@@ -1,0 +1,44 @@
+{
+    "name": "konjugate",
+    "version": "0.1.0",
+    "private": true,
+    "description": "A graph-native simulation engine for composable engineering simulations and digital twins.",
+    "type": "module",
+    "main": "src/main.mjs",
+    "license": "MPL-2.0",
+    "author": {
+        "name": "Zenin Easa Panthakkalakath",
+        "url": "https://github.com/zenineasa"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/zenineasa/Konjugate.git"
+    },
+    "bugs": {
+        "url": "https://github.com/zenineasa/Konjugate/issues"
+    },
+    "homepage": "https://github.com/zenineasa/Konjugate#readme",
+    "keywords": [
+        "digital-twin",
+        "engineering",
+        "graph",
+        "multiphysics",
+        "simulation"
+    ],
+    "scripts": {
+        "start": "make iconsPng && electron .",
+        "dev": "npm start",
+        "build": "make build",
+        "icons": "make icons",
+        "package": "make packageApp",
+        "distribute": "make distributable",
+        "clean": "make clean"
+    },
+    "devDependencies": {
+        "@electron/packager": "^20.0.4",
+        "electron": "^43.2.0"
+    },
+    "engines": {
+        "node": ">=22.12.0"
+    }
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Konjugate
+Comment=Graph-native engineering simulation
+Exec=Konjugate
+Icon=konjugate
+Type=Application
+Categories=Science;Engineering;
+Terminal=false

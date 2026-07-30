@@ -91,6 +91,46 @@ This project is currently in the early stages of development.
 
 ---
 
+## Development
+
+Konjugate currently requires Node.js 22.12 or newer. Start the Electron
+application with:
+
+```bash
+npm install
+npm start
+```
+
+The application uses explicit `.mjs` modules for the Electron main, preload,
+and renderer processes.
+
+## Building
+
+Run the complete host-platform build with:
+
+```bash
+make
+```
+
+or:
+
+```bash
+make build
+```
+
+The build installs missing dependencies, generates application and web icons,
+packages Electron, and writes the shareable artifact to `out/release/`.
+
+- macOS produces a DMG.
+- Windows produces a portable ZIP containing the executable.
+- Linux produces an AppImage and requires `appimagetool`.
+
+Generated application bundles are stored in `out/package/`. Run `make clean`
+to remove dependencies, the lockfile, generated icons, caches, and all build
+outputs.
+
+---
+
 ## Vision and Roadmap
 
 The vision of this project is to create an integrated environment for modelling and simulating complex systems.

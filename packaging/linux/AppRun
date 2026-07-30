@@ -1,0 +1,4 @@
+#!/bin/sh
+
+appDir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$appDir/usr/lib/konjugate/Konjugate" "$@"

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>Konjugate</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="renderer.mjs"></script>
+</head>
+<body>
+    <header id="titleBar">
+        <div class="windowTitle">
+            <img src="../../assets/icon.svg" alt="">
+            <span>Konjugate</span>
+        </div>
+
+        <div class="windowControls">
+            <button id="minimizeButton" type="button" aria-label="Minimize window" title="Minimize">
+                <span aria-hidden="true">−</span>
+            </button>
+            <button id="maximizeButton" type="button" aria-label="Maximize window" title="Maximize">
+                <span id="maximizeIcon" aria-hidden="true">□</span>
+            </button>
+            <button id="closeButton" class="closeButton" type="button" aria-label="Close window" title="Close">
+                <span aria-hidden="true">×</span>
+            </button>
+        </div>
+    </header>
+
+    <main id="content">
+        <section class="welcomeCard">
+            <img class="welcomeIcon" src="../../assets/icon.svg" alt="Konjugate">
+            <p class="eyebrow">Graph-native simulation</p>
+            <h1>Welcome to Konjugate</h1>
+            <p class="intro">
+                Your workspace for composing engineering simulations and digital twins
+                from interconnected components.
+            </p>
+            <div class="placeholder">
+                <span>Content area</span>
+                <small>The simulation workspace will live here.</small>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

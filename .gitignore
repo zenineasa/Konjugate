@@ -1,0 +1,7 @@
+### Copyright (c) 2024-2026 Zenin Easa Panthakkalakath ###
+
+node_modules
+**/.DS_Store
+**/.vscode
+out
+assets/icons

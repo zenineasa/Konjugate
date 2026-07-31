@@ -14,7 +14,9 @@ contextBridge.exposeInMainWorld('windowControls', {
 });
 
 contextBridge.exposeInMainWorld('projectFiles', {
-    loadDefault: () => ipcRenderer.invoke('projectLoadDefault'),
+    listExamples: () => ipcRenderer.invoke('projectListExamples'),
+    loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),
     open: () => ipcRenderer.invoke('projectOpen'),
-    save: (path, content) => ipcRenderer.invoke('projectSave', { path, content })
+    save: (path, content, suggestedFilename) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename }),
+    confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });

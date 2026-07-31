@@ -23,8 +23,21 @@
         <div class="windowTitle">
             <img src="../../assets/icon.svg" alt="">
             <strong>Konjugate</strong>
-            <span class="documentTitle">Konjugate project</span>
+            <button class="documentTitle" type="button" title="Rename project">Untitled</button>
+            <input class="documentTitleInput" aria-label="Project filename" autocomplete="off" hidden>
             <i title="Unsaved changes"></i>
+            <div class="documentActions" aria-label="Project file actions">
+                <button id="newButton" type="button" aria-label="New project">
+                    <img class="documentActionIcon" src="../../assets/newProject.svg" alt="New project">
+                </button>
+                <button id="loadButton" type="button" aria-label="Open project">
+                    <img class="documentActionIcon" src="../../assets/openProject.svg" alt="Open project">
+                </button>
+                <button id="saveButton" type="button" aria-label="Save project">
+                    <img class="documentActionIcon" src="../../assets/saveProject.svg" alt="Save project">
+                </button>
+                <select id="exampleSelect" aria-label="Load example"><option value="">Examples</option></select>
+            </div>
         </div>
         <div class="windowControls">
             <button id="minimizeButton" type="button" aria-label="Minimize">−</button>
@@ -34,10 +47,7 @@
     </header>
 
     <nav class="toolstrip" aria-label="Model tools">
-        <div class="brandMark">K</div>
         <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
-        <button id="loadButton" class="toolButton" type="button">Open</button>
-        <button id="saveButton" class="toolButton" type="button">Save</button>
         <span class="divider"></span>
         <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" disabled>↶</button>
         <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" disabled>↷</button>
@@ -72,11 +82,15 @@
             <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
             <div data-node-panel="model">
             <section>
-                <h3>States</h3>
+                <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
+                <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
+            </section>
+            <section>
+                <h3>States <button id="editAddState" type="button">＋</button></h3>
                 <div id="nodeEditorStates"></div>
             </section>
             <section>
-                <h3>Source terms</h3>
+                <h3>Source terms <button id="editAddSourceTerm" type="button">＋</button></h3>
                 <div id="nodeEditorSourceTerms"></div>
             </section>
             </div>
@@ -95,12 +109,19 @@
         <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Edge</span><strong>Relationship</strong></div><button data-close-card type="button">×</button></header>
             <section>
+                <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
+                <div class="endpointGrid">
+                    <label class="editorField"><span>Source</span><select id="editEdgeSource"></select></label>
+                    <label class="editorField"><span>Target</span><select id="editEdgeTarget"></select></label>
+                </div>
                 <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
+                <h3>Parameters <button id="editAddEdgeParameter" type="button">＋</button></h3>
                 <div id="edgeEditorParameters"></div>
             </section>
             <section>
                 <h3>Equation</h3>
                 <textarea id="editEdgeEquation" rows="3" placeholder="No equation defined"></textarea>
+                <div class="referencePicker"><span>Available state references</span><div id="editStateReferenceChips"></div></div>
             </section>
             <footer><button data-delete-edge type="button">Delete edge</button><button class="doneButton" data-close-card type="button">Done</button></footer>
         </div>

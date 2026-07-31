@@ -34,8 +34,22 @@ input, select { user-select: text; }
 .windowTitle { display: flex; align-items: center; gap: 8px; padding-left: 13px; font-size: 11px; }
 .windowTitle img { width: 18px; height: 18px; }
 .windowTitle strong { font-size: 12px; }
-.windowTitle .documentTitle { margin-left: 18px; color: #82949f; font-weight: 450; }
+.windowTitle .documentTitle { margin-left: 18px; padding: 3px 5px; color: #82949f; background: transparent; border: 1px solid transparent; border-radius: 4px; font-weight: 450; -webkit-app-region: no-drag; }
+.windowTitle .documentTitle:hover { color: #c4d2d8; background: #121d25; border-color: #263641; }
+.documentTitleInput { width: 170px; height: 25px; margin-left: 18px; padding: 0 5px; color: #d5e2e7; background: #111d25; border: 1px solid #34505c; border-radius: 4px; outline: 0; font-size: 11px; -webkit-app-region: no-drag; }
 .windowTitle i { width: 5px; height: 5px; background: var(--accent); border-radius: 50%; }
+.documentActions { display: flex; align-items: center; gap: 2px; margin-left: 6px; -webkit-app-region: no-drag; }
+.documentActions button {
+    display: grid; width: 27px; height: 25px; padding: 0; place-items: center; color: #82949f;
+    background: transparent; border: 1px solid transparent; border-radius: 4px;
+}
+.documentActions button:hover { color: #dce9ee; background: #17232c; border-color: #293b46; }
+.documentActions button:disabled { color: #344752; background: transparent; border-color: transparent; cursor: default; }
+.documentActionIcon { width: 14px; height: 14px; opacity: .8; transition: filter .12s, opacity .12s; }
+.documentActions button:hover .documentActionIcon { filter: brightness(1.65); opacity: 1; }
+.documentActions button:disabled .documentActionIcon { filter: brightness(.55); opacity: .55; }
+.documentActions select { height: 25px; margin-left: 4px; padding: 0 22px 0 7px; color: #82949f; background: #0b141b; border: 1px solid #253640; border-radius: 4px; outline: 0; font-size: 9px; }
+.documentActions select:hover { color: #d5e2e7; border-color: #36505d; }
 .windowControls { display: flex; height: 100%; -webkit-app-region: no-drag; }
 .windowControls button { display: grid; width: 46px; height: 100%; padding: 0; place-items: center; background: transparent; border: 0; font-size: 17px; }
 .windowControls button:hover { background: #1a2730; }
@@ -46,7 +60,6 @@ input, select { user-select: text; }
     align-items: center; gap: 6px; padding: 0 12px; background: rgb(14 24 33 / 96%);
     border-bottom: 1px solid var(--border); box-shadow: 0 5px 18px rgb(0 0 0 / 18%);
 }
-.brandMark { display: grid; width: 26px; height: 26px; margin-right: 4px; place-items: center; color: #071817; background: var(--accent); border-radius: 6px; font-size: 12px; font-weight: 850; }
 .toolButton, .squareTool {
     display: flex; height: 31px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px;
     color: #9cafba; background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 11px;
@@ -141,7 +154,8 @@ input, select { user-select: text; }
 
 .contextCard { position: absolute; z-index: 20; color: #b8c7ce; background: rgb(14 25 34 / 97%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px); }
 .contextCard.hidden { display: none; }
-.editorCard { width: 304px; }
+.editorCard { width: 390px; }
+.edgeEditor { width: 440px; }
 .editorCard > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; }
 .editorCard > header strong, .contextKicker { display: block; }
 .editorCard > header strong { margin-top: 3px; color: #d5e1e6; font-size: 12px; }
@@ -163,16 +177,13 @@ input, select { user-select: text; }
 .stateRow b { color: #b8c7ce; font-size: 8px; font-weight: 600; }
 .stateRow em { color: #5f7480; font-style: normal; font-weight: 400; }
 .emptyEditorState { margin: 0; padding: 9px; color: #566b76; background: #0f1c24; border-radius: 4px; font-size: 8px; }
-.sourceTermItem { display: grid; gap: 4px; padding: 8px; background: #111f28; border-bottom: 1px solid #263742; }
-.sourceTermItem strong { color: #899ca6; font-size: 8px; }
-.sourceTermItem code { color: #68aaa5; font-size: 8px; }
-.equationItem { display: grid; width: 100%; min-height: 39px; grid-template-columns: 25px 1fr 10px; align-items: center; gap: 7px; padding: 5px 7px; color: #80949f; background: #111f28; border: 0; border-bottom: 1px solid #263742; text-align: left; }
-.equationItem:last-of-type { border-bottom: 0; }
-.equationItem > span { display: grid; width: 23px; height: 23px; place-items: center; color: #6fd6cd; background: rgb(66 201 188 / 9%); border-radius: 4px; font-family: Georgia, serif; }
-.equationItem strong, .equationItem small { display: block; }
-.equationItem strong { color: #99abb5; font-size: 8px; }
-.equationItem small { margin-top: 3px; color: #596e7a; font-family: Georgia, serif; font-size: 8px; }
-.equationItem > b { color: #566b76; font-size: 14px; font-weight: 400; }
+.editorStateRow { display: grid; grid-template-columns: 1.25fr .65fr .7fr .55fr 18px; gap: 4px; margin-bottom: 5px; }
+.editorSourceTermRow { display: grid; grid-template-columns: .8fr 1.4fr 18px; gap: 4px; margin-bottom: 5px; }
+.editorStateRow input, .editorSourceTermRow input, .editorSourceTermRow select { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
+.editorStateRow button, .editorSourceTermRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
+.editorParameterRow { display: grid; grid-template-columns: 1fr .6fr .55fr .55fr .75fr 18px; gap: 4px; margin-bottom: 5px; }
+.editorParameterRow input, .editorParameterRow select { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
+.editorParameterRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
 .editorCard footer { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 10px 12px; }
 .editorCard footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 8px; }
 .editorCard footer button:first-child { margin-right: auto; color: #bc6c73; }
@@ -214,9 +225,8 @@ input, select { user-select: text; }
 .endpointField button { padding: 0 7px; color: #73bdb7; background: #13242c; border: 1px solid #2b4650; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; }
 .endpointField button.active { color: #09201e; background: var(--accent); border-color: var(--accent); }
 .canvas.pickingEndpoint .webglSurface { cursor: crosshair; }
-.suggestionChips, .referencePicker { margin-bottom: 9px; color: #607581; font-size: 7px; }
-.suggestionChips { display: flex; align-items: center; gap: 5px; }
-.suggestionChips button, .referencePicker button { padding: 4px 6px; color: #7dbab5; background: rgb(66 201 188 / 7%); border: 1px solid #29454a; border-radius: 9px; font-size: 7px; }
+.referencePicker { margin: 9px 0; color: #607581; font-size: 7px; }
+.referencePicker button { padding: 4px 6px; color: #7dbab5; background: rgb(66 201 188 / 7%); border: 1px solid #29454a; border-radius: 9px; font-size: 7px; }
 .referencePicker > span { display: block; margin-bottom: 6px; }
 .referencePicker div { display: flex; flex-wrap: wrap; gap: 5px; }
 .builderHint { margin: -3px 0 9px; color: #566b77; font-size: 7px; line-height: 1.45; }

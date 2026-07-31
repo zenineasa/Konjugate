@@ -27,6 +27,7 @@
         "simulation"
     ],
     "scripts": {
+        "test": "node --test",
         "start": "make iconsPng && electron .",
         "dev": "npm start",
         "build": "make build",

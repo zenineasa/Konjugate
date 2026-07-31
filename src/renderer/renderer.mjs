@@ -6,6 +6,7 @@ import { DragControls } from 'three/addons/controls/DragControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { DocumentController } from './documentController.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -20,6 +21,8 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
     "'": '&#39;',
     '"': '&quot;'
 }[character]));
+const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 const canvas = $('#canvas');
 const webglContainer = $('#webglContainer');
@@ -55,12 +58,26 @@ function hydrateProjectDocument(document) {
         ids.add(node.id);
         nodeIds.add(node.id);
         const stateIds = new Set();
+        const stateSymbols = new Set();
         (node.states ?? []).forEach((state) => {
             if (!uuidPattern.test(state.id) || ids.has(state.id)) {
                 throw new Error(`Every state in “${node.name ?? node.id}” must have a unique UUID id.`);
             }
             ids.add(state.id);
             stateIds.add(state.id);
+            if (!modelSymbolPattern.test(state.symbol) || stateSymbols.has(state.symbol)) {
+                throw new Error(`State symbols in “${node.name ?? node.id}” must be unique lower camel case identifiers.`);
+            }
+            stateSymbols.add(state.symbol);
+        });
+        (node.sourceTerms ?? []).forEach((term) => {
+            if (!uuidPattern.test(term.id) || ids.has(term.id)) {
+                throw new Error(`Every source term in “${node.name ?? node.id}” must have a unique UUID id.`);
+            }
+            ids.add(term.id);
+            if (!stateSymbols.has(term.state)) {
+                throw new Error(`A source term in “${node.name ?? node.id}” references a missing state symbol.`);
+            }
         });
         stateIdsByNode.set(node.id, stateIds);
     });
@@ -78,6 +95,17 @@ function hydrateProjectDocument(document) {
         if (edge.target.stateId && !stateIdsByNode.get(edge.target.nodeId)?.has(edge.target.stateId)) {
             throw new Error(`Edge “${edge.name ?? edge.id}” references a missing target state.`);
         }
+        const parameterSymbols = new Set();
+        (edge.parameters ?? []).forEach((parameter) => {
+            if (!uuidPattern.test(parameter.id) || ids.has(parameter.id)) {
+                throw new Error(`Every parameter in “${edge.name ?? edge.id}” must have a unique UUID id.`);
+            }
+            ids.add(parameter.id);
+            if (!modelSymbolPattern.test(parameter.symbol) || parameterSymbols.has(parameter.symbol)) {
+                throw new Error(`Parameter symbols in “${edge.name ?? edge.id}” must be unique lower camel case identifiers.`);
+            }
+            parameterSymbols.add(parameter.symbol);
+        });
     });
 
     const nodes = document.nodes.map((node) => {
@@ -121,16 +149,44 @@ function hydrateProjectDocument(document) {
         offset: Number(edge.appearance?.offset) || 0
     }));
     return {
-        metadata: { name: document.metadata?.name || 'Untitled project', units: document.metadata?.units || 'SI' },
+        metadata: { units: document.metadata?.units || 'SI' },
         nodes,
         relationships
     };
 }
 
-const defaultProjectFile = await window.projectFiles.loadDefault();
-const model = hydrateProjectDocument(JSON.parse(defaultProjectFile.content));
+const emptyProjectDocument = {
+    format: 'konjugate',
+    version: 1,
+    copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
+    metadata: { units: 'SI' },
+    nodes: [],
+    edges: []
+};
+const model = hydrateProjectDocument(emptyProjectDocument);
 let currentProjectPath = null;
-$('.documentTitle').textContent = model.metadata.name;
+let currentProjectFilename = 'untitled.konjugate.json';
+
+function filenameStem(fileName) {
+    return fileName.replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '');
+}
+
+function camelCaseFilename(value) {
+    const words = value.trim().replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '')
+        .split(/[^A-Za-z0-9]+|(?=[A-Z])/).filter(Boolean);
+    if (!words.length) return 'untitled.konjugate.json';
+    const stem = words.map((word, index) => {
+        const lower = word.toLowerCase();
+        return index ? `${lower.charAt(0).toUpperCase()}${lower.slice(1)}` : lower;
+    }).join('');
+    return `${stem}.konjugate.json`;
+}
+
+function updateDocumentTitle() {
+    $('.documentTitle').textContent = filenameStem(currentProjectFilename);
+}
+
+updateDocumentTitle();
 
 const nodeObjects = new Map();
 const relationshipObjects = new Map();
@@ -145,46 +201,48 @@ let cameraAnimation = null;
 let bundleSignature = '';
 let pendingImportedGeometry = null;
 let pendingGeometryFileName = '';
-const undoStack = [];
-const redoStack = [];
+const documentController = new DocumentController();
 
 function updateHistoryControls() {
-    $('#undoButton').disabled = undoStack.length === 0;
-    $('#redoButton').disabled = redoStack.length === 0;
+    $('#undoButton').disabled = !documentController.canUndo;
+    $('#redoButton').disabled = !documentController.canRedo;
+    $('#saveButton').disabled = !documentController.dirty && currentProjectPath !== null;
+    $('.windowTitle i').style.visibility = documentController.dirty ? 'visible' : 'hidden';
 }
 
 function recordHistory(action) {
-    undoStack.push(action);
-    redoStack.length = 0;
-    updateHistoryControls();
+    documentController.record(action);
 }
 
 function undo() {
-    const action = undoStack.pop();
-    if (!action) return;
     clearSelection();
     hideCards();
-    action.undo();
-    redoStack.push(action);
-    updateHistoryControls();
+    documentController.undo();
 }
 
 function redo() {
-    const action = redoStack.pop();
-    if (!action) return;
     clearSelection();
     hideCards();
-    action.redo();
-    undoStack.push(action);
-    updateHistoryControls();
+    documentController.redo();
 }
+
+documentController.subscribe(updateHistoryControls);
 
 function initializeWindowControls() {
     $('#minimizeButton').addEventListener('click', () => window.windowControls.minimize());
+    $('#maximizeButton').ariaLabel = isMac ? 'Enter full screen' : 'Maximize';
+    $('#maximizeButton').title = isMac ? 'Enter full screen' : 'Maximize';
     $('#maximizeButton').addEventListener('click', () => window.windowControls.toggleMaximize());
-    $('#closeButton').addEventListener('click', () => window.windowControls.close());
+    $('#closeButton').addEventListener('click', async () => {
+        if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
+        window.windowControls.close();
+    });
     window.windowControls.onMaximizedChange((maximized) => {
         $('#maximizeIcon').textContent = maximized ? '❐' : '□';
+        $('#maximizeButton').ariaLabel = isMac
+            ? `${maximized ? 'Exit' : 'Enter'} full screen`
+            : `${maximized ? 'Restore' : 'Maximize'} window`;
+        $('#maximizeButton').title = $('#maximizeButton').ariaLabel;
     });
 }
 
@@ -656,38 +714,142 @@ function positionCard(card, clientX, clientY) {
     card.style.top = `${Math.max(12, Math.min(localY, canvasRect.height - cardRect.height - 12))}px`;
 }
 
+function captureNodeModel(node) {
+    const definition = node.userData.definition;
+    return {
+        title: definition.title,
+        type: definition.type,
+        states: structuredClone(definition.states),
+        sourceTerms: structuredClone(definition.sourceTerms),
+        bindings: model.relationships.map((edge) => ({
+            id: edge.id,
+            sourceStateId: edge.sourceStateId,
+            targetStateId: edge.targetStateId
+        }))
+    };
+}
+
+function refreshNodeLabel(node) {
+    const previous = node.children.find((child) => child.element?.classList.contains('node-label-container'));
+    if (previous) {
+        node.remove(previous);
+        previous.element.remove();
+    }
+    node.add(createNodeLabel(node.userData.definition));
+}
+
+function applyNodeModel(node, snapshot) {
+    const definition = node.userData.definition;
+    definition.title = snapshot.title;
+    definition.type = snapshot.type;
+    definition.states = structuredClone(snapshot.states);
+    definition.sourceTerms = structuredClone(snapshot.sourceTerms);
+    snapshot.bindings.forEach((binding) => {
+        const edge = model.relationships.find((candidate) => candidate.id === binding.id);
+        if (edge) {
+            edge.sourceStateId = binding.sourceStateId;
+            edge.targetStateId = binding.targetStateId;
+        }
+    });
+    refreshNodeLabel(node);
+    bundleSignature = '';
+    syncContextualOverlays();
+    if (selectedNode === node && !$('#nodeEditor').classList.contains('hidden')) {
+        renderNodeEditorModel(node);
+    }
+}
+
+function changeNodeModel(node, mutate) {
+    const before = captureNodeModel(node);
+    const after = structuredClone(before);
+    mutate(after);
+    const symbols = after.states.map((state) => state.symbol);
+    if (symbols.some((symbol) => !modelSymbolPattern.test(symbol)) || new Set(symbols).size !== symbols.length) {
+        renderNodeEditorModel(node);
+        return;
+    }
+    const validStateIds = new Set(after.states.map((state) => state.id));
+    after.bindings.forEach((binding) => {
+        const edge = model.relationships.find((candidate) => candidate.id === binding.id);
+        if (edge?.source === node.userData.id && !validStateIds.has(binding.sourceStateId)) binding.sourceStateId = null;
+        if (edge?.target === node.userData.id && !validStateIds.has(binding.targetStateId)) binding.targetStateId = null;
+    });
+    applyNodeModel(node, after);
+    recordHistory({
+        undo: () => applyNodeModel(node, before),
+        redo: () => applyNodeModel(node, after)
+    });
+}
+
+function renderNodeEditorModel(node) {
+    const definition = node.userData.definition;
+    $('#nodeEditorTitle').textContent = definition.title;
+    $('#editNodeName').value = definition.title;
+    $('#editNodeType').value = definition.type;
+    const stateContainer = $('#nodeEditorStates');
+    stateContainer.replaceChildren();
+    if (!definition.states.length) stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
+    definition.states.forEach((state) => {
+        const row = document.createElement('div');
+        row.className = 'editorStateRow';
+        row.innerHTML = `
+            <input data-field="name" value="${escapeHtml(state.label)}" aria-label="State name">
+            <input data-field="symbol" value="${escapeHtml(state.symbol)}" aria-label="State symbol">
+            <input data-field="value" type="number" value="${escapeHtml(state.initialValue ?? 0)}" aria-label="Initial value">
+            <input data-field="unit" value="${escapeHtml(state.unit ?? '')}" aria-label="Unit">
+            <button type="button" title="Remove state">×</button>
+        `;
+        $$('input', row).forEach((input) => input.addEventListener('change', () => {
+            changeNodeModel(node, (snapshot) => {
+                const target = snapshot.states.find((candidate) => candidate.id === state.id);
+                const previousSymbol = target.symbol;
+                const field = input.dataset.field;
+                target[field === 'name' ? 'label' : field === 'value' ? 'initialValue' : field] =
+                    field === 'value' ? Number(input.value) || 0 : input.value.trim();
+                target.value = `${target.initialValue}${target.unit ? ` ${target.unit}` : ''}`;
+                if (field === 'symbol') {
+                    snapshot.sourceTerms.forEach((term) => {
+                        if (term.state === previousSymbol) term.state = target.symbol;
+                    });
+                }
+            });
+        }));
+        $('button', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
+            snapshot.states = snapshot.states.filter((candidate) => candidate.id !== state.id);
+            snapshot.sourceTerms = snapshot.sourceTerms.filter((term) => term.state !== state.symbol);
+        }));
+        stateContainer.appendChild(row);
+    });
+
+    const sourceTermContainer = $('#nodeEditorSourceTerms');
+    sourceTermContainer.replaceChildren();
+    if (!definition.sourceTerms.length) sourceTermContainer.innerHTML = '<p class="emptyEditorState">No source terms defined</p>';
+    definition.sourceTerms.forEach((term) => {
+        const row = document.createElement('div');
+        row.className = 'editorSourceTermRow';
+        row.innerHTML = `
+            <select aria-label="Updated state">${definition.states.map((state) => `<option value="${escapeHtml(state.symbol)}" ${state.symbol === term.state ? 'selected' : ''}>${escapeHtml(state.label)}</option>`).join('')}</select>
+            <input value="${escapeHtml(term.expression)}" aria-label="Source expression">
+            <button type="button" title="Remove source term">×</button>
+        `;
+        $('select', row).addEventListener('change', (event) => changeNodeModel(node, (snapshot) => {
+            snapshot.sourceTerms.find((candidate) => candidate.id === term.id).state = event.target.value;
+        }));
+        $('input', row).addEventListener('change', (event) => changeNodeModel(node, (snapshot) => {
+            snapshot.sourceTerms.find((candidate) => candidate.id === term.id).expression = event.target.value.trim();
+        }));
+        $('button', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
+            snapshot.sourceTerms = snapshot.sourceTerms.filter((candidate) => candidate.id !== term.id);
+        }));
+        sourceTermContainer.appendChild(row);
+    });
+}
+
 function openNodeEditor(definition, clientX, clientY) {
     const editor = $('#nodeEditor');
     hideCards(editor);
-    $('#nodeEditorTitle').textContent = definition.title;
-    const stateContainer = $('#nodeEditorStates');
-    stateContainer.replaceChildren();
-    if (!definition.states.length) {
-        stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
-    } else {
-        definition.states.forEach((state) => {
-            const row = document.createElement('div');
-            row.className = 'stateRow';
-            row.innerHTML = `
-                <span><i class="stateIcon">${escapeHtml(state.symbol?.slice(0, 3) || 'x')}</i>${escapeHtml(state.label)}</span>
-                <b>${escapeHtml((state.initialValue ?? Number.parseFloat(state.value)) || 0)} <em>${escapeHtml(state.unit ?? '')}</em></b>
-            `;
-            stateContainer.appendChild(row);
-        });
-    }
-    const sourceTermContainer = $('#nodeEditorSourceTerms');
-    sourceTermContainer.replaceChildren();
-    if (!definition.sourceTerms.length) {
-        sourceTermContainer.innerHTML = '<p class="emptyEditorState">No source terms defined</p>';
-    } else {
-        definition.sourceTerms.forEach((term) => {
-            const state = definition.states.find((candidate) => candidate.symbol === term.state);
-            const item = document.createElement('div');
-            item.className = 'sourceTermItem';
-            item.innerHTML = `<strong>${escapeHtml(state?.label ?? term.state)}</strong><code>${escapeHtml(term.expression)}</code>`;
-            sourceTermContainer.appendChild(item);
-        });
-    }
+    const node = nodeObjects.get(definition.id);
+    renderNodeEditorModel(node);
     $$('[data-node-tab]').forEach((button) => {
         button.classList.toggle('active', button.dataset.nodeTab === 'model');
     });
@@ -701,68 +863,122 @@ function openNodeEditor(definition, clientX, clientY) {
     positionCard(editor, clientX, clientY);
 }
 
+function captureEdgeModel(definition) {
+    return {
+        title: definition.title,
+        source: definition.source,
+        sourceStateId: definition.sourceStateId,
+        target: definition.target,
+        targetStateId: definition.targetStateId,
+        directionality: definition.directionality,
+        equation: definition.equation,
+        parameters: structuredClone(definition.parameters)
+    };
+}
+
+function applyEdgeModel(definition, snapshot) {
+    definition.title = snapshot.title;
+    definition.source = snapshot.source;
+    definition.sourceStateId = snapshot.sourceStateId;
+    definition.target = snapshot.target;
+    definition.targetStateId = snapshot.targetStateId;
+    definition.equation = snapshot.equation;
+    definition.parameters = structuredClone(snapshot.parameters);
+    setRelationshipDirectionality(definition, snapshot.directionality);
+    updateRelationships();
+    if (selectedRelationship?.id === definition.id && !$('#edgeEditor').classList.contains('hidden')) {
+        renderEdgeEditor(definition);
+    }
+}
+
+function changeEdgeModel(definition, mutate) {
+    const before = captureEdgeModel(definition);
+    const after = structuredClone(before);
+    mutate(after);
+    if (after.source === after.target) {
+        renderEdgeEditor(definition);
+        return;
+    }
+    const parameterSymbols = after.parameters.map((parameter) => parameter.symbol);
+    if (parameterSymbols.some((symbol) => !modelSymbolPattern.test(symbol)) || new Set(parameterSymbols).size !== parameterSymbols.length) {
+        renderEdgeEditor(definition);
+        return;
+    }
+    applyEdgeModel(definition, after);
+    recordHistory({
+        undo: () => applyEdgeModel(definition, before),
+        redo: () => applyEdgeModel(definition, after)
+    });
+}
+
+function renderEdgeEditor(definition) {
+    $('.edgeEditor > header strong').textContent = definition.title;
+    $('#editEdgeName').value = definition.title;
+    const source = $('#editEdgeSource');
+    const target = $('#editEdgeTarget');
+    const options = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
+    source.replaceChildren(...options.map((node) => new Option(node.title, node.id)));
+    target.replaceChildren(...options.map((node) => new Option(node.title, node.id)));
+    source.value = definition.source;
+    target.value = definition.target;
+    $('#editEdgeDirectionality').value = definition.directionality;
+    const parameterContainer = $('#edgeEditorParameters');
+    parameterContainer.replaceChildren();
+    if (!definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
+    definition.parameters.forEach((parameter) => {
+        const row = document.createElement('div');
+        row.className = 'editorParameterRow';
+        row.innerHTML = `
+            <input data-field="name" value="${escapeHtml(parameter.name)}" aria-label="Parameter name">
+            <input data-field="symbol" value="${escapeHtml(parameter.symbol)}" aria-label="Parameter symbol">
+            <input data-field="value" type="number" value="${escapeHtml(parameter.value)}" aria-label="Value">
+            <input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}" aria-label="Unit">
+            <select data-field="mode" aria-label="Mode"><option value="constant">Constant</option><option value="live">Live</option></select>
+            <button type="button" title="Remove parameter">×</button>
+        `;
+        $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
+        $$('input, select', row).forEach((input) => input.addEventListener('change', () => {
+            changeEdgeModel(definition, (snapshot) => {
+                const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
+                targetParameter[input.dataset.field] = input.dataset.field === 'value'
+                    ? Number(input.value) || 0
+                    : input.value.trim();
+            });
+        }));
+        $('button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
+            snapshot.parameters = snapshot.parameters.filter((candidate) => candidate.id !== parameter.id);
+        }));
+        parameterContainer.appendChild(row);
+    });
+    $('#editEdgeEquation').value = definition.equation ?? '';
+    const references = $('#editStateReferenceChips');
+    references.replaceChildren();
+    [['source', definition.source], ['target', definition.target]].forEach(([role, nodeId]) => {
+        const node = model.nodes.find((candidate) => candidate.id === nodeId);
+        node?.states.forEach((state) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = `${role}.${state.symbol}`;
+            button.addEventListener('click', () => {
+                const equation = $('#editEdgeEquation');
+                equation.setRangeText(
+                    button.textContent,
+                    equation.selectionStart,
+                    equation.selectionEnd,
+                    'end'
+                );
+                equation.focus();
+            });
+            references.appendChild(button);
+        });
+    });
+}
+
 function openRelationshipEditor(definition, clientX, clientY) {
     const editor = $('#edgeEditor');
     selectRelationship(definition);
     hideCards(editor);
-    $('.edgeEditor > header strong').textContent = definition.title;
-    const directionality = $('#editEdgeDirectionality');
-    directionality.value = definition.directionality;
-    directionality.onchange = () => {
-        const previous = definition.directionality;
-        const next = directionality.value;
-        setRelationshipDirectionality(definition, next);
-        recordHistory({
-            undo: () => setRelationshipDirectionality(definition, previous),
-            redo: () => setRelationshipDirectionality(definition, next)
-        });
-    };
-    const parameterContainer = $('#edgeEditorParameters');
-    parameterContainer.replaceChildren();
-    if (!definition.parameters.length) {
-        parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
-    } else {
-        definition.parameters.forEach((parameter) => {
-            const label = document.createElement('label');
-            label.className = 'editorField';
-            label.innerHTML = `
-                <span>${escapeHtml(parameter.name)} (${escapeHtml(parameter.symbol)})</span>
-                <span class="unitInput"><input type="number" value="${escapeHtml(parameter.value)}"><b>${escapeHtml(parameter.unit ?? '')}</b></span>
-            `;
-            const input = $('input', label);
-            input.addEventListener('change', () => {
-                const previous = parameter.value;
-                const next = Number(input.value) || 0;
-                const applyValue = (value) => {
-                    parameter.value = value;
-                    bundleSignature = '';
-                    syncContextualOverlays();
-                };
-                applyValue(next);
-                recordHistory({
-                    undo: () => applyValue(previous),
-                    redo: () => applyValue(next)
-                });
-            });
-            parameterContainer.appendChild(label);
-        });
-    }
-    const equation = $('#editEdgeEquation');
-    equation.value = definition.equation ?? '';
-    equation.onchange = () => {
-        const previous = definition.equation ?? '';
-        const next = equation.value.trim();
-        const applyEquation = (value) => {
-            definition.equation = value;
-            bundleSignature = '';
-            syncContextualOverlays();
-        };
-        applyEquation(next);
-        recordHistory({
-            undo: () => applyEquation(previous),
-            redo: () => applyEquation(next)
-        });
-    };
+    renderEdgeEditor(definition);
     positionCard(editor, clientX, clientY);
 }
 
@@ -873,7 +1089,7 @@ function addSourceTermRow() {
     row.className = 'builderRow sourceTermRow';
     row.innerHTML = `
         <select class="sourceState" aria-label="Updated state"></select>
-        <input class="sourceExpression" placeholder="Source expression, e.g. Q_dot / C">
+        <input class="sourceExpression" placeholder="Source expression, e.g. qDot / heatCapacity">
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
     `;
     $('#sourceTermRows').appendChild(row);
@@ -1035,7 +1251,7 @@ function serializeProjectDocument() {
         format: 'konjugate',
         version: 1,
         copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
-        metadata: { ...model.metadata },
+        metadata: { units: model.metadata.units },
         nodes: visibleNodes.map((node) => {
             const object = nodeObjects.get(node.id);
             return {
@@ -1110,7 +1326,7 @@ function clearRenderedModel() {
     nodePickTargets.length = 0;
 }
 
-function loadProjectDocument(document, path = null) {
+function loadProjectDocument(document, { path = null, fileName = 'untitled.konjugate.json', saved = true } = {}) {
     const nextModel = hydrateProjectDocument(document);
     clearRenderedModel();
     model.metadata = nextModel.metadata;
@@ -1121,11 +1337,10 @@ function loadProjectDocument(document, path = null) {
     bundleSignature = '';
     updateRelationships();
     updateModelStatus();
-    undoStack.length = 0;
-    redoStack.length = 0;
-    updateHistoryControls();
     currentProjectPath = path;
-    $('.documentTitle').textContent = model.metadata.name;
+    currentProjectFilename = fileName;
+    documentController.reset({ saved });
+    updateDocumentTitle();
     setCameraView('orbit');
 }
 
@@ -1228,6 +1443,89 @@ $$('[data-node-tab]').forEach((button) => {
     });
 });
 
+$('#editNodeName').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    changeNodeModel(selectedNode, (snapshot) => {
+        snapshot.title = event.target.value.trim() || 'Untitled node';
+    });
+});
+$('#editNodeType').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    changeNodeModel(selectedNode, (snapshot) => {
+        snapshot.type = event.target.value.trim() || 'Custom node';
+    });
+});
+$('#editAddState').addEventListener('click', () => {
+    if (!selectedNode) return;
+    changeNodeModel(selectedNode, (snapshot) => {
+        snapshot.states.push({
+            id: crypto.randomUUID(),
+            label: 'New state',
+            symbol: `x${snapshot.states.length + 1}`,
+            initialValue: 0,
+            unit: '',
+            value: '0',
+            className: ''
+        });
+    });
+});
+$('#editAddSourceTerm').addEventListener('click', () => {
+    if (!selectedNode?.userData.definition.states.length) return;
+    changeNodeModel(selectedNode, (snapshot) => {
+        snapshot.sourceTerms.push({
+            id: crypto.randomUUID(),
+            state: snapshot.states[0].symbol,
+            expression: '0'
+        });
+    });
+});
+
+$('#editEdgeName').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.title = event.target.value.trim() || 'Untitled relationship';
+    });
+});
+$('#editEdgeSource').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.source = event.target.value;
+        snapshot.sourceStateId = null;
+    });
+});
+$('#editEdgeTarget').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.target = event.target.value;
+        snapshot.targetStateId = null;
+    });
+});
+$('#editEdgeDirectionality').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.directionality = event.target.value;
+    });
+});
+$('#editEdgeEquation').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.equation = event.target.value.trim();
+    });
+});
+$('#editAddEdgeParameter').addEventListener('click', () => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.parameters.push({
+            id: crypto.randomUUID(),
+            name: 'Parameter',
+            symbol: `p${snapshot.parameters.length + 1}`,
+            value: 0,
+            unit: '',
+            mode: 'constant'
+        });
+    });
+});
+
 $('#editNodeShape').addEventListener('change', (event) => {
     if (!selectedNode) return;
     changeNodeAppearance(selectedNode, {
@@ -1278,7 +1576,8 @@ async function openProject() {
     try {
         const file = await window.projectFiles.open();
         if (!file) return;
-        loadProjectDocument(JSON.parse(file.content), file.path);
+        if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
+        loadProjectDocument(JSON.parse(file.content), { path: file.path, fileName: file.fileName });
         $('#statusText').textContent = 'Project loaded';
     } catch (error) {
         console.error(error);
@@ -1286,21 +1585,67 @@ async function openProject() {
     }
 }
 
-async function saveProject() {
+async function saveProject(saveAs = false) {
     try {
         const content = `${JSON.stringify(serializeProjectDocument(), null, 4)}\n`;
-        const result = await window.projectFiles.save(currentProjectPath, content);
-        if (!result) return;
+        const result = await window.projectFiles.save(
+            saveAs ? null : currentProjectPath,
+            content,
+            currentProjectFilename
+        );
+        if (!result) return false;
         currentProjectPath = result.path;
+        currentProjectFilename = result.fileName;
+        updateDocumentTitle();
+        documentController.markSaved();
         $('#statusText').textContent = 'Project saved';
+        return true;
     } catch (error) {
         console.error(error);
         $('#statusText').textContent = `Save failed · ${error.message}`;
+        return false;
     }
 }
 
+async function newProject() {
+    if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
+    loadProjectDocument(emptyProjectDocument);
+    $('#statusText').textContent = 'New project';
+}
+
+async function loadExample(id) {
+    if (!id) return;
+    try {
+        if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
+        const example = await window.projectFiles.loadExample(id);
+        loadProjectDocument(JSON.parse(example.content), {
+            fileName: example.suggestedFilename,
+            saved: false
+        });
+        $('#statusText').textContent = 'Example loaded as an unsaved copy';
+    } catch (error) {
+        console.error(error);
+        $('#statusText').textContent = `Example failed · ${error.message}`;
+    } finally {
+        $('#exampleSelect').value = '';
+    }
+}
+
+async function populateExamples() {
+    try {
+        const examples = await window.projectFiles.listExamples();
+        $('#exampleSelect').append(...examples.map((example) => new Option(example.label, example.id)));
+    } catch (error) {
+        console.error(error);
+        $('#exampleSelect').disabled = true;
+    }
+}
+
+$('#newButton').addEventListener('click', newProject);
 $('#loadButton').addEventListener('click', openProject);
-$('#saveButton').addEventListener('click', saveProject);
+$('#saveButton').addEventListener('click', () => saveProject());
+$('#exampleSelect').addEventListener('change', (event) => loadExample(event.target.value));
+populateExamples();
 
 $$('[data-add-kind]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1365,6 +1710,11 @@ $('#createNode').addEventListener('click', () => {
         $('#stateVariableRows input').focus();
         return;
     }
+    if (states.some((state) => !modelSymbolPattern.test(state.symbol)) ||
+        new Set(states.map((state) => state.symbol)).size !== states.length) {
+        $('.stateVariableRow [data-field="symbol"]')?.focus();
+        return;
+    }
     if ($('#newNodeShape').value === 'imported' && !pendingImportedGeometry) {
         $('#nodeGeometryFile').click();
         return;
@@ -1426,6 +1776,11 @@ $('#createEdge').addEventListener('click', () => {
         unit: $('[data-field="unit"]', row).value.trim(),
         mode: $('[data-field="mode"]', row).value
     })).filter((parameter) => parameter.name && parameter.symbol);
+    if (parameters.some((parameter) => !modelSymbolPattern.test(parameter.symbol)) ||
+        new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
+        $('.parameterRow [data-field="symbol"]')?.focus();
+        return;
+    }
     const definition = {
         id: crypto.randomUUID(),
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
@@ -1668,12 +2023,56 @@ function deleteSelected() {
     }
 }
 
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+$('#newButton').title = `New (${isMac ? '⌘N' : 'Ctrl+N'})`;
+$('#loadButton').title = `Open (${isMac ? '⌘O' : 'Ctrl+O'})`;
+$('#saveButton').title = `Save (${isMac ? '⌘S' : 'Ctrl+S'})`;
 $('#undoButton').title = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
 $('#redoButton').title = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
 $('#undoButton').addEventListener('click', undo);
 $('#redoButton').addEventListener('click', redo);
 updateHistoryControls();
+
+const documentTitle = $('.documentTitle');
+const documentTitleInput = $('.documentTitleInput');
+
+function beginFilenameEdit() {
+    documentTitleInput.value = filenameStem(currentProjectFilename);
+    documentTitle.hidden = true;
+    documentTitleInput.hidden = false;
+    documentTitleInput.focus();
+    documentTitleInput.select();
+}
+
+async function commitFilenameEdit() {
+    if (documentTitleInput.hidden) return;
+    const previousFilename = currentProjectFilename;
+    const nextFilename = camelCaseFilename(documentTitleInput.value);
+    documentTitleInput.hidden = true;
+    documentTitle.hidden = false;
+    currentProjectFilename = nextFilename;
+    updateDocumentTitle();
+    if (currentProjectPath && nextFilename !== previousFilename && !await saveProject(true)) {
+        currentProjectFilename = previousFilename;
+        updateDocumentTitle();
+    }
+}
+
+function cancelFilenameEdit() {
+    documentTitleInput.hidden = true;
+    documentTitle.hidden = false;
+}
+
+documentTitle.addEventListener('click', beginFilenameEdit);
+documentTitleInput.addEventListener('blur', commitFilenameEdit);
+documentTitleInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        documentTitleInput.blur();
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelFilenameEdit();
+    }
+});
 
 $('[data-action="delete"]').addEventListener('click', deleteSelected);
 $('[data-delete-node]').addEventListener('click', () => {
@@ -1691,6 +2090,11 @@ window.addEventListener('keydown', (event) => {
     }
     const isEditing = event.target.matches('input, textarea, select') || event.target.isContentEditable;
     const commandKey = isMac ? event.metaKey : event.ctrlKey;
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        newProject();
+        return;
+    }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'o') {
         event.preventDefault();
         openProject();
@@ -1698,7 +2102,7 @@ window.addEventListener('keydown', (event) => {
     }
     if (!isEditing && commandKey && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        saveProject();
+        saveProject(event.shiftKey);
         return;
     }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'z') {

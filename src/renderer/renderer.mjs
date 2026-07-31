@@ -7,6 +7,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DocumentController } from './documentController.mjs';
+import { validateProjectPassword } from './passwordValidation.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -165,28 +166,37 @@ const emptyProjectDocument = {
 };
 const model = hydrateProjectDocument(emptyProjectDocument);
 let currentProjectPath = null;
-let currentProjectFilename = 'untitled.konjugate.json';
+let currentProjectFilename = 'untitled.kjt';
+let currentProjectPassword = null;
 
 function filenameStem(fileName) {
-    return fileName.replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '');
+    return fileName.replace(/\.kjt$/i, '').replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '');
 }
 
 function camelCaseFilename(value) {
     const words = value.trim().replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '')
         .split(/[^A-Za-z0-9]+|(?=[A-Z])/).filter(Boolean);
-    if (!words.length) return 'untitled.konjugate.json';
+    if (!words.length) return 'untitled.kjt';
     const stem = words.map((word, index) => {
         const lower = word.toLowerCase();
         return index ? `${lower.charAt(0).toUpperCase()}${lower.slice(1)}` : lower;
     }).join('');
-    return `${stem}.konjugate.json`;
+    return `${stem}.kjt`;
 }
 
 function updateDocumentTitle() {
     $('.documentTitle').textContent = filenameStem(currentProjectFilename);
 }
 
+function updateEncryptionControls() {
+    const encrypted = Boolean(currentProjectPassword);
+    $('#encryptionStatus').hidden = !encrypted;
+    $('#saveEncryptedButton').dataset.tooltip = encrypted ? 'Encryption options…' : 'Save encrypted…';
+    $('#saveEncryptedButton').ariaLabel = encrypted ? 'Encryption options' : 'Save encrypted project';
+}
+
 updateDocumentTitle();
+updateEncryptionControls();
 
 const nodeObjects = new Map();
 const relationshipObjects = new Map();
@@ -231,7 +241,7 @@ documentController.subscribe(updateHistoryControls);
 function initializeWindowControls() {
     $('#minimizeButton').addEventListener('click', () => window.windowControls.minimize());
     $('#maximizeButton').ariaLabel = isMac ? 'Enter full screen' : 'Maximize';
-    $('#maximizeButton').title = isMac ? 'Enter full screen' : 'Maximize';
+    $('#maximizeButton').dataset.tooltip = isMac ? 'Enter full screen' : 'Maximize';
     $('#maximizeButton').addEventListener('click', () => window.windowControls.toggleMaximize());
     $('#closeButton').addEventListener('click', async () => {
         if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
@@ -242,7 +252,7 @@ function initializeWindowControls() {
         $('#maximizeButton').ariaLabel = isMac
             ? `${maximized ? 'Exit' : 'Enter'} full screen`
             : `${maximized ? 'Restore' : 'Maximize'} window`;
-        $('#maximizeButton').title = $('#maximizeButton').ariaLabel;
+        $('#maximizeButton').dataset.tooltip = $('#maximizeButton').ariaLabel;
     });
 }
 
@@ -1326,7 +1336,12 @@ function clearRenderedModel() {
     nodePickTargets.length = 0;
 }
 
-function loadProjectDocument(document, { path = null, fileName = 'untitled.konjugate.json', saved = true } = {}) {
+function loadProjectDocument(document, {
+    path = null,
+    fileName = 'untitled.kjt',
+    saved = true,
+    password = null
+} = {}) {
     const nextModel = hydrateProjectDocument(document);
     clearRenderedModel();
     model.metadata = nextModel.metadata;
@@ -1339,8 +1354,10 @@ function loadProjectDocument(document, { path = null, fileName = 'untitled.konju
     updateModelStatus();
     currentProjectPath = path;
     currentProjectFilename = fileName;
+    currentProjectPassword = password;
     documentController.reset({ saved });
     updateDocumentTitle();
+    updateEncryptionControls();
     setCameraView('orbit');
 }
 
@@ -1574,10 +1591,29 @@ $('#addButton').addEventListener('click', (event) => {
 
 async function openProject() {
     try {
-        const file = await window.projectFiles.open();
+        let file = await window.projectFiles.open();
         if (!file) return;
         if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
-        loadProjectDocument(JSON.parse(file.content), { path: file.path, fileName: file.fileName });
+        let password = null;
+        let passwordError = '';
+        while (file.requiresPassword) {
+            password = await requestProjectPassword({
+                error: passwordError,
+                title: `Unlock ${file.fileName}`,
+                hint: `Enter the password for ${file.fileName}.`
+            });
+            if (password === null) return;
+            try {
+                file = await window.projectFiles.unlock(file.path, password);
+            } catch {
+                passwordError = 'Incorrect password, or this project has been modified.';
+            }
+        }
+        loadProjectDocument(JSON.parse(file.content), {
+            path: file.path,
+            fileName: file.fileName,
+            password: file.encrypted ? password : null
+        });
         $('#statusText').textContent = 'Project loaded';
     } catch (error) {
         console.error(error);
@@ -1585,20 +1621,23 @@ async function openProject() {
     }
 }
 
-async function saveProject(saveAs = false) {
+async function saveProject(saveAs = false, password = currentProjectPassword) {
     try {
         const content = `${JSON.stringify(serializeProjectDocument(), null, 4)}\n`;
         const result = await window.projectFiles.save(
             saveAs ? null : currentProjectPath,
             content,
-            currentProjectFilename
+            currentProjectFilename,
+            password
         );
         if (!result) return false;
         currentProjectPath = result.path;
         currentProjectFilename = result.fileName;
+        currentProjectPassword = result.encrypted ? password : null;
         updateDocumentTitle();
+        updateEncryptionControls();
         documentController.markSaved();
-        $('#statusText').textContent = 'Project saved';
+        $('#statusText').textContent = result.encrypted ? 'Encrypted project saved' : 'Project saved';
         return true;
     } catch (error) {
         console.error(error);
@@ -1631,6 +1670,76 @@ async function loadExample(id) {
     }
 }
 
+function requestProjectPassword({
+    confirm = false,
+    error = '',
+    title = confirm ? 'Save encrypted project' : 'Unlock project',
+    hint = confirm
+        ? 'Choose a password. It cannot be recovered if you forget it.'
+        : 'Enter the password used to protect this project.',
+    submitLabel = confirm ? 'Save encrypted' : 'Unlock'
+} = {}) {
+    const dialog = $('#passwordDialog');
+    const form = $('form', dialog);
+    const password = $('#projectPassword');
+    const confirmation = $('#confirmProjectPassword');
+    const submit = $('#passwordSubmit');
+    const cancel = $('#passwordCancel');
+    $('#passwordDialogTitle').textContent = title;
+    $('#passwordDialogHint').textContent = hint;
+    submit.textContent = submitLabel;
+    $('#confirmPasswordField').hidden = !confirm;
+    $('#passwordError').textContent = error;
+    password.value = '';
+    confirmation.value = '';
+    confirmation.required = confirm;
+
+    return new Promise((resolve) => {
+        const updateValidation = () => {
+            const { valid, message } = validateProjectPassword(
+                password.value,
+                confirmation.value,
+                confirm,
+                error
+            );
+            $('#passwordError').textContent = message;
+            confirmation.setAttribute('aria-invalid', String(confirm && Boolean(confirmation.value) && password.value !== confirmation.value));
+            submit.disabled = !valid;
+        };
+        const finish = (value) => {
+            form.removeEventListener('submit', onSubmit);
+            dialog.removeEventListener('cancel', onCancel);
+            password.removeEventListener('input', updateValidation);
+            confirmation.removeEventListener('input', updateValidation);
+            cancel.removeEventListener('click', onCancelClick);
+            password.value = '';
+            confirmation.value = '';
+            dialog.close();
+            resolve(value);
+        };
+        const onCancel = (event) => {
+            event.preventDefault();
+            finish(null);
+        };
+        const onCancelClick = () => finish(null);
+        const onSubmit = (event) => {
+            event.preventDefault();
+            updateValidation();
+            if (submit.disabled) return;
+            const submittedPassword = password.value;
+            finish(submittedPassword);
+        };
+        form.addEventListener('submit', onSubmit);
+        dialog.addEventListener('cancel', onCancel);
+        password.addEventListener('input', updateValidation);
+        confirmation.addEventListener('input', updateValidation);
+        cancel.addEventListener('click', onCancelClick);
+        updateValidation();
+        dialog.showModal();
+        password.focus();
+    });
+}
+
 async function populateExamples() {
     try {
         const examples = await window.projectFiles.listExamples();
@@ -1644,6 +1753,53 @@ async function populateExamples() {
 $('#newButton').addEventListener('click', newProject);
 $('#loadButton').addEventListener('click', openProject);
 $('#saveButton').addEventListener('click', () => saveProject());
+$('#saveEncryptedButton').addEventListener('click', async (event) => {
+    if (!currentProjectPassword) {
+        const password = await requestProjectPassword({ confirm: true });
+        if (password !== null) await saveProject(true, password);
+        return;
+    }
+    const menu = $('#encryptionMenu');
+    const rect = event.currentTarget.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, rect.right - 245)}px`;
+    menu.style.top = `${rect.bottom + 5}px`;
+    menu.classList.toggle('hidden');
+});
+
+async function verifyCurrentProjectPassword(actionLabel) {
+    let error = '';
+    while (true) {
+        const password = await requestProjectPassword({
+            error,
+            title: actionLabel,
+            hint: `Enter the current password for ${currentProjectFilename}.`,
+            submitLabel: 'Continue'
+        });
+        if (password === null) return false;
+        if (password === currentProjectPassword) return true;
+        error = 'The current password is incorrect.';
+    }
+}
+
+$('#changePasswordButton').addEventListener('click', async () => {
+    $('#encryptionMenu').classList.add('hidden');
+    if (!await verifyCurrentProjectPassword('Change encryption password')) return;
+    const password = await requestProjectPassword({
+        confirm: true,
+        title: `Change password for ${currentProjectFilename}`,
+        hint: 'Choose a new password. It cannot be recovered if you forget it.',
+        submitLabel: 'Change password'
+    });
+    if (password !== null) await saveProject(false, password);
+});
+
+$('#removeEncryptionButton').addEventListener('click', async () => {
+    $('#encryptionMenu').classList.add('hidden');
+    if (!await verifyCurrentProjectPassword('Remove encryption')) return;
+    await saveProject(false, null);
+});
+
+$('#encryptionMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
 $('#exampleSelect').addEventListener('change', (event) => loadExample(event.target.value));
 populateExamples();
 
@@ -2023,9 +2179,10 @@ function deleteSelected() {
     }
 }
 
-$('#newButton').title = `New (${isMac ? '⌘N' : 'Ctrl+N'})`;
-$('#loadButton').title = `Open (${isMac ? '⌘O' : 'Ctrl+O'})`;
-$('#saveButton').title = `Save (${isMac ? '⌘S' : 'Ctrl+S'})`;
+$('#newButton').dataset.tooltip = `New project (${isMac ? '⌘N' : 'Ctrl+N'})`;
+$('#loadButton').dataset.tooltip = `Open project (${isMac ? '⌘O' : 'Ctrl+O'})`;
+$('#saveButton').dataset.tooltip = `Save project (${isMac ? '⌘S' : 'Ctrl+S'})`;
+updateEncryptionControls();
 $('#undoButton').title = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
 $('#redoButton').title = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
 $('#undoButton').addEventListener('click', undo);

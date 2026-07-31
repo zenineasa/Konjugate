@@ -31,6 +31,25 @@ input, select { user-select: text; }
     align-items: center; justify-content: space-between; color: #eff8fa; background: #070d13;
     border-bottom: 1px solid #15212a; -webkit-app-region: drag;
 }
+#titleBar [data-tooltip] { position: relative; -webkit-app-region: no-drag; }
+#titleBar [data-tooltip]::after {
+    position: absolute; z-index: 100; top: calc(100% + 7px); left: 50%; padding: 5px 7px;
+    color: #d8e5ea; background: #15232c; border: 1px solid #354954; border-radius: 4px;
+    box-shadow: 0 7px 18px rgb(0 0 0 / 38%); content: attr(data-tooltip); font-size: 8px;
+    font-style: normal; font-weight: 500; line-height: 1; opacity: 0; pointer-events: none;
+    transform: translate(-50%, -2px); transition: opacity .12s .35s, transform .12s .35s;
+    visibility: hidden; white-space: nowrap;
+}
+#titleBar [data-tooltip]:hover::after,
+#titleBar [data-tooltip]:focus-visible::after {
+    opacity: 1; transform: translate(-50%, 0); visibility: visible;
+}
+#titleBar .windowControls button:last-child::after { right: 5px; left: auto; transform: translateY(-2px); }
+#titleBar .windowControls button:last-child:hover::after,
+#titleBar .windowControls button:last-child:focus-visible::after { transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+    #titleBar [data-tooltip]::after { transition: none; }
+}
 .windowTitle { display: flex; align-items: center; gap: 8px; padding-left: 13px; font-size: 11px; }
 .windowTitle img { width: 18px; height: 18px; }
 .windowTitle strong { font-size: 12px; }
@@ -38,6 +57,9 @@ input, select { user-select: text; }
 .windowTitle .documentTitle:hover { color: #c4d2d8; background: #121d25; border-color: #263641; }
 .documentTitleInput { width: 170px; height: 25px; margin-left: 18px; padding: 0 5px; color: #d5e2e7; background: #111d25; border: 1px solid #34505c; border-radius: 4px; outline: 0; font-size: 11px; -webkit-app-region: no-drag; }
 .windowTitle i { width: 5px; height: 5px; background: var(--accent); border-radius: 50%; }
+.encryptionStatus { display: grid; width: 18px; height: 18px; margin-left: 1px; place-items: center; background: rgb(66 201 188 / 10%); border: 1px solid rgb(66 201 188 / 24%); border-radius: 50%; }
+.encryptionStatus[hidden] { display: none; }
+.encryptionStatus img { width: 11px; height: 11px; filter: brightness(1.45) saturate(1.25); }
 .documentActions { display: flex; align-items: center; gap: 2px; margin-left: 6px; -webkit-app-region: no-drag; }
 .documentActions button {
     display: grid; width: 27px; height: 25px; padding: 0; place-items: center; color: #82949f;
@@ -50,6 +72,25 @@ input, select { user-select: text; }
 .documentActions button:disabled .documentActionIcon { filter: brightness(.55); opacity: .55; }
 .documentActions select { height: 25px; margin-left: 4px; padding: 0 22px 0 7px; color: #82949f; background: #0b141b; border: 1px solid #253640; border-radius: 4px; outline: 0; font-size: 9px; }
 .documentActions select:hover { color: #d5e2e7; border-color: #36505d; }
+.encryptionMenu { width: 245px; padding: 6px; }
+.encryptionMenu button { display: block; width: 100%; padding: 8px 9px; color: #91a3ac; background: transparent; border: 0; border-radius: 4px; text-align: left; }
+.encryptionMenu button:hover { background: #1a2933; }
+.encryptionMenu strong, .encryptionMenu span { display: block; }
+.encryptionMenu strong { color: #c1d0d6; font-size: 9px; }
+.encryptionMenu span { margin-top: 3px; color: #60747f; font-size: 7px; }
+.passwordDialog { width: 330px; padding: 0; color: #b8c7ce; background: #0e1922; border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 20px 55px rgb(0 0 0 / 60%); }
+.passwordDialog::backdrop { background: rgb(2 7 11 / 62%); backdrop-filter: blur(3px); }
+.passwordDialog form { padding: 17px; }
+.passwordDialog strong { display: block; margin: 4px 0 5px; color: #d8e4e9; font-size: 13px; }
+.passwordDialog p { margin: 0 0 14px; color: #667b86; font-size: 8px; line-height: 1.5; }
+.passwordDialog label { display: grid; gap: 5px; margin-top: 9px; color: #718691; font-size: 8px; }
+.passwordDialog label[hidden] { display: none; }
+.passwordDialog input { height: 30px; padding: 0 8px; color: #d4e0e5; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; outline: 0; }
+.passwordDialog input:focus { border-color: #478177; }
+.passwordError { min-height: 16px; padding-top: 6px; color: #d48288; font-size: 8px; }
+.passwordDialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
+.passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
+.passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .windowControls { display: flex; height: 100%; -webkit-app-region: no-drag; }
 .windowControls button { display: grid; width: 46px; height: 100%; padding: 0; place-items: center; background: transparent; border: 0; font-size: 17px; }
 .windowControls button:hover { background: #1a2730; }
@@ -153,6 +194,7 @@ input, select { user-select: text; }
 .showEdgesDetails .bundleLabel header { border-bottom: 1px solid #293b46; }
 
 .contextCard { position: absolute; z-index: 20; color: #b8c7ce; background: rgb(14 25 34 / 97%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px); }
+.contextCard.encryptionMenu { position: fixed; z-index: 70; }
 .contextCard.hidden { display: none; }
 .editorCard { width: 390px; }
 .edgeEditor { width: 440px; }

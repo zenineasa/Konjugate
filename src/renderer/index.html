@@ -23,28 +23,54 @@
         <div class="windowTitle">
             <img src="../../assets/icon.svg" alt="">
             <strong>Konjugate</strong>
-            <button class="documentTitle" type="button" title="Rename project">Untitled</button>
+            <span id="encryptionStatus" class="encryptionStatus" role="img" aria-label="Encrypted project · AES-256-GCM" data-tooltip="Encrypted project · AES-256-GCM" tabindex="0" hidden>
+                <img src="../../assets/encryptionStatus.svg" alt="">
+            </span>
+            <button class="documentTitle" type="button" data-tooltip="Rename project">Untitled</button>
             <input class="documentTitleInput" aria-label="Project filename" autocomplete="off" hidden>
-            <i title="Unsaved changes"></i>
+            <i aria-label="Unsaved changes" data-tooltip="Unsaved changes"></i>
             <div class="documentActions" aria-label="Project file actions">
-                <button id="newButton" type="button" aria-label="New project">
-                    <img class="documentActionIcon" src="../../assets/newProject.svg" alt="New project">
+                <button id="newButton" type="button" aria-label="New project" data-tooltip="New project">
+                    <img class="documentActionIcon" src="../../assets/newProject.svg" alt="">
                 </button>
-                <button id="loadButton" type="button" aria-label="Open project">
-                    <img class="documentActionIcon" src="../../assets/openProject.svg" alt="Open project">
+                <button id="loadButton" type="button" aria-label="Open project" data-tooltip="Open project">
+                    <img class="documentActionIcon" src="../../assets/openProject.svg" alt="">
                 </button>
-                <button id="saveButton" type="button" aria-label="Save project">
-                    <img class="documentActionIcon" src="../../assets/saveProject.svg" alt="Save project">
+                <button id="saveButton" type="button" aria-label="Save project" data-tooltip="Save project">
+                    <img class="documentActionIcon" src="../../assets/saveProject.svg" alt="">
+                </button>
+                <button id="saveEncryptedButton" type="button" aria-label="Save encrypted project" data-tooltip="Save encrypted…">
+                    <img class="documentActionIcon" src="../../assets/saveEncrypted.svg" alt="">
                 </button>
                 <select id="exampleSelect" aria-label="Load example"><option value="">Examples</option></select>
             </div>
         </div>
         <div class="windowControls">
-            <button id="minimizeButton" type="button" aria-label="Minimize">−</button>
-            <button id="maximizeButton" type="button" aria-label="Maximize"><span id="maximizeIcon">□</span></button>
-            <button id="closeButton" class="closeButton" type="button" aria-label="Close">×</button>
+            <button id="minimizeButton" type="button" aria-label="Minimize" data-tooltip="Minimize">−</button>
+            <button id="maximizeButton" type="button" aria-label="Maximize" data-tooltip="Maximize"><span id="maximizeIcon">□</span></button>
+            <button id="closeButton" class="closeButton" type="button" aria-label="Close" data-tooltip="Close">×</button>
         </div>
     </header>
+
+    <div id="encryptionMenu" class="contextCard encryptionMenu hidden" role="menu">
+        <button id="changePasswordButton" type="button" role="menuitem"><strong>Change password…</strong><span>Re-encrypt this file with a new password</span></button>
+        <button id="removeEncryptionButton" type="button" role="menuitem"><strong>Remove encryption…</strong><span>Keep compression but remove password protection</span></button>
+    </div>
+
+    <dialog id="passwordDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Protected project</span>
+            <strong id="passwordDialogTitle">Enter password</strong>
+            <p id="passwordDialogHint">Enter the password used to protect this project.</p>
+            <label><span>Password</span><input id="projectPassword" type="password" autocomplete="current-password" required></label>
+            <label id="confirmPasswordField"><span>Confirm password</span><input id="confirmProjectPassword" type="password" autocomplete="new-password"></label>
+            <div class="passwordError" id="passwordError" role="alert"></div>
+            <footer>
+                <button id="passwordCancel" type="button">Cancel</button>
+                <button id="passwordSubmit" class="doneButton" type="submit" disabled>Continue</button>
+            </footer>
+        </form>
+    </dialog>
 
     <nav class="toolstrip" aria-label="Model tools">
         <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>

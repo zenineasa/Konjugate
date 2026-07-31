@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('projectFiles', {
     listExamples: () => ipcRenderer.invoke('projectListExamples'),
     loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),
     open: () => ipcRenderer.invoke('projectOpen'),
-    save: (path, content, suggestedFilename) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename }),
+    unlock: (path, password) => ipcRenderer.invoke('projectUnlock', { path, password }),
+    save: (path, content, suggestedFilename, password) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password }),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });

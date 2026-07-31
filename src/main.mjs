@@ -1,11 +1,14 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
+const pendingEncryptedPaths = new Set();
 
 function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
@@ -85,7 +88,7 @@ function exampleLabel(fileName) {
 ipcMain.handle('projectListExamples', async () => (await exampleFiles()).map((fileName) => ({
     id: fileName,
     label: exampleLabel(fileName),
-    suggestedFilename: fileName
+    suggestedFilename: fileName.replace(/\.konjugate\.json$/, '.kjt')
 })));
 
 ipcMain.handle('projectLoadExample', async (_event, id) => {
@@ -98,27 +101,71 @@ ipcMain.handle('projectOpen', async (event) => {
     const result = await dialog.showOpenDialog(targetWindow, {
         title: 'Open Konjugate project',
         properties: ['openFile'],
-        filters: [{ name: 'Konjugate project', extensions: ['json', 'konjugate'] }]
+        filters: [
+            { name: 'Konjugate project', extensions: ['kjt'] },
+            { name: 'Legacy JSON project', extensions: ['json', 'konjugate'] }
+        ]
     });
     if (result.canceled) return null;
     const [path] = result.filePaths;
-    return { path, fileName: basename(path), content: await readFile(path, 'utf8') };
+    const bytes = await readFile(path);
+    const inspection = inspectProjectFile(bytes);
+    if (inspection.encrypted) {
+        pendingEncryptedPaths.add(path);
+        return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
+    }
+    return { path, fileName: basename(path), encrypted: false, content: await decodeProjectFile(bytes) };
 });
 
-ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename }) => {
+ipcMain.handle('projectUnlock', async (_event, { path, password }) => {
+    if (!pendingEncryptedPaths.has(path)) throw new Error('Select the encrypted project again.');
+    const content = await decodeProjectFile(await readFile(path), { password });
+    pendingEncryptedPaths.delete(path);
+    return { path, fileName: basename(path), encrypted: true, content };
+});
+
+ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename, password }) => {
     const targetWindow = getWindowFromEvent(event);
     let path = existingPath;
     if (!path) {
+        const defaultName = (suggestedFilename || 'untitled.kjt').replace(/(?:\.konjugate)?\.json$/i, '.kjt');
         const result = await dialog.showSaveDialog(targetWindow, {
             title: 'Save Konjugate project',
-            defaultPath: suggestedFilename || 'untitled.konjugate.json',
-            filters: [{ name: 'Konjugate project', extensions: ['konjugate.json', 'json'] }]
+            defaultPath: defaultName,
+            filters: password
+                ? [{ name: 'Encrypted Konjugate project', extensions: ['kjt'] }]
+                : [
+                    { name: 'Konjugate project', extensions: ['kjt'] },
+                    { name: 'Legacy JSON project', extensions: ['json'] }
+                ]
         });
         if (result.canceled) return null;
         path = result.filePath;
+        if (password && !path.toLowerCase().endsWith('.kjt')) {
+            path = path.replace(/(?:\.konjugate)?\.json$/i, '') + '.kjt';
+        }
     }
-    await writeFile(path, content, 'utf8');
-    return { path, fileName: basename(path) };
+    const isJson = path.toLowerCase().endsWith('.json') && !password;
+    const bytes = isJson ? Buffer.from(content, 'utf8') : await encodeProjectFile(content, { password });
+    if (!isJson) {
+        const verification = await decodeProjectFile(bytes, { password });
+        if (verification !== content) throw new Error('The saved project could not be verified.');
+    }
+    const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
+    try {
+        await writeFile(temporaryPath, bytes);
+        try {
+            await rename(temporaryPath, path);
+        } catch (error) {
+            if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+            await writeFile(path, bytes);
+            await unlink(temporaryPath);
+        }
+    } catch (error) {
+        await unlink(temporaryPath).catch(() => {});
+        throw error;
+    }
+    return { path, fileName: basename(path), encrypted: Boolean(password) };
 });
 
 ipcMain.handle('projectConfirmDiscard', async (event) => {

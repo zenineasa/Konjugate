@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DragControls } from 'three/addons/controls/DragControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -23,76 +25,112 @@ const canvas = $('#canvas');
 const webglContainer = $('#webglContainer');
 const css2dContainer = $('#css2dContainer');
 
-const model = {
-    nodes: [
-        {
-            id: 'battery',
-            title: 'Battery module',
-            type: 'Battery',
-            shape: 'box',
-            position: [-5.2, 0.4, 0],
-            color: 0x2f6970,
-            states: [
-                { label: 'Temperature', symbol: 'T', value: '353.2 K', className: 'temperatureValue' },
-                { label: 'State of charge', symbol: 'SOC', value: '84.6%' }
-            ]
-        },
-        {
-            id: 'cooling',
-            title: 'Coolant reservoir',
-            type: 'Fluid volume',
-            shape: 'cylinder',
-            position: [4.7, 0, -0.8],
-            color: 0x2e7591,
-            badgeClass: 'coolBadge',
-            states: [
-                { label: 'Temperature', symbol: 'T', value: '293.2 K', className: 'coolantTemperature' },
-                { label: 'Fill level', symbol: 'h', value: '72%' }
-            ]
-        },
-        {
-            id: 'heater',
-            title: 'Electrical losses',
-            type: 'Heat source',
-            shape: 'sphere',
-            position: [-4.2, -3.6, 0.8],
-            color: 0xb66755,
-            badgeClass: 'sourceBadge',
-            states: [
-                { label: 'Heat flow', symbol: 'Q_dot', value: '420 W', className: 'heatValue' }
-            ]
+function geometryFromDocument(mesh) {
+    if (!mesh?.position?.length) return null;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(mesh.position, 3));
+    if (mesh.normal?.length) geometry.setAttribute('normal', new THREE.Float32BufferAttribute(mesh.normal, 3));
+    else geometry.computeVertexNormals();
+    if (mesh.index?.length) geometry.setIndex(mesh.index);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return geometry;
+}
+
+function hydrateProjectDocument(document) {
+    if (document?.format !== 'konjugate' || document.version !== 1) {
+        throw new Error('This is not a supported Konjugate project document.');
+    }
+    if (!Array.isArray(document.nodes) || !Array.isArray(document.edges)) {
+        throw new Error('The project must contain node and edge arrays.');
+    }
+    const ids = new Set();
+    const nodeIds = new Set();
+    const stateIdsByNode = new Map();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    document.nodes.forEach((node) => {
+        if (!uuidPattern.test(node.id) || ids.has(node.id)) {
+            throw new Error('Every node must have a unique UUID id.');
         }
-    ],
-    relationships: [
-        {
-            id: 'conduction',
-            title: 'Thermal conduction',
-            source: 'battery',
-            target: 'cooling',
-            directionality: 'bidirectional',
-            color: 0xe6a15b,
-            offset: -0.11
-        },
-        {
-            id: 'signal',
-            title: 'Temperature signal',
-            source: 'battery',
-            target: 'cooling',
-            directionality: 'directed',
-            color: 0xb68bd5,
-            offset: 0.16
-        },
-        {
-            id: 'heat-source',
-            title: 'Heat source',
-            source: 'heater',
-            target: 'battery',
-            directionality: 'directed',
-            color: 0xc88be0,
-            offset: 0
+        ids.add(node.id);
+        nodeIds.add(node.id);
+        const stateIds = new Set();
+        (node.states ?? []).forEach((state) => {
+            if (!uuidPattern.test(state.id) || ids.has(state.id)) {
+                throw new Error(`Every state in “${node.name ?? node.id}” must have a unique UUID id.`);
+            }
+            ids.add(state.id);
+            stateIds.add(state.id);
+        });
+        stateIdsByNode.set(node.id, stateIds);
+    });
+    document.edges.forEach((edge) => {
+        if (!uuidPattern.test(edge.id) || ids.has(edge.id)) {
+            throw new Error('Every edge must have a unique UUID id.');
         }
-    ]
-};
+        ids.add(edge.id);
+        if (!nodeIds.has(edge.source?.nodeId) || !nodeIds.has(edge.target?.nodeId)) {
+            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing node.`);
+        }
+        if (edge.source.stateId && !stateIdsByNode.get(edge.source.nodeId)?.has(edge.source.stateId)) {
+            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing source state.`);
+        }
+        if (edge.target.stateId && !stateIdsByNode.get(edge.target.nodeId)?.has(edge.target.stateId)) {
+            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing target state.`);
+        }
+    });
+
+    const nodes = document.nodes.map((node) => {
+        const appearance = node.appearance ?? {};
+        const importedGeometry = appearance.type === 'mesh'
+            ? geometryFromDocument(appearance.mesh)
+            : null;
+        return {
+            id: node.id,
+            title: node.name || 'Untitled node',
+            type: node.type || 'Custom node',
+            shape: importedGeometry ? 'imported' : appearance.shape || 'box',
+            position: node.position?.length === 3 ? node.position : [0, 0, 0],
+            color: Number.parseInt(String(appearance.color ?? '#34727a').replace('#', ''), 16),
+            importedGeometry,
+            geometryFileName: appearance.fileName ?? null,
+            badgeClass: '',
+            sourceTerms: node.sourceTerms ?? [],
+            states: (node.states ?? []).map((state) => ({
+                id: state.id,
+                label: state.name,
+                symbol: state.symbol,
+                initialValue: state.initialValue,
+                unit: state.unit ?? '',
+                value: `${state.initialValue}${state.unit ? ` ${state.unit}` : ''}`,
+                className: ''
+            }))
+        };
+    });
+    const relationships = document.edges.map((edge) => ({
+        id: edge.id,
+        title: edge.name || 'Untitled relationship',
+        source: edge.source.nodeId,
+        sourceStateId: edge.source.stateId ?? null,
+        target: edge.target.nodeId,
+        targetStateId: edge.target.stateId ?? null,
+        directionality: edge.directionality ?? 'directed',
+        equation: edge.equation ?? '',
+        parameters: edge.parameters ?? [],
+        color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
+        offset: Number(edge.appearance?.offset) || 0
+    }));
+    return {
+        metadata: { name: document.metadata?.name || 'Untitled project', units: document.metadata?.units || 'SI' },
+        nodes,
+        relationships
+    };
+}
+
+const defaultProjectFile = await window.projectFiles.loadDefault();
+const model = hydrateProjectDocument(JSON.parse(defaultProjectFile.content));
+let currentProjectPath = null;
+$('.documentTitle').textContent = model.metadata.name;
 
 const nodeObjects = new Map();
 const relationshipObjects = new Map();
@@ -100,12 +138,46 @@ const nodePickTargets = [];
 const relationshipPickTargets = [];
 let selectedNode = null;
 let selectedRelationship = null;
-let running = false;
-let simulationTimer;
 let currentTool = 'select';
 let currentView = 'orbit';
 let activeEndpointPick = null;
 let cameraAnimation = null;
+let bundleSignature = '';
+let pendingImportedGeometry = null;
+let pendingGeometryFileName = '';
+const undoStack = [];
+const redoStack = [];
+
+function updateHistoryControls() {
+    $('#undoButton').disabled = undoStack.length === 0;
+    $('#redoButton').disabled = redoStack.length === 0;
+}
+
+function recordHistory(action) {
+    undoStack.push(action);
+    redoStack.length = 0;
+    updateHistoryControls();
+}
+
+function undo() {
+    const action = undoStack.pop();
+    if (!action) return;
+    clearSelection();
+    hideCards();
+    action.undo();
+    redoStack.push(action);
+    updateHistoryControls();
+}
+
+function redo() {
+    const action = redoStack.pop();
+    if (!action) return;
+    clearSelection();
+    hideCards();
+    action.redo();
+    undoStack.push(action);
+    updateHistoryControls();
+}
 
 function initializeWindowControls() {
     $('#minimizeButton').addEventListener('click', () => window.windowControls.minimize());
@@ -160,6 +232,30 @@ transformControls.addEventListener('objectChange', () => {
     updateRelationships();
     updateSelectionOutline();
 });
+let transformStartPosition = null;
+transformControls.addEventListener('mouseDown', () => {
+    transformStartPosition = transformControls.object?.position.clone() ?? null;
+});
+transformControls.addEventListener('mouseUp', () => {
+    const object = transformControls.object;
+    if (!object || !transformStartPosition || object.position.equals(transformStartPosition)) {
+        transformStartPosition = null;
+        return;
+    }
+    const from = transformStartPosition.clone();
+    const to = object.position.clone();
+    recordHistory({
+        undo: () => {
+            object.position.copy(from);
+            updateRelationships();
+        },
+        redo: () => {
+            object.position.copy(to);
+            updateRelationships();
+        }
+    });
+    transformStartPosition = null;
+});
 
 scene.add(new THREE.HemisphereLight(0xbfe4f2, 0x16212a, 2.25));
 
@@ -177,29 +273,27 @@ floor.material.transparent = true;
 floor.material.opacity = 0.22;
 scene.add(floor);
 
-function geometryFor(shape) {
-    if (shape === 'cylinder') return new THREE.CylinderGeometry(1.15, 1.15, 2.9, 32);
-    if (shape === 'sphere') return new THREE.SphereGeometry(1.05, 32, 24);
+function geometryFor(definition) {
+    if (definition.importedGeometry) return definition.importedGeometry.clone();
+    if (definition.shape === 'cylinder') return new THREE.CylinderGeometry(1.15, 1.15, 2.9, 32);
+    if (definition.shape === 'sphere') return new THREE.SphereGeometry(1.05, 32, 24);
     return new THREE.BoxGeometry(2.8, 1.8, 1.8, 2, 1, 1);
 }
 
 function materialFor(definition) {
-    if (definition.shape === 'sphere') {
-        return new THREE.MeshStandardMaterial({
-            color: definition.color,
-            emissive: 0x54221e,
-            emissiveIntensity: 0.42,
-            metalness: 0.08,
-            roughness: 0.38
-        });
-    }
-
     return new THREE.MeshStandardMaterial({
         color: definition.color,
-        metalness: definition.shape === 'cylinder' ? 0.18 : 0.28,
+        metalness: 0.2,
         roughness: 0.42
     });
 }
+
+const nodeLabelOffsets = {
+    box: [1.72, 0.62, 0],
+    cylinder: [1.5, 0.7, 0],
+    sphere: [1.38, 0.5, 0],
+    imported: [1.72, 0.62, 0]
+};
 
 function createNodeLabel(definition) {
     const wrapper = document.createElement('div');
@@ -235,45 +329,20 @@ function createNodeLabel(definition) {
         openNodeEditor(definition, event.clientX, event.clientY);
     });
 
-    const labelOffsets = {
-        box: [1.72, 0.62, 0],
-        cylinder: [1.5, 0.7, 0],
-        sphere: [1.38, 0.5, 0]
-    };
     const label = new CSS2DObject(wrapper);
-    label.position.fromArray(labelOffsets[definition.shape] ?? [1.72, 0.62, 0]);
+    label.position.fromArray(nodeLabelOffsets[definition.shape] ?? nodeLabelOffsets.box);
     label.center.set(0, 0.5);
     return label;
 }
 
-function createPort(color, position) {
-    const port = new THREE.Mesh(
-        new THREE.SphereGeometry(0.105, 16, 12),
-        new THREE.MeshBasicMaterial({ color })
-    );
-    port.position.copy(position);
-    port.renderOrder = 10;
-    return port;
-}
-
 function createNode(definition) {
-    const mesh = new THREE.Mesh(geometryFor(definition.shape), materialFor(definition));
+    const mesh = new THREE.Mesh(geometryFor(definition), materialFor(definition));
     mesh.position.fromArray(definition.position);
     mesh.userData = {
         kind: 'node',
         id: definition.id,
         definition
     };
-
-    if (definition.id === 'battery') {
-        mesh.add(createPort(0x42d7ca, new THREE.Vector3(1.45, 0.35, 0)));
-        mesh.add(createPort(0xc18de1, new THREE.Vector3(1.45, -0.35, 0)));
-    } else if (definition.id === 'cooling') {
-        mesh.add(createPort(0xe6a15b, new THREE.Vector3(-1.16, 0.35, 0)));
-        mesh.add(createPort(0xc18de1, new THREE.Vector3(-1.16, -0.35, 0)));
-    } else {
-        mesh.add(createPort(0xc18de1, new THREE.Vector3(0.75, 0.68, 0)));
-    }
 
     mesh.add(createNodeLabel(definition));
     scene.add(mesh);
@@ -304,7 +373,7 @@ function relationshipPoints(definition) {
     const start = source.clone().add(lateral);
     const end = target.clone().add(lateral);
     midpoint.add(lateral);
-    midpoint.y -= definition.source === 'heater' ? 0.15 : 0.55;
+    midpoint.y -= 0.55;
 
     return { start, midpoint, end };
 }
@@ -365,6 +434,72 @@ function createRelationship(definition) {
     if (marker) relationshipPickTargets.push(marker);
 }
 
+function setRelationshipVisibility(id, visible) {
+    const relationship = relationshipObjects.get(id);
+    if (!relationship) return;
+    relationship.line.visible = visible;
+    if (relationship.marker) relationship.marker.visible = visible;
+    updateModelStatus();
+}
+
+function setRelationshipDirectionality(definition, directionality) {
+    const relationship = relationshipObjects.get(definition.id);
+    if (!relationship) return;
+    if (relationship.marker) {
+        scene.remove(relationship.marker);
+        const markerIndex = relationshipPickTargets.indexOf(relationship.marker);
+        if (markerIndex >= 0) relationshipPickTargets.splice(markerIndex, 1);
+        relationship.marker.geometry.dispose();
+        relationship.marker.material.dispose();
+    }
+    definition.directionality = directionality;
+    relationship.marker = createDirectionMarker(definition, relationship.line.userData.curve);
+    if (relationship.marker) relationshipPickTargets.push(relationship.marker);
+    bundleSignature = '';
+    syncContextualOverlays();
+}
+
+function setNodeVisibility(id, visible) {
+    const node = nodeObjects.get(id);
+    if (!node) return;
+    node.visible = visible;
+    updateModelStatus();
+}
+
+function captureNodeAppearance(definition) {
+    return {
+        shape: definition.shape,
+        importedGeometry: definition.importedGeometry?.clone() ?? null,
+        geometryFileName: definition.geometryFileName ?? null
+    };
+}
+
+function applyNodeAppearance(node, appearance) {
+    const definition = node.userData.definition;
+    definition.importedGeometry?.dispose();
+    definition.shape = appearance.shape;
+    definition.importedGeometry = appearance.importedGeometry?.clone() ?? null;
+    definition.geometryFileName = appearance.geometryFileName ?? null;
+    node.geometry.dispose();
+    node.geometry = geometryFor(definition);
+    node.material.dispose();
+    node.material = materialFor(definition);
+    const label = node.children.find((child) => child.element?.classList.contains('node-label-container'));
+    label?.position.fromArray(nodeLabelOffsets[definition.shape] ?? nodeLabelOffsets.box);
+    updateSelectionOutline();
+    updateRelationships();
+}
+
+function changeNodeAppearance(node, appearance) {
+    const before = captureNodeAppearance(node.userData.definition);
+    applyNodeAppearance(node, appearance);
+    const after = captureNodeAppearance(node.userData.definition);
+    recordHistory({
+        undo: () => applyNodeAppearance(node, before),
+        redo: () => applyNodeAppearance(node, after)
+    });
+}
+
 model.relationships.forEach(createRelationship);
 
 const bundleAnchor = new THREE.Object3D();
@@ -388,10 +523,13 @@ function updateRelationships() {
         if (relationship.marker) positionDirectionMarker(relationship.marker, curve);
     });
 
-    const battery = nodeObjects.get('battery').position;
-    const cooling = nodeObjects.get('cooling').position;
-    bundleAnchor.position.copy(battery).lerp(cooling, 0.5);
-    bundleAnchor.position.y -= 1.65;
+    const bundle = activeRelationshipBundle();
+    if (bundle) {
+        bundleAnchor.position.copy(nodeObjects.get(bundle.source).position)
+            .lerp(nodeObjects.get(bundle.target).position, 0.5);
+        bundleAnchor.position.y -= 1.65;
+    }
+    syncContextualOverlays();
 }
 
 updateRelationships();
@@ -402,16 +540,34 @@ const dragControls = new DragControls(
     renderer.domElement
 );
 dragControls.recursive = false;
+let dragStartPosition = null;
 dragControls.addEventListener('dragstart', (event) => {
     orbitControls.enabled = false;
+    dragStartPosition = event.object.position.clone();
     selectNode(event.object);
 });
 dragControls.addEventListener('drag', () => {
     updateRelationships();
     updateSelectionOutline();
 });
-dragControls.addEventListener('dragend', () => {
+dragControls.addEventListener('dragend', (event) => {
     orbitControls.enabled = true;
+    if (dragStartPosition && !event.object.position.equals(dragStartPosition)) {
+        const object = event.object;
+        const from = dragStartPosition.clone();
+        const to = object.position.clone();
+        recordHistory({
+            undo: () => {
+                object.position.copy(from);
+                updateRelationships();
+            },
+            redo: () => {
+                object.position.copy(to);
+                updateRelationships();
+            }
+        });
+    }
+    dragStartPosition = null;
 });
 
 const raycaster = new THREE.Raycaster();
@@ -447,6 +603,7 @@ function updateSelectionOutline() {
 function selectNode(node) {
     selectedNode = node;
     selectedRelationship = null;
+    updateRelationshipSelection();
     updateSelectionOutline();
 }
 
@@ -454,13 +611,32 @@ function selectRelationship(relationship) {
     selectedNode = null;
     selectedRelationship = relationship;
     selectionOutline.visible = false;
+    updateRelationshipSelection();
 }
 
 function clearSelection() {
     selectedNode = null;
     selectedRelationship = null;
     selectionOutline.visible = false;
+    updateRelationshipSelection();
     transformControls.detach();
+}
+
+function updateRelationshipSelection() {
+    relationshipObjects.forEach((relationship) => {
+        const selected = relationship.definition.id === selectedRelationship?.id;
+        relationship.line.material.color.setHex(
+            selected ? 0x62e1d5 : relationship.definition.color
+        );
+        relationship.line.material.opacity = selected ? 1 : 0.92;
+        relationship.line.renderOrder = selected ? 7 : 0;
+        if (relationship.marker) {
+            relationship.marker.material.color.setHex(
+                selected ? 0x8cfff5 : relationship.definition.color
+            );
+            relationship.marker.scale.setScalar(selected ? 1.35 : 1);
+        }
+    });
 }
 
 function hideCards(except) {
@@ -484,13 +660,109 @@ function openNodeEditor(definition, clientX, clientY) {
     const editor = $('#nodeEditor');
     hideCards(editor);
     $('#nodeEditorTitle').textContent = definition.title;
+    const stateContainer = $('#nodeEditorStates');
+    stateContainer.replaceChildren();
+    if (!definition.states.length) {
+        stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
+    } else {
+        definition.states.forEach((state) => {
+            const row = document.createElement('div');
+            row.className = 'stateRow';
+            row.innerHTML = `
+                <span><i class="stateIcon">${escapeHtml(state.symbol?.slice(0, 3) || 'x')}</i>${escapeHtml(state.label)}</span>
+                <b>${escapeHtml((state.initialValue ?? Number.parseFloat(state.value)) || 0)} <em>${escapeHtml(state.unit ?? '')}</em></b>
+            `;
+            stateContainer.appendChild(row);
+        });
+    }
+    const sourceTermContainer = $('#nodeEditorSourceTerms');
+    sourceTermContainer.replaceChildren();
+    if (!definition.sourceTerms.length) {
+        sourceTermContainer.innerHTML = '<p class="emptyEditorState">No source terms defined</p>';
+    } else {
+        definition.sourceTerms.forEach((term) => {
+            const state = definition.states.find((candidate) => candidate.symbol === term.state);
+            const item = document.createElement('div');
+            item.className = 'sourceTermItem';
+            item.innerHTML = `<strong>${escapeHtml(state?.label ?? term.state)}</strong><code>${escapeHtml(term.expression)}</code>`;
+            sourceTermContainer.appendChild(item);
+        });
+    }
+    $$('[data-node-tab]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.nodeTab === 'model');
+    });
+    $$('[data-node-panel]').forEach((panel) => {
+        panel.hidden = panel.dataset.nodePanel !== 'model';
+    });
+    $('#editNodeShape').value = definition.shape === 'imported' ? '' : definition.shape;
+    $('#editNodeGeometryFile').value = '';
+    $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file';
+    $('#editNodeGeometryFile').closest('.geometryImportField').classList.remove('loading', 'error');
     positionCard(editor, clientX, clientY);
 }
 
 function openRelationshipEditor(definition, clientX, clientY) {
     const editor = $('#edgeEditor');
+    selectRelationship(definition);
     hideCards(editor);
     $('.edgeEditor > header strong').textContent = definition.title;
+    const directionality = $('#editEdgeDirectionality');
+    directionality.value = definition.directionality;
+    directionality.onchange = () => {
+        const previous = definition.directionality;
+        const next = directionality.value;
+        setRelationshipDirectionality(definition, next);
+        recordHistory({
+            undo: () => setRelationshipDirectionality(definition, previous),
+            redo: () => setRelationshipDirectionality(definition, next)
+        });
+    };
+    const parameterContainer = $('#edgeEditorParameters');
+    parameterContainer.replaceChildren();
+    if (!definition.parameters.length) {
+        parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
+    } else {
+        definition.parameters.forEach((parameter) => {
+            const label = document.createElement('label');
+            label.className = 'editorField';
+            label.innerHTML = `
+                <span>${escapeHtml(parameter.name)} (${escapeHtml(parameter.symbol)})</span>
+                <span class="unitInput"><input type="number" value="${escapeHtml(parameter.value)}"><b>${escapeHtml(parameter.unit ?? '')}</b></span>
+            `;
+            const input = $('input', label);
+            input.addEventListener('change', () => {
+                const previous = parameter.value;
+                const next = Number(input.value) || 0;
+                const applyValue = (value) => {
+                    parameter.value = value;
+                    bundleSignature = '';
+                    syncContextualOverlays();
+                };
+                applyValue(next);
+                recordHistory({
+                    undo: () => applyValue(previous),
+                    redo: () => applyValue(next)
+                });
+            });
+            parameterContainer.appendChild(label);
+        });
+    }
+    const equation = $('#editEdgeEquation');
+    equation.value = definition.equation ?? '';
+    equation.onchange = () => {
+        const previous = definition.equation ?? '';
+        const next = equation.value.trim();
+        const applyEquation = (value) => {
+            definition.equation = value;
+            bundleSignature = '';
+            syncContextualOverlays();
+        };
+        applyEquation(next);
+        recordHistory({
+            undo: () => applyEquation(previous),
+            redo: () => applyEquation(next)
+        });
+    };
     positionCard(editor, clientX, clientY);
 }
 
@@ -517,6 +789,65 @@ function addStateVariableRow(values = {}) {
     });
     row.querySelectorAll('input').forEach((input) => input.addEventListener('input', refreshSourceStateOptions));
     refreshSourceStateOptions();
+}
+
+function normalizeImportedGeometry(geometry) {
+    if (!geometry.attributes.normal) geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    const size = geometry.boundingBox.getSize(new THREE.Vector3());
+    const largestDimension = Math.max(size.x, size.y, size.z);
+    if (!Number.isFinite(largestDimension) || largestDimension <= 0) {
+        throw new Error('The file contains no usable geometry.');
+    }
+    geometry.scale(2.8 / largestDimension, 2.8 / largestDimension, 2.8 / largestDimension);
+    geometry.computeBoundingBox();
+    const center = geometry.boundingBox.getCenter(new THREE.Vector3());
+    geometry.translate(-center.x, -center.y, -center.z);
+    geometry.computeBoundingSphere();
+    return geometry;
+}
+
+function geometryFromStepResult(result) {
+    if (!result.success || !result.meshes?.length) throw new Error('OpenCascade could not read this STEP file.');
+    const geometries = result.meshes.map((resultMesh) => {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute(
+            'position',
+            new THREE.Float32BufferAttribute(resultMesh.attributes.position.array, 3)
+        );
+        if (resultMesh.attributes.normal) {
+            geometry.setAttribute(
+                'normal',
+                new THREE.Float32BufferAttribute(resultMesh.attributes.normal.array, 3)
+            );
+        } else {
+            geometry.computeVertexNormals();
+        }
+        geometry.setIndex(resultMesh.index.array);
+        return geometry.toNonIndexed();
+    });
+    const merged = mergeGeometries(geometries, false);
+    geometries.forEach((geometry) => geometry.dispose());
+    if (!merged) throw new Error('The STEP meshes could not be combined.');
+    return merged;
+}
+
+async function importNodeGeometry(file) {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const buffer = await file.arrayBuffer();
+    if (extension === 'stl') return normalizeImportedGeometry(new STLLoader().parse(buffer));
+    if (extension === 'step' || extension === 'stp') {
+        if (!window.occtimportjs) throw new Error('The STEP importer is unavailable.');
+        const occt = await window.occtimportjs();
+        const result = occt.ReadStepFile(new Uint8Array(buffer), {
+            linearUnit: 'millimeter',
+            linearDeflectionType: 'bounding_box_ratio',
+            linearDeflection: 0.001,
+            angularDeflection: 0.5
+        });
+        return normalizeImportedGeometry(geometryFromStepResult(result));
+    }
+    throw new Error('Choose an STL, STEP, or STP file.');
 }
 
 function stateVariablesFromBuilder() {
@@ -631,8 +962,171 @@ function refreshStateReferences() {
 
 function updateModelStatus() {
     const status = $$('.modelStatus span');
-    status[0].textContent = `${model.nodes.length} nodes`;
-    status[1].textContent = `${model.relationships.length} relationships`;
+    const visibleNodes = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible !== false).length;
+    const visibleRelationships = model.relationships.filter(
+        (relationship) => relationshipObjects.get(relationship.id)?.line.visible !== false
+    ).length;
+    status[0].textContent = `${visibleNodes} nodes`;
+    status[1].textContent = `${visibleRelationships} relationships`;
+    status[2].textContent = `${model.metadata.units} units`;
+    syncContextualOverlays();
+}
+
+function syncContextualOverlays() {
+    const bundle = activeRelationshipBundle();
+    const bundledRelationships = bundle?.relationships ?? [];
+    bundleAnchor.visible = Boolean(bundle);
+    if (bundle) {
+        const source = model.nodes.find((node) => node.id === bundle.source);
+        const target = model.nodes.find((node) => node.id === bundle.target);
+        $('.bundleLabel header strong').textContent = `${source.title} ↔ ${target.title}`;
+    }
+    $('.bundleLabel header span').textContent = `${bundledRelationships.length} relationships`;
+    const nextBundleSignature = bundledRelationships.map((relationship) => relationship.id).join('|');
+    if (bundleSignature !== nextBundleSignature) {
+        bundleSignature = nextBundleSignature;
+        $$('.relationshipRow', bundleElement).forEach((row) => row.remove());
+        bundledRelationships.forEach((relationship) => {
+            const row = document.createElement('button');
+            const parameter = relationship.parameters?.[0];
+            const summary = parameter
+                ? `${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`
+                : relationship.equation ? 'Equation' : 'No equation';
+            row.className = 'relationshipRow';
+            row.dataset.relationship = relationship.id;
+            row.type = 'button';
+            row.innerHTML = `
+                <i class="relationColor" style="background:#${relationship.color.toString(16).padStart(6, '0')}"></i>
+                <span><b>${relationship.directionality === 'directed' ? '→' : '⇄'}</b> ${escapeHtml(relationship.title)}</span>
+                <em>${escapeHtml(summary)}</em>
+            `;
+            bundleElement.appendChild(row);
+        });
+    }
+
+}
+
+function activeRelationshipBundle() {
+    const groups = new Map();
+    model.relationships.forEach((relationship) => {
+        if (relationshipObjects.get(relationship.id)?.line.visible !== true) return;
+        if (nodeObjects.get(relationship.source)?.visible !== true) return;
+        if (nodeObjects.get(relationship.target)?.visible !== true) return;
+        const [source, target] = [relationship.source, relationship.target].sort();
+        const key = `${source}|${target}`;
+        if (!groups.has(key)) groups.set(key, { source, target, relationships: [] });
+        groups.get(key).relationships.push(relationship);
+    });
+    return [...groups.values()].find((group) => group.relationships.length > 1) ?? null;
+}
+
+function serializeGeometry(geometry) {
+    return {
+        position: Array.from(geometry.attributes.position.array),
+        normal: geometry.attributes.normal ? Array.from(geometry.attributes.normal.array) : [],
+        index: geometry.index ? Array.from(geometry.index.array) : []
+    };
+}
+
+function serializeProjectDocument() {
+    const visibleNodes = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
+    const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
+    return {
+        format: 'konjugate',
+        version: 1,
+        copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
+        metadata: { ...model.metadata },
+        nodes: visibleNodes.map((node) => {
+            const object = nodeObjects.get(node.id);
+            return {
+                id: node.id,
+                name: node.title,
+                type: node.type,
+                position: object.position.toArray(),
+                states: node.states.map((state) => ({
+                    id: state.id ?? crypto.randomUUID(),
+                    name: state.label,
+                    symbol: state.symbol,
+                    initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
+                    unit: state.unit ?? ''
+                })),
+                sourceTerms: node.sourceTerms ?? [],
+                appearance: node.importedGeometry
+                    ? {
+                        type: 'mesh',
+                        fileName: node.geometryFileName,
+                        color: `#${node.color.toString(16).padStart(6, '0')}`,
+                        mesh: serializeGeometry(node.importedGeometry)
+                    }
+                    : {
+                        type: 'primitive',
+                        shape: node.shape,
+                        color: `#${node.color.toString(16).padStart(6, '0')}`
+                    }
+            };
+        }),
+        edges: model.relationships
+            .filter((edge) => (
+                relationshipObjects.get(edge.id)?.line.visible === true &&
+                visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
+            ))
+            .map((edge) => ({
+                id: edge.id,
+                name: edge.title,
+                source: { nodeId: edge.source, stateId: edge.sourceStateId ?? null },
+                target: { nodeId: edge.target, stateId: edge.targetStateId ?? null },
+                directionality: edge.directionality,
+                equation: edge.equation ?? '',
+                parameters: edge.parameters ?? [],
+                appearance: {
+                    color: `#${edge.color.toString(16).padStart(6, '0')}`,
+                    offset: edge.offset
+                }
+            }))
+    };
+}
+
+function clearRenderedModel() {
+    clearSelection();
+    relationshipObjects.forEach((relationship) => {
+        scene.remove(relationship.line);
+        relationship.line.geometry.dispose();
+        relationship.line.material.dispose();
+        if (relationship.marker) {
+            scene.remove(relationship.marker);
+            relationship.marker.geometry.dispose();
+            relationship.marker.material.dispose();
+        }
+    });
+    nodeObjects.forEach((node) => {
+        scene.remove(node);
+        node.geometry.dispose();
+        node.material.dispose();
+        node.userData.definition.importedGeometry?.dispose();
+    });
+    relationshipObjects.clear();
+    nodeObjects.clear();
+    relationshipPickTargets.length = 0;
+    nodePickTargets.length = 0;
+}
+
+function loadProjectDocument(document, path = null) {
+    const nextModel = hydrateProjectDocument(document);
+    clearRenderedModel();
+    model.metadata = nextModel.metadata;
+    model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
+    model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
+    model.nodes.forEach(createNode);
+    model.relationships.forEach(createRelationship);
+    bundleSignature = '';
+    updateRelationships();
+    updateModelStatus();
+    undoStack.length = 0;
+    redoStack.length = 0;
+    updateHistoryControls();
+    currentProjectPath = path;
+    $('.documentTitle').textContent = model.metadata.name;
+    setCameraView('orbit');
 }
 
 function openNodeBuilder(clientX, clientY) {
@@ -640,10 +1134,16 @@ function openNodeBuilder(clientX, clientY) {
     hideCards(builder);
     $('#newNodeName').value = 'New node';
     $('#newNodeShape').value = 'box';
+    $('#nodeGeometryFile').value = '';
+    $('#geometryImportField').hidden = true;
+    $('#geometryImportField').classList.remove('loading', 'error');
+    $('#geometryImportStatus').textContent = 'No geometry selected';
+    pendingImportedGeometry?.dispose();
+    pendingImportedGeometry = null;
+    pendingGeometryFileName = '';
     $('#stateVariableRows').replaceChildren();
     $('#sourceTermRows').replaceChildren();
-    addStateVariableRow({ name: 'Temperature', symbol: 'T', value: '293.15', unit: 'K' });
-    addSourceTermRow();
+    addStateVariableRow();
     positionCard(builder, clientX, clientY);
     $('#newNodeName').select();
 }
@@ -719,10 +1219,88 @@ $$('[data-close-card]').forEach((button) => {
     });
 });
 
+$$('[data-node-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+        $$('[data-node-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+        $$('[data-node-panel]').forEach((panel) => {
+            panel.hidden = panel.dataset.nodePanel !== button.dataset.nodeTab;
+        });
+    });
+});
+
+$('#editNodeShape').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    changeNodeAppearance(selectedNode, {
+        shape: event.target.value,
+        importedGeometry: null,
+        geometryFileName: null
+    });
+    $('#editGeometryStatus').textContent = 'Choose a CAD or mesh file';
+});
+
+$('#editNodeGeometryFile').addEventListener('change', async (event) => {
+    const [file] = event.target.files;
+    if (!file || !selectedNode) return;
+    const node = selectedNode;
+    const field = event.target.closest('.geometryImportField');
+    const status = $('#editGeometryStatus');
+    field.classList.remove('error');
+    field.classList.add('loading');
+    status.textContent = `Loading ${file.name}…`;
+    try {
+        const geometry = await importNodeGeometry(file);
+        changeNodeAppearance(node, {
+            shape: 'imported',
+            importedGeometry: geometry,
+            geometryFileName: file.name
+        });
+        geometry.dispose();
+        $('#editNodeShape').value = '';
+        status.textContent = `${file.name} applied`;
+    } catch (error) {
+        field.classList.add('error');
+        status.textContent = error.message;
+        $('#editNodeShape').value = node.userData.definition.shape === 'imported'
+            ? ''
+            : node.userData.definition.shape;
+    } finally {
+        field.classList.remove('loading');
+        event.target.value = '';
+    }
+});
+
 $('#addButton').addEventListener('click', (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     openAddPalette(rect.left, rect.bottom + 3);
 });
+
+async function openProject() {
+    try {
+        const file = await window.projectFiles.open();
+        if (!file) return;
+        loadProjectDocument(JSON.parse(file.content), file.path);
+        $('#statusText').textContent = 'Project loaded';
+    } catch (error) {
+        console.error(error);
+        $('#statusText').textContent = `Load failed · ${error.message}`;
+    }
+}
+
+async function saveProject() {
+    try {
+        const content = `${JSON.stringify(serializeProjectDocument(), null, 4)}\n`;
+        const result = await window.projectFiles.save(currentProjectPath, content);
+        if (!result) return;
+        currentProjectPath = result.path;
+        $('#statusText').textContent = 'Project saved';
+    } catch (error) {
+        console.error(error);
+        $('#statusText').textContent = `Save failed · ${error.message}`;
+    }
+}
+
+$('#loadButton').addEventListener('click', openProject);
+$('#saveButton').addEventListener('click', saveProject);
 
 $$('[data-add-kind]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -735,14 +1313,39 @@ $$('[data-add-kind]').forEach((button) => {
 $('#addStateVariable').addEventListener('click', () => addStateVariableRow());
 $('#addSourceTerm').addEventListener('click', addSourceTermRow);
 $('#addEdgeParameter').addEventListener('click', () => addEdgeParameterRow());
-$$('[data-state-suggestion]').forEach((button) => {
-    button.addEventListener('click', () => {
-        const [name, symbol, value, unit] = button.dataset.stateSuggestion.split('|');
-        addStateVariableRow({ name, symbol, value, unit });
-    });
-});
 $('#edgeSource').addEventListener('change', refreshStateReferences);
 $('#edgeTarget').addEventListener('change', refreshStateReferences);
+$('#newNodeShape').addEventListener('change', (event) => {
+    $('#geometryImportField').hidden = event.target.value !== 'imported';
+});
+$('#nodeGeometryFile').addEventListener('change', async (event) => {
+    const [file] = event.target.files;
+    if (!file) return;
+    const field = $('#geometryImportField');
+    const status = $('#geometryImportStatus');
+    field.classList.remove('error');
+    field.classList.add('loading');
+    status.textContent = `Loading ${file.name}…`;
+    $('#createNode').disabled = true;
+    try {
+        const geometry = await importNodeGeometry(file);
+        pendingImportedGeometry?.dispose();
+        pendingImportedGeometry = geometry;
+        pendingGeometryFileName = file.name;
+        $('#newNodeShape').value = 'imported';
+        field.hidden = false;
+        status.textContent = `${file.name} ready`;
+    } catch (error) {
+        pendingImportedGeometry?.dispose();
+        pendingImportedGeometry = null;
+        pendingGeometryFileName = '';
+        field.classList.add('error');
+        status.textContent = error.message;
+    } finally {
+        field.classList.remove('loading');
+        $('#createNode').disabled = false;
+    }
+});
 $$('[data-pick-endpoint]').forEach((button) => {
     button.addEventListener('click', () => startEndpointPick(button.dataset.pickEndpoint));
 });
@@ -762,16 +1365,23 @@ $('#createNode').addEventListener('click', () => {
         $('#stateVariableRows input').focus();
         return;
     }
+    if ($('#newNodeShape').value === 'imported' && !pendingImportedGeometry) {
+        $('#nodeGeometryFile').click();
+        return;
+    }
 
-    const id = `node-${Date.now()}`;
+    const id = crypto.randomUUID();
     const definition = {
         id,
         title: $('#newNodeName').value.trim() || 'Untitled node',
         type: 'Custom node',
         shape: $('#newNodeShape').value,
+        importedGeometry: pendingImportedGeometry?.clone() ?? null,
+        geometryFileName: pendingGeometryFileName || null,
         position: [0, -0.7, 0],
         color: 0x34727a,
         states: states.map((state) => ({
+            id: crypto.randomUUID(),
             label: state.name,
             symbol: state.symbol,
             initialValue: Number(state.value) || 0,
@@ -779,6 +1389,7 @@ $('#createNode').addEventListener('click', () => {
             value: `${Number(state.value) || 0}${state.unit ? ` ${state.unit}` : ''}`
         })),
         sourceTerms: $$('.sourceTermRow').map((row) => ({
+            id: crypto.randomUUID(),
             state: $('.sourceState', row).value,
             expression: $('.sourceExpression', row).value.trim()
         })).filter((term) => term.state && term.expression)
@@ -787,9 +1398,16 @@ $('#createNode').addEventListener('click', () => {
     hideCards();
     model.nodes.push(definition);
     createNode(definition);
+    pendingImportedGeometry?.dispose();
+    pendingImportedGeometry = null;
+    pendingGeometryFileName = '';
     updateModelStatus();
     selectNode(nodeObjects.get(id));
     if (currentTool === 'move') transformControls.attach(nodeObjects.get(id));
+    recordHistory({
+        undo: () => setNodeVisibility(id, false),
+        redo: () => setNodeVisibility(id, true)
+    });
 });
 
 $('#createEdge').addEventListener('click', () => {
@@ -801,6 +1419,7 @@ $('#createEdge').addEventListener('click', () => {
     }
 
     const parameters = $$('.parameterRow').map((row) => ({
+        id: crypto.randomUUID(),
         name: $('[data-field="name"]', row).value.trim(),
         symbol: $('[data-field="symbol"]', row).value.trim(),
         value: Number($('[data-field="value"]', row).value) || 0,
@@ -808,7 +1427,7 @@ $('#createEdge').addEventListener('click', () => {
         mode: $('[data-field="mode"]', row).value
     })).filter((parameter) => parameter.name && parameter.symbol);
     const definition = {
-        id: `relationship-${Date.now()}`,
+        id: crypto.randomUUID(),
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
         source,
         target,
@@ -826,28 +1445,34 @@ $('#createEdge').addEventListener('click', () => {
     updateModelStatus();
     $('#edgeBuilder').classList.add('hidden');
     selectRelationship(definition);
+    recordHistory({
+        undo: () => setRelationshipVisibility(definition.id, false),
+        redo: () => setRelationshipVisibility(definition.id, true)
+    });
 });
 
 bundleElement.addEventListener('pointerdown', (event) => event.stopPropagation());
+bundleElement.addEventListener('click', (event) => {
+    const row = event.target.closest('.relationshipRow');
+    if (!row) return;
+    const definition = model.relationships.find(
+        (relationship) => relationship.id === row.dataset.relationship
+    );
+    if (definition) selectRelationship(definition);
+});
 bundleElement.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    const row = event.target.closest('.relationshipRow');
+    const definition = row
+        ? model.relationships.find((relationship) => relationship.id === row.dataset.relationship)
+        : model.relationships.find((relationship) => relationshipObjects.get(relationship.id)?.line.visible);
+    if (!definition) return;
     openRelationshipEditor(
-        model.relationships[0],
+        definition,
         event.clientX,
         event.clientY
     );
-});
-
-$$('.relationshipRow').forEach((row) => {
-    row.addEventListener('contextmenu', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const definition = model.relationships.find(
-            (relationship) => relationship.id === row.dataset.relationship
-        );
-        openRelationshipEditor(definition, event.clientX, event.clientY);
-    });
 });
 
 $('.collapseBundle').addEventListener('click', (event) => {
@@ -1004,112 +1629,87 @@ function updateViewCube() {
     });
 }
 
-function openWorkbench() {
-    hideCards();
-    $('#equationWorkbench').showModal();
-}
-
-$('#equationsButton').addEventListener('click', openWorkbench);
-$$('.openEquation, .equationItem').forEach((button) => {
-    button.addEventListener('dblclick', openWorkbench);
-});
-$('#closeWorkbench').addEventListener('click', () => $('#equationWorkbench').close());
-$('#cancelWorkbench').addEventListener('click', () => $('#equationWorkbench').close());
-$('#saveEquation').addEventListener('click', () => $('#equationWorkbench').close());
-
-const heatSlider = $('#heatSlider');
-const heatNumber = $('#heatNumber');
-const heaterEnabled = $('#heaterEnabled');
-let configuredHeatValue = 420;
-
-function applyHeat(value, remember = true) {
-    const bounded = Math.min(1000, Math.max(0, Number(value) || 0));
-    if (remember) configuredHeatValue = bounded;
-    heatSlider.value = bounded;
-    heatNumber.value = bounded;
-    $$('.heatValue').forEach((element) => {
-        element.textContent = `${bounded} W`;
-    });
-    heatSlider.style.setProperty('--range-progress', `${bounded / 10}%`);
-
-    const heater = nodeObjects.get('heater');
-    heater.material.emissiveIntensity = 0.2 + (bounded / 1000) * 1.15;
-}
-
-heatSlider.addEventListener('input', (event) => {
-    if (!heaterEnabled.checked) heaterEnabled.checked = true;
-    applyHeat(event.target.value);
-});
-heatNumber.addEventListener('input', (event) => {
-    if (!heaterEnabled.checked) heaterEnabled.checked = true;
-    applyHeat(event.target.value);
-});
-heaterEnabled.addEventListener('change', (event) => {
-    applyHeat(event.target.checked ? configuredHeatValue : 0, false);
-});
-$('#closeControl').addEventListener('click', () => {
-    $('#controlCard').classList.add('hiddenControl');
-});
-
-$('#runButton').addEventListener('click', () => {
-    running = !running;
-    const button = $('#runButton');
-    button.classList.toggle('running', running);
-    button.innerHTML = running ? '<span>■</span> Stop' : '<span>▶</span> Run';
-    $('#statusText').textContent = running ? 'Simulating · 1.0×' : 'Model ready';
-    $('.simulationReadout').classList.toggle('running', running);
-
-    clearInterval(simulationTimer);
-    if (running) {
-        simulationTimer = setInterval(() => {
-            const power = Number(heatNumber.value);
-            const temperatureElement = $('.temperatureValue');
-            const coolantElement = $('.coolantTemperature');
-            const hot = Math.max(
-                293.2,
-                Number.parseFloat(temperatureElement.textContent) -
-                    (2.6 - power / 500) * 0.08
-            );
-            const cool = Math.min(
-                hot,
-                Number.parseFloat(coolantElement.textContent) + 0.035
-            );
-            temperatureElement.textContent = `${hot.toFixed(1)} K`;
-            coolantElement.textContent = `${cool.toFixed(1)} K`;
-        }, 250);
-    }
-});
-
 function deleteSelected() {
     if (selectedNode) {
-        selectedNode.visible = false;
+        const node = selectedNode;
+        const affectedRelationships = [];
         relationshipObjects.forEach((relationship) => {
             const definition = relationship.definition;
             if (
-                definition.source === selectedNode.userData.id ||
-                definition.target === selectedNode.userData.id
+                definition.source === node.userData.id ||
+                definition.target === node.userData.id
             ) {
-                relationship.line.visible = false;
-                if (relationship.marker) relationship.marker.visible = false;
+                affectedRelationships.push({
+                    id: definition.id,
+                    visible: relationship.line.visible
+                });
             }
         });
+        const applyDeleted = (deleted) => {
+            setNodeVisibility(node.userData.id, !deleted);
+            affectedRelationships.forEach((relationship) => {
+                setRelationshipVisibility(
+                    relationship.id,
+                    deleted ? false : relationship.visible
+                );
+            });
+        };
+        applyDeleted(true);
+        recordHistory({ undo: () => applyDeleted(false), redo: () => applyDeleted(true) });
         clearSelection();
     } else if (selectedRelationship) {
-        const relationship = relationshipObjects.get(selectedRelationship.id);
-        relationship.line.visible = false;
-        if (relationship.marker) relationship.marker.visible = false;
+        const id = selectedRelationship.id;
+        setRelationshipVisibility(id, false);
+        recordHistory({
+            undo: () => setRelationshipVisibility(id, true),
+            redo: () => setRelationshipVisibility(id, false)
+        });
         selectedRelationship = null;
     }
 }
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+$('#undoButton').title = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
+$('#redoButton').title = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
+$('#undoButton').addEventListener('click', undo);
+$('#redoButton').addEventListener('click', redo);
+updateHistoryControls();
 
 $('[data-action="delete"]').addEventListener('click', deleteSelected);
 $('[data-delete-node]').addEventListener('click', () => {
     deleteSelected();
     $('#nodeEditor').classList.add('hidden');
 });
+$('[data-delete-edge]').addEventListener('click', () => {
+    deleteSelected();
+    $('#edgeEditor').classList.add('hidden');
+});
 window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && activeEndpointPick) {
         finishEndpointPick();
+        return;
+    }
+    const isEditing = event.target.matches('input, textarea, select') || event.target.isContentEditable;
+    const commandKey = isMac ? event.metaKey : event.ctrlKey;
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        openProject();
+        return;
+    }
+    if (!isEditing && commandKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveProject();
+        return;
+    }
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+        return;
+    }
+    if (!isEditing && !isMac && event.ctrlKey && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redo();
         return;
     }
     if (
@@ -1133,23 +1733,17 @@ new ResizeObserver(resizeRenderer).observe(webglContainer);
 resizeRenderer();
 setTool('select');
 setCameraView('orbit', false);
-applyHeat(420);
 
 function render(time) {
     requestAnimationFrame(render);
     if (!updateCameraAnimation(time)) orbitControls.update();
     updateViewCube();
 
-    if (running) {
-        const pulse = 0.78 + Math.sin(time * 0.008) * 0.2;
-        relationshipObjects.forEach((relationship) => {
-            relationship.line.material.opacity = pulse;
-        });
-    } else {
-        relationshipObjects.forEach((relationship) => {
-            relationship.line.material.opacity = 0.92;
-        });
-    }
+    relationshipObjects.forEach((relationship) => {
+        relationship.line.material.opacity = relationship.definition.id === selectedRelationship?.id
+            ? 1
+            : 0.92;
+    });
 
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);

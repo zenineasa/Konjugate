@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
 """Create a shareable ZIP archive from a packaged application directory."""
 
 from __future__ import annotations

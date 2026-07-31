@@ -1,3 +1,5 @@
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+
 # Konjugate
 
 This is an attempt to create an open-source graph-native simulation engine for building composable engineering simulations and digital twins.

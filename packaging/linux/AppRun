@@ -1,4 +1,5 @@
 #!/bin/sh
+# Copyright © 2026 Zenin Easa Panthakkalakath
 
 appDir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 exec "$appDir/usr/lib/konjugate/Konjugate" "$@"

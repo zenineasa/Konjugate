@@ -1,3 +1,5 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
 svgIcon := assets/icon.svg
 iconDir := assets/icons
 pngDir := $(iconDir)/png

@@ -12,3 +12,9 @@ contextBridge.exposeInMainWorld('windowControls', {
         });
     }
 });
+
+contextBridge.exposeInMainWorld('projectFiles', {
+    loadDefault: () => ipcRenderer.invoke('projectLoadDefault'),
+    open: () => ipcRenderer.invoke('projectOpen'),
+    save: (path, content) => ipcRenderer.invoke('projectSave', { path, content })
+});

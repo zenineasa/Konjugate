@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,6 +63,39 @@ ipcMain.on('windowMinimize', (event) => {
 
 ipcMain.on('windowClose', (event) => {
     getWindowFromEvent(event)?.close();
+});
+
+ipcMain.handle('projectLoadDefault', async () => {
+    const path = join(currentDir, '..', 'examples', 'thermal-management.konjugate.json');
+    return { path, content: await readFile(path, 'utf8') };
+});
+
+ipcMain.handle('projectOpen', async (event) => {
+    const targetWindow = getWindowFromEvent(event);
+    const result = await dialog.showOpenDialog(targetWindow, {
+        title: 'Open Konjugate project',
+        properties: ['openFile'],
+        filters: [{ name: 'Konjugate project', extensions: ['json', 'konjugate'] }]
+    });
+    if (result.canceled) return null;
+    const [path] = result.filePaths;
+    return { path, content: await readFile(path, 'utf8') };
+});
+
+ipcMain.handle('projectSave', async (event, { path: existingPath, content }) => {
+    const targetWindow = getWindowFromEvent(event);
+    let path = existingPath;
+    if (!path) {
+        const result = await dialog.showSaveDialog(targetWindow, {
+            title: 'Save Konjugate project',
+            defaultPath: 'model.konjugate.json',
+            filters: [{ name: 'Konjugate project', extensions: ['konjugate.json', 'json'] }]
+        });
+        if (result.canceled) return null;
+        path = result.filePath;
+    }
+    await writeFile(path, content, 'utf8');
+    return { path };
 });
 
 app.whenReady().then(() => {

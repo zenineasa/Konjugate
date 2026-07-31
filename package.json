@@ -6,6 +6,7 @@
     "type": "module",
     "main": "src/main.mjs",
     "license": "MPL-2.0",
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
     "author": {
         "name": "Zenin Easa Panthakkalakath",
         "url": "https://github.com/zenineasa"
@@ -42,6 +43,7 @@
         "node": ">=22.12.0"
     },
     "dependencies": {
+        "occt-import-js": "^0.0.23",
         "three": "^0.185.1"
     }
 }

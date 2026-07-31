@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -14,6 +15,7 @@
             }
         }
     </script>
+    <script src="../../node_modules/occt-import-js/dist/occt-import-js.js"></script>
     <script type="module" src="renderer.mjs"></script>
 </head>
 <body>
@@ -21,7 +23,7 @@
         <div class="windowTitle">
             <img src="../../assets/icon.svg" alt="">
             <strong>Konjugate</strong>
-            <span class="documentTitle">Thermal management study</span>
+            <span class="documentTitle">Konjugate project</span>
             <i title="Unsaved changes"></i>
         </div>
         <div class="windowControls">
@@ -34,12 +36,15 @@
     <nav class="toolstrip" aria-label="Model tools">
         <div class="brandMark">K</div>
         <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
+        <button id="loadButton" class="toolButton" type="button">Open</button>
+        <button id="saveButton" class="toolButton" type="button">Save</button>
+        <span class="divider"></span>
+        <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" disabled>↶</button>
+        <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" disabled>↷</button>
         <span class="divider"></span>
         <button class="squareTool active" data-tool="select" type="button" title="Select (Free Drag)">↖</button>
         <button class="squareTool" data-tool="move" type="button" title="Move (Precise Axis)">☩</button>
-        <button class="squareTool" data-tool="connect" type="button" title="Connect">⌁</button>
         <button class="squareTool" data-action="delete" type="button" title="Delete selected">⌫</button>
-        <button id="equationsButton" class="toolButton" type="button"><span>ƒx</span> Equations</button>
         <div class="toolSpacer"></div>
         <div class="simulationReadout"><i></i><span id="statusText">Model ready</span></div>
         <div class="labelControls" aria-label="Label detail">
@@ -48,7 +53,7 @@
             <button data-detail="edges" type="button" title="Expand all relationship labels">Edges</button>
         </div>
         <button id="fitButton" class="squareTool" type="button" title="Frame model">⌗</button>
-        <button id="runButton" class="runButton" type="button"><span>▶</span> Run</button>
+        <button id="runButton" class="runButton" type="button" title="A simulation engine is not configured" disabled><span>▶</span> Run</button>
     </nav>
 
     <main id="canvas" class="canvas" data-tool="select">
@@ -57,53 +62,47 @@
 
         <div id="bundleLabel" class="bundleLabel" tabindex="0">
             <header>
-                <div><strong>Battery ↔ Cooling</strong><span>2 relationships</span></div>
+                <div><strong>Relationships</strong><span>0 relationships</span></div>
                 <button class="collapseBundle" type="button" title="Keep expanded">＋</button>
             </header>
-            <button class="relationshipRow" data-relationship="conduction" type="button">
-                <i class="relationColor thermal"></i><span><b>⇄</b> Thermal conduction</span><em>12 W/K</em>
-            </button>
-            <button class="relationshipRow" data-relationship="signal" type="button">
-                <i class="relationColor signal"></i><span><b>→</b> Temperature signal</span><em>353.2 K</em>
-            </button>
-        </div>
-
-        <div id="controlCard" class="controlCard">
-            <header><span><i></i> Live control</span><button id="closeControl" type="button">×</button></header>
-            <div class="controlTitle"><strong>Electrical losses</strong><span>Heater power</span></div>
-            <label class="toggleRow"><span>Enabled</span><input id="heaterEnabled" type="checkbox" checked><i></i></label>
-            <div class="sliderHeader"><span>Heat flow</span><label><input id="heatNumber" type="number" min="0" max="1000" step="10" value="420"><b>W</b></label></div>
-            <input id="heatSlider" class="rangeInput" type="range" min="0" max="1000" step="10" value="420">
-            <div class="rangeLabels"><span>0</span><span>1000 W</span></div>
         </div>
 
         <div id="nodeEditor" class="contextCard editorCard hidden">
-            <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Battery module</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" type="button">Model</button><button type="button">Appearance</button></nav>
+            <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
+            <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
+            <div data-node-panel="model">
             <section>
-                <h3>States <button type="button">＋</button></h3>
-                <div class="stateRow"><span><i class="stateIcon thermal">T</i>Temperature</span><b>353.2 <em>K</em></b></div>
-                <div class="stateRow"><span><i class="stateIcon charge">%</i>State of charge</span><b>84.6 <em>%</em></b></div>
+                <h3>States</h3>
+                <div id="nodeEditorStates"></div>
             </section>
             <section>
-                <h3>Node equations <button id="addNodeEquation" type="button">＋</button></h3>
-                <button class="equationItem" type="button"><span>ƒ</span><div><strong>Thermal storage</strong><small>m cₚ · dT/dt = Σ Q̇</small></div><b>›</b></button>
-                <button class="equationItem" type="button"><span>ƒ</span><div><strong>Electrical heating</strong><small>Q̇ = I²R</small></div><b>›</b></button>
+                <h3>Source terms</h3>
+                <div id="nodeEditorSourceTerms"></div>
             </section>
+            </div>
+            <div data-node-panel="appearance" hidden>
+                <section>
+                    <label class="editorField"><span>Primitive shape</span><select id="editNodeShape"><option value="" disabled>Select a primitive…</option><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option></select></label>
+                    <label class="geometryImportField">
+                        <input id="editNodeGeometryFile" type="file" accept=".stl,.step,.stp">
+                        <span><b>↥ Import STL or STEP</b><small id="editGeometryStatus">Replace the current geometry from a file</small></span>
+                    </label>
+                </section>
+            </div>
             <footer><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button><button class="doneButton" data-close-card type="button">Done</button></footer>
         </div>
 
         <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
-            <header><div><span class="contextKicker">Relationship equation</span><strong>Thermal conduction</strong></div><button data-close-card type="button">×</button></header>
+            <header><div><span class="contextKicker">Edge</span><strong>Relationship</strong></div><button data-close-card type="button">×</button></header>
             <section>
-                <label class="editorField"><span>Directionality</span><select><option>Bidirectional</option><option>Directed A → B</option><option>Directed B → A</option></select></label>
-                <label class="editorField"><span>Conductance</span><span class="unitInput"><input type="number" value="12"><b>W/K</b></span></label>
+                <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
+                <div id="edgeEditorParameters"></div>
             </section>
             <section>
                 <h3>Equation</h3>
-                <button class="equationItem openEquation" type="button"><span>ƒ</span><div><strong>Heat transfer</strong><small>Q̇ = G (Tₐ − Tᵦ)</small></div><b>›</b></button>
+                <textarea id="editEdgeEquation" rows="3" placeholder="No equation defined"></textarea>
             </section>
-            <footer><button type="button">Delete relationship</button><button class="doneButton" data-close-card type="button">Done</button></footer>
+            <footer><button data-delete-edge type="button">Delete edge</button><button class="doneButton" data-close-card type="button">Done</button></footer>
         </div>
 
         <div id="addPalette" class="contextCard addPalette hidden">
@@ -116,11 +115,14 @@
             <header><div><span class="contextKicker">Add node</span><strong>Define its state</strong></div><button data-close-card type="button">×</button></header>
             <section>
                 <label class="editorField"><span>Name</span><input id="newNodeName" value="New node" autocomplete="off"></label>
-                <label class="editorField"><span>Appearance</span><select id="newNodeShape"><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option></select></label>
+                <label class="editorField"><span>Appearance</span><select id="newNodeShape"><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option><option value="imported">Imported geometry</option></select></label>
+                <label id="geometryImportField" class="geometryImportField" hidden>
+                    <input id="nodeGeometryFile" type="file" accept=".stl,.step,.stp">
+                    <span><b>↥ Choose STL or STEP</b><small id="geometryImportStatus">No geometry selected</small></span>
+                </label>
             </section>
             <section>
                 <h3>State variables <button id="addStateVariable" type="button">＋</button></h3>
-                <div class="suggestionChips"><span>Suggestions</span><button data-state-suggestion="Temperature|T|293.15|K" type="button">Temperature</button><button data-state-suggestion="Pressure|p|101.3|kPa" type="button">Pressure</button><button data-state-suggestion="State of charge|SOC|100|%" type="button">Charge</button></div>
                 <div id="stateVariableRows" class="builderRows"></div>
             </section>
             <section>
@@ -139,12 +141,12 @@
             </section>
             <section>
                 <label class="editorField"><span>Edge name</span><input id="newEdgeName" value="New relationship" autocomplete="off"></label>
-                <label class="editorField"><span>Equation</span><textarea id="edgeEquation" rows="3" placeholder="e.g. Q_dot = G * (source.T - target.T)"></textarea></label>
+                <label class="editorField"><span>Equation</span><textarea id="edgeEquation" rows="3" placeholder="e.g. output = k * (source.x - target.x)"></textarea></label>
                 <div class="referencePicker"><span>Available state references</span><div id="stateReferenceChips"></div></div>
             </section>
             <section>
                 <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>
-                <p class="builderHint">Parameters include units; live values become controls that can change while the simulation runs.</p>
+                <p class="builderHint">Parameters include units and can be marked for future runtime control.</p>
                 <div id="edgeParameterRows" class="builderRows"></div>
             </section>
             <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
@@ -174,38 +176,7 @@
             </div>
             <button class="cubeFit" data-nav-action="fit" type="button" title="Fit model">⌗ Fit</button>
         </div>
-        <div class="modelStatus"><i></i><span>3 nodes</span><span>3 relationships</span><span>SI units</span></div>
+        <div class="modelStatus"><i></i><span>0 nodes</span><span>0 relationships</span><span>SI units</span></div>
     </main>
-
-    <dialog id="equationWorkbench" class="equationWorkbench">
-        <header>
-            <div class="workbenchIcon">ƒx</div>
-            <div><span class="contextKicker">Equation workbench</span><h2>Thermal conduction</h2></div>
-            <span class="equationKind">Relationship equation</span>
-            <button id="closeWorkbench" type="button">×</button>
-        </header>
-        <div class="workbenchBody">
-            <aside>
-                <span class="contextKicker">Equation library</span>
-                <button class="active" type="button"><i>⇄</i><span>Thermal conduction<small>Relationship</small></span></button>
-                <button type="button"><i>↯</i><span>Electrical heating<small>Node source</small></span></button>
-                <button type="button"><i>▰</i><span>Thermal storage<small>Node state</small></span></button>
-                <button class="newEquation" type="button">＋ New equation</button>
-            </aside>
-            <main>
-                <div class="equationCanvas">
-                    <span class="equationName">Heat transfer</span>
-                    <div class="prettyEquation"><i>Q̇</i> = <i>G</i> · (<i>T<sub>A</sub></i> − <i>T<sub>B</sub></i>)</div>
-                    <div class="unitValidation"><span>✓</span> Units consistent · Result is W</div>
-                </div>
-                <div class="equationDefinition">
-                    <section><h3>Inputs</h3><div class="definitionRow"><i>T<sub>A</sub></i><span>Temperature A</span><b>K</b></div><div class="definitionRow"><i>T<sub>B</sub></i><span>Temperature B</span><b>K</b></div></section>
-                    <section><h3>Parameters</h3><div class="definitionRow"><i>G</i><span>Conductance</span><b>W/K</b><em>default 1</em></div></section>
-                    <section><h3>Output</h3><div class="definitionRow"><i>Q̇</i><span>Heat flow</span><b>W</b></div></section>
-                </div>
-            </main>
-        </div>
-        <footer><span>Used by 1 relationship in this model</span><button id="cancelWorkbench" type="button">Cancel</button><button id="saveEquation" class="doneButton" type="button">Save equation</button></footer>
-    </dialog>
 </body>
 </html>

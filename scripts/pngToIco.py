@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
 """Combine square PNG images into a multi-resolution Windows ICO file."""
 
 from __future__ import annotations

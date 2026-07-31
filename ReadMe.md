@@ -8,6 +8,8 @@ The objective is to simplify the process of modelling complex physical systems b
 
 Rather than requiring users to manually assemble large system-level formulations, this project explores an approach where systems are represented as graphs of interconnected components. Components define their states and properties, while relationships define the equations governing how quantities are transported and transformed.
 
+![Konjugate Application Screenshot](assets/konjugateAppScreenshot.png)
+
 ---
 
 ## Why build another simulation software?
@@ -30,36 +32,33 @@ Engineers often describe dynamic systems using states and their evolution over t
 
 A general dynamic system can be represented as:
 
-\[
+$$
 \dot{x}=f(x,u)
-\]
+$$
 
-where \(x\) represents the state vector of the system, \(u\) represents external inputs and \(f\) describes the mathematical relationships governing the evolution of those states.
+where $x$ represents the state vector of the system, $u$ represents external inputs and $f$ describes the mathematical relationships governing the evolution of those states.
 
-However, as systems become larger and more interconnected, the function \(f\) often becomes a complex collection of coupled relationships between individual components. Understanding, modifying and extending such models can become increasingly difficult.
+However, as systems become larger and more interconnected, the function $f$ often becomes a complex collection of coupled relationships between individual components. Understanding, modifying and extending such models can become increasingly difficult.
 
 This project explores a representation where a system is viewed as a network of states and relationships. Nodes represent stateful components, while relationships represent the interactions that govern how quantities are transferred, transformed, or constrained between them.
 
 Instead of defining one large function:
 
-\[
+$$
 \dot{x}=f(x,u)
-\]
+$$
 
 the system dynamics can be composed from smaller interaction models:
 
-\[
-\dot{x_i} =
-\sum_j f_{ij}(x_i,x_j)
-+
-s_i(x_i,u)
-\]
+$$
+\dot{x_i} = \sum_j f_{ij}(x_i,x_j) + s_i(x_i,u)
+$$
 
 where:
 
-- \(x_i\) represents the states contained within a component.
-- \(f_{ij}\) represents the interaction model between components.
-- \(s_i\) represents sources, sinks, or internal processes affecting the component.
+- $x_i$ represents the states contained within a component.
+- $f_{ij}$ represents the interaction model between components.
+- $s_i$ represents sources, sinks, or internal processes affecting the component.
 
 For example, in a thermal system:
 

@@ -6,42 +6,206 @@
     <meta name="color-scheme" content="dark">
     <title>Konjugate</title>
     <link rel="stylesheet" href="styles.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../node_modules/three/build/three.module.js",
+                "three/addons/": "../../node_modules/three/examples/jsm/"
+            }
+        }
+    </script>
     <script type="module" src="renderer.mjs"></script>
 </head>
 <body>
     <header id="titleBar">
         <div class="windowTitle">
             <img src="../../assets/icon.svg" alt="">
-            <span>Konjugate</span>
+            <strong>Konjugate</strong>
+            <span class="documentTitle">Thermal management study</span>
+            <i title="Unsaved changes"></i>
         </div>
-
         <div class="windowControls">
-            <button id="minimizeButton" type="button" aria-label="Minimize window" title="Minimize">
-                <span aria-hidden="true">−</span>
-            </button>
-            <button id="maximizeButton" type="button" aria-label="Maximize window" title="Maximize">
-                <span id="maximizeIcon" aria-hidden="true">□</span>
-            </button>
-            <button id="closeButton" class="closeButton" type="button" aria-label="Close window" title="Close">
-                <span aria-hidden="true">×</span>
-            </button>
+            <button id="minimizeButton" type="button" aria-label="Minimize">−</button>
+            <button id="maximizeButton" type="button" aria-label="Maximize"><span id="maximizeIcon">□</span></button>
+            <button id="closeButton" class="closeButton" type="button" aria-label="Close">×</button>
         </div>
     </header>
 
-    <main id="content">
-        <section class="welcomeCard">
-            <img class="welcomeIcon" src="../../assets/icon.svg" alt="Konjugate">
-            <p class="eyebrow">Graph-native simulation</p>
-            <h1>Welcome to Konjugate</h1>
-            <p class="intro">
-                Your workspace for composing engineering simulations and digital twins
-                from interconnected components.
-            </p>
-            <div class="placeholder">
-                <span>Content area</span>
-                <small>The simulation workspace will live here.</small>
+    <nav class="toolstrip" aria-label="Model tools">
+        <div class="brandMark">K</div>
+        <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
+        <span class="divider"></span>
+        <button class="squareTool active" data-tool="select" type="button" title="Select (Free Drag)">↖</button>
+        <button class="squareTool" data-tool="move" type="button" title="Move (Precise Axis)">☩</button>
+        <button class="squareTool" data-tool="connect" type="button" title="Connect">⌁</button>
+        <button class="squareTool" data-action="delete" type="button" title="Delete selected">⌫</button>
+        <button id="equationsButton" class="toolButton" type="button"><span>ƒx</span> Equations</button>
+        <div class="toolSpacer"></div>
+        <div class="simulationReadout"><i></i><span id="statusText">Model ready</span></div>
+        <div class="labelControls" aria-label="Label detail">
+            <span>Details</span>
+            <button data-detail="nodes" type="button" title="Expand all node labels">Nodes</button>
+            <button data-detail="edges" type="button" title="Expand all relationship labels">Edges</button>
+        </div>
+        <button id="fitButton" class="squareTool" type="button" title="Frame model">⌗</button>
+        <button id="runButton" class="runButton" type="button"><span>▶</span> Run</button>
+    </nav>
+
+    <main id="canvas" class="canvas" data-tool="select">
+        <div id="webglContainer" class="webglContainer"></div>
+        <div id="css2dContainer" class="css2dContainer"></div>
+
+        <div id="bundleLabel" class="bundleLabel" tabindex="0">
+            <header>
+                <div><strong>Battery ↔ Cooling</strong><span>2 relationships</span></div>
+                <button class="collapseBundle" type="button" title="Keep expanded">＋</button>
+            </header>
+            <button class="relationshipRow" data-relationship="conduction" type="button">
+                <i class="relationColor thermal"></i><span><b>⇄</b> Thermal conduction</span><em>12 W/K</em>
+            </button>
+            <button class="relationshipRow" data-relationship="signal" type="button">
+                <i class="relationColor signal"></i><span><b>→</b> Temperature signal</span><em>353.2 K</em>
+            </button>
+        </div>
+
+        <div id="controlCard" class="controlCard">
+            <header><span><i></i> Live control</span><button id="closeControl" type="button">×</button></header>
+            <div class="controlTitle"><strong>Electrical losses</strong><span>Heater power</span></div>
+            <label class="toggleRow"><span>Enabled</span><input id="heaterEnabled" type="checkbox" checked><i></i></label>
+            <div class="sliderHeader"><span>Heat flow</span><label><input id="heatNumber" type="number" min="0" max="1000" step="10" value="420"><b>W</b></label></div>
+            <input id="heatSlider" class="rangeInput" type="range" min="0" max="1000" step="10" value="420">
+            <div class="rangeLabels"><span>0</span><span>1000 W</span></div>
+        </div>
+
+        <div id="nodeEditor" class="contextCard editorCard hidden">
+            <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Battery module</strong></div><button data-close-card type="button">×</button></header>
+            <nav class="cardTabs"><button class="active" type="button">Model</button><button type="button">Appearance</button></nav>
+            <section>
+                <h3>States <button type="button">＋</button></h3>
+                <div class="stateRow"><span><i class="stateIcon thermal">T</i>Temperature</span><b>353.2 <em>K</em></b></div>
+                <div class="stateRow"><span><i class="stateIcon charge">%</i>State of charge</span><b>84.6 <em>%</em></b></div>
+            </section>
+            <section>
+                <h3>Node equations <button id="addNodeEquation" type="button">＋</button></h3>
+                <button class="equationItem" type="button"><span>ƒ</span><div><strong>Thermal storage</strong><small>m cₚ · dT/dt = Σ Q̇</small></div><b>›</b></button>
+                <button class="equationItem" type="button"><span>ƒ</span><div><strong>Electrical heating</strong><small>Q̇ = I²R</small></div><b>›</b></button>
+            </section>
+            <footer><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button><button class="doneButton" data-close-card type="button">Done</button></footer>
+        </div>
+
+        <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
+            <header><div><span class="contextKicker">Relationship equation</span><strong>Thermal conduction</strong></div><button data-close-card type="button">×</button></header>
+            <section>
+                <label class="editorField"><span>Directionality</span><select><option>Bidirectional</option><option>Directed A → B</option><option>Directed B → A</option></select></label>
+                <label class="editorField"><span>Conductance</span><span class="unitInput"><input type="number" value="12"><b>W/K</b></span></label>
+            </section>
+            <section>
+                <h3>Equation</h3>
+                <button class="equationItem openEquation" type="button"><span>ƒ</span><div><strong>Heat transfer</strong><small>Q̇ = G (Tₐ − Tᵦ)</small></div><b>›</b></button>
+            </section>
+            <footer><button type="button">Delete relationship</button><button class="doneButton" data-close-card type="button">Done</button></footer>
+        </div>
+
+        <div id="addPalette" class="contextCard addPalette hidden">
+            <span class="contextKicker">Add to model</span>
+            <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and source terms</small></span><b>›</b></button>
+            <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Edge</strong><small>Connect nodes with an equation</small></span><b>›</b></button>
+        </div>
+
+        <div id="nodeBuilder" class="contextCard builderCard hidden">
+            <header><div><span class="contextKicker">Add node</span><strong>Define its state</strong></div><button data-close-card type="button">×</button></header>
+            <section>
+                <label class="editorField"><span>Name</span><input id="newNodeName" value="New node" autocomplete="off"></label>
+                <label class="editorField"><span>Appearance</span><select id="newNodeShape"><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option></select></label>
+            </section>
+            <section>
+                <h3>State variables <button id="addStateVariable" type="button">＋</button></h3>
+                <div class="suggestionChips"><span>Suggestions</span><button data-state-suggestion="Temperature|T|293.15|K" type="button">Temperature</button><button data-state-suggestion="Pressure|p|101.3|kPa" type="button">Pressure</button><button data-state-suggestion="State of charge|SOC|100|%" type="button">Charge</button></div>
+                <div id="stateVariableRows" class="builderRows"></div>
+            </section>
+            <section>
+                <h3>Source terms <button id="addSourceTerm" type="button">＋</button></h3>
+                <p class="builderHint">Contributions are summed into a selected state's time derivative.</p>
+                <div id="sourceTermRows" class="builderRows"></div>
+            </section>
+            <footer><button data-close-card type="button">Cancel</button><button id="createNode" class="doneButton" type="button">Create node</button></footer>
+        </div>
+
+        <div id="edgeBuilder" class="contextCard builderCard edgeBuilder hidden">
+            <header><div><span class="contextKicker">Add edge</span><strong>Connect stateful nodes</strong></div><button data-close-card type="button">×</button></header>
+            <section class="endpointGrid">
+                <label class="editorField endpointField"><span>From node</span><div><select id="edgeSource"></select><button data-pick-endpoint="source" type="button">⌖ Pick</button></div></label>
+                <label class="editorField endpointField"><span>To node</span><div><select id="edgeTarget"></select><button data-pick-endpoint="target" type="button">⌖ Pick</button></div></label>
+            </section>
+            <section>
+                <label class="editorField"><span>Edge name</span><input id="newEdgeName" value="New relationship" autocomplete="off"></label>
+                <label class="editorField"><span>Equation</span><textarea id="edgeEquation" rows="3" placeholder="e.g. Q_dot = G * (source.T - target.T)"></textarea></label>
+                <div class="referencePicker"><span>Available state references</span><div id="stateReferenceChips"></div></div>
+            </section>
+            <section>
+                <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>
+                <p class="builderHint">Parameters include units; live values become controls that can change while the simulation runs.</p>
+                <div id="edgeParameterRows" class="builderRows"></div>
+            </section>
+            <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
+        </div>
+
+        <div class="canvasHelp">
+            <span><b>Left drag</b> move</span><i></i><span><b>Right click</b> edit</span><i></i><span><b>Scroll</b> zoom</span>
+        </div>
+        <div id="viewCube" class="viewCube" aria-label="3D view cube">
+            <div class="viewCubeScene">
+                <div id="viewCubeObject" class="viewCubeObject">
+                    <button class="cubeFace cubeFront" data-nav-view="front" type="button">Front</button>
+                    <button class="cubeFace cubeBack" data-nav-view="back" type="button">Back</button>
+                    <button class="cubeFace cubeRight" data-nav-view="right" type="button">Right</button>
+                    <button class="cubeFace cubeLeft" data-nav-view="left" type="button">Left</button>
+                    <button class="cubeFace cubeTop" data-nav-view="top" type="button">Top</button>
+                    <button class="cubeFace cubeBottom" data-nav-view="bottom" type="button">Bottom</button>
+                    <button class="cubeCorner cornerPPP" data-nav-corner="1,1,1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerPPN" data-nav-corner="1,1,-1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerPNP" data-nav-corner="1,-1,1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerPNN" data-nav-corner="1,-1,-1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerNPP" data-nav-corner="-1,1,1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerNPN" data-nav-corner="-1,1,-1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerNNP" data-nav-corner="-1,-1,1" type="button" title="Isometric view"></button>
+                    <button class="cubeCorner cornerNNN" data-nav-corner="-1,-1,-1" type="button" title="Isometric view"></button>
+                </div>
             </div>
-        </section>
+            <button class="cubeFit" data-nav-action="fit" type="button" title="Fit model">⌗ Fit</button>
+        </div>
+        <div class="modelStatus"><i></i><span>3 nodes</span><span>3 relationships</span><span>SI units</span></div>
     </main>
+
+    <dialog id="equationWorkbench" class="equationWorkbench">
+        <header>
+            <div class="workbenchIcon">ƒx</div>
+            <div><span class="contextKicker">Equation workbench</span><h2>Thermal conduction</h2></div>
+            <span class="equationKind">Relationship equation</span>
+            <button id="closeWorkbench" type="button">×</button>
+        </header>
+        <div class="workbenchBody">
+            <aside>
+                <span class="contextKicker">Equation library</span>
+                <button class="active" type="button"><i>⇄</i><span>Thermal conduction<small>Relationship</small></span></button>
+                <button type="button"><i>↯</i><span>Electrical heating<small>Node source</small></span></button>
+                <button type="button"><i>▰</i><span>Thermal storage<small>Node state</small></span></button>
+                <button class="newEquation" type="button">＋ New equation</button>
+            </aside>
+            <main>
+                <div class="equationCanvas">
+                    <span class="equationName">Heat transfer</span>
+                    <div class="prettyEquation"><i>Q̇</i> = <i>G</i> · (<i>T<sub>A</sub></i> − <i>T<sub>B</sub></i>)</div>
+                    <div class="unitValidation"><span>✓</span> Units consistent · Result is W</div>
+                </div>
+                <div class="equationDefinition">
+                    <section><h3>Inputs</h3><div class="definitionRow"><i>T<sub>A</sub></i><span>Temperature A</span><b>K</b></div><div class="definitionRow"><i>T<sub>B</sub></i><span>Temperature B</span><b>K</b></div></section>
+                    <section><h3>Parameters</h3><div class="definitionRow"><i>G</i><span>Conductance</span><b>W/K</b><em>default 1</em></div></section>
+                    <section><h3>Output</h3><div class="definitionRow"><i>Q̇</i><span>Heat flow</span><b>W</b></div></section>
+                </div>
+            </main>
+        </div>
+        <footer><span>Used by 1 relationship in this model</span><button id="cancelWorkbench" type="button">Cancel</button><button id="saveEquation" class="doneButton" type="button">Save equation</button></footer>
+    </dialog>
 </body>
 </html>

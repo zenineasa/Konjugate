@@ -122,7 +122,7 @@ The vision of this project is to create an integrated environment for modelling 
 
 The initial focus is on developing a desktop application where users can define components, their states and relationships between them. These models can be explored interactively using a general-purpose simulation engine with real-time visualization.
 
-For computationally intensive simulations, the same models can be transformed into optimized C++ simulations that can run independently and produce results for later analysis.
+The desktop application uses a separate native C++ process to validate and execute the same `.kjt` models. The validator and simulation runner are also available through command-line interfaces, keeping model behavior consistent across desktop and automated workflows.
 
 Future directions include an extensible plugin ecosystem where users and developers can contribute physics models, reusable components, visualization tools and other simulation capabilities through the community.
 

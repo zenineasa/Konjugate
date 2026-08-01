@@ -330,6 +330,8 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.35;
 renderer.domElement.className = 'webglSurface';
+renderer.domElement.tabIndex = 0;
+renderer.domElement.ariaLabel = '3D model canvas';
 webglContainer.appendChild(renderer.domElement);
 
 const labelRenderer = new CSS2DRenderer();
@@ -340,8 +342,10 @@ const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
 orbitControls.dampingFactor = 0.07;
 orbitControls.minDistance = 8;
-orbitControls.maxDistance = 45;
+orbitControls.maxDistance = 5000;
+orbitControls.zoomToCursor = true;
 orbitControls.target.set(0, -0.7, 0);
+orbitControls.listenToKeyEvents(renderer.domElement);
 
 const transformControls = new TransformControls(camera, renderer.domElement);
 transformControls.setMode('translate');
@@ -2615,22 +2619,60 @@ function setCameraCorner(direction) {
 }
 
 function fitCurrentView() {
+    const bounds = new THREE.Box3();
+    nodeObjects.forEach((object) => {
+        if (object.visible) bounds.expandByObject(object);
+    });
+    if (bounds.isEmpty()) {
+        orbitControls.target.set(0, -0.7, 0);
+        camera.position.set(0, 7.5, 19);
+        camera.lookAt(orbitControls.target);
+        orbitControls.update();
+        return;
+    }
+    const center = bounds.getCenter(new THREE.Vector3());
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const direction = camera.position.clone().sub(orbitControls.target).normalize();
-    camera.position.copy(direction.multiplyScalar(24).add(orbitControls.target));
+    const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+    const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+    const limitingFov = Math.min(verticalFov, horizontalFov);
+    const distance = Math.max(orbitControls.minDistance, sphere.radius / Math.sin(limitingFov / 2) * 1.15);
+    orbitControls.target.copy(center);
+    camera.position.copy(direction.multiplyScalar(distance).add(center));
     camera.lookAt(orbitControls.target);
     orbitControls.update();
+}
+
+function zoomCamera(direction) {
+    if (direction === 'in') orbitControls.dollyIn(0.8);
+    else orbitControls.dollyOut(0.8);
+}
+
+function panCamera(direction) {
+    const step = 36;
+    if (direction === 'up') orbitControls.pan(0, step);
+    else if (direction === 'down') orbitControls.pan(0, -step);
+    else if (direction === 'left') orbitControls.pan(step, 0);
+    else orbitControls.pan(-step, 0);
 }
 
 $$('[data-nav-corner]').forEach((button) => {
     button.addEventListener('click', () => setCameraCorner(button.dataset.navCorner));
 });
 $('[data-nav-action="fit"]').addEventListener('click', fitCurrentView);
+$('[data-nav-action="zoomIn"]').addEventListener('click', () => zoomCamera('in'));
+$('[data-nav-action="zoomOut"]').addEventListener('click', () => zoomCamera('out'));
+$$('[data-nav-pan]').forEach((button) => {
+    button.addEventListener('click', () => panCamera(button.dataset.navPan));
+});
 
 $('#fitButton').addEventListener('click', () => {
     fitCurrentView();
 });
 
 function updateViewCube() {
+    $('#viewCube').dataset.cameraDistance = camera.position.distanceTo(orbitControls.target).toFixed(4);
+    $('#viewCube').dataset.cameraTarget = orbitControls.target.toArray().map((value) => value.toFixed(4)).join(',');
     const inverseCameraRotation = camera.quaternion.clone().invert();
     const worldRotation = new THREE.Matrix4().makeRotationFromQuaternion(inverseCameraRotation);
     const flipCssY = new THREE.Matrix4().makeScale(1, -1, 1);
@@ -2697,8 +2739,8 @@ $('#newButton').dataset.tooltip = `New project (${isMac ? '⌘N' : 'Ctrl+N'})`;
 $('#loadButton').dataset.tooltip = `Open project (${isMac ? '⌘O' : 'Ctrl+O'})`;
 $('#saveButton').dataset.tooltip = `Save project (${isMac ? '⌘S' : 'Ctrl+S'})`;
 updateEncryptionControls();
-$('#undoButton').title = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
-$('#redoButton').title = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
+$('#undoButton').dataset.tooltip = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
+$('#redoButton').dataset.tooltip = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
 $('#undoButton').addEventListener('click', undo);
 $('#redoButton').addEventListener('click', redo);
 updateHistoryControls();

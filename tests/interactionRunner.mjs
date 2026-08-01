@@ -45,6 +45,25 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#closeValidationPanel').click()`);
     });
 
+    await run('icon-only toolstrip controls expose custom accessible tooltips', async () => {
+        const controls = await evaluate(window, `[...document.querySelectorAll('.toolstrip .squareTool')].map((button) => ({
+            label: button.getAttribute('aria-label'),
+            tooltip: button.dataset.tooltip,
+            nativeTitle: button.getAttribute('title')
+        }))`);
+        assert.ok(controls.length >= 6);
+        assert.ok(controls.every((control) => control.label && control.tooltip && control.nativeTitle === null));
+    });
+
+    await run('canvas help reflects left-click inspection controls', async () => {
+        const help = await evaluate(window, `document.querySelector('.canvasHelp').textContent.replace(/\\s+/g, ' ').trim()`);
+        assert.match(help, /Left click inspect/);
+        assert.match(help, /Drag move or orbit/);
+        assert.match(help, /Shift-drag pan/);
+        assert.match(help, /Scroll or −\/\+ zoom/);
+        assert.doesNotMatch(help, /Right click edit/);
+    });
+
     await run('left-click opens node and relationship inspectors', async () => {
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
@@ -166,6 +185,23 @@ export async function runInteractionTests(window) {
     await run('view cube changes the camera to a named view', async () => {
         await evaluate(window, `document.querySelector('[data-nav-view="top"]').click()`);
         await waitFor(window, `document.querySelector('[data-nav-view="top"]').classList.contains('active')`, 'Top camera view did not become active.', 2000);
+    });
+
+    await run('camera controls provide wheel-free zoom and model fitting', async () => {
+        assert.equal(await evaluate(window, `document.querySelector('[data-nav-action="zoomIn"]').ariaLabel`), 'Zoom camera in');
+        const before = Number(await evaluate(window, `document.querySelector('#viewCube').dataset.cameraDistance`));
+        await evaluate(window, `document.querySelector('[data-nav-action="zoomIn"]').click()`);
+        await waitFor(window, `Number(document.querySelector('#viewCube').dataset.cameraDistance) < ${before}`, 'Camera zoom-in control did not reduce its target distance.');
+        await evaluate(window, `document.querySelector('[data-nav-action="fit"]').click()`);
+        assert.ok(Number(await evaluate(window, `document.querySelector('#viewCube').dataset.cameraDistance`)) > 0);
+    });
+
+    await run('camera controls provide button and keyboard panning', async () => {
+        const before = await evaluate(window, `document.querySelector('#viewCube').dataset.cameraTarget`);
+        await evaluate(window, `document.querySelector('[data-nav-pan="left"]').click()`);
+        await waitFor(window, `document.querySelector('#viewCube').dataset.cameraTarget !== ${JSON.stringify(before)}`, 'Pan control did not move the camera target.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('[data-nav-pan]').length`), 4);
+        assert.equal(await evaluate(window, `document.querySelector('.webglSurface').getAttribute('aria-label')`), '3D model canvas');
     });
 
     await run('encrypted-save password feedback updates continuously', async () => {

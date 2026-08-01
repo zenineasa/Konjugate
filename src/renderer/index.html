@@ -85,12 +85,12 @@
     <nav class="toolstrip" aria-label="Model tools">
         <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
         <span class="divider"></span>
-        <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" disabled>↶</button>
-        <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" disabled>↷</button>
+        <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
+        <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↷</button>
         <span class="divider"></span>
-        <button class="squareTool active" data-tool="select" type="button" title="Select (Free Drag)">↖</button>
-        <button class="squareTool" data-tool="move" type="button" title="Move (Precise Axis)">☩</button>
-        <button class="squareTool" data-action="delete" type="button" title="Delete selected">⌫</button>
+        <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
+        <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
+        <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected">⌫</button>
         <div class="toolSpacer"></div>
         <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
         <div class="labelControls" aria-label="Label detail">
@@ -98,7 +98,7 @@
             <button data-detail="nodes" type="button" title="Expand all node labels">Nodes</button>
             <button data-detail="edges" type="button" title="Expand all relationship labels">Edges</button>
         </div>
-        <button id="fitButton" class="squareTool" type="button" title="Frame model">⌗</button>
+        <button id="fitButton" class="squareTool" type="button" aria-label="Frame model" data-tooltip="Frame model">⌗</button>
         <button id="runButton" class="runButton" type="button" title="A simulation engine is not configured" disabled><span>▶</span> Run</button>
     </nav>
 
@@ -227,9 +227,15 @@
         </div>
 
         <div class="canvasHelp">
-            <span><b>Left drag</b> move</span><i></i><span><b>Right click</b> edit</span><i></i><span><b>Scroll</b> zoom</span>
+            <span><b>Left click</b> inspect</span><i></i><span><b>Drag</b> move or orbit</span><i></i><span><b>Shift-drag</b> pan</span><i></i><span><b>Scroll or −/+</b> zoom</span>
         </div>
         <div id="viewCube" class="viewCube" aria-label="3D view cube">
+            <div class="panPad" aria-label="Camera pan controls">
+                <button class="panUp" data-nav-pan="up" type="button" aria-label="Pan camera up"><span aria-hidden="true"></span></button>
+                <button class="panLeft" data-nav-pan="left" type="button" aria-label="Pan camera left"><span aria-hidden="true"></span></button>
+                <button class="panRight" data-nav-pan="right" type="button" aria-label="Pan camera right"><span aria-hidden="true"></span></button>
+                <button class="panDown" data-nav-pan="down" type="button" aria-label="Pan camera down"><span aria-hidden="true"></span></button>
+            </div>
             <div class="viewCubeScene">
                 <div id="viewCubeObject" class="viewCubeObject">
                     <button class="cubeFace cubeFront" data-nav-view="front" type="button">Front</button>
@@ -248,7 +254,11 @@
                     <button class="cubeCorner cornerNNN" data-nav-corner="-1,-1,-1" type="button" title="Isometric view"></button>
                 </div>
             </div>
-            <button class="cubeFit" data-nav-action="fit" type="button" title="Fit model">⌗ Fit</button>
+            <div class="viewNavActions" aria-label="Camera zoom controls">
+                <button data-nav-action="zoomOut" type="button" aria-label="Zoom camera out" data-tooltip="Zoom camera out">−</button>
+                <button class="cubeFit" data-nav-action="fit" type="button" aria-label="Fit visible model" data-tooltip="Fit visible model">⌗ Fit</button>
+                <button data-nav-action="zoomIn" type="button" aria-label="Zoom camera in" data-tooltip="Zoom camera in">＋</button>
+            </div>
         </div>
         <div class="modelStatus"><i></i><span>0 nodes</span><span>0 relationships</span><span>SI units</span></div>
     </main>

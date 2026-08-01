@@ -58,7 +58,6 @@ contextBridge.exposeInMainWorld('addons', {
     publishEvent: (eventName, value) => {
         if (eventName === 'timeline.change') ipcRenderer.send('visualizerHostTimelineChange', value);
         else if (eventName === 'selection.change') ipcRenderer.send('visualizerHostSelectionChange', value);
-        else if (eventName === 'result.update') ipcRenderer.send('visualizerHostResultUpdate', value);
     },
     closeContext: (contextName) => {
         if (contextName === 'resultSession') ipcRenderer.send('visualizerCloseSession');

@@ -2,7 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access, mkdtemp, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, open as openFile, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
@@ -82,6 +82,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const inputPath = join(directory, 'input.kjt');
     const configurationPath = join(directory, 'runConfiguration.json');
     const outputPath = join(directory, 'simulationResults.kjr');
+    const streamPath = `${outputPath}.stream`;
     const pacingControlPath = join(directory, 'pacingControl.json');
     const jobId = randomUUID();
     const initialPacing = normalizePacing(configuration.pacing);
@@ -100,13 +101,53 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     let diagnostics = '';
     let lastSnapshotKey = '';
     let polling = false;
+    let streamOffset = 0;
+    let streamRemainder = '';
+    let accumulatedSamples = [];
+    let accumulatedCheckpoints = [];
     child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+
+    const readStream = async () => {
+        const handle = await openFile(streamPath, 'r');
+        try {
+            const { size } = await handle.stat();
+            if (size < streamOffset) {
+                streamOffset = 0;
+                streamRemainder = '';
+                accumulatedSamples = [];
+                accumulatedCheckpoints = [];
+            }
+            if (size === streamOffset) return;
+            const bytes = Buffer.alloc(size - streamOffset);
+            await handle.read(bytes, 0, bytes.length, streamOffset);
+            streamOffset = size;
+            const lines = `${streamRemainder}${bytes.toString('utf8')}`.split('\n');
+            streamRemainder = lines.pop() ?? '';
+            for (const line of lines) {
+                if (!line) continue;
+                const record = JSON.parse(line);
+                if (record.type === 'sample') accumulatedSamples.push({ time: record.time, states: record.states });
+                else if (record.type === 'checkpoint') accumulatedCheckpoints.push({
+                    uuid: record.uuid, time: record.time, solver: record.solver, states: record.states
+                });
+            }
+        } finally {
+            await handle.close();
+        }
+    };
 
     const readSnapshot = async () => {
         if (polling) return null;
         polling = true;
         try {
-            const snapshot = JSON.parse(await readFile(outputPath, 'utf8'));
+            let snapshot = JSON.parse(await readFile(outputPath, 'utf8'));
+            if (snapshot.snapshotMode === 'live') {
+                await readStream();
+                snapshot = { ...snapshot, samples: accumulatedSamples, checkpoints: accumulatedCheckpoints };
+            } else {
+                accumulatedSamples = snapshot.samples ?? [];
+                accumulatedCheckpoints = snapshot.checkpoints ?? [];
+            }
             const key = `${snapshot.lifecycle}:${snapshot.samples?.length}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
             if (key !== lastSnapshotKey) {
                 lastSnapshotKey = key;
@@ -119,12 +160,13 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             polling = false;
         }
     };
-    const pollTimer = setInterval(readSnapshot, 40);
+    const pollTimer = setInterval(readSnapshot, 100);
 
     const completion = new Promise((resolve, reject) => {
         child.once('error', reject);
         child.once('exit', async (code) => {
             clearInterval(pollTimer);
+            while (polling) await new Promise((resolvePolling) => setTimeout(resolvePolling, 5));
             const result = await readSnapshot();
             try {
                 if (code !== 0) throw new Error(diagnostics.trim() || `The simulation engine exited with code ${code}.`);

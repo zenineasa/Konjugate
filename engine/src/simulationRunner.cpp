@@ -188,16 +188,39 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto steps = static_cast<std::size_t>(std::ceil((targetTime - startTime) / globalTimeStep));
     std::vector<Sample> samples = {{startTime, states}};
     std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states}};
+    const auto streamPath = std::filesystem::path(outputPath.string() + ".stream");
+    std::ofstream resultStream(streamPath, std::ios::binary | std::ios::trunc);
+    if (!resultStream) throw std::runtime_error("The live result stream could not be created.");
+    const auto appendStreamRecord = [&](const std::string& type, double time, const Values& recordStates, const std::string& uuid = {}) {
+        resultStream << std::setprecision(17) << "{\"type\":\"" << type << "\",\"time\":" << time;
+        if (!uuid.empty()) resultStream << ",\"uuid\":\"" << uuid << "\",\"solver\":{\"kind\":\"explicitEuler\",\"version\":1}";
+        resultStream << ",\"states\":[";
+        for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
+            if (stateIndex) resultStream << ',';
+            const auto& stateId = stateIds[stateIndex];
+            resultStream << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << recordStates.at(stateId) << '}';
+        }
+        resultStream << "]}\n";
+    };
+    appendStreamRecord("sample", startTime, states);
+    appendStreamRecord("checkpoint", startTime, states, checkpoints.front().uuid);
     double currentTime = startTime;
     const auto captureBoundary = [&]() {
-        if (currentTime <= samples.back().time + 1e-12) return;
-        samples.push_back({currentTime, states});
-        checkpoints.push_back({createUuid(), currentTime, states});
+        if (currentTime > samples.back().time + 1e-12) {
+            samples.push_back({currentTime, states});
+            appendStreamRecord("sample", currentTime, states);
+        }
+        if (currentTime > checkpoints.back().time + 1e-12) {
+            checkpoints.push_back({createUuid(), currentTime, states});
+            appendStreamRecord("checkpoint", currentTime, states, checkpoints.back().uuid);
+        }
     };
-    const auto writeResult = [&](const std::string& lifecycle, double simulationTime) {
+    const auto writeResult = [&](const std::string& lifecycle, double simulationTime, bool completeSnapshot = false) {
+        resultStream.flush();
         std::ostringstream json;
         json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.1.0\",\"configurationName\":\""
-             << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"lifecycle\":\"" << lifecycle
+             << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"snapshotMode\":\"" << (completeSnapshot ? "full" : "live")
+             << "\",\"lifecycle\":\"" << lifecycle
              << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time
              << ",\"pacing\":{\"mode\":\"" << escape(pacing.mode) << "\",\"simulationSecondsPerWallSecond\":" << pacing.ratio << "}"
              << ",\"targetTime\":" << targetTime << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval
@@ -216,7 +239,7 @@ void runSimulation(const boost::property_tree::ptree& document,
                  << "\",\"value\":" << states.at(stateId) << '}';
         }
         json << "],\"samples\":[";
-        for (std::size_t sampleIndex = 0; sampleIndex < samples.size(); ++sampleIndex) {
+        for (std::size_t sampleIndex = 0; completeSnapshot && sampleIndex < samples.size(); ++sampleIndex) {
             if (sampleIndex) json << ',';
             json << "{\"time\":" << samples[sampleIndex].time << ",\"states\":[";
             for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
@@ -227,7 +250,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             json << "]}";
         }
         json << "],\"checkpoints\":[";
-        for (std::size_t checkpointIndex = 0; checkpointIndex < checkpoints.size(); ++checkpointIndex) {
+        for (std::size_t checkpointIndex = 0; completeSnapshot && checkpointIndex < checkpoints.size(); ++checkpointIndex) {
             if (checkpointIndex) json << ',';
             const auto& checkpoint = checkpoints[checkpointIndex];
             json << "{\"uuid\":\"" << checkpoint.uuid << "\",\"time\":" << checkpoint.time
@@ -244,26 +267,38 @@ void runSimulation(const boost::property_tree::ptree& document,
     };
     writeResult("running", startTime);
     auto lastPublishedAt = std::chrono::steady_clock::now();
+    auto lastControlReadAt = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    const auto refreshRunControl = [&](bool force = false) {
+        const auto now = std::chrono::steady_clock::now();
+        if (force || now - lastControlReadAt >= std::chrono::milliseconds(10)) {
+            runControl = readRunControl(pacingControlPath, runControl);
+            lastControlReadAt = now;
+        }
+    };
     auto nextOutputTime = startTime + outputInterval;
     for (std::size_t step = 0; step < steps; ++step) {
-        runControl = readRunControl(pacingControlPath, runControl);
+        refreshRunControl();
         pacing = runControl.pacing;
         if (runControl.executionState == "paused") {
             captureBoundary();
             writeResult("paused", currentTime);
             while (runControl.executionState == "paused") {
                 std::this_thread::sleep_for(std::chrono::milliseconds(40));
-                runControl = readRunControl(pacingControlPath, runControl);
+                refreshRunControl(true);
             }
             pacing = runControl.pacing;
             if (runControl.executionState == "stopped") {
-                writeResult("stopped", currentTime);
+                writeResult("stopped", currentTime, true);
+                resultStream.close();
+                std::filesystem::remove(streamPath);
                 return;
             }
             writeResult("running", currentTime);
         } else if (runControl.executionState == "stopped") {
             captureBoundary();
-            writeResult("stopped", currentTime);
+            writeResult("stopped", currentTime, true);
+            resultStream.close();
+            std::filesystem::remove(streamPath);
             return;
         }
         const auto wallStepStarted = std::chrono::steady_clock::now();
@@ -324,21 +359,27 @@ void runSimulation(const boost::property_tree::ptree& document,
             if (spent >= targetDuration) break;
             const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(targetDuration - spent);
             std::this_thread::sleep_for(std::min(remaining, std::chrono::milliseconds(20)));
-            runControl = readRunControl(pacingControlPath, runControl);
+            refreshRunControl(true);
             pacing = runControl.pacing;
             if (runControl.executionState != "running") break;
         }
         if (elapsed + 1e-12 >= nextOutputTime || step + 1 == steps) {
             samples.push_back({elapsed, states});
-            checkpoints.push_back({createUuid(), elapsed, states});
+            appendStreamRecord("sample", elapsed, states);
+            if (step + 1 == steps && elapsed > checkpoints.back().time + 1e-12) {
+                checkpoints.push_back({createUuid(), elapsed, states});
+                appendStreamRecord("checkpoint", elapsed, states, checkpoints.back().uuid);
+            }
             while (nextOutputTime <= elapsed + 1e-12) nextOutputTime += outputInterval;
             const auto publicationTime = std::chrono::steady_clock::now();
-            if (step + 1 == steps || publicationTime - lastPublishedAt >= std::chrono::milliseconds(100)) {
-                writeResult(step + 1 == steps ? "completed" : "running", elapsed);
+            if (step + 1 == steps || publicationTime - lastPublishedAt >= std::chrono::milliseconds(250)) {
+                writeResult(step + 1 == steps ? "completed" : "running", elapsed, step + 1 == steps);
                 lastPublishedAt = publicationTime;
             }
         }
     }
+    resultStream.close();
+    std::filesystem::remove(streamPath);
 }
 
 }

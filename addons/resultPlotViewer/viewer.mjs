@@ -6,6 +6,8 @@ let context = null;
 let signals = [];
 let plotReady = false;
 let pendingLiveRender = null;
+let liveRenderRequested = false;
+let plotRendering = false;
 
 function formatTime(time) {
     return `${Number(time).toLocaleString(undefined, { maximumSignificantDigits: 6 })} s`;
@@ -38,8 +40,18 @@ function renderRunStatus(run) {
 }
 
 function scheduleLiveRender() {
-    clearTimeout(pendingLiveRender);
-    pendingLiveRender = setTimeout(() => renderPlot(), 50);
+    liveRenderRequested = true;
+    if (pendingLiveRender || document.hidden) return;
+    pendingLiveRender = setTimeout(async () => {
+        pendingLiveRender = null;
+        if (!liveRenderRequested || plotRendering || document.hidden) return;
+        liveRenderRequested = false;
+        plotRendering = true;
+        try { await renderPlot(); } finally {
+            plotRendering = false;
+            if (liveRenderRequested) scheduleLiveRender();
+        }
+    }, 250);
 }
 
 async function renderPlot() {
@@ -183,5 +195,8 @@ window.konjugateVisualizer.onPacingChange((pacing) => {
     renderRunStatus({ pacing });
 });
 window.konjugateVisualizer.onSessionChange(loadSession);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && liveRenderRequested) scheduleLiveRender();
+});
 
 loadSession();

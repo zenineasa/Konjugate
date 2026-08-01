@@ -277,6 +277,7 @@ let activeResult = null;
 let activeEngineJobId = null;
 let runLaunchSettings = {
     targetTime: 1,
+    online: false,
     pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 }
 };
 let pendingRestart = null;
@@ -367,7 +368,7 @@ const renderer = new THREE.WebGLRenderer({
     alpha: true,
     powerPreference: 'high-performance'
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.35;
@@ -1722,10 +1723,13 @@ function updateLiveResultControls() {
     $('#resultPlaybackControls').hidden = live;
     $('#simulationPauseResume').innerHTML = paused ? '<span aria-hidden="true">▶</span> Resume' : '<span aria-hidden="true">❚❚</span> Pause';
     $('#simulationPauseResume').ariaLabel = paused ? 'Resume simulation' : 'Pause simulation';
-    $('#continueRun').hidden = lifecycle !== 'stopped' || live || !activeResult?.checkpoints?.length;
+    const canContinue = ['stopped', 'completed'].includes(lifecycle) && !live && Boolean(activeResult?.checkpoints?.length);
+    $('#continueRun').hidden = !canContinue;
+    $('#continueRun').textContent = lifecycle === 'completed' ? 'Extend simulation' : 'Continue';
+    $('#continueRun').ariaLabel = lifecycle === 'completed' ? 'Extend simulation from the final checkpoint' : 'Continue simulation from the latest checkpoint';
     $$('.reviewControl').forEach((control) => { control.hidden = live; });
     $('#resultPlaybackRate').hidden = live;
-    $('#simulationPacing').hidden = !live;
+    $('#simulationPacing').hidden = !live || activeResult?.pacing?.mode === 'fastest';
     $('#closeResults').lastChild.textContent = 'Close results and edit';
     if (activeResult?.pacing) {
         const { mode, simulationSecondsPerWallSecond: ratio } = activeResult.pacing;
@@ -1755,7 +1759,6 @@ function applyLiveResult(jobId, result) {
         projectResultSample(followLatest ? result.samples.length - 1 : Math.min(activeResultSampleIndex, result.samples.length - 1));
         updateLiveResultControls();
     }
-    window.addons.publishEvent('result.update', { jobId, result });
 }
 
 async function clearResultPlayback() {
@@ -1828,8 +1831,10 @@ $('#continueRun').addEventListener('click', () => {
     runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, checkpoint.time + model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId).globalTimeStep);
     $('#runLaunchDescription').textContent = `Continue from ${formatResultTime(checkpoint.time)}.`;
     $('#runTargetTime').value = runLaunchSettings.targetTime;
-    $('#runPacingMode').value = runLaunchSettings.pacing.mode;
+    $('#runOnlineMode').checked = runLaunchSettings.online;
+    $('#runPacingMode').value = runLaunchSettings.pacing.mode === 'limitedRatio' ? 'limitedRatio' : 'realTime';
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
+    updateRunModeFields();
     $('#runLaunchDialog').showModal();
 });
 $('#closeResults').addEventListener('click', clearResultPlayback);
@@ -1943,22 +1948,34 @@ $('#runButton').addEventListener('click', () => {
     pendingRestart = null;
     $('#runLaunchDescription').textContent = "Run from the model's initial state.";
     $('#runTargetTime').value = runLaunchSettings.targetTime;
-    $('#runPacingMode').value = runLaunchSettings.pacing.mode;
+    $('#runOnlineMode').checked = runLaunchSettings.online;
+    $('#runPacingMode').value = runLaunchSettings.pacing.mode === 'limitedRatio' ? 'limitedRatio' : 'realTime';
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
-    $('#runPacingRatioField').hidden = runLaunchSettings.pacing.mode !== 'limitedRatio';
+    updateRunModeFields();
     $('#runLaunchError').textContent = '';
     $('#runLaunchDialog').showModal();
 });
 
 $('#runLaunchCancel').addEventListener('click', () => $('#runLaunchDialog').close());
+function updateRunModeFields() {
+    const online = $('#runOnlineMode').checked;
+    $('#runModeName').textContent = online ? 'Online' : 'Offline';
+    $('#runModeDescription').textContent = online
+        ? 'Synchronize the run with wall-clock time for live interaction.'
+        : 'Run at maximum speed without wall-clock synchronization.';
+    $('#runPacingModeField').hidden = !online;
+    $('#runPacingRatioField').hidden = !online || $('#runPacingMode').value !== 'limitedRatio';
+}
+$('#runOnlineMode').addEventListener('change', updateRunModeFields);
 $('#runPacingMode').addEventListener('change', (event) => {
-    $('#runPacingRatioField').hidden = event.target.value !== 'limitedRatio';
+    $('#runPacingRatioField').hidden = !$('#runOnlineMode').checked || event.target.value !== 'limitedRatio';
 });
 $('#runLaunchDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     const targetTime = Number($('#runTargetTime').value);
-    const pacingMode = $('#runPacingMode').value;
+    const online = $('#runOnlineMode').checked;
+    const pacingMode = online ? $('#runPacingMode').value : 'fastest';
     const pacingRatio = pacingMode === 'realTime' ? 1 : Number($('#runPacingRatio').value);
     const startTime = pendingRestart?.checkpoint.time ?? 0;
     if (!(targetTime > startTime) || targetTime - startTime < configuration.globalTimeStep ||
@@ -1968,6 +1985,7 @@ $('#runLaunchDialog form').addEventListener('submit', (event) => {
     }
     runLaunchSettings = {
         targetTime,
+        online,
         pacing: { mode: pacingMode, simulationSecondsPerWallSecond: pacingRatio }
     };
     $('#runLaunchDialog').close();
@@ -3408,8 +3426,11 @@ setCameraView('orbit', false);
 updateModelStatus();
 initializeAddonToolstripContributions();
 
+let lastRenderTime = 0;
 function render(time) {
     requestAnimationFrame(render);
+    if (document.hidden || time - lastRenderTime < 1000 / 30) return;
+    lastRenderTime = time;
     if (!updateCameraAnimation(time)) orbitControls.update();
     updateViewCube();
 

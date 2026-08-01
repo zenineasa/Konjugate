@@ -67,8 +67,8 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
         await evaluate(window, `document.querySelector('#runButton').click()`);
-        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '0.3'; document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
-        await waitFor(window, `!document.querySelector('#resultTransport').hidden`, 'C++ simulation did not produce a playable result.', 10000);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1.5'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `!document.querySelector('#resultTransport').hidden && document.querySelector('.resultMode small').textContent === 'Running · model locked'`, 'C++ simulation did not enter its running state.', 10000);
         assert.equal(await evaluate(window, `!document.querySelector('#simulationPacing').hidden && document.querySelector('#resultPlaybackRate').hidden`), true);
         assert.equal(await evaluate(window, `document.querySelector('#resultPlaybackControls').hidden && !document.querySelector('#simulationExecutionControls').hidden`), true);
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl')].every((control) => control.hidden) && document.querySelector('#continueRun').hidden`), true);
@@ -83,8 +83,8 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete.', 5000);
         assert.equal(await evaluate(window, `document.querySelector('#simulationPacing').hidden && !document.querySelector('#resultPlaybackRate').hidden`), true);
         assert.equal(await evaluate(window, `!document.querySelector('#resultPlaybackControls').hidden && document.querySelector('#simulationExecutionControls').hidden`), true);
-        assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl')].every((control) => !control.hidden) && document.querySelector('#continueRun').hidden`), true);
-        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#continueRun')).display === 'none' && getComputedStyle(document.querySelector('#resultTimeline')).display !== 'none'`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl')].every((control) => !control.hidden) && !document.querySelector('#continueRun').hidden`), true);
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#continueRun')).display !== 'none' && document.querySelector('#continueRun').textContent === 'Extend simulation' && getComputedStyle(document.querySelector('#resultTimeline')).display !== 'none'`), true);
         assert.equal(await evaluate(window, `document.querySelector('.resultMode b').textContent`), 'Results');
         assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#simulationProgress')).display === 'none'`), true);
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), true);

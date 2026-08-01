@@ -102,7 +102,8 @@
             <strong>Start run</strong>
             <p id="runLaunchDescription">Run from the model's initial state.</p>
             <label><span>Run until simulation time (s)</span><input id="runTargetTime" type="number" min="0" step="any" value="1" required></label>
-            <label><span>Simulation pacing</span><select id="runPacingMode"><option value="fastest">As fast as possible</option><option value="realTime">Real time</option><option value="limitedRatio">Limited rate</option></select></label>
+            <label class="runModeSwitch"><span><b><span id="runModeName">Offline</span> simulation</b><small id="runModeDescription">Run at maximum speed without wall-clock synchronization.</small></span><input id="runOnlineMode" type="checkbox" role="switch" aria-label="Use online simulation mode"></label>
+            <label id="runPacingModeField" hidden><span>Online pacing</span><select id="runPacingMode"><option value="realTime">Real time</option><option value="limitedRatio">Custom rate</option></select></label>
             <label id="runPacingRatioField" hidden><span>Simulation seconds / wall second</span><input id="runPacingRatio" type="number" min="0.01" step="any" value="1" required></label>
             <div class="passwordError" id="runLaunchError" role="alert"></div>
             <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
@@ -292,7 +293,7 @@
             <input id="resultTimeline" class="reviewControl" type="range" min="0" max="0" value="0" step="1" aria-label="Simulation time">
             <output id="resultExtent" class="reviewControl" aria-label="Available and target simulation time">available 0 · target 0 s</output>
             <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option></select>
-            <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="fastest">Fastest</option><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
+            <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
             <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
         </section>
 

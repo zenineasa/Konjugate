@@ -119,7 +119,8 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
     }
     analysisAddonId = manifest.addonId;
     visualizerManifest = manifest;
-    visualizerSession = createVisualizerSession({ ...payload, sessionId: randomUUID() });
+    const liveResult = activeEngineJobs.get(payload.engineJobId)?.latestResult;
+    visualizerSession = createVisualizerSession({ ...payload, result: liveResult ?? payload.result, sessionId: randomUUID() });
     if (analysisWindow && !analysisWindow.isDestroyed()) {
         analysisWindow.setTitle(`${visualizerSession.projectName} — Results`);
         analysisWindow.webContents.send('visualizerSessionChange');
@@ -188,9 +189,9 @@ ipcMain.on('visualizerHostSelectionChange', (event, nodeId) => {
     }
 });
 
-ipcMain.on('visualizerHostResultUpdate', (event, { jobId, result }) => {
-    if (!senderIs(mainWindow, event) || !visualizerSession || visualizerSession.engineJobId !== jobId) return;
-    visualizerSession.samples = structuredClone(result.samples);
+function updateVisualizerResult(jobId, result) {
+    if (!visualizerSession || visualizerSession.engineJobId !== jobId) return;
+    visualizerSession.samples = result.samples;
     visualizerSession.run = {
         ...visualizerSession.run,
         sampleCount: result.samples.length,
@@ -212,7 +213,7 @@ ipcMain.on('visualizerHostResultUpdate', (event, { jobId, result }) => {
     if (visualizerCan('simulation.pacing.read')) {
         analysisWindow.webContents.send('visualizerPacingChange', structuredClone(visualizerSession.run.pacing));
     }
-});
+}
 
 ipcMain.on('visualizerCloseSession', (event) => {
     if (!senderIs(mainWindow, event)) return;
@@ -392,18 +393,27 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         if (latestUpdate && !owner.isDestroyed()) owner.send('engineRunUpdate', latestUpdate);
         latestUpdate = null;
     };
+    const projectLiveResult = (result) => ({
+        ...result,
+        samples: result.samples?.length ? [result.samples.at(-1)] : [],
+        checkpoints: []
+    });
     execution = await startEngineRun(content, configuration, engineOptions(), {
         onUpdate: (result) => {
-            latestUpdate = { jobId: execution.jobId, result };
+            const job = activeEngineJobs.get(execution.jobId);
+            if (job) job.latestResult = result;
+            updateVisualizerResult(execution.jobId, result);
+            latestUpdate = { jobId: execution.jobId, result: projectLiveResult(result) };
             updateTimer ??= setTimeout(flushUpdate, 100);
         }
     });
     if (!execution.available) return { available: false };
-    activeEngineJobs.set(execution.jobId, { owner, ...execution });
+    activeEngineJobs.set(execution.jobId, { owner, latestResult: null, ...execution });
     execution.completion.then((result) => {
         if (updateTimer) clearTimeout(updateTimer);
         updateTimer = null;
         latestUpdate = null;
+        updateVisualizerResult(execution.jobId, result);
         if (!owner.isDestroyed()) owner.send('engineRunComplete', { jobId: execution.jobId, result });
     }).catch((error) => {
         if (updateTimer) clearTimeout(updateTimer);

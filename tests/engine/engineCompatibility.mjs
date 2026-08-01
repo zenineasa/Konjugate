@@ -124,7 +124,7 @@ assert.throws(() => normalizePacing({ mode: 'limitedRatio', simulationSecondsPer
 const liveUpdates = [];
 const liveStartedAt = performance.now();
 const liveRun = await startEngineRun(example, {
-    name: 'Live adapter', targetTime: 0.2, globalTimeStep: 0.01, outputInterval: 0.05,
+    name: 'Live adapter', targetTime: 0.5, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
     applicationPath: new URL('../..', import.meta.url).pathname,
@@ -132,11 +132,12 @@ const liveRun = await startEngineRun(example, {
     packaged: false
 }, { onUpdate: (result) => liveUpdates.push(result) });
 const liveResult = await liveRun.completion;
-assert.ok(performance.now() - liveStartedAt >= 150);
+assert.ok(performance.now() - liveStartedAt >= 450);
 assert.ok(liveUpdates.some((result) => result.lifecycle === 'running' && result.samples.length > 1));
 assert.equal(liveResult.lifecycle, 'completed');
-assert.equal(liveResult.availableResultTime, 0.2);
-assert.equal(liveResult.checkpoints.length, liveResult.samples.length);
+assert.equal(liveResult.availableResultTime, 0.5);
+assert.ok(liveResult.samples.length > liveResult.checkpoints.length);
+assert.deepEqual(liveResult.checkpoints.map((checkpoint) => checkpoint.time), [0, 0.5]);
 
 const controlledUpdates = [];
 const controlledRun = await startEngineRun(example, {
@@ -162,14 +163,18 @@ const controlledResult = await controlledRun.completion;
 assert.equal(controlledResult.lifecycle, 'completed');
 assert.equal(controlledResult.pacing.mode, 'fastest');
 
+let resolveStoppedProgress;
+const stoppedProgress = new Promise((resolve) => { resolveStoppedProgress = resolve; });
 const stoppedRun = await startEngineRun(example, {
-    name: 'Stopped adapter', targetTime: 0.4, globalTimeStep: 0.01, outputInterval: 0.05,
+    name: 'Stopped adapter', targetTime: 2, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
     applicationPath: new URL('../..', import.meta.url).pathname,
     resourcesPath: '', packaged: false
-});
-await new Promise((resolve) => setTimeout(resolve, 90));
+}, { onUpdate: (result) => {
+    if (result.lifecycle === 'running' && result.availableResultTime > 0) resolveStoppedProgress();
+} });
+await stoppedProgress;
 await stoppedRun.setExecutionState('stopped');
 const stoppedResult = await stoppedRun.completion;
 assert.equal(stoppedResult.lifecycle, 'stopped');

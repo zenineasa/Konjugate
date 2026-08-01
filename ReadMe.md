@@ -8,7 +8,7 @@ The objective is to simplify the process of modelling complex physical systems b
 
 Rather than requiring users to manually assemble large system-level formulations, this project explores an approach where systems are represented as graphs of interconnected components. Components define their states and properties, while relationships define the equations governing how quantities are transported and transformed.
 
-![Konjugate Application Screenshot](assets/konjugateAppScreenshot.png)
+![Konjugate Application Screenshot](assets/ForReadme/konjugateAppScreenshot.png)
 
 ---
 
@@ -18,7 +18,7 @@ This is a natural question. As an engineer, I have come across, used and even de
 
 However, many engineering systems are still difficult to model quickly and it is not necessarily due to a lack of capability in existing tools; rather it is because different simulation frameworks are built around different ways of thinking about a system.
 
-Some approaches begin with equations. Others focus on physical domains, block diagrams, meshes, or specialised modelling languages. These abstractions are extremely effective within their intended applications, but translating a complex real-world system into the appropriate representation can often require significant effort.
+Some approaches begin with equations. Others focus on physical domains, block diagrams, meshes or specialised modelling languages. These abstractions are extremely effective within their intended applications, but translating a complex real-world system into the appropriate representation can often require significant effort.
 
 This project explores another perspective: representing systems as networks of interconnected components. Components define their states and properties, while the relationships between them define the mathematical models governing how quantities are transferred and transformed.
 
@@ -40,7 +40,7 @@ where $x$ represents the state vector of the system, $u$ represents external inp
 
 However, as systems become larger and more interconnected, the function $f$ often becomes a complex collection of coupled relationships between individual components. Understanding, modifying and extending such models can become increasingly difficult.
 
-This project explores a representation where a system is viewed as a network of states and relationships. Nodes represent stateful components, while relationships represent the interactions that govern how quantities are transferred, transformed, or constrained between them.
+This project explores a representation where a system is viewed as a network of states and relationships. Nodes represent stateful components, while relationships represent the interactions that govern how quantities are transferred, transformed or constrained between them.
 
 Instead of defining one large function:
 
@@ -58,29 +58,13 @@ where:
 
 - $x_i$ represents the states contained within a component.
 - $f_{ij}$ represents the interaction model between components.
-- $s_i$ represents sources, sinks, or internal processes affecting the component.
+- $s_i$ represents sources, sinks or internal processes affecting the component.
 
-For example, in a thermal system:
+![Graph representation of node states, interactions and local source terms](assets/ForReadme/graphRepresentation.png)
 
-```
-             Heat Transfer
-      ┌─────────────────────┐
-      │                     │
-      ▼                     │
-  ┌───────┐              ┌───────┐
-  │Battery│──────────────│Coolant│
-  └───────┘              └───────┘
-      │                     │
-      │                     │
- Electrical Heating     Fluid Flow
+In more practical terms, each node represents a component with values that can change over time. A relationship term $f_{ij}$ describes how one component influences another—for example, heat transferred between a battery and a coolant reservoir. A local term $s_i$ describes what happens within or directly to a component, such as electrical heating, heat loss to the environment or an externally applied input.
 
-```
-
-The Battery Cell node may contain states such as temperature, state of charge and internal resistance.
-
-The relationship between the Battery Cell and Cooling Plate defines the heat transfer model.
-
-The relationship between the Electrical System and Battery Cell defines the energy generation model.
+Together, these smaller contributions determine how the state of every component evolves.
 
 By composing nodes and relationships, complex systems can be assembled from reusable models.
 
@@ -120,14 +104,14 @@ make build
 ```
 
 The build installs missing dependencies, generates application and web icons,
-packages Electron, and writes the shareable artifact to `out/release/`.
+packages Electron and writes the shareable artifact to `out/release/`.
 
 - macOS produces a DMG.
 - Windows produces a portable ZIP containing the executable.
 - Linux produces an AppImage and requires `appimagetool`.
 
 Generated application bundles are stored in `out/package/`. Run `make clean`
-to remove dependencies, the lockfile, generated icons, caches, and all build
+to remove dependencies, the lockfile, generated icons, caches and all build
 outputs.
 
 ---

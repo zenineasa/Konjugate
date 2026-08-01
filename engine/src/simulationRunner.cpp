@@ -1,12 +1,17 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "simulationRunner.hpp"
+#include <boost/property_tree/json_parser.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <random>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -14,6 +19,9 @@ namespace konjugate {
 namespace {
 using Values = std::unordered_map<std::string, double>;
 struct Sample { double time; Values states; };
+struct Checkpoint { std::string uuid; double time; Values states; };
+struct Pacing { std::string mode = "fastest"; double ratio = 1; };
+struct RunControl { Pacing pacing; std::string executionState = "running"; };
 
 std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
     return tree.get<std::string>(key, "");
@@ -24,6 +32,22 @@ double number(const std::string& input) {
     const auto result = std::stod(input, &consumed);
     if (consumed != input.size() || !std::isfinite(result)) throw std::runtime_error("Expression contains a non-finite number.");
     return result;
+}
+
+std::string createUuid() {
+    static thread_local std::mt19937_64 generator(std::random_device{}());
+    std::uniform_int_distribution<unsigned int> octet(0, 255);
+    unsigned int bytes[16];
+    for (auto& byte : bytes) byte = octet(generator);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    std::ostringstream value;
+    value << std::hex << std::setfill('0');
+    for (std::size_t index = 0; index < 16; ++index) {
+        if (index == 4 || index == 6 || index == 8 || index == 10) value << '-';
+        value << std::setw(2) << bytes[index];
+    }
+    return value.str();
 }
 
 double evaluate(const boost::property_tree::ptree& expression, const Values& symbols) {
@@ -76,18 +100,49 @@ void atomicWrite(const std::filesystem::path& path, const std::string& content) 
         std::filesystem::rename(temporary, path);
     }
 }
+
+Pacing pacingFromTree(const boost::property_tree::ptree& tree, const Pacing& fallback = {}) {
+    Pacing pacing;
+    pacing.mode = tree.get<std::string>("pacing.mode", tree.get<std::string>("mode", fallback.mode));
+    pacing.ratio = tree.get<double>("pacing.simulationSecondsPerWallSecond",
+        tree.get<double>("simulationSecondsPerWallSecond", fallback.ratio));
+    if (pacing.mode == "realTime") pacing.ratio = 1;
+    if (pacing.mode != "fastest" && pacing.mode != "realTime" && pacing.mode != "limitedRatio") {
+        throw std::runtime_error("Pacing mode must be fastest, realTime, or limitedRatio.");
+    }
+    if (pacing.mode == "limitedRatio" && (!(pacing.ratio > 0) || !std::isfinite(pacing.ratio))) {
+        throw std::runtime_error("Limited pacing requires a finite positive simulationSecondsPerWallSecond value.");
+    }
+    return pacing;
+}
+
+RunControl readRunControl(const std::filesystem::path& path, const RunControl& current) {
+    if (path.empty() || !std::filesystem::exists(path)) return current;
+    try {
+        boost::property_tree::ptree control;
+        boost::property_tree::read_json(path.string(), control);
+        const auto executionState = control.get<std::string>("executionState", current.executionState);
+        if (executionState != "running" && executionState != "paused" && executionState != "stopped") return current;
+        return {pacingFromTree(control, current.pacing), executionState};
+    } catch (...) {
+        return current;
+    }
+}
 }
 
 void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
-                   const std::filesystem::path& outputPath) {
-    const auto duration = configuration.get<double>("duration", 1.0);
+                   const std::filesystem::path& outputPath,
+                   const std::filesystem::path& pacingControlPath) {
+    const auto targetTime = configuration.get<double>("targetTime");
     const auto globalTimeStep = configuration.get<double>("globalTimeStep", configuration.get<double>("timeStep", 0.01));
     const auto outputInterval = configuration.get<double>("outputInterval", globalTimeStep);
     const auto outputRatio = outputInterval / globalTimeStep;
-    if (!(duration > 0) || !(globalTimeStep > 0) || globalTimeStep > duration || !(outputInterval > 0) || outputInterval > duration ||
-        !std::isfinite(duration) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
-        throw std::runtime_error("Run configuration requires finite positive duration, globalTimeStep, and outputInterval values that do not exceed duration.");
+    auto pacing = pacingFromTree(configuration);
+    RunControl runControl{pacing, "running"};
+    if (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
+        !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
+        throw std::runtime_error("A run requires a finite positive targetTime and numerical timestep values.");
     }
     if (outputInterval < globalTimeStep || std::abs(outputRatio - std::round(outputRatio)) > 1e-9) {
         throw std::runtime_error("outputInterval must be an integer multiple of globalTimeStep.");
@@ -110,11 +165,109 @@ void runSimulation(const boost::property_tree::ptree& document,
         }
     }
 
-    const auto steps = static_cast<std::size_t>(std::ceil(duration / globalTimeStep));
-    std::vector<Sample> samples = {{0, states}};
-    auto nextOutputTime = outputInterval;
+    double startTime = 0;
+    if (const auto checkpoint = configuration.get_child_optional("startCheckpoint")) {
+        startTime = checkpoint->get<double>("time");
+        std::set<std::string> restored;
+        for (const auto& stateItem : checkpoint->get_child("states")) {
+            const auto stateId = value(stateItem.second, "stateId");
+            if (!states.contains(stateId) || !restored.insert(stateId).second) throw std::runtime_error("The restart checkpoint does not match the model state vector.");
+            states[stateId] = stateItem.second.get<double>("value");
+        }
+        if (restored.size() != states.size()) throw std::runtime_error("The restart checkpoint is missing model states.");
+    }
+    if (!(startTime >= 0) || !(targetTime > startTime)) throw std::runtime_error("targetTime must be later than the restart checkpoint.");
+
+    std::vector<std::string> stateIds;
+    for (const auto& item : states) stateIds.push_back(item.first);
+    std::sort(stateIds.begin(), stateIds.end());
+    std::vector<std::string> nodeIds;
+    for (const auto& item : nodeSubsteps) nodeIds.push_back(item.first);
+    std::sort(nodeIds.begin(), nodeIds.end());
+
+    const auto steps = static_cast<std::size_t>(std::ceil((targetTime - startTime) / globalTimeStep));
+    std::vector<Sample> samples = {{startTime, states}};
+    std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states}};
+    double currentTime = startTime;
+    const auto captureBoundary = [&]() {
+        if (currentTime <= samples.back().time + 1e-12) return;
+        samples.push_back({currentTime, states});
+        checkpoints.push_back({createUuid(), currentTime, states});
+    };
+    const auto writeResult = [&](const std::string& lifecycle, double simulationTime) {
+        std::ostringstream json;
+        json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.1.0\",\"configurationName\":\""
+             << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"lifecycle\":\"" << lifecycle
+             << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time
+             << ",\"pacing\":{\"mode\":\"" << escape(pacing.mode) << "\",\"simulationSecondsPerWallSecond\":" << pacing.ratio << "}"
+             << ",\"targetTime\":" << targetTime << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval
+             << ",\"globalSteps\":" << steps << ",\"nodeTimesteps\":[";
+        for (std::size_t index = 0; index < nodeIds.size(); ++index) {
+            if (index) json << ',';
+            const auto& nodeId = nodeIds[index];
+            json << "{\"nodeId\":\"" << escape(nodeId) << "\",\"substepsPerGlobalStep\":" << nodeSubsteps.at(nodeId)
+                 << ",\"effectiveTimeStep\":" << globalTimeStep / static_cast<double>(nodeSubsteps.at(nodeId)) << '}';
+        }
+        json << "],\"states\":[";
+        for (std::size_t index = 0; index < stateIds.size(); ++index) {
+            if (index) json << ',';
+            const auto& stateId = stateIds[index];
+            json << "{\"nodeId\":\"" << escape(stateNodes.at(stateId)) << "\",\"stateId\":\"" << escape(stateId)
+                 << "\",\"value\":" << states.at(stateId) << '}';
+        }
+        json << "],\"samples\":[";
+        for (std::size_t sampleIndex = 0; sampleIndex < samples.size(); ++sampleIndex) {
+            if (sampleIndex) json << ',';
+            json << "{\"time\":" << samples[sampleIndex].time << ",\"states\":[";
+            for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
+                if (stateIndex) json << ',';
+                const auto& stateId = stateIds[stateIndex];
+                json << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << samples[sampleIndex].states.at(stateId) << '}';
+            }
+            json << "]}";
+        }
+        json << "],\"checkpoints\":[";
+        for (std::size_t checkpointIndex = 0; checkpointIndex < checkpoints.size(); ++checkpointIndex) {
+            if (checkpointIndex) json << ',';
+            const auto& checkpoint = checkpoints[checkpointIndex];
+            json << "{\"uuid\":\"" << checkpoint.uuid << "\",\"time\":" << checkpoint.time
+                 << ",\"solver\":{\"kind\":\"explicitEuler\",\"version\":1},\"states\":[";
+            for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
+                if (stateIndex) json << ',';
+                const auto& stateId = stateIds[stateIndex];
+                json << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << checkpoint.states.at(stateId) << '}';
+            }
+            json << "]}";
+        }
+        json << "]}";
+        atomicWrite(outputPath, json.str());
+    };
+    writeResult("running", startTime);
+    auto lastPublishedAt = std::chrono::steady_clock::now();
+    auto nextOutputTime = startTime + outputInterval;
     for (std::size_t step = 0; step < steps; ++step) {
-        const auto synchronizationStep = std::min(globalTimeStep, duration - static_cast<double>(step) * globalTimeStep);
+        runControl = readRunControl(pacingControlPath, runControl);
+        pacing = runControl.pacing;
+        if (runControl.executionState == "paused") {
+            captureBoundary();
+            writeResult("paused", currentTime);
+            while (runControl.executionState == "paused") {
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                runControl = readRunControl(pacingControlPath, runControl);
+            }
+            pacing = runControl.pacing;
+            if (runControl.executionState == "stopped") {
+                writeResult("stopped", currentTime);
+                return;
+            }
+            writeResult("running", currentTime);
+        } else if (runControl.executionState == "stopped") {
+            captureBoundary();
+            writeResult("stopped", currentTime);
+            return;
+        }
+        const auto wallStepStarted = std::chrono::steady_clock::now();
+        const auto synchronizationStep = std::min(globalTimeStep, targetTime - startTime - static_cast<double>(step) * globalTimeStep);
         const auto snapshot = states;
         auto synchronizedStates = snapshot;
         for (const auto& nodeItem : document.get_child("nodes")) {
@@ -163,50 +316,29 @@ void runSimulation(const boost::property_tree::ptree& document,
             for (const auto& stateId : nodeStates.at(nodeId)) synchronizedStates[stateId] = localStates.at(stateId);
         }
         states = std::move(synchronizedStates);
-        const auto elapsed = std::min(duration, static_cast<double>(step + 1) * globalTimeStep);
+        const auto elapsed = std::min(targetTime, startTime + static_cast<double>(step + 1) * globalTimeStep);
+        currentTime = elapsed;
+        while (pacing.mode != "fastest") {
+            const auto targetDuration = std::chrono::duration<double>(synchronizationStep / pacing.ratio);
+            const auto spent = std::chrono::steady_clock::now() - wallStepStarted;
+            if (spent >= targetDuration) break;
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(targetDuration - spent);
+            std::this_thread::sleep_for(std::min(remaining, std::chrono::milliseconds(20)));
+            runControl = readRunControl(pacingControlPath, runControl);
+            pacing = runControl.pacing;
+            if (runControl.executionState != "running") break;
+        }
         if (elapsed + 1e-12 >= nextOutputTime || step + 1 == steps) {
             samples.push_back({elapsed, states});
+            checkpoints.push_back({createUuid(), elapsed, states});
             while (nextOutputTime <= elapsed + 1e-12) nextOutputTime += outputInterval;
+            const auto publicationTime = std::chrono::steady_clock::now();
+            if (step + 1 == steps || publicationTime - lastPublishedAt >= std::chrono::milliseconds(100)) {
+                writeResult(step + 1 == steps ? "completed" : "running", elapsed);
+                lastPublishedAt = publicationTime;
+            }
         }
     }
-
-    std::vector<std::string> stateIds;
-    for (const auto& item : states) stateIds.push_back(item.first);
-    std::sort(stateIds.begin(), stateIds.end());
-    std::ostringstream json;
-    json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.1.0\",\"configurationName\":\""
-         << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"duration\":" << duration
-         << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval
-         << ",\"globalSteps\":" << steps << ",\"nodeTimesteps\":[";
-    std::vector<std::string> nodeIds;
-    for (const auto& item : nodeSubsteps) nodeIds.push_back(item.first);
-    std::sort(nodeIds.begin(), nodeIds.end());
-    for (std::size_t index = 0; index < nodeIds.size(); ++index) {
-        if (index) json << ',';
-        const auto& nodeId = nodeIds[index];
-        json << "{\"nodeId\":\"" << escape(nodeId) << "\",\"substepsPerGlobalStep\":" << nodeSubsteps.at(nodeId)
-             << ",\"effectiveTimeStep\":" << globalTimeStep / static_cast<double>(nodeSubsteps.at(nodeId)) << '}';
-    }
-    json << "],\"states\":[";
-    for (std::size_t index = 0; index < stateIds.size(); ++index) {
-        if (index) json << ',';
-        const auto& stateId = stateIds[index];
-        json << "{\"nodeId\":\"" << escape(stateNodes.at(stateId)) << "\",\"stateId\":\"" << escape(stateId)
-             << "\",\"value\":" << states.at(stateId) << '}';
-    }
-    json << "],\"samples\":[";
-    for (std::size_t sampleIndex = 0; sampleIndex < samples.size(); ++sampleIndex) {
-        if (sampleIndex) json << ',';
-        json << "{\"time\":" << samples[sampleIndex].time << ",\"states\":[";
-        for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
-            if (stateIndex) json << ',';
-            const auto& stateId = stateIds[stateIndex];
-            json << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << samples[sampleIndex].states.at(stateId) << '}';
-        }
-        json << "]}";
-    }
-    json << "]}";
-    atomicWrite(outputPath, json.str());
 }
 
 }

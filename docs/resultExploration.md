@@ -215,12 +215,13 @@ Playback rate controls the presentation of existing samples. Simulation pacing
 controls how quickly the engine is permitted to advance relative to wall-clock
 time. They are independent.
 
-Proposed engine pacing modes are:
+Implemented engine pacing modes are:
 
 - **Fastest:** run as quickly as computation permits.
 - **Real time:** target one simulation second per wall-clock second.
-- **Capped:** run at no more than `n` simulation seconds per wall-clock second.
-- **Manual step:** advance one global synchronization step on request.
+- **Limited ratio:** run at no more than `n` simulation seconds per wall-clock second.
+
+Manual stepping and pausing remain future extensions.
 
 A pacing cap is a maximum, not a guarantee; expensive models may advance more
 slowly. Pausing occurs at a safe synchronization boundary. Pacing belongs in the
@@ -229,6 +230,12 @@ C++ runner so Electron and command-line execution share the same semantics.
 During a paced run, confirmed samples stream to the UI, the transport cursor
 advances, and node labels update at output intervals. Cancellation, pausing, and
 interventions use the file-based job protocol rather than renderer delays.
+
+The implemented execution lifecycle is `running ↔ paused`, followed by either
+`completed` or `stopped`. Stop captures the current synchronization boundary and
+retains a partial result. The current UI can continue a stopped result from its
+latest checkpoint. Earlier-checkpoint restart and branch navigation remain part
+of the proposed branching phase rather than the live transport.
 
 ## Proposed result-session model
 

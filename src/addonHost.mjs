@@ -10,7 +10,11 @@ const allowedPermissions = new Set([
     'results.read',
     'timeline.read',
     'timeline.seek',
-    'selection.read'
+    'selection.read',
+    'results.live.read',
+    'simulation.status.read',
+    'simulation.pacing.read',
+    'simulation.pacing.control'
 ]);
 
 export function validateAddonManifest(manifest) {
@@ -55,7 +59,7 @@ export function publicToolstripContributions(manifest) {
     }));
 }
 
-export function createVisualizerSession({ sessionId, projectName, result, nodes, selectedNodeId, time = 0 }) {
+export function createVisualizerSession({ sessionId, projectName, result, nodes, selectedNodeId, engineJobId = null, time = 0 }) {
     const signals = nodes.flatMap((node) => node.states.map((state) => ({
         signalUuid: state.id,
         entityUuid: node.id,
@@ -66,12 +70,17 @@ export function createVisualizerSession({ sessionId, projectName, result, nodes,
     })));
     return {
         sessionId,
+        engineJobId,
         projectName,
         run: {
             name: result.configurationName,
-            duration: Number(result.duration),
+            targetTime: Number(result.targetTime),
             outputInterval: Number(result.outputInterval),
-            sampleCount: result.samples.length
+            sampleCount: result.samples.length,
+            lifecycle: result.lifecycle ?? 'completed',
+            simulationTime: Number(result.simulationTime ?? result.targetTime),
+            availableResultTime: Number(result.availableResultTime ?? result.targetTime),
+            pacing: structuredClone(result.pacing ?? { mode: 'fastest', simulationSecondsPerWallSecond: 1 })
         },
         signals,
         samples: structuredClone(result.samples),

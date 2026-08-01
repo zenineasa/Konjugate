@@ -15,7 +15,7 @@
     <header class="analysisHeader">
         <div><span>Konjugate add-on</span><strong>Results Analysis</strong></div>
         <div class="runIdentity"><strong id="projectName">—</strong><span id="runName">—</span></div>
-        <span class="readOnlyBadge">Read-only</span>
+        <div class="liveControls"><span id="runLifecycle" class="readOnlyBadge">Completed</span><select id="pacing" aria-label="Simulation pacing" hidden><option value="fastest">Fastest</option><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select></div>
     </header>
     <main>
         <aside class="signalBrowser">
@@ -31,7 +31,7 @@
     <footer class="analysisTimeline">
         <output id="currentTime">0 s</output>
         <input id="timeline" type="range" min="0" max="0" value="0" step="any" aria-label="Simulation time">
-        <output id="duration">0 s</output>
+        <output id="targetTime">0 s</output>
     </footer>
 </body>
 </html>

@@ -47,9 +47,13 @@ Invalid manifests are skipped. A diagnostic is written to the main-process conso
     "copyright": "Copyright © 2026 Example Author",
     "permissions": [
         "results.read",
+        "results.live.read",
         "timeline.read",
         "timeline.seek",
-        "selection.read"
+        "selection.read",
+        "simulation.status.read",
+        "simulation.pacing.read",
+        "simulation.pacing.control"
     ],
     "contributes": {
         "toolstrip": [{
@@ -97,6 +101,10 @@ Permissions are declared explicitly. Unknown permissions cause the manifest to b
 | `timeline.read` | Receive timeline-position changes from the main result player. |
 | `timeline.seek` | Request that the main result player seek to a time. |
 | `selection.read` | Receive selected-node changes from the main canvas. |
+| `results.live.read` | Receive notifications when additional live samples are available. |
+| `simulation.status.read` | Receive live run lifecycle and progress metadata. |
+| `simulation.pacing.read` | Receive the active simulation pacing mode and ratio. |
+| `simulation.pacing.control` | Request a pacing change for the active engine job. |
 
 Only request capabilities the visualizer uses. The bundled preload may expose a method whose corresponding permission was not granted, but the host will not provide the protected data or event.
 
@@ -144,9 +152,15 @@ context
 ├── time
 └── run
     ├── name
-    ├── duration
+    ├── targetTime
     ├── outputInterval
-    └── sampleCount
+    ├── sampleCount
+    ├── lifecycle              `running`, `paused`, `stopped`, or `completed`
+    ├── simulationTime
+    ├── availableResultTime
+    └── pacing
+        ├── mode               `fastest`, `realTime`, or `limitedRatio`
+        └── simulationSecondsPerWallSecond
 ```
 
 The context contains metadata, not the full model or result sample storage. It returns `null` after the result session is no longer available.
@@ -182,7 +196,7 @@ const series = await window.konjugateVisualizer.readSeries(
     selectedSignalUuids,
     {
         startTime: 0,
-        endTime: context.run.duration,
+        endTime: context.run.targetTime,
         maxPoints: 5000
     }
 );
@@ -198,6 +212,8 @@ samples: [{ time: Number, value: Number }, ...]
 
 An add-on should request only the signals and resolution it can display. Do not assume all runs fit comfortably in renderer memory.
 
+During a live run, `readSeries()` returns the complete samples currently published by the engine. Re-request only the visible series after `onSamplesAvailable`; the event intentionally does not push the potentially large sample payload across the bridge.
+
 ### `seek(time)`
 
 Requests a new time from the main result player. It requires `timeline.seek`.
@@ -206,7 +222,7 @@ Requests a new time from the main result player. It requires `timeline.seek`.
 window.konjugateVisualizer.seek(4.2);
 ```
 
-The host clamps the request to the result duration. The main player selects its nearest available output sample and subsequently publishes the accepted time through `onTimelineChange` when `timeline.read` is granted.
+The host clamps the request to the latest available result time. The main player selects its nearest available output sample and subsequently publishes the accepted time through `onTimelineChange` when `timeline.read` is granted.
 
 ### `onTimelineChange(callback)`
 
@@ -243,6 +259,29 @@ window.konjugateVisualizer.onSessionChange(async () => {
 ```
 
 When the user explicitly closes results in Konjugate, the visualizer window is closed and its session is invalidated.
+
+### Live run events and pacing
+
+`onSamplesAvailable(callback)` requires `results.live.read` and reports `{ sampleCount, availableResultTime }` whenever a new atomic result snapshot is available. `onRunStatusChange(callback)` requires `simulation.status.read` and publishes the current `run` metadata. `onPacingChange(callback)` requires `simulation.pacing.read`.
+
+```js
+window.konjugateVisualizer.onSamplesAvailable(async () => {
+    const series = await window.konjugateVisualizer.readSeries(selectedSignalUuids);
+    updatePlot(series);
+});
+window.konjugateVisualizer.onRunStatusChange((run) => updateStatus(run.lifecycle));
+```
+
+An add-on with `simulation.pacing.control` may request a live pacing change:
+
+```js
+await window.konjugateVisualizer.requestPacing({
+    mode: 'limitedRatio',
+    simulationSecondsPerWallSecond: 2
+});
+```
+
+`realTime` always means one simulation second per wall second. `fastest` removes the wall-clock limit. A limited ratio is a cap, not a guarantee: computationally expensive models may advance more slowly. Simulation pacing controls engine execution; it is separate from the completed-result playback rate and must not be presented as playback speed.
 
 ## Minimal visualizer
 

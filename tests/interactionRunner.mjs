@@ -50,7 +50,6 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#runConfigurationButton').click()`);
         await evaluate(window, `(() => {
             document.querySelector('#runConfigurationName').value = 'Fast response';
-            document.querySelector('#runDuration').value = '0.2';
             document.querySelector('#runGlobalTimeStep').value = '0.02';
             document.querySelector('#runOutputInterval').value = '0.1';
             document.querySelector('#applyRunConfiguration').click();
@@ -68,7 +67,26 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
         await evaluate(window, `document.querySelector('#runButton').click()`);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '0.3'; document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
         await waitFor(window, `!document.querySelector('#resultTransport').hidden`, 'C++ simulation did not produce a playable result.', 10000);
+        assert.equal(await evaluate(window, `!document.querySelector('#simulationPacing').hidden && document.querySelector('#resultPlaybackRate').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#resultPlaybackControls').hidden && !document.querySelector('#simulationExecutionControls').hidden`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl')].every((control) => control.hidden) && document.querySelector('#continueRun').hidden`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl, #continueRun')].every((control) => getComputedStyle(control).display === 'none')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('.resultMode b').textContent`), 'Simulation');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#simulationProgress')).display !== 'none' && document.querySelector('#simulationProgress').value.includes('/')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('.resultMode small').textContent`), 'Running · model locked');
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Paused · model locked'`, 'Simulation did not pause at a synchronization boundary.', 3000);
+        assert.equal(await evaluate(window, `document.querySelector('#closeResults').hidden`), true);
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete.', 5000);
+        assert.equal(await evaluate(window, `document.querySelector('#simulationPacing').hidden && !document.querySelector('#resultPlaybackRate').hidden`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#resultPlaybackControls').hidden && document.querySelector('#simulationExecutionControls').hidden`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl')].every((control) => !control.hidden) && document.querySelector('#continueRun').hidden`), true);
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#continueRun')).display === 'none' && getComputedStyle(document.querySelector('#resultTimeline')).display !== 'none'`), true);
+        assert.equal(await evaluate(window, `document.querySelector('.resultMode b').textContent`), 'Results');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#simulationProgress')).display === 'none'`), true);
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('showNodesDetails')`), true);
         const finalValue = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
@@ -102,7 +120,7 @@ export async function runInteractionTests(window) {
             throw new Error('Results Analysis add-on window did not open.');
         })();
         await waitFor(analysisWindow, `document.querySelectorAll('.signalOption').length > 0 && document.querySelector('.plotWorkspace').classList.contains('hasSignals')`, 'Results Analysis did not load signals.', 5000);
-        assert.equal(await evaluate(analysisWindow, `document.querySelector('.readOnlyBadge').textContent`), 'Read-only');
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('.readOnlyBadge').textContent`), 'Completed');
         assert.equal(await evaluate(analysisWindow, `typeof require === 'undefined'`), true);
         assert.ok(await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data.length`) > 0);
         await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);

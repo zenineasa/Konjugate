@@ -9,6 +9,7 @@ namespace konjugate {
 
 void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
-                   const std::filesystem::path& outputPath);
+                   const std::filesystem::path& outputPath,
+                   const std::filesystem::path& pacingControlPath = {});
 
 }

@@ -34,7 +34,7 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const defaultRunConfiguration = () => ({
-    id: crypto.randomUUID(), name: 'Default', duration: 1, globalTimeStep: 0.01, outputInterval: 0.1
+    id: crypto.randomUUID(), name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1
 });
 
 const canvas = $('#canvas');
@@ -197,7 +197,6 @@ function hydrateProjectDocument(document) {
         ? document.runConfigurations.map((configuration) => ({
             id: configuration.id ?? crypto.randomUUID(),
             name: configuration.name || 'Untitled',
-            duration: Number(configuration.duration) || 1,
             globalTimeStep: Number(configuration.globalTimeStep) || 0.01,
             outputInterval: Number(configuration.outputInterval) || 0.1
         }))
@@ -275,6 +274,12 @@ let engineValidationTimer = null;
 let equationEditSession = null;
 let simulationRunning = false;
 let activeResult = null;
+let activeEngineJobId = null;
+let runLaunchSettings = {
+    targetTime: 1,
+    pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 }
+};
+let pendingRestart = null;
 let activeResultSampleIndex = 0;
 let resultPlaybackTimer = null;
 let resultPlaying = false;
@@ -1599,6 +1604,18 @@ function formatResultTime(time) {
     return `${Number(time).toLocaleString(undefined, { maximumSignificantDigits: 6 })} s`;
 }
 
+function updateResultExtent() {
+    if (!activeResult) return;
+    const targetTime = Number(activeResult.targetTime);
+    const availableTime = Number(activeResult.availableResultTime);
+    const plannedIntervals = Math.max(1, Math.ceil(targetTime / Number(activeResult.outputInterval)));
+    const availableIntervals = Math.max(0, activeResult.samples.length - 1);
+    $('#resultTimeline').max = String(Math.max(plannedIntervals, availableIntervals));
+    $('#resultTimeline').style.setProperty('--available-progress', `${100 * availableIntervals / Math.max(plannedIntervals, availableIntervals)}%`);
+    $('#resultExtent').value = `available ${formatResultTime(availableTime)} · target ${formatResultTime(targetTime)}`;
+    $('#simulationProgress').value = `${formatResultTime(availableTime)} / ${formatResultTime(targetTime)}`;
+}
+
 function updateDisplayedState(stateId, numericValue) {
     const node = model.nodes.find((candidate) => candidate.states.some((state) => state.id === stateId));
     const state = node?.states.find((candidate) => candidate.id === stateId);
@@ -1687,17 +1704,68 @@ function activateResult(result) {
     setResultModeLocked(true);
     setLabelDetail('nodes', true);
     $('#resultTransport').hidden = false;
-    $('#resultTimeline').max = String(result.samples.length - 1);
-    $('#resultDuration').value = formatResultTime(result.duration);
+    updateLiveResultControls();
+    updateResultExtent();
     projectResultSample(result.samples.length - 1);
     if (selectedNode && !$('#nodeEditor').classList.contains('hidden')) selectNodeEditorTab('results');
 }
 
-function clearResultPlayback() {
+function updateLiveResultControls() {
+    const lifecycle = activeResult?.lifecycle;
+    const live = simulationRunning && ['running', 'paused'].includes(lifecycle);
+    const paused = lifecycle === 'paused';
+    $('#resultTransport').classList.toggle('liveMode', live);
+    $('#simulationProgress').hidden = !live;
+    $('.resultMode b').textContent = live ? 'Simulation' : 'Results';
+    $('.resultMode small').textContent = live ? `${paused ? 'Paused' : 'Running'} · model locked` : `${lifecycle === 'stopped' ? 'Stopped · ' : ''}Model locked`;
+    $('#simulationExecutionControls').hidden = !live;
+    $('#resultPlaybackControls').hidden = live;
+    $('#simulationPauseResume').innerHTML = paused ? '<span aria-hidden="true">▶</span> Resume' : '<span aria-hidden="true">❚❚</span> Pause';
+    $('#simulationPauseResume').ariaLabel = paused ? 'Resume simulation' : 'Pause simulation';
+    $('#continueRun').hidden = lifecycle !== 'stopped' || live || !activeResult?.checkpoints?.length;
+    $$('.reviewControl').forEach((control) => { control.hidden = live; });
+    $('#resultPlaybackRate').hidden = live;
+    $('#simulationPacing').hidden = !live;
+    $('#closeResults').lastChild.textContent = 'Close results and edit';
+    if (activeResult?.pacing) {
+        const { mode, simulationSecondsPerWallSecond: ratio } = activeResult.pacing;
+        const value = mode === 'limitedRatio' ? `limitedRatio:${ratio}` : mode;
+        if ([...$('#simulationPacing').options].some((option) => option.value === value)) $('#simulationPacing').value = value;
+    }
+}
+
+function applyLiveResult(jobId, result) {
+    if (!simulationRunning || (activeEngineJobId && jobId !== activeEngineJobId)) return;
+    activeEngineJobId ??= jobId;
+    const followLatest = !activeResult || activeResultSampleIndex >= activeResult.samples.length - 1;
+    if (pendingRestart) {
+        result = {
+            ...result,
+            samples: [...pendingRestart.samples, ...result.samples],
+            checkpoints: [...pendingRestart.checkpoints, ...result.checkpoints]
+        };
+    }
+    if (!activeResult || pendingRestart?.starting) {
+        if (pendingRestart) pendingRestart.starting = false;
+        activateResult(result);
+    }
+    else {
+        activeResult = result;
+        updateResultExtent();
+        projectResultSample(followLatest ? result.samples.length - 1 : Math.min(activeResultSampleIndex, result.samples.length - 1));
+        updateLiveResultControls();
+    }
+    window.addons.publishEvent('result.update', { jobId, result });
+}
+
+async function clearResultPlayback() {
     if (!activeResult) return;
+    if (simulationRunning) return;
     stopResultPlayback();
     window.addons.closeContext('resultSession');
     activeResult = null;
+    activeEngineJobId = null;
+    simulationRunning = false;
     setResultModeLocked(false);
     nodeResultPlot.clear();
     $('.nodeResultsPanel').classList.remove('hasResults');
@@ -1711,6 +1779,7 @@ function clearResultPlayback() {
 $('#resultTimeline').addEventListener('input', (event) => {
     stopResultPlayback();
     projectResultSample(Number(event.target.value));
+    updateLiveResultControls();
 });
 $('#resultStart').addEventListener('click', () => { stopResultPlayback(); projectResultSample(0); });
 $('#resultPrevious').addEventListener('click', () => { stopResultPlayback(); projectResultSample(activeResultSampleIndex - 1); });
@@ -1730,6 +1799,39 @@ $('#resultPlayPause').addEventListener('click', () => {
 $('#resultPlaybackRate').addEventListener('change', () => {
     if (resultPlaying) { clearTimeout(resultPlaybackTimer); scheduleResultPlayback(); }
 });
+$('#simulationPacing').addEventListener('change', async (event) => {
+    if (!activeEngineJobId) return;
+    const [mode, ratio] = event.target.value.split(':');
+    await window.engine.setPacing(activeEngineJobId, {
+        mode,
+        simulationSecondsPerWallSecond: mode === 'realTime' ? 1 : Number(ratio || 1)
+    });
+});
+$('#simulationPauseResume').addEventListener('click', async () => {
+    if (!activeEngineJobId || !simulationRunning) return;
+    const nextState = activeResult?.lifecycle === 'paused' ? 'running' : 'paused';
+    await window.engine.setExecutionState(activeEngineJobId, nextState);
+});
+$('#simulationStop').addEventListener('click', async () => {
+    if (!activeEngineJobId || !simulationRunning) return;
+    await window.engine.setExecutionState(activeEngineJobId, 'stopped');
+});
+$('#continueRun').addEventListener('click', () => {
+    const checkpoint = activeResult.checkpoints.at(-1);
+    if (!checkpoint) return;
+    pendingRestart = {
+        starting: true,
+        checkpoint: structuredClone(checkpoint),
+        samples: structuredClone(activeResult.samples.slice(0, -1)),
+        checkpoints: structuredClone(activeResult.checkpoints.slice(0, -1))
+    };
+    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, checkpoint.time + model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId).globalTimeStep);
+    $('#runLaunchDescription').textContent = `Continue from ${formatResultTime(checkpoint.time)}.`;
+    $('#runTargetTime').value = runLaunchSettings.targetTime;
+    $('#runPacingMode').value = runLaunchSettings.pacing.mode;
+    $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
+    $('#runLaunchDialog').showModal();
+});
 $('#closeResults').addEventListener('click', clearResultPlayback);
 window.addons.onRequest('timeline.seek', (time) => {
     if (!activeResult) return;
@@ -1743,6 +1845,7 @@ function createAddonContext(contextNames) {
         if (contextName !== 'resultSession' || !activeResult) return null;
         contexts.resultSession = {
             projectName: filenameStem(currentProjectFilename),
+            engineJobId: activeEngineJobId,
             result: activeResult,
             nodes: model.nodes.map((node) => ({
                 id: node.id,
@@ -1805,25 +1908,89 @@ async function initializeAddonToolstripContributions() {
     }
 }
 
-$('#runButton').addEventListener('click', async () => {
+async function startSimulation() {
     if (simulationRunning || !currentValidation.valid) return;
     simulationRunning = true;
+    if (pendingRestart && activeResult) {
+        activeResult = { ...activeResult, lifecycle: 'running' };
+        updateLiveResultControls();
+    }
     $('#runButton').disabled = true;
     $('#runButton').title = 'Simulation is running';
     $('#statusText').textContent = 'Running simulation…';
     try {
         const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
-        const execution = await window.engine.run(JSON.stringify(serializeProjectDocument()), configuration);
+        const execution = await window.engine.start(JSON.stringify(serializeProjectDocument()), {
+            ...configuration,
+            targetTime: runLaunchSettings.targetTime,
+            pacing: runLaunchSettings.pacing,
+            ...(pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
+        });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
-        activateResult(execution.result);
+        activeEngineJobId = execution.jobId;
     } catch (error) {
         console.error('C++ simulation failed.', error);
         $('#statusText').textContent = 'Simulation failed';
         $('#runButton').title = error.message;
-    } finally {
         simulationRunning = false;
         $('#runButton').disabled = Boolean(activeResult) || !currentValidation.valid;
         if (currentValidation.valid) $('#runButton').title = 'Run simulation';
+    }
+}
+
+$('#runButton').addEventListener('click', () => {
+    if (simulationRunning || !currentValidation.valid) return;
+    pendingRestart = null;
+    $('#runLaunchDescription').textContent = "Run from the model's initial state.";
+    $('#runTargetTime').value = runLaunchSettings.targetTime;
+    $('#runPacingMode').value = runLaunchSettings.pacing.mode;
+    $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
+    $('#runPacingRatioField').hidden = runLaunchSettings.pacing.mode !== 'limitedRatio';
+    $('#runLaunchError').textContent = '';
+    $('#runLaunchDialog').showModal();
+});
+
+$('#runLaunchCancel').addEventListener('click', () => $('#runLaunchDialog').close());
+$('#runPacingMode').addEventListener('change', (event) => {
+    $('#runPacingRatioField').hidden = event.target.value !== 'limitedRatio';
+});
+$('#runLaunchDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+    const targetTime = Number($('#runTargetTime').value);
+    const pacingMode = $('#runPacingMode').value;
+    const pacingRatio = pacingMode === 'realTime' ? 1 : Number($('#runPacingRatio').value);
+    const startTime = pendingRestart?.checkpoint.time ?? 0;
+    if (!(targetTime > startTime) || targetTime - startTime < configuration.globalTimeStep ||
+        (pacingMode === 'limitedRatio' && (!(pacingRatio > 0) || !Number.isFinite(pacingRatio)))) {
+        $('#runLaunchError').textContent = `Target time must be at least one global timestep after ${formatResultTime(startTime)}; limited pacing requires a positive ratio.`;
+        return;
+    }
+    runLaunchSettings = {
+        targetTime,
+        pacing: { mode: pacingMode, simulationSecondsPerWallSecond: pacingRatio }
+    };
+    $('#runLaunchDialog').close();
+    startSimulation();
+});
+
+window.engine.onUpdate(({ jobId, result }) => applyLiveResult(jobId, result));
+window.engine.onComplete(({ jobId, result }) => {
+    if (jobId !== activeEngineJobId) return;
+    applyLiveResult(jobId, result);
+    simulationRunning = false;
+    updateLiveResultControls();
+    $('#statusText').textContent = result.lifecycle === 'stopped' ? 'Simulation stopped · partial results retained' : 'Simulation complete';
+});
+window.engine.onError(({ jobId, message }) => {
+    if (jobId !== activeEngineJobId) return;
+    simulationRunning = false;
+    updateLiveResultControls();
+    $('#statusText').textContent = 'Simulation failed';
+    $('#runButton').title = message;
+    if (!activeResult) {
+        activeEngineJobId = null;
+        $('#runButton').disabled = !currentValidation.valid;
     }
 });
 
@@ -1838,7 +2005,6 @@ $('#runConfigurationButton').addEventListener('click', () => {
     if (activeResult) return;
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#runConfigurationName').value = configuration.name;
-    $('#runDuration').value = configuration.duration;
     $('#runGlobalTimeStep').value = configuration.globalTimeStep;
     $('#runOutputInterval').value = configuration.outputInterval;
     $('#runConfigurationError').textContent = '';
@@ -1852,13 +2018,11 @@ $('#runConfigurationDialog form').addEventListener('submit', (event) => {
     const after = {
         ...before,
         name: $('#runConfigurationName').value.trim() || 'Untitled',
-        duration: Number($('#runDuration').value),
         globalTimeStep: Number($('#runGlobalTimeStep').value),
         outputInterval: Number($('#runOutputInterval').value)
     };
     const outputRatio = after.outputInterval / after.globalTimeStep;
-    if (!(after.duration > 0) || !(after.globalTimeStep > 0) || after.globalTimeStep > after.duration ||
-        !(after.outputInterval > 0) || after.outputInterval > after.duration || after.outputInterval < after.globalTimeStep ||
+    if (!(after.globalTimeStep > 0) || !(after.outputInterval > 0) || after.outputInterval < after.globalTimeStep ||
         Math.abs(outputRatio - Math.round(outputRatio)) > 1e-9) {
         $('#runConfigurationError').textContent = 'Use positive values; output interval must be an integer multiple of the global timestep.';
         return;

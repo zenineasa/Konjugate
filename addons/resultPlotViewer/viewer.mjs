@@ -5,6 +5,7 @@ const selectedSignals = new Set();
 let context = null;
 let signals = [];
 let plotReady = false;
+let pendingLiveRender = null;
 
 function formatTime(time) {
     return `${Number(time).toLocaleString(undefined, { maximumSignificantDigits: 6 })} s`;
@@ -22,6 +23,23 @@ function paddedRange(values, ratio = 0.06) {
 
 function cursorShape(time) {
     return { type: 'line', x0: time, x1: time, y0: 0, y1: 1, yref: 'paper', line: { color: '#62e1d5', width: 1.5, dash: 'dot' } };
+}
+
+function renderRunStatus(run) {
+    context.run = { ...context.run, ...run };
+    const live = context.run.lifecycle === 'running';
+    $('#runLifecycle').textContent = live ? `Live · ${formatTime(context.run.availableResultTime)}` : 'Completed';
+    $('#pacing').hidden = !live;
+    const pacing = context.run.pacing;
+    if (pacing) {
+        const value = pacing.mode === 'limitedRatio' ? `limitedRatio:${pacing.simulationSecondsPerWallSecond}` : pacing.mode;
+        if ([...$('#pacing').options].some((option) => option.value === value)) $('#pacing').value = value;
+    }
+}
+
+function scheduleLiveRender() {
+    clearTimeout(pendingLiveRender);
+    pendingLiveRender = setTimeout(() => renderPlot(), 50);
 }
 
 async function renderPlot() {
@@ -115,10 +133,11 @@ async function loadSession() {
     signals.filter((signal) => signal.entityUuid === context.selectedNodeId).forEach((signal) => selectedSignals.add(signal.signalUuid));
     $('#projectName').textContent = context.projectName;
     $('#runName').textContent = context.run.name;
-    $('#timeline').max = String(context.run.duration);
+    $('#timeline').max = String(context.run.targetTime);
     $('#timeline').value = String(context.time);
     $('#currentTime').value = formatTime(context.time);
-    $('#duration').value = formatTime(context.run.duration);
+    $('#targetTime').value = formatTime(context.run.targetTime);
+    renderRunStatus(context.run);
     renderSignalBrowser();
     await renderPlot();
 }
@@ -130,6 +149,13 @@ $('#clearSignals').addEventListener('click', () => {
     renderPlot();
 });
 $('#timeline').addEventListener('input', (event) => window.konjugateVisualizer.seek(Number(event.target.value)));
+$('#pacing').addEventListener('change', async (event) => {
+    const [mode, ratio] = event.target.value.split(':');
+    await window.konjugateVisualizer.requestPacing({
+        mode,
+        simulationSecondsPerWallSecond: mode === 'realTime' ? 1 : Number(ratio || 1)
+    });
+});
 window.konjugateVisualizer.onTimelineChange((time) => {
     if (!context) return;
     context.time = Number(time);
@@ -141,6 +167,20 @@ window.konjugateVisualizer.onSelectionChange((nodeId) => {
     if (!context) return;
     context.selectedNodeId = nodeId;
     document.querySelectorAll('.signalGroup').forEach((group) => group.classList.toggle('selectedEntity', group.dataset.entityUuid === nodeId));
+});
+window.konjugateVisualizer.onSamplesAvailable(({ availableResultTime }) => {
+    if (!context) return;
+    context.run.availableResultTime = availableResultTime;
+    renderRunStatus(context.run);
+    scheduleLiveRender();
+});
+window.konjugateVisualizer.onRunStatusChange((run) => {
+    if (!context) return;
+    renderRunStatus(run);
+});
+window.konjugateVisualizer.onPacingChange((pacing) => {
+    if (!context) return;
+    renderRunStatus({ pacing });
 });
 window.konjugateVisualizer.onSessionChange(loadSession);
 

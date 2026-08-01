@@ -6,7 +6,7 @@ import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { runWithEngine, validateWithEngine } from './engineAdapter.mjs';
+import { runWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import {
     createVisualizerSession,
     publicToolstripContributions,
@@ -23,6 +23,7 @@ let analysisAddonId = null;
 let visualizerManifest = null;
 let visualizerSession = null;
 const addonRegistry = new Map();
+const activeEngineJobs = new Map();
 
 function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
@@ -42,7 +43,8 @@ function createWindow() {
             preload: join(currentDir, 'preload.mjs'),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false
+            sandbox: false,
+            backgroundThrottling: false
         }
     });
 
@@ -136,7 +138,8 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
             preload: join(currentDir, 'addonPreload.cjs'),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true
+            sandbox: true,
+            backgroundThrottling: false
         }
     });
     analysisWindow = createdWindow;
@@ -185,6 +188,32 @@ ipcMain.on('visualizerHostSelectionChange', (event, nodeId) => {
     }
 });
 
+ipcMain.on('visualizerHostResultUpdate', (event, { jobId, result }) => {
+    if (!senderIs(mainWindow, event) || !visualizerSession || visualizerSession.engineJobId !== jobId) return;
+    visualizerSession.samples = structuredClone(result.samples);
+    visualizerSession.run = {
+        ...visualizerSession.run,
+        sampleCount: result.samples.length,
+        lifecycle: result.lifecycle,
+        simulationTime: Number(result.simulationTime),
+        availableResultTime: Number(result.availableResultTime),
+        pacing: structuredClone(result.pacing)
+    };
+    if (!analysisWindow || analysisWindow.isDestroyed()) return;
+    if (visualizerCan('results.live.read')) {
+        analysisWindow.webContents.send('visualizerSamplesAvailable', {
+            sampleCount: visualizerSession.run.sampleCount,
+            availableResultTime: visualizerSession.run.availableResultTime
+        });
+    }
+    if (visualizerCan('simulation.status.read')) {
+        analysisWindow.webContents.send('visualizerRunStatusChange', structuredClone(visualizerSession.run));
+    }
+    if (visualizerCan('simulation.pacing.read')) {
+        analysisWindow.webContents.send('visualizerPacingChange', structuredClone(visualizerSession.run.pacing));
+    }
+});
+
 ipcMain.on('visualizerCloseSession', (event) => {
     if (!senderIs(mainWindow, event)) return;
     visualizerSession = null;
@@ -210,9 +239,19 @@ ipcMain.handle('visualizerReadSeries', (event, { signalUuids, options }) => {
 
 ipcMain.on('visualizerSeek', (event, time) => {
     if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('timeline.seek')) return;
-    const boundedTime = Math.max(0, Math.min(Number(time), visualizerSession.run.duration));
+    if (['running', 'paused'].includes(visualizerSession.run.lifecycle)) return;
+    const boundedTime = Math.max(0, Math.min(Number(time), visualizerSession.run.availableResultTime));
     visualizerSession.time = boundedTime;
     mainWindow?.webContents.send('visualizerSeekRequest', boundedTime);
+});
+
+ipcMain.handle('visualizerRequestPacing', async (event, pacing) => {
+    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('simulation.pacing.control')) {
+        throw new Error('The visualizer does not have permission to control pacing.');
+    }
+    const job = activeEngineJobs.get(visualizerSession.engineJobId);
+    if (!job) throw new Error('The simulation is no longer running.');
+    return job.setPacing(pacing);
 });
 
 ipcMain.on('windowMaximizeToggle', (event) => {
@@ -333,17 +372,64 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
     return result.response === 1;
 });
 
-ipcMain.handle('engineValidate', async (_event, content) => validateWithEngine(content, {
+const engineOptions = () => ({
     applicationPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     packaged: app.isPackaged
-}));
+});
 
-ipcMain.handle('engineRun', async (_event, content, configuration) => runWithEngine(content, configuration, {
-    applicationPath: app.getAppPath(),
-    resourcesPath: process.resourcesPath,
-    packaged: app.isPackaged
-}));
+ipcMain.handle('engineValidate', async (_event, content) => validateWithEngine(content, engineOptions()));
+
+ipcMain.handle('engineRun', async (_event, content, configuration) => runWithEngine(content, configuration, engineOptions()));
+
+ipcMain.handle('engineStart', async (event, content, configuration) => {
+    const owner = event.sender;
+    let execution;
+    let latestUpdate = null;
+    let updateTimer = null;
+    const flushUpdate = () => {
+        updateTimer = null;
+        if (latestUpdate && !owner.isDestroyed()) owner.send('engineRunUpdate', latestUpdate);
+        latestUpdate = null;
+    };
+    execution = await startEngineRun(content, configuration, engineOptions(), {
+        onUpdate: (result) => {
+            latestUpdate = { jobId: execution.jobId, result };
+            updateTimer ??= setTimeout(flushUpdate, 100);
+        }
+    });
+    if (!execution.available) return { available: false };
+    activeEngineJobs.set(execution.jobId, { owner, ...execution });
+    execution.completion.then((result) => {
+        if (updateTimer) clearTimeout(updateTimer);
+        updateTimer = null;
+        latestUpdate = null;
+        if (!owner.isDestroyed()) owner.send('engineRunComplete', { jobId: execution.jobId, result });
+    }).catch((error) => {
+        if (updateTimer) clearTimeout(updateTimer);
+        if (!owner.isDestroyed()) owner.send('engineRunError', { jobId: execution.jobId, message: error.message });
+    }).finally(() => activeEngineJobs.delete(execution.jobId));
+    return { available: true, jobId: execution.jobId };
+});
+
+ipcMain.handle('engineSetPacing', async (event, jobId, pacing) => {
+    const job = activeEngineJobs.get(jobId);
+    if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
+    return job.setPacing(pacing);
+});
+
+ipcMain.handle('engineSetExecutionState', async (event, jobId, executionState) => {
+    const job = activeEngineJobs.get(jobId);
+    if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
+    return job.setExecutionState(executionState);
+});
+
+ipcMain.handle('engineCancel', async (event, jobId) => {
+    const job = activeEngineJobs.get(jobId);
+    if (!job || job.owner !== event.sender) return false;
+    job.cancel();
+    return true;
+});
 
 app.whenReady().then(() => {
     createWindow();

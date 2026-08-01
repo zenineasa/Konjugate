@@ -42,7 +42,14 @@ contextBridge.exposeInMainWorld('projectFiles', {
 
 contextBridge.exposeInMainWorld('engine', {
     validate: (content) => ipcRenderer.invoke('engineValidate', content),
-    run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration)
+    run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
+    start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),
+    setPacing: (jobId, pacing) => ipcRenderer.invoke('engineSetPacing', jobId, pacing),
+    setExecutionState: (jobId, executionState) => ipcRenderer.invoke('engineSetExecutionState', jobId, executionState),
+    cancel: (jobId) => ipcRenderer.invoke('engineCancel', jobId),
+    onUpdate: (callback) => ipcRenderer.on('engineRunUpdate', (_event, update) => callback(update)),
+    onComplete: (callback) => ipcRenderer.on('engineRunComplete', (_event, update) => callback(update)),
+    onError: (callback) => ipcRenderer.on('engineRunError', (_event, update) => callback(update))
 });
 
 contextBridge.exposeInMainWorld('addons', {
@@ -51,6 +58,7 @@ contextBridge.exposeInMainWorld('addons', {
     publishEvent: (eventName, value) => {
         if (eventName === 'timeline.change') ipcRenderer.send('visualizerHostTimelineChange', value);
         else if (eventName === 'selection.change') ipcRenderer.send('visualizerHostSelectionChange', value);
+        else if (eventName === 'result.update') ipcRenderer.send('visualizerHostResultUpdate', value);
     },
     closeContext: (contextName) => {
         if (contextName === 'resultSession') ipcRenderer.send('visualizerCloseSession');

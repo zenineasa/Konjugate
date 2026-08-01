@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
-import { runWithEngine, validateWithEngine } from '../../src/engineAdapter.mjs';
+import { normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
 
 function run(executable, args, environment = {}) {
     return new Promise((resolve, reject) => {
@@ -47,7 +47,7 @@ sourceProject.nodes[0].sourceTerms.push({
     }
 });
 await writeFile(input, await encodeProjectFile(JSON.stringify(sourceProject)));
-await writeFile(join(directory, 'sourceRun.json'), JSON.stringify({ name: 'Subcycling', duration: 0.1, globalTimeStep: 0.1, outputInterval: 0.1 }));
+await writeFile(join(directory, 'sourceRun.json'), JSON.stringify({ name: 'Subcycling', targetTime: 0.1, globalTimeStep: 0.1, outputInterval: 0.1 }));
 assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'sourceRun.json'), '--output', join(directory, 'sourceResults.kjr')]), 0);
 const sourceResult = JSON.parse(await readFile(join(directory, 'sourceResults.kjr'), 'utf8'));
 assert.ok(Math.abs(sourceResult.states[0].value - 1.1025) < 1e-12);
@@ -55,6 +55,9 @@ assert.deepEqual(sourceResult.nodeTimesteps[0], {
     nodeId: '11111111-1111-4111-8111-111111111111', substepsPerGlobalStep: 2, effectiveTimeStep: 0.05
 });
 assert.deepEqual(sourceResult.samples.map((sample) => sample.time), [0, 0.1]);
+assert.deepEqual(sourceResult.checkpoints.map((checkpoint) => checkpoint.time), [0, 0.1]);
+assert.ok(sourceResult.checkpoints.every((checkpoint) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(checkpoint.uuid)));
+assert.ok(sourceResult.checkpoints.every((checkpoint) => checkpoint.solver.kind === 'explicitEuler' && checkpoint.states.length === 1));
 
 const exampleInput = join(directory, 'thermalManagement.kjt');
 const exampleReport = join(directory, 'thermalValidation.json');
@@ -64,10 +67,11 @@ assert.equal(await run(executable, ['validate', exampleInput, '--report', exampl
 assert.equal(JSON.parse(await readFile(exampleReport, 'utf8')).valid, true);
 const runConfiguration = join(directory, 'runConfiguration.json');
 const simulationOutput = join(directory, 'simulationResults.kjr');
-await writeFile(runConfiguration, JSON.stringify({ name: 'Compatibility', duration: 1, globalTimeStep: 0.01, outputInterval: 0.1 }));
+await writeFile(runConfiguration, JSON.stringify({ name: 'Compatibility', targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1 }));
 assert.equal(await run(executable, ['run', exampleInput, '--configuration', runConfiguration, '--output', simulationOutput]), 0);
 const simulation = JSON.parse(await readFile(simulationOutput, 'utf8'));
 assert.equal(simulation.resultVersion, 1);
+assert.equal(simulation.targetTime, 1);
 assert.equal(simulation.globalSteps, 100);
 assert.equal(simulation.samples.length, 11);
 assert.equal(simulation.states.length, 5);
@@ -106,13 +110,80 @@ const adapted = await validateWithEngine(project, {
 });
 assert.equal(adapted.available, true);
 assert.equal(adapted.report.valid, true);
-const adaptedRun = await runWithEngine(example, { name: 'Adapter', duration: 0.1, globalTimeStep: 0.01, outputInterval: 0.1 }, {
+const adaptedRun = await runWithEngine(example, { name: 'Adapter', targetTime: 0.1, globalTimeStep: 0.01, outputInterval: 0.1 }, {
     applicationPath: new URL('../..', import.meta.url).pathname,
     resourcesPath: '',
     packaged: false
 });
 assert.equal(adaptedRun.available, true);
 assert.equal(adaptedRun.result.globalSteps, 10);
+assert.deepEqual(normalizePacing({ mode: 'realTime', simulationSecondsPerWallSecond: 9 }), {
+    mode: 'realTime', simulationSecondsPerWallSecond: 1
+});
+assert.throws(() => normalizePacing({ mode: 'limitedRatio', simulationSecondsPerWallSecond: 0 }));
+const liveUpdates = [];
+const liveStartedAt = performance.now();
+const liveRun = await startEngineRun(example, {
+    name: 'Live adapter', targetTime: 0.2, globalTimeStep: 0.01, outputInterval: 0.05,
+    pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
+}, {
+    applicationPath: new URL('../..', import.meta.url).pathname,
+    resourcesPath: '',
+    packaged: false
+}, { onUpdate: (result) => liveUpdates.push(result) });
+const liveResult = await liveRun.completion;
+assert.ok(performance.now() - liveStartedAt >= 150);
+assert.ok(liveUpdates.some((result) => result.lifecycle === 'running' && result.samples.length > 1));
+assert.equal(liveResult.lifecycle, 'completed');
+assert.equal(liveResult.availableResultTime, 0.2);
+assert.equal(liveResult.checkpoints.length, liveResult.samples.length);
+
+const controlledUpdates = [];
+const controlledRun = await startEngineRun(example, {
+    name: 'Controlled adapter', targetTime: 0.4, globalTimeStep: 0.01, outputInterval: 0.05,
+    pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
+}, {
+    applicationPath: new URL('../..', import.meta.url).pathname,
+    resourcesPath: '', packaged: false
+}, { onUpdate: (result) => controlledUpdates.push(result) });
+await new Promise((resolve) => setTimeout(resolve, 90));
+await controlledRun.setExecutionState('paused');
+for (let attempt = 0; attempt < 50 && !controlledUpdates.some((result) => result.lifecycle === 'paused'); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+}
+assert.ok(controlledUpdates.some((result) => result.lifecycle === 'paused'));
+await Promise.all([
+    controlledRun.setPacing({ mode: 'realTime' }),
+    controlledRun.setPacing({ mode: 'limitedRatio', simulationSecondsPerWallSecond: 2 }),
+    controlledRun.setPacing({ mode: 'fastest' })
+]);
+await controlledRun.setExecutionState('running');
+const controlledResult = await controlledRun.completion;
+assert.equal(controlledResult.lifecycle, 'completed');
+assert.equal(controlledResult.pacing.mode, 'fastest');
+
+const stoppedRun = await startEngineRun(example, {
+    name: 'Stopped adapter', targetTime: 0.4, globalTimeStep: 0.01, outputInterval: 0.05,
+    pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
+}, {
+    applicationPath: new URL('../..', import.meta.url).pathname,
+    resourcesPath: '', packaged: false
+});
+await new Promise((resolve) => setTimeout(resolve, 90));
+await stoppedRun.setExecutionState('stopped');
+const stoppedResult = await stoppedRun.completion;
+assert.equal(stoppedResult.lifecycle, 'stopped');
+assert.ok(stoppedResult.availableResultTime > 0 && stoppedResult.availableResultTime < stoppedResult.targetTime);
+assert.equal(stoppedResult.checkpoints.at(-1).time, stoppedResult.availableResultTime);
+
+await writeFile(join(directory, 'restartRun.json'), JSON.stringify({
+    name: 'Restart', targetTime: 0.2, globalTimeStep: 0.1, outputInterval: 0.1,
+    startCheckpoint: sourceResult.checkpoints.at(-1)
+}));
+await writeFile(input, await encodeProjectFile(JSON.stringify(sourceProject)));
+assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'restartRun.json'), '--output', join(directory, 'restartResults.kjr')]), 0);
+const restartResult = JSON.parse(await readFile(join(directory, 'restartResults.kjr'), 'utf8'));
+assert.deepEqual(restartResult.samples.map((sample) => sample.time), [0.1, 0.2]);
 
 const unsupportedInput = join(directory, 'project.unsupported');
 await writeFile(unsupportedInput, await encodeProjectFile(project));

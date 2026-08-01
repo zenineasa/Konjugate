@@ -141,16 +141,14 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             registerId(configurationId, "runConfiguration", configurationId, "Run configuration \"" + value(configuration, "name") + "\"");
             runConfigurationIds.insert(configurationId);
             try {
-                const auto duration = configuration.get<double>("duration");
                 const auto globalTimeStep = configuration.get<double>("globalTimeStep");
                 const auto outputInterval = configuration.get<double>("outputInterval");
-                if (!(duration > 0) || !(globalTimeStep > 0) || globalTimeStep > duration ||
-                    !(outputInterval > 0) || outputInterval > duration || !std::isfinite(duration) ||
+                if (!(globalTimeStep > 0) || !(outputInterval > 0) ||
                     !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) throw std::out_of_range("configuration");
                 const auto ratio = outputInterval / globalTimeStep;
                 if (outputInterval < globalTimeStep || std::abs(ratio - std::round(ratio)) > 1e-9) throw std::out_of_range("configuration");
             } catch (...) {
-                add(result, "runConfigurationInvalid", "error", "Run configuration values must be finite and positive; output interval must be an integer multiple of the global timestep.", "runConfiguration", configurationId, "numerics");
+                add(result, "runConfigurationInvalid", "error", "Numerical configuration values must be finite and positive; output interval must be an integer multiple of the global timestep.", "runConfiguration", configurationId, "numerics");
             }
         }
         if (!configurations->empty() && !runConfigurationIds.contains(value(document, "activeRunConfigurationId"))) {

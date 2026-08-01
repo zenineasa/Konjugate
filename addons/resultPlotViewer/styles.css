@@ -4,7 +4,7 @@
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { display: grid; grid-template-rows: 58px minmax(0, 1fr) 48px; color: #aebfc7; background: #081119; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 .analysisHeader { display: flex; align-items: center; gap: 24px; padding: 0 18px; background: #0c1922; border-bottom: 1px solid #263943; }
 .analysisHeader > div:first-child { display: grid; gap: 2px; }
 .analysisHeader span { color: #647b86; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
@@ -13,6 +13,8 @@ button, input { font: inherit; }
 .runIdentity strong { overflow: hidden; max-width: 280px; text-overflow: ellipsis; white-space: nowrap; }
 .runIdentity span { text-transform: none; }
 .analysisHeader .readOnlyBadge { padding: 5px 8px; color: #7ed4cc; background: rgb(66 201 188 / 9%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 12px; }
+.liveControls { display: flex; align-items: center; gap: 8px; }
+.liveControls select { height: 27px; padding: 0 7px; color: #8fcfc9; background: #0a151d; border: 1px solid #31505a; border-radius: 5px; font-size: 9px; }
 main { display: grid; min-height: 0; grid-template-columns: 250px minmax(0, 1fr); }
 .signalBrowser { min-height: 0; padding: 14px; overflow: auto; background: #0b1720; border-right: 1px solid #263943; }
 .signalBrowser > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }

@@ -89,11 +89,23 @@
             <strong>Run configuration</strong>
             <p>Configure the global synchronization step. Individual nodes can substep within it.</p>
             <label><span>Name</span><input id="runConfigurationName" autocomplete="off" required></label>
-            <label><span>Duration (s)</span><input id="runDuration" type="number" min="0" step="any" required></label>
             <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
             <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
             <div class="passwordError" id="runConfigurationError" role="alert"></div>
             <footer><button id="runConfigurationCancel" type="button">Cancel</button><button id="applyRunConfiguration" class="doneButton" type="submit">Apply</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="runLaunchDialog" class="passwordDialog runConfigurationDialog">
+        <form method="dialog">
+            <span class="contextKicker">Simulation</span>
+            <strong>Start run</strong>
+            <p id="runLaunchDescription">Run from the model's initial state.</p>
+            <label><span>Run until simulation time (s)</span><input id="runTargetTime" type="number" min="0" step="any" value="1" required></label>
+            <label><span>Simulation pacing</span><select id="runPacingMode"><option value="fastest">As fast as possible</option><option value="realTime">Real time</option><option value="limitedRatio">Limited rate</option></select></label>
+            <label id="runPacingRatioField" hidden><span>Simulation seconds / wall second</span><input id="runPacingRatio" type="number" min="0.01" step="any" value="1" required></label>
+            <div class="passwordError" id="runLaunchError" role="alert"></div>
+            <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
         </form>
     </dialog>
 
@@ -261,18 +273,27 @@
             <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
         </div>
 
-        <section id="resultTransport" class="resultTransport" aria-label="Simulation result playback" hidden>
+        <section id="resultTransport" class="resultTransport" aria-label="Simulation status and results" hidden>
             <span class="resultMode"><b>Results</b><small>Model locked</small></span>
-            <button id="resultStart" type="button" aria-label="First result sample">|◀</button>
-            <button id="resultPrevious" type="button" aria-label="Previous result sample">◀</button>
-            <button id="resultPlayPause" class="resultPlayPause" type="button" aria-label="Play results">▶</button>
-            <button id="resultNext" type="button" aria-label="Next result sample">▶</button>
-            <button id="resultEnd" type="button" aria-label="Last result sample">▶|</button>
-            <output id="resultCurrentTime">0 s</output>
-            <input id="resultTimeline" type="range" min="0" max="0" value="0" step="1" aria-label="Simulation time">
-            <output id="resultDuration">0 s</output>
+            <div id="simulationExecutionControls" class="transportGroup" hidden>
+                <button id="simulationPauseResume" class="executionButton" type="button" aria-label="Pause simulation"><span aria-hidden="true">❚❚</span> Pause</button>
+                <button id="simulationStop" class="executionButton" type="button" aria-label="Stop simulation"><span aria-hidden="true">■</span> Stop</button>
+            </div>
+            <output id="simulationProgress" class="liveControl" hidden>0 / 0 s</output>
+            <button id="continueRun" type="button" hidden>Continue</button>
+            <div id="resultPlaybackControls" class="transportGroup">
+                <button id="resultStart" type="button" aria-label="First result sample">|◀</button>
+                <button id="resultPrevious" type="button" aria-label="Previous result sample">◀</button>
+                <button id="resultPlayPause" class="resultPlayPause" type="button" aria-label="Play results">▶</button>
+                <button id="resultNext" type="button" aria-label="Next result sample">▶</button>
+                <button id="resultEnd" type="button" aria-label="Last result sample">▶|</button>
+            </div>
+            <output id="resultCurrentTime" class="reviewControl">0 s</output>
+            <input id="resultTimeline" class="reviewControl" type="range" min="0" max="0" value="0" step="1" aria-label="Simulation time">
+            <output id="resultExtent" class="reviewControl" aria-label="Available and target simulation time">available 0 · target 0 s</output>
             <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option></select>
-            <button id="closeResults" class="closeResults" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
+            <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="fastest">Fastest</option><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
+            <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
         </section>
 
         <div class="canvasHelp">

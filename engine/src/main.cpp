@@ -28,13 +28,14 @@ bool hasKjtExtension(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: konjugateEngine <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr]\n";
+        std::cerr << "Usage: konjugateEngine <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr --pacing-control pacing.json]\n";
         return 64;
     }
     const std::string command = argv[1];
     const auto report = optionPath(argc, argv, "--report");
     const auto configurationPath = optionPath(argc, argv, "--configuration");
     const auto outputPath = optionPath(argc, argv, "--output");
+    const auto pacingControlPath = optionPath(argc, argv, "--pacing-control");
     if ((command != "inspect" && command != "validate" && command != "run") ||
         ((command == "inspect" || command == "validate") && report.empty()) ||
         (command == "run" && (configurationPath.empty() || outputPath.empty()))) {
@@ -67,7 +68,7 @@ int main(int argc, char** argv) {
         }
         boost::property_tree::ptree configuration;
         boost::property_tree::read_json(configurationPath.string(), configuration);
-        konjugate::runSimulation(document, configuration, outputPath);
+        konjugate::runSimulation(document, configuration, outputPath, pacingControlPath);
         return 0;
     } catch (const konjugate::ContainerError& error) {
         std::cerr << error.code << ": " << error.what() << '\n';

@@ -15,7 +15,6 @@ import {
 } from '../equationModel.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
-import { validateModel } from '../modelValidation.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import {
     CSS2DObject,
@@ -252,9 +251,10 @@ let endpointPickMaterialState = new Map();
 let cameraAnimation = null;
 let pendingImportedGeometry = null;
 let pendingGeometryFileName = '';
-let currentValidation = { valid: true, issues: [], executableModel: null };
+let currentValidation = { valid: false, issues: [], executableModel: null };
 let validationRevision = 0;
 let engineValidationTimer = null;
+let equationEditSession = null;
 const documentController = new DocumentController();
 
 function updateHistoryControls() {
@@ -269,12 +269,14 @@ function recordHistory(action) {
 }
 
 function undo() {
+    finishEquationEdit();
     clearSelection();
     hideCards();
     documentController.undo();
 }
 
 function redo() {
+    finishEquationEdit();
     clearSelection();
     hideCards();
     documentController.redo();
@@ -984,6 +986,7 @@ function applyEdgeModel(definition, snapshot) {
 }
 
 function changeEdgeModel(definition, mutate) {
+    finishEquationEdit();
     const before = captureEdgeModel(definition);
     const after = structuredClone(before);
     mutate(after);
@@ -1393,16 +1396,6 @@ function updateModelStatus() {
     updateValidationStatus();
 }
 
-function visibleValidationModel() {
-    const nodes = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    const relationships = model.relationships.filter((relationship) => (
-        relationshipObjects.get(relationship.id)?.line.visible === true &&
-        nodeIds.has(relationship.source) && nodeIds.has(relationship.target)
-    ));
-    return { nodes, relationships };
-}
-
 function navigateToValidationIssue(item) {
     $('#validationPanel').hidden = true;
     $('#validationSummary').ariaExpanded = 'false';
@@ -1423,34 +1416,68 @@ function navigateToValidationIssue(item) {
 }
 
 function updateValidationStatus() {
-    currentValidation = validateModel(visibleValidationModel());
-    renderValidationStatus();
     scheduleEngineValidation();
 }
 
-function scheduleEngineValidation() {
+function scheduleEngineValidation(projectDocument = null) {
     const revision = ++validationRevision;
     clearTimeout(engineValidationTimer);
+    renderValidationPending();
     engineValidationTimer = setTimeout(async () => {
         try {
-            const result = await window.engine.validate(JSON.stringify(serializeProjectDocument()));
-            if (revision !== validationRevision || !result.available) return;
+            const result = await window.engine.validate(JSON.stringify(projectDocument ?? serializeProjectDocument()));
+            if (revision !== validationRevision) return;
+            if (!result.available) {
+                renderValidationFailure('The C++ validation engine is unavailable. Build the engine before editing or running models.');
+                return;
+            }
             currentValidation = {
                 valid: result.report.valid,
                 issues: result.report.issues,
                 executableModel: null
             };
+            $('#validationSummary').dataset.validationSource = 'engine';
             renderValidationStatus();
         } catch (error) {
-            console.warn('C++ model validation was unavailable; retaining local validation.', error);
+            if (revision !== validationRevision) return;
+            console.error('C++ model validation failed.', error);
+            renderValidationFailure(`The C++ validation engine failed: ${error.message}`);
         }
     }, 180);
+}
+
+function renderValidationPending() {
+    const summary = $('#validationSummary');
+    delete summary.dataset.validationSource;
+    summary.classList.remove('error', 'warning');
+    summary.classList.add('pending');
+    $('#statusText').textContent = 'Validating…';
+    $('#runButton').disabled = true;
+    $('#runButton').title = 'Wait for model validation to finish';
+    $('#validationPanelTitle').textContent = 'Validating…';
+    $('#validationIssues').innerHTML = '<p class="validationEmpty">The C++ engine is validating this model.</p>';
+}
+
+function renderValidationFailure(message) {
+    currentValidation = {
+        valid: false,
+        issues: [{
+            code: 'validationEngineUnavailable',
+            severity: 'error',
+            message,
+            location: { kind: 'model', entityId: '', field: '' }
+        }],
+        executableModel: null
+    };
+    $('#validationSummary').dataset.validationSource = 'engineError';
+    renderValidationStatus();
 }
 
 function renderValidationStatus() {
     const errors = currentValidation.issues.filter((item) => item.severity === 'error').length;
     const warnings = currentValidation.issues.filter((item) => item.severity === 'warning').length;
     const summary = $('#validationSummary');
+    summary.classList.remove('pending');
     summary.classList.toggle('error', errors > 0);
     summary.classList.toggle('warning', !errors && warnings > 0);
     $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
@@ -1844,6 +1871,7 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
 
 $$('[data-close-card]').forEach((button) => {
     button.addEventListener('click', () => {
+        if (button.closest('#edgeEditor')) finishEquationEdit();
         if (button.closest('#edgeBuilder')) finishEndpointPick();
         button.closest('.contextCard').classList.add('hidden');
     });
@@ -1924,20 +1952,33 @@ $('#editEdgeDirectionality').addEventListener('change', (event) => {
 
 function previewEdgeEquation(latex, origin) {
     if (!selectedRelationship) return;
-    const equationModel = normalizeEdgeEquationModel(selectedRelationship, {
-        ...selectedRelationship.equationModel,
+    const definition = selectedRelationship;
+    if (!equationEditSession || equationEditSession.relationshipId !== definition.id) {
+        finishEquationEdit();
+        equationEditSession = { relationshipId: definition.id, definition, before: captureEdgeModel(definition) };
+    }
+    const equationModel = normalizeEdgeEquationModel(definition, {
+        ...definition.equationModel,
         latex
     });
+    definition.equationModel = equationModel;
+    definition.equation = latex;
     if (origin !== 'visual') $('#editEdgeMathField').setValue(latex, { silenceNotifications: true });
     if (origin !== 'latex') $('#editEdgeEquation').value = latex;
     renderEquationDiagnostics(latex, equationModel.bindings);
+    updateRelationships();
+    updateValidationStatus();
 }
 
-function commitEdgeEquation(latex) {
-    if (!selectedRelationship) return;
-    changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.equationModel.latex = latex.trim();
-        snapshot.equation = snapshot.equationModel.latex;
+function finishEquationEdit() {
+    if (!equationEditSession) return;
+    const { definition, before } = equationEditSession;
+    equationEditSession = null;
+    const after = captureEdgeModel(definition);
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    recordHistory({
+        undo: () => applyEdgeModel(definition, before),
+        redo: () => applyEdgeModel(definition, after)
     });
 }
 
@@ -1945,13 +1986,13 @@ $('#editEdgeMathField').addEventListener('input', (event) => {
     previewEdgeEquation(event.target.value, 'visual');
 });
 $('#editEdgeMathField').addEventListener('change', (event) => {
-    commitEdgeEquation(event.target.value);
+    finishEquationEdit();
 });
 $('#editEdgeEquation').addEventListener('input', (event) => {
     previewEdgeEquation(event.target.value, 'latex');
 });
 $('#editEdgeEquation').addEventListener('change', (event) => {
-    commitEdgeEquation(event.target.value);
+    finishEquationEdit();
 });
 $('#editEquationOutput').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
@@ -2613,6 +2654,7 @@ function updateViewCube() {
 }
 
 function deleteSelected() {
+    finishEquationEdit();
     if (selectedNode) {
         const node = selectedNode;
         const affectedRelationships = [];

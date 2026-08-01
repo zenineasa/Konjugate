@@ -49,10 +49,6 @@ std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
     if (const auto parameters = edge.get_child_optional("parameters")) for (const auto& item : *parameters) knownSymbols.insert(value(item.second, "symbol"));
     if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& item : *bindings) knownSymbols.insert(value(item.second, "symbol"));
 
-    const std::regex symbolExpression(R"(\\mathrm\{([A-Za-z][A-Za-z0-9]*)\})");
-    for (auto match = std::sregex_iterator(latex.begin(), latex.end(), symbolExpression); match != std::sregex_iterator(); ++match) {
-        if (!knownSymbols.contains((*match)[1].str())) errors.push_back("Unknown symbol: " + (*match)[1].str() + ".");
-    }
     const std::set<std::string> supportedCommands = {
         "cdot", "cos", "exp", "frac", "left", "ln", "log", "max", "min", "mathrm", "right", "sin", "sqrt", "tan"
     };
@@ -61,6 +57,18 @@ std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
         const auto command = (*match)[1].str();
         if (!supportedCommands.contains(command)) errors.push_back("Unsupported LaTeX command: \\" + command + ".");
     }
+
+    // Remove command names before scanning identifiers. Their arguments remain,
+    // so both plain symbols and symbols rendered as \mathrm{symbol} are checked.
+    const auto expressionWithoutCommands = std::regex_replace(latex, commandExpression, " ");
+    const std::regex identifierExpression(R"([A-Za-z][A-Za-z0-9]*)");
+    std::set<std::string> unknownSymbols;
+    for (auto match = std::sregex_iterator(expressionWithoutCommands.begin(), expressionWithoutCommands.end(), identifierExpression);
+         match != std::sregex_iterator(); ++match) {
+        const auto symbol = match->str();
+        if (!knownSymbols.contains(symbol)) unknownSymbols.insert(symbol);
+    }
+    for (const auto& symbol : unknownSymbols) errors.push_back("Unknown symbol: " + symbol + ".");
     return errors;
 }
 }

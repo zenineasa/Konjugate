@@ -37,6 +37,7 @@ export async function runInteractionTests(window) {
     });
 
     await run('validation summary reports and displays a valid model', async () => {
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'C++ validation report did not reach the UI.');
         assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('error')`), false);
         await evaluate(window, `document.querySelector('#validationSummary').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#validationPanel').hidden`), true);
@@ -50,6 +51,7 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#nodeEditorTitle').textContent`), 'Battery module');
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditor .doneButton') === null`), true);
     });
 
     await run('equation editor switches between visual and LaTeX modes', async () => {
@@ -57,6 +59,23 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `!document.querySelector('#editEdgeMathField').hidden && document.querySelector('#editEdgeEquation').hidden`), false);
         await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#editEdgeMathField').hidden && document.querySelector('#editEdgeEquation').hidden`), true);
+    });
+
+    await run('C++ validation rejects unknown equation symbols while typing', async () => {
+        const originalEquation = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
+        await evaluate(window, `(() => {
+            const field = document.querySelector('#editEdgeMathField');
+            field.setValue('randomCharacters');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationSummary').classList.contains('error')`, 'Unknown equation symbols were not rejected by the C++ validator.');
+        assert.match(await evaluate(window, `document.querySelector('#validationIssues').textContent`), /randomCharacters/);
+        await evaluate(window, `(() => {
+            const field = document.querySelector('#editEdgeMathField');
+            field.setValue(${JSON.stringify(originalEquation)});
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('error')`, 'Restoring the valid equation did not clear its validation error.');
     });
 
     await run('Backspace edits MathLive without deleting the relationship', async () => {
@@ -70,7 +89,12 @@ export async function runInteractionTests(window) {
         })()`);
         await waitFor(window, `document.querySelector('#editEdgeMathField').value !== ${JSON.stringify(equationBefore)}`, 'Backspace did not edit the equation.');
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `(() => {
+            const field = document.querySelector('#editEdgeMathField');
+            field.setValue(${JSON.stringify(equationBefore)});
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#edgeEditor [data-close-card]').click();
+        })()`);
     });
 
     await run('node appearance changes and participates in undo', async () => {

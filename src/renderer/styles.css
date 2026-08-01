@@ -143,6 +143,7 @@ input, select { user-select: text; }
 .simulationReadout i { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 7px rgb(66 201 188 / 50%); }
 .simulationReadout.warning i { background: var(--orange); box-shadow: 0 0 7px rgb(237 159 82 / 50%); }
 .simulationReadout.error i { background: #d96f78; box-shadow: 0 0 7px rgb(217 111 120 / 50%); }
+.simulationReadout.pending i { background: #63bee8; box-shadow: 0 0 7px rgb(99 190 232 / 50%); animation: pulse 1s infinite; }
 .labelControls { display: flex; height: 29px; align-items: center; gap: 2px; margin-right: 3px; padding: 2px; background: #0a141c; border: 1px solid #293a45; border-radius: 5px; }
 .labelControls > span { padding: 0 6px; color: #526773; font-size: 7px; text-transform: uppercase; letter-spacing: .07em; }
 .labelControls button { height: 23px; padding: 0 7px; color: #647986; background: transparent; border: 0; border-radius: 3px; font-size: 8px; }

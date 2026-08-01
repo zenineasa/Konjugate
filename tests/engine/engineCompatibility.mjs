@@ -50,10 +50,17 @@ assert.equal(invalid.valid, false);
 assert.ok(invalid.issues.some((issue) => issue.code === 'stateSymbolInvalid'));
 
 const invalidEquation = JSON.parse(example);
-invalidEquation.edges[0].equation = '\\mathrm{unknownState}';
+invalidEquation.edges[0].equation = 'randomCharacters';
+invalidEquation.edges[0].equationModel = {
+    ...invalidEquation.edges[0].equationModel,
+    latex: 'randomCharacters'
+};
 await writeFile(input, await encodeProjectFile(JSON.stringify(invalidEquation)));
 assert.equal(await run(executable, ['validate', input, '--report', report]), 2);
-assert.ok(JSON.parse(await readFile(report, 'utf8')).issues.some((issue) => issue.code === 'edgeEquationInvalid'));
+const invalidEquationReport = JSON.parse(await readFile(report, 'utf8'));
+assert.ok(invalidEquationReport.issues.some((issue) => (
+    issue.code === 'edgeEquationInvalid' && issue.message.includes('randomCharacters')
+)));
 
 const encryptedInput = join(directory, 'encrypted.kjt');
 await writeFile(encryptedInput, await encodeProjectFile(project, { password: 'engine compatibility password', scryptCost: 2 ** 14 }));

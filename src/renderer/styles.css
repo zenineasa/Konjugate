@@ -138,8 +138,11 @@ input, select { user-select: text; }
 .primaryTool span { color: var(--accent); font-size: 17px; }
 .divider { width: 1px; height: 24px; margin: 0 3px; background: #2b3b46; }
 .toolSpacer { flex: 1; }
-.simulationReadout { display: flex; align-items: center; gap: 7px; margin-right: 8px; color: #768b98; font-size: 9px; }
+.simulationReadout { display: flex; align-items: center; gap: 7px; margin-right: 8px; padding: 5px 7px; color: #768b98; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 9px; }
+.simulationReadout:hover, .simulationReadout[aria-expanded="true"] { background: #172630; border-color: #2c404b; }
 .simulationReadout i { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 7px rgb(66 201 188 / 50%); }
+.simulationReadout.warning i { background: var(--orange); box-shadow: 0 0 7px rgb(237 159 82 / 50%); }
+.simulationReadout.error i { background: #d96f78; box-shadow: 0 0 7px rgb(217 111 120 / 50%); }
 .labelControls { display: flex; height: 29px; align-items: center; gap: 2px; margin-right: 3px; padding: 2px; background: #0a141c; border: 1px solid #293a45; border-radius: 5px; }
 .labelControls > span { padding: 0 6px; color: #526773; font-size: 7px; text-transform: uppercase; letter-spacing: .07em; }
 .labelControls button { height: 23px; padding: 0 7px; color: #647986; background: transparent; border: 0; border-radius: 3px; font-size: 8px; }
@@ -329,6 +332,23 @@ input, select { user-select: text; }
 .endpointPickBanner small { margin-top: 2px; color: #6f858f; font-size: 7px; }
 .endpointPickBanner button { height: 27px; padding: 0 8px; color: #89a1aa; background: #152630; border: 1px solid #324853; border-radius: 4px; font-size: 8px; }
 .endpointPickBanner kbd { margin-left: 5px; color: #607781; font-family: inherit; font-size: 7px; }
+.validationPanel { position: absolute; z-index: 33; top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow: auto; color: #aebfc7; background: rgb(13 24 32 / 96%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 45%); backdrop-filter: blur(12px); }
+.validationPanel[hidden] { display: none; }
+.validationPanel header { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 12px 13px; background: rgb(13 24 32 / 98%); border-bottom: 1px solid #293a45; }
+.validationPanel header strong { display: block; margin-top: 3px; color: #d5e1e6; font-size: 11px; }
+.validationPanel header button { color: #60747f; background: transparent; border: 0; font-size: 16px; }
+.validationIssue { display: grid; width: 100%; grid-template-columns: 8px 1fr; gap: 8px; padding: 10px 12px; color: #91a3ad; background: transparent; border: 0; border-bottom: 1px solid #23343e; text-align: left; }
+.validationIssue:hover { background: #182832; }
+.validationIssue i { width: 7px; height: 7px; margin-top: 2px; background: var(--orange); border-radius: 50%; }
+.validationIssue.error i { background: #d96f78; }
+.validationIssue strong, .validationIssue small { display: block; }
+.validationIssue strong { color: #becdd3; font-size: 8px; line-height: 1.4; }
+.validationIssue small { margin-top: 3px; color: #5f747f; font-size: 7px; text-transform: capitalize; }
+.validationEmpty { margin: 0; padding: 16px 13px; color: #648079; font-size: 8px; }
+.node-label-container.validationError .objectLabel { border-color: #97545b; box-shadow: 0 0 0 1px rgb(217 111 120 / 14%), 0 8px 18px rgb(0 0 0 / 24%); }
+.node-label-container.validationWarning .objectLabel { border-color: #8a683f; }
+.bundleLabel.validationError { border-color: #97545b; }
+.bundleLabel.validationWarning { border-color: #8a683f; }
 .canvas.pickingEndpoint .node-label-container { opacity: .32; transition: opacity .14s; }
 .canvas.pickingEndpoint .node-label-container.endpointEligible { opacity: 1; }
 .canvas.pickingEndpoint .node-label-container.endpointEligible .objectLabel { border-color: #58a69f; box-shadow: 0 0 0 1px rgb(66 201 188 / 20%), 0 8px 22px rgb(0 0 0 / 30%); }

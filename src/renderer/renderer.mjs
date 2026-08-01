@@ -15,6 +15,7 @@ import {
 } from '../equationModel.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
+import { validateModel } from '../modelValidation.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import {
     CSS2DObject,
@@ -251,6 +252,7 @@ let endpointPickMaterialState = new Map();
 let cameraAnimation = null;
 let pendingImportedGeometry = null;
 let pendingGeometryFileName = '';
+let currentValidation = { valid: true, issues: [], executableModel: null };
 const documentController = new DocumentController();
 
 function updateHistoryControls() {
@@ -742,8 +744,12 @@ function clearSelection() {
 function updateRelationshipSelection() {
     relationshipObjects.forEach((relationship) => {
         const selected = relationship.definition.id === selectedRelationship?.id;
+        const validationSeverity = relationship.line.userData.validationSeverity;
         relationship.line.material.color.setHex(
-            selected ? 0x62e1d5 : relationship.definition.color
+            selected ? 0x62e1d5
+                : validationSeverity === 'error' ? 0xd96f78
+                    : validationSeverity === 'warning' ? 0xed9f52
+                        : relationship.definition.color
         );
         relationship.line.material.opacity = selected ? 1 : 0.92;
         relationship.line.renderOrder = selected ? 7 : 0;
@@ -813,6 +819,7 @@ function applyNodeModel(node, snapshot) {
     refreshNodeLabel(node);
     invalidateRelationshipBundles();
     syncContextualOverlays();
+    updateValidationStatus();
     if (selectedNode === node && !$('#nodeEditor').classList.contains('hidden')) {
         renderNodeEditorModel(node);
     }
@@ -968,6 +975,7 @@ function applyEdgeModel(definition, snapshot) {
     definition.equation = definition.equationModel.latex;
     setRelationshipDirectionality(definition, snapshot.directionality);
     updateRelationships();
+    updateValidationStatus();
     if (selectedRelationship?.id === definition.id && !$('#edgeEditor').classList.contains('hidden')) {
         renderEdgeEditor(definition);
     }
@@ -1380,6 +1388,85 @@ function updateModelStatus() {
     status[1].textContent = `${visibleRelationships} relationships`;
     status[2].textContent = `${model.metadata.units} units`;
     syncContextualOverlays();
+    updateValidationStatus();
+}
+
+function visibleValidationModel() {
+    const nodes = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const relationships = model.relationships.filter((relationship) => (
+        relationshipObjects.get(relationship.id)?.line.visible === true &&
+        nodeIds.has(relationship.source) && nodeIds.has(relationship.target)
+    ));
+    return { nodes, relationships };
+}
+
+function navigateToValidationIssue(item) {
+    $('#validationPanel').hidden = true;
+    $('#validationSummary').ariaExpanded = 'false';
+    if (item.location.kind === 'node') {
+        const node = nodeObjects.get(item.location.entityId);
+        if (!node) return;
+        selectNode(node);
+        openNodeEditor(node.userData.definition);
+        const field = { name: '#editNodeName', states: '#nodeEditorStates input', sourceTerms: '#nodeEditorSourceTerms input' }[item.location.field];
+        if (field) requestAnimationFrame(() => $(field)?.focus());
+    } else if (item.location.kind === 'edge') {
+        const relationship = model.relationships.find((candidate) => candidate.id === item.location.entityId);
+        if (!relationship) return;
+        openRelationshipEditor(relationship);
+        const field = { source: '#editEdgeSource', target: '#editEdgeTarget', equation: '#editEdgeMathField', output: '#editEquationOutput', parameters: '#edgeEditorParameters input' }[item.location.field];
+        if (field) requestAnimationFrame(() => $(field)?.focus());
+    }
+}
+
+function updateValidationStatus() {
+    currentValidation = validateModel(visibleValidationModel());
+    const errors = currentValidation.issues.filter((item) => item.severity === 'error').length;
+    const warnings = currentValidation.issues.filter((item) => item.severity === 'warning').length;
+    const summary = $('#validationSummary');
+    summary.classList.toggle('error', errors > 0);
+    summary.classList.toggle('warning', !errors && warnings > 0);
+    $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
+        : warnings ? `${warnings} model ${warnings === 1 ? 'warning' : 'warnings'}` : 'Model valid';
+    $('#runButton').disabled = true;
+    $('#runButton').title = errors ? 'Resolve model errors before running' : 'A simulation engine is not configured';
+
+    const severityByEntity = new Map();
+    currentValidation.issues.forEach((item) => {
+        if (!item.location.entityId) return;
+        const previous = severityByEntity.get(item.location.entityId);
+        if (!previous || item.severity === 'error') severityByEntity.set(item.location.entityId, item.severity);
+    });
+    nodeObjects.forEach((node, id) => {
+        const label = node.children.find((child) => child.isCSS2DObject)?.element;
+        label?.classList.toggle('validationError', severityByEntity.get(id) === 'error');
+        label?.classList.toggle('validationWarning', severityByEntity.get(id) === 'warning');
+    });
+    relationshipObjects.forEach((relationship, id) => {
+        relationship.line.userData.validationSeverity = severityByEntity.get(id) ?? null;
+    });
+    relationshipBundleObjects.forEach((overlay, key) => {
+        const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
+        const severities = bundle?.relationships.map((item) => severityByEntity.get(item.id)).filter(Boolean) ?? [];
+        overlay.element.classList.toggle('validationError', severities.includes('error'));
+        overlay.element.classList.toggle('validationWarning', !severities.includes('error') && severities.includes('warning'));
+    });
+    updateRelationshipSelection();
+
+    $('#validationPanelTitle').textContent = currentValidation.issues.length
+        ? `${errors} errors · ${warnings} warnings` : 'No issues';
+    const container = $('#validationIssues');
+    container.replaceChildren();
+    if (!currentValidation.issues.length) container.innerHTML = '<p class="validationEmpty">This model is structurally valid and ready for a simulation runtime.</p>';
+    currentValidation.issues.forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `validationIssue ${item.severity}`;
+        button.innerHTML = `<i></i><span><strong>${escapeHtml(item.message)}</strong><small>${escapeHtml(item.location.kind)}${item.location.field ? ` · ${escapeHtml(item.location.field)}` : ''}</small></span>`;
+        button.addEventListener('click', () => navigateToValidationIssue(item));
+        container.appendChild(button);
+    });
 }
 
 function syncContextualOverlays() {
@@ -2354,6 +2441,16 @@ $$('[data-detail]').forEach((button) => {
     });
 });
 
+$('#validationSummary').addEventListener('click', () => {
+    const panel = $('#validationPanel');
+    panel.hidden = !panel.hidden;
+    $('#validationSummary').ariaExpanded = String(!panel.hidden);
+});
+$('#closeValidationPanel').addEventListener('click', () => {
+    $('#validationPanel').hidden = true;
+    $('#validationSummary').ariaExpanded = 'false';
+});
+
 function setTool(tool) {
     currentTool = tool;
     dragControls.enabled = tool === 'select';
@@ -2599,7 +2696,9 @@ window.addEventListener('keydown', (event) => {
         finishEndpointPick();
         return;
     }
-    const isEditing = event.target.matches('input, textarea, select') || event.target.isContentEditable;
+    const isEditing = event.target.matches?.('input, textarea, select, math-field') ||
+        event.target.isContentEditable ||
+        event.composedPath().some((element) => element?.matches?.('input, textarea, select, math-field') || element?.isContentEditable);
     const commandKey = isMac ? event.metaKey : event.ctrlKey;
     if (commandKey && (event.key === '+' || event.key === '=')) {
         event.preventDefault();
@@ -2648,7 +2747,7 @@ window.addEventListener('keydown', (event) => {
     }
     if (
         (event.key === 'Delete' || event.key === 'Backspace') &&
-        !event.target.matches('input, textarea')
+        !isEditing
     ) {
         deleteSelected();
     }
@@ -2667,6 +2766,7 @@ new ResizeObserver(resizeRenderer).observe(webglContainer);
 resizeRenderer();
 setTool('select');
 setCameraView('orbit', false);
+updateModelStatus();
 
 function render(time) {
     requestAnimationFrame(render);

@@ -92,7 +92,7 @@
         <button class="squareTool" data-tool="move" type="button" title="Move (Precise Axis)">☩</button>
         <button class="squareTool" data-action="delete" type="button" title="Delete selected">⌫</button>
         <div class="toolSpacer"></div>
-        <div class="simulationReadout"><i></i><span id="statusText">Model ready</span></div>
+        <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
         <div class="labelControls" aria-label="Label detail">
             <span>Details</span>
             <button data-detail="nodes" type="button" title="Expand all node labels">Nodes</button>
@@ -109,6 +109,10 @@
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>
         </div>
+        <aside id="validationPanel" class="validationPanel" aria-label="Model issues" hidden>
+            <header><div><span class="contextKicker">Model validation</span><strong id="validationPanelTitle">No issues</strong></div><button id="closeValidationPanel" type="button" aria-label="Close issues">×</button></header>
+            <div id="validationIssues"></div>
+        </aside>
 
         <template id="relationshipBundleTemplate">
             <div class="bundleLabel" tabindex="0">

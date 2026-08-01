@@ -28,6 +28,8 @@
     ],
     "scripts": {
         "test": "node --test",
+        "test:interaction": "node scripts/runInteractionTests.mjs",
+        "test:all": "npm test && npm run test:interaction",
         "start": "make iconsPng && electron .",
         "dev": "npm start",
         "build": "make build",

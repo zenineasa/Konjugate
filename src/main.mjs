@@ -50,6 +50,19 @@ function createWindow() {
         );
     });
 
+    if (process.argv.includes('--interaction-test')) {
+        mainWindow.webContents.once('did-finish-load', async () => {
+            try {
+                const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
+                await runInteractionTests(mainWindow);
+                app.exit(0);
+            } catch (error) {
+                console.error(error);
+                app.exit(1);
+            }
+        });
+    }
+
     mainWindow.loadFile(join(currentDir, 'renderer', 'index.html'));
 }
 

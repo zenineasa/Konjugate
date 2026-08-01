@@ -280,6 +280,7 @@ let resultPlaybackTimer = null;
 let resultPlaying = false;
 let nodeDetailsBeforeResult = null;
 let toolBeforeResult = null;
+let addonToolstripContributions = [];
 const nodeResultPlot = new ResultPlot($('#nodeResultPlot'), {
     onSeek: (time) => {
         if (!activeResult) return;
@@ -769,6 +770,7 @@ function selectNode(node) {
     selectedRelationship = null;
     updateRelationshipSelection();
     updateSelectionOutline();
+    if (activeResult) window.addons.publishEvent('selection.change', node.userData.id);
 }
 
 function selectRelationship(relationship) {
@@ -776,6 +778,7 @@ function selectRelationship(relationship) {
     selectedRelationship = relationship;
     selectionOutline.visible = false;
     updateRelationshipSelection();
+    if (activeResult) window.addons.publishEvent('selection.change', null);
 }
 
 function clearSelection() {
@@ -784,6 +787,7 @@ function clearSelection() {
     selectionOutline.visible = false;
     updateRelationshipSelection();
     transformControls.detach();
+    if (activeResult) window.addons.publishEvent('selection.change', null);
 }
 
 function updateRelationshipSelection() {
@@ -1614,6 +1618,7 @@ function projectResultSample(index) {
     $('#resultCurrentTime').value = formatResultTime(sample.time);
     $('#statusText').textContent = `Result · ${formatResultTime(sample.time)}`;
     nodeResultPlot.setCursor(sample.time);
+    window.addons.publishEvent('timeline.change', sample.time);
 }
 
 function stopResultPlayback() {
@@ -1671,6 +1676,7 @@ function setResultModeLocked(locked) {
     $('#nodeModelActions').hidden = locked || !$('[data-node-tab="model"]').classList.contains('active');
     applyInspectorReadOnly();
     updateHistoryControls();
+    refreshAddonToolstripContributions();
 }
 
 function activateResult(result) {
@@ -1690,6 +1696,7 @@ function activateResult(result) {
 function clearResultPlayback() {
     if (!activeResult) return;
     stopResultPlayback();
+    window.addons.closeContext('resultSession');
     activeResult = null;
     setResultModeLocked(false);
     nodeResultPlot.clear();
@@ -1724,6 +1731,79 @@ $('#resultPlaybackRate').addEventListener('change', () => {
     if (resultPlaying) { clearTimeout(resultPlaybackTimer); scheduleResultPlayback(); }
 });
 $('#closeResults').addEventListener('click', clearResultPlayback);
+window.addons.onRequest('timeline.seek', (time) => {
+    if (!activeResult) return;
+    stopResultPlayback();
+    projectResultSample(nearestSampleIndex(activeResult.samples, Number(time)));
+});
+
+function createAddonContext(contextNames) {
+    const contexts = {};
+    for (const contextName of contextNames) {
+        if (contextName !== 'resultSession' || !activeResult) return null;
+        contexts.resultSession = {
+            projectName: filenameStem(currentProjectFilename),
+            result: activeResult,
+            nodes: model.nodes.map((node) => ({
+                id: node.id,
+                title: node.title,
+                states: node.states.map(({ id, label, symbol, unit }) => ({ id, label, symbol, unit }))
+            })),
+            selectedNodeId: selectedNode?.userData.id ?? null,
+            time: activeResult.samples[activeResultSampleIndex]?.time ?? 0
+        };
+    }
+    return contexts;
+}
+
+function addonConditionMatches(condition) {
+    return condition === 'always' || (condition === 'resultsActive' && Boolean(activeResult));
+}
+
+function refreshAddonToolstripContributions() {
+    let visibleCount = 0;
+    addonToolstripContributions.forEach(({ contribution, button }) => {
+        const visible = addonConditionMatches(contribution.when);
+        button.hidden = !visible;
+        if (visible) visibleCount += 1;
+    });
+    $('#addonToolstripSeparator').hidden = visibleCount === 0;
+}
+
+async function initializeAddonToolstripContributions() {
+    try {
+        const contributions = await window.addons.listToolstripContributions();
+        const container = $('#addonToolstripContributions');
+        container.replaceChildren();
+        addonToolstripContributions = contributions.map((contribution) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'toolButton addonTool';
+            button.ariaLabel = contribution.tooltip;
+            button.dataset.tooltip = contribution.tooltip;
+            button.dataset.addonId = contribution.addonId;
+            button.dataset.commandId = contribution.commandId;
+            const symbol = document.createElement('span');
+            symbol.textContent = contribution.symbol;
+            button.append(symbol, document.createTextNode(contribution.label));
+            button.addEventListener('click', async () => {
+                const contexts = createAddonContext(contribution.contexts);
+                if (!contexts) return;
+                try {
+                    await window.addons.invokeCommand(contribution.addonId, contribution.commandId, contexts);
+                } catch (error) {
+                    console.error(`Add-on command ${contribution.addonId}.${contribution.commandId} failed.`, error);
+                    $('#statusText').textContent = `${contribution.addonName} unavailable`;
+                }
+            });
+            container.appendChild(button);
+            return { contribution, button };
+        });
+        refreshAddonToolstripContributions();
+    } catch (error) {
+        console.error('Add-on contributions could not be loaded.', error);
+    }
+}
 
 $('#runButton').addEventListener('click', async () => {
     if (simulationRunning || !currentValidation.valid) return;
@@ -3162,6 +3242,7 @@ resizeRenderer();
 setTool('select');
 setCameraView('orbit', false);
 updateModelStatus();
+initializeAddonToolstripContributions();
 
 function render(time) {
     requestAnimationFrame(render);

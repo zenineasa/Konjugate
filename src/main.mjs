@@ -7,16 +7,29 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { runWithEngine, validateWithEngine } from './engineAdapter.mjs';
+import {
+    createVisualizerSession,
+    publicToolstripContributions,
+    publicVisualizerContext,
+    readSignalSeries,
+    validateAddonManifest
+} from './addonHost.mjs';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
+let mainWindow = null;
+let analysisWindow = null;
+let analysisAddonId = null;
+let visualizerManifest = null;
+let visualizerSession = null;
+const addonRegistry = new Map();
 
 function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
 }
 
 function createWindow() {
-    const mainWindow = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 1200,
         height: 760,
         minWidth: 720,
@@ -66,6 +79,141 @@ function createWindow() {
 
     mainWindow.loadFile(join(currentDir, 'renderer', 'index.html'));
 }
+
+function senderIs(window, event) {
+    return Boolean(window && !window.isDestroyed() && event.sender === window.webContents);
+}
+
+function visualizerCan(permission) {
+    return visualizerManifest?.permissions.includes(permission);
+}
+
+async function discoverAddons() {
+    addonRegistry.clear();
+    const addonRoots = [
+        join(currentDir, '..', 'addons'),
+        join(app.getPath('userData'), 'addons')
+    ];
+    for (const addonsDirectory of addonRoots) {
+        const entries = await readdir(addonsDirectory, { withFileTypes: true }).catch(() => []);
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const addonDirectory = join(addonsDirectory, entry.name);
+            try {
+                const manifest = validateAddonManifest(JSON.parse(await readFile(join(addonDirectory, 'addon.json'), 'utf8')));
+                if (addonRegistry.has(manifest.addonId)) throw new Error(`Duplicate add-on ID: ${manifest.addonId}.`);
+                addonRegistry.set(manifest.addonId, { addonDirectory, manifest });
+            } catch (error) {
+                console.warn(`Skipping add-on ${entry.name}: ${error.message}`);
+            }
+        }
+    }
+}
+
+async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
+    if (analysisWindow && !analysisWindow.isDestroyed() && analysisAddonId !== manifest.addonId) {
+        analysisWindow.destroy();
+        analysisWindow = null;
+    }
+    analysisAddonId = manifest.addonId;
+    visualizerManifest = manifest;
+    visualizerSession = createVisualizerSession({ ...payload, sessionId: randomUUID() });
+    if (analysisWindow && !analysisWindow.isDestroyed()) {
+        analysisWindow.setTitle(`${visualizerSession.projectName} — Results`);
+        analysisWindow.webContents.send('visualizerSessionChange');
+        analysisWindow.show();
+        analysisWindow.focus();
+        return;
+    }
+    const createdWindow = new BrowserWindow({
+        width: 1080,
+        height: 720,
+        minWidth: 720,
+        minHeight: 480,
+        title: `${visualizerSession.projectName} — Results`,
+        backgroundColor: '#081119',
+        webPreferences: {
+            preload: join(currentDir, 'addonPreload.cjs'),
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true
+        }
+    });
+    analysisWindow = createdWindow;
+    createdWindow.on('closed', () => {
+        if (analysisWindow === createdWindow) {
+            analysisWindow = null;
+            analysisAddonId = null;
+        }
+    });
+    await analysisWindow.loadFile(join(addonDirectory, manifest.entry));
+}
+
+ipcMain.handle('addonListToolstripContributions', async (event) => {
+    if (!senderIs(mainWindow, event)) return [];
+    await discoverAddons();
+    return [...addonRegistry.values()].flatMap(({ manifest }) => publicToolstripContributions(manifest));
+});
+
+ipcMain.handle('addonInvokeCommand', async (event, { addonId, commandId, contexts = {} }) => {
+    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can invoke add-on commands.');
+    if (!addonRegistry.size) await discoverAddons();
+    const addon = addonRegistry.get(addonId);
+    const contribution = addon?.manifest.contributes?.toolstrip?.find((item) => item.commandId === commandId);
+    if (!addon || !contribution) throw new Error('That add-on command is unavailable.');
+    if (!(contribution.contexts ?? []).every((context) => contexts[context])) throw new Error('The add-on command requires unavailable context.');
+    if (addon.manifest.kind === 'resultVisualizer') {
+        await openResultsVisualizer(addon, contexts.resultSession);
+        return { addonId, commandId, sessionId: visualizerSession.sessionId };
+    }
+    throw new Error(`Unsupported add-on kind: ${addon.manifest.kind}.`);
+});
+
+ipcMain.on('visualizerHostTimelineChange', (event, time) => {
+    if (!senderIs(mainWindow, event) || !visualizerSession) return;
+    visualizerSession.time = Number(time);
+    if (visualizerCan('timeline.read') && analysisWindow && !analysisWindow.isDestroyed()) {
+        analysisWindow.webContents.send('visualizerTimelineChange', visualizerSession.time);
+    }
+});
+
+ipcMain.on('visualizerHostSelectionChange', (event, nodeId) => {
+    if (!senderIs(mainWindow, event) || !visualizerSession) return;
+    visualizerSession.selectedNodeId = nodeId ?? null;
+    if (visualizerCan('selection.read') && analysisWindow && !analysisWindow.isDestroyed()) {
+        analysisWindow.webContents.send('visualizerSelectionChange', nodeId ?? null);
+    }
+});
+
+ipcMain.on('visualizerCloseSession', (event) => {
+    if (!senderIs(mainWindow, event)) return;
+    visualizerSession = null;
+    visualizerManifest = null;
+    analysisAddonId = null;
+    analysisWindow?.close();
+});
+
+ipcMain.handle('visualizerGetContext', (event) => {
+    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return null;
+    return publicVisualizerContext(visualizerSession);
+});
+
+ipcMain.handle('visualizerListSignals', (event) => {
+    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return [];
+    return structuredClone(visualizerSession.signals);
+});
+
+ipcMain.handle('visualizerReadSeries', (event, { signalUuids, options }) => {
+    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return [];
+    return readSignalSeries(visualizerSession, signalUuids, options);
+});
+
+ipcMain.on('visualizerSeek', (event, time) => {
+    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('timeline.seek')) return;
+    const boundedTime = Math.max(0, Math.min(Number(time), visualizerSession.run.duration));
+    visualizerSession.time = boundedTime;
+    mainWindow?.webContents.send('visualizerSeekRequest', boundedTime);
+});
 
 ipcMain.on('windowMaximizeToggle', (event) => {
     const targetWindow = getWindowFromEvent(event);

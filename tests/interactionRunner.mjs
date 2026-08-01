@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import assert from 'node:assert/strict';
+import { BrowserWindow } from 'electron';
 
 async function evaluate(window, expression) {
     return window.webContents.executeJavaScript(expression, true);
@@ -87,15 +88,39 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor [data-result-readonly]').hidden`), true);
         assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').data.length`) > 0);
         assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').layout.shapes.length`) > 0);
+        assert.equal(await evaluate(window, `document.querySelector('#openResultsAnalysis')`), null);
+        await waitFor(window, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]:not([hidden])'))`, 'Manifest-declared add-on toolstrip command did not appear.');
+        assert.equal(await evaluate(window, `document.querySelector('#addonToolstripSeparator').hidden`), false);
+        await evaluate(window, `document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]').click()`);
+        const analysisWindow = await (async () => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 5000) {
+                const candidate = BrowserWindow.getAllWindows().find((item) => item !== window && !item.isDestroyed());
+                if (candidate) return candidate;
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            throw new Error('Results Analysis add-on window did not open.');
+        })();
+        await waitFor(analysisWindow, `document.querySelectorAll('.signalOption').length > 0 && document.querySelector('.plotWorkspace').classList.contains('hasSignals')`, 'Results Analysis did not load signals.', 5000);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('.readOnlyBadge').textContent`), 'Read-only');
+        assert.equal(await evaluate(analysisWindow, `typeof require === 'undefined'`), true);
+        assert.ok(await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data.length`) > 0);
+        await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(window, `document.querySelector('#resultCurrentTime').value === '0 s'`, 'Visualizer seek did not synchronize to the project window.');
         await evaluate(window, `document.querySelector('[data-node-tab="model"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled`), true);
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeName'); input.value = 'Changed during results'; input.dispatchEvent(new Event('change', { bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module'))`), true);
         await evaluate(window, `document.querySelector('#closeResults').click()`);
+        for (let attempt = 0; attempt < 100 && !analysisWindow.isDestroyed(); attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        assert.equal(analysisWindow.isDestroyed(), true);
         assert.equal(await evaluate(window, `document.querySelector('#resultTransport').hidden`), true);
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), false);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || document.querySelector('#nodeModelActions').hidden`), false);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#addonToolstripSeparator').hidden`), true);
     });
 
     await run('icon-only toolstrip controls expose custom accessible tooltips', async () => {

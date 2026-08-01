@@ -44,3 +44,20 @@ contextBridge.exposeInMainWorld('engine', {
     validate: (content) => ipcRenderer.invoke('engineValidate', content),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration)
 });
+
+contextBridge.exposeInMainWorld('addons', {
+    listToolstripContributions: () => ipcRenderer.invoke('addonListToolstripContributions'),
+    invokeCommand: (addonId, commandId, contexts) => ipcRenderer.invoke('addonInvokeCommand', { addonId, commandId, contexts }),
+    publishEvent: (eventName, value) => {
+        if (eventName === 'timeline.change') ipcRenderer.send('visualizerHostTimelineChange', value);
+        else if (eventName === 'selection.change') ipcRenderer.send('visualizerHostSelectionChange', value);
+    },
+    closeContext: (contextName) => {
+        if (contextName === 'resultSession') ipcRenderer.send('visualizerCloseSession');
+    },
+    onRequest: (requestName, callback) => {
+        if (requestName === 'timeline.seek') {
+            ipcRenderer.on('visualizerSeekRequest', (_event, time) => callback(time));
+        }
+    }
+});

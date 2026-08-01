@@ -138,6 +138,10 @@ input, select { user-select: text; }
 .toolButton.active, .squareTool.active { color: var(--accent-bright); background: rgb(66 201 188 / 12%); border-color: rgb(66 201 188 / 38%); }
 .squareTool:disabled { color: #344852; background: transparent; border-color: transparent; cursor: default; opacity: .55; }
 .historyTool { font-size: 14px; }
+.addonToolstripContributions { display: contents; }
+.toolstrip #addonToolstripSeparator[hidden] { display: none; }
+.addonTool[hidden] { display: none; }
+.addonTool > span { color: #72d5cc; font-size: 14px; }
 .primaryTool { color: #d7e5ea; background: #1c2c37; border-color: #334550; }
 .primaryTool span { color: var(--accent); font-size: 17px; }
 .divider { width: 1px; height: 24px; margin: 0 3px; background: #2b3b46; }

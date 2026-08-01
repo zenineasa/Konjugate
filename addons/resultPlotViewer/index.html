@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    <title>Results Analysis</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="../../node_modules/plotly.js-dist-min/plotly.min.js"></script>
+    <script type="module" src="viewer.mjs"></script>
+</head>
+<body>
+    <header class="analysisHeader">
+        <div><span>Konjugate add-on</span><strong>Results Analysis</strong></div>
+        <div class="runIdentity"><strong id="projectName">—</strong><span id="runName">—</span></div>
+        <span class="readOnlyBadge">Read-only</span>
+    </header>
+    <main>
+        <aside class="signalBrowser">
+            <header><div><span>Signals</span><strong>Compare results</strong></div><button id="clearSignals" type="button">Clear</button></header>
+            <input id="signalSearch" type="search" placeholder="Search nodes or signals" aria-label="Search signals">
+            <div id="signalGroups"></div>
+        </aside>
+        <section class="plotWorkspace">
+            <div id="analysisPlot" role="img" aria-label="Selected simulation signals"></div>
+            <div id="emptyPlot"><strong>Select signals to compare</strong><span>Signals may use different units and domains.</span></div>
+        </section>
+    </main>
+    <footer class="analysisTimeline">
+        <output id="currentTime">0 s</output>
+        <input id="timeline" type="range" min="0" max="0" value="0" step="any" aria-label="Simulation time">
+        <output id="duration">0 s</output>
+    </footer>
+</body>
+</html>

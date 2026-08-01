@@ -1,0 +1,43 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { display: grid; grid-template-rows: 58px minmax(0, 1fr) 48px; color: #aebfc7; background: #081119; }
+button, input { font: inherit; }
+.analysisHeader { display: flex; align-items: center; gap: 24px; padding: 0 18px; background: #0c1922; border-bottom: 1px solid #263943; }
+.analysisHeader > div:first-child { display: grid; gap: 2px; }
+.analysisHeader span { color: #647b86; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.analysisHeader strong { color: #d3e0e5; font-size: 13px; }
+.runIdentity { display: flex; min-width: 0; align-items: baseline; gap: 8px; margin-left: auto; }
+.runIdentity strong { overflow: hidden; max-width: 280px; text-overflow: ellipsis; white-space: nowrap; }
+.runIdentity span { text-transform: none; }
+.analysisHeader .readOnlyBadge { padding: 5px 8px; color: #7ed4cc; background: rgb(66 201 188 / 9%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 12px; }
+main { display: grid; min-height: 0; grid-template-columns: 250px minmax(0, 1fr); }
+.signalBrowser { min-height: 0; padding: 14px; overflow: auto; background: #0b1720; border-right: 1px solid #263943; }
+.signalBrowser > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.signalBrowser > header div { display: grid; gap: 2px; }
+.signalBrowser > header span { color: #627985; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
+.signalBrowser > header strong { color: #c3d1d7; font-size: 11px; }
+.signalBrowser button { color: #73bdb7; background: transparent; border: 0; font-size: 9px; }
+#signalSearch { width: 100%; height: 31px; margin-bottom: 13px; padding: 0 9px; color: #b7c6cd; background: #08131a; border: 1px solid #2b404a; border-radius: 5px; outline: 0; font-size: 9px; }
+#signalSearch:focus { border-color: #47746f; }
+.signalGroup { margin-bottom: 14px; }
+.signalGroup > strong { display: block; margin-bottom: 6px; color: #718791; font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+.signalGroup.selectedEntity > strong { color: #80d7cf; }
+.signalOption { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; gap: 7px; min-height: 31px; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
+.signalOption:hover { background: #11222c; }
+.signalOption input { width: 12px; height: 12px; accent-color: #42c9bc; }
+.signalOption span { display: grid; gap: 1px; min-width: 0; }
+.signalOption b { overflow: hidden; color: #aebfc7; font-size: 9px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.signalOption small, .signalOption em { color: #5f747e; font-size: 8px; font-style: normal; }
+.plotWorkspace { position: relative; min-width: 0; min-height: 0; padding: 12px; }
+#analysisPlot { width: 100%; height: 100%; }
+#emptyPlot { position: absolute; inset: 12px; display: grid; place-content: center; gap: 6px; color: #5e747d; text-align: center; pointer-events: none; }
+#emptyPlot strong { color: #91a5ae; font-size: 13px; }
+#emptyPlot span { font-size: 9px; }
+.plotWorkspace.hasSignals #emptyPlot { display: none; }
+.plotWorkspace:not(.hasSignals) #analysisPlot { visibility: hidden; }
+.analysisTimeline { display: grid; grid-template-columns: 64px minmax(120px, 1fr) 64px; align-items: center; gap: 10px; padding: 0 18px; background: #0c1922; border-top: 1px solid #2a3d47; }
+.analysisTimeline input { width: 100%; accent-color: #42c9bc; }
+.analysisTimeline output { color: #758b95; font-size: 9px; text-align: center; }

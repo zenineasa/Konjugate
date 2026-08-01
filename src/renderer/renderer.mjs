@@ -6,8 +6,16 @@ import { DragControls } from 'three/addons/controls/DragControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import 'mathlive';
 import { DocumentController } from './documentController.mjs';
+import {
+    latexForBinding,
+    reconcileEquationBindings,
+    validateEquationLatex
+} from '../equationModel.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
+import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
+import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -28,6 +36,31 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const canvas = $('#canvas');
 const webglContainer = $('#webglContainer');
 const css2dContainer = $('#css2dContainer');
+
+function setupVirtualKeyboardLayout() {
+    const keyboard = window.mathVirtualKeyboard;
+    if (!keyboard) return;
+
+    const updateInset = (event) => {
+        const visible = event?.type === 'virtual-keyboard-toggle'
+            ? Boolean(event.detail?.visible)
+            : Boolean(keyboard.visible);
+        const bounds = event?.detail?.boundingRect ?? keyboard.boundingRect;
+        const inset = virtualKeyboardInset(window.innerHeight, bounds, visible);
+        document.documentElement.style.setProperty('--math-keyboard-inset', `${inset}px`);
+        if (!inset) return;
+        requestAnimationFrame(() => {
+            const activeEquation = $$('.equationMathField').find((field) => field.matches(':focus-within'));
+            activeEquation?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+    };
+
+    keyboard.addEventListener('geometrychange', updateInset);
+    keyboard.addEventListener('virtual-keyboard-toggle', updateInset);
+    window.addEventListener('resize', updateInset);
+}
+
+customElements.whenDefined('math-field').then(setupVirtualKeyboardLayout);
 
 function geometryFromDocument(mesh) {
     if (!mesh?.position?.length) return null;
@@ -145,6 +178,12 @@ function hydrateProjectDocument(document) {
         targetStateId: edge.target.stateId ?? null,
         directionality: edge.directionality ?? 'directed',
         equation: edge.equation ?? '',
+        equationModel: edge.equationModel ?? {
+            latex: edge.equation ?? '',
+            output: { role: 'target', stateId: edge.target.stateId ?? null },
+            bindings: [],
+            mathJson: null
+        },
         parameters: edge.parameters ?? [],
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: Number(edge.appearance?.offset) || 0
@@ -207,8 +246,9 @@ let selectedRelationship = null;
 let currentTool = 'select';
 let currentView = 'orbit';
 let activeEndpointPick = null;
+let endpointPickRestoreCard = null;
+let endpointPickMaterialState = new Map();
 let cameraAnimation = null;
-let bundleSignature = '';
 let pendingImportedGeometry = null;
 let pendingGeometryFileName = '';
 const documentController = new DocumentController();
@@ -356,14 +396,18 @@ function materialFor(definition) {
     });
 }
 
-const nodeLabelOffsets = {
-    box: [1.72, 0.62, 0],
-    cylinder: [1.5, 0.7, 0],
-    sphere: [1.38, 0.5, 0],
-    imported: [1.72, 0.62, 0]
-};
+function nodeLabelOffset(geometry) {
+    geometry.computeBoundingBox();
+    const bounds = geometry.boundingBox;
+    const height = bounds.max.y - bounds.min.y;
+    return [
+        bounds.max.x + 0.08,
+        (bounds.min.y + bounds.max.y) / 2 + height * 0.24,
+        (bounds.min.z + bounds.max.z) / 2
+    ];
+}
 
-function createNodeLabel(definition) {
+function createNodeLabel(definition, geometry) {
     const wrapper = document.createElement('div');
     wrapper.className = 'node-label-container';
     wrapper.dataset.node = definition.id;
@@ -388,17 +432,23 @@ function createNodeLabel(definition) {
 
     wrapper.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
-        if (activeEndpointPick) chooseEndpointNode(definition.id);
+    });
+    wrapper.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (activeEndpointPick) {
+            chooseEndpointNode(definition.id);
+            return;
+        }
+        selectNode(nodeObjects.get(definition.id));
+        openNodeEditor(definition);
     });
     wrapper.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        selectNode(nodeObjects.get(definition.id));
-        openNodeEditor(definition, event.clientX, event.clientY);
     });
 
     const label = new CSS2DObject(wrapper);
-    label.position.fromArray(nodeLabelOffsets[definition.shape] ?? nodeLabelOffsets.box);
+    label.position.fromArray(nodeLabelOffset(geometry));
     label.center.set(0, 0.5);
     return label;
 }
@@ -412,7 +462,7 @@ function createNode(definition) {
         definition
     };
 
-    mesh.add(createNodeLabel(definition));
+    mesh.add(createNodeLabel(definition, mesh.geometry));
     scene.add(mesh);
     nodeObjects.set(definition.id, mesh);
     nodePickTargets.push(mesh);
@@ -523,7 +573,7 @@ function setRelationshipDirectionality(definition, directionality) {
     definition.directionality = directionality;
     relationship.marker = createDirectionMarker(definition, relationship.line.userData.curve);
     if (relationship.marker) relationshipPickTargets.push(relationship.marker);
-    bundleSignature = '';
+    invalidateRelationshipBundles();
     syncContextualOverlays();
 }
 
@@ -553,7 +603,7 @@ function applyNodeAppearance(node, appearance) {
     node.material.dispose();
     node.material = materialFor(definition);
     const label = node.children.find((child) => child.element?.classList.contains('node-label-container'));
-    label?.position.fromArray(nodeLabelOffsets[definition.shape] ?? nodeLabelOffsets.box);
+    label?.position.fromArray(nodeLabelOffset(node.geometry));
     updateSelectionOutline();
     updateRelationships();
 }
@@ -570,12 +620,7 @@ function changeNodeAppearance(node, appearance) {
 
 model.relationships.forEach(createRelationship);
 
-const bundleAnchor = new THREE.Object3D();
-scene.add(bundleAnchor);
-const bundleElement = $('#bundleLabel');
-const bundleObject = new CSS2DObject(bundleElement);
-bundleObject.center.set(0.5, 0.5);
-bundleAnchor.add(bundleObject);
+const relationshipBundleObjects = new Map();
 
 function updateRelationships() {
     relationshipObjects.forEach((relationship) => {
@@ -591,12 +636,6 @@ function updateRelationships() {
         if (relationship.marker) positionDirectionMarker(relationship.marker, curve);
     });
 
-    const bundle = activeRelationshipBundle();
-    if (bundle) {
-        bundleAnchor.position.copy(nodeObjects.get(bundle.source).position)
-            .lerp(nodeObjects.get(bundle.target).position, 0.5);
-        bundleAnchor.position.y -= 1.65;
-    }
     syncContextualOverlays();
 }
 
@@ -745,7 +784,7 @@ function refreshNodeLabel(node) {
         node.remove(previous);
         previous.element.remove();
     }
-    node.add(createNodeLabel(node.userData.definition));
+    node.add(createNodeLabel(node.userData.definition, node.geometry));
 }
 
 function applyNodeModel(node, snapshot) {
@@ -762,7 +801,7 @@ function applyNodeModel(node, snapshot) {
         }
     });
     refreshNodeLabel(node);
-    bundleSignature = '';
+    invalidateRelationshipBundles();
     syncContextualOverlays();
     if (selectedNode === node && !$('#nodeEditor').classList.contains('hidden')) {
         renderNodeEditorModel(node);
@@ -870,10 +909,31 @@ function openNodeEditor(definition, clientX, clientY) {
     $('#editNodeGeometryFile').value = '';
     $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file';
     $('#editNodeGeometryFile').closest('.geometryImportField').classList.remove('loading', 'error');
-    positionCard(editor, clientX, clientY);
+    editor.style.removeProperty('left');
+    editor.style.removeProperty('top');
+    editor.classList.remove('hidden');
+}
+
+function normalizeEdgeEquationModel(definition, equationModel = definition.equationModel) {
+    const sourceNode = model.nodes.find((node) => node.id === definition.source);
+    const targetNode = model.nodes.find((node) => node.id === definition.target);
+    const base = equationModel ?? {
+        latex: definition.equation ?? '',
+        output: { role: 'target', stateId: definition.targetStateId ?? null },
+        bindings: [],
+        mathJson: null
+    };
+    const bindings = reconcileEquationBindings(base.bindings, sourceNode, targetNode, definition.parameters);
+    const outputNode = base.output?.role === 'source' ? sourceNode : targetNode;
+    const output = outputNode?.states.some((state) => state.id === base.output?.stateId)
+        ? base.output
+        : { role: 'target', stateId: targetNode?.states[0]?.id ?? null };
+    const validation = validateEquationLatex(base.latex, bindings);
+    return { latex: base.latex ?? '', output, bindings, mathJson: validation.valid ? validation.mathJson : null };
 }
 
 function captureEdgeModel(definition) {
+    const equationModel = normalizeEdgeEquationModel(definition);
     return {
         title: definition.title,
         source: definition.source,
@@ -882,6 +942,7 @@ function captureEdgeModel(definition) {
         targetStateId: definition.targetStateId,
         directionality: definition.directionality,
         equation: definition.equation,
+        equationModel: structuredClone(equationModel),
         parameters: structuredClone(definition.parameters)
     };
 }
@@ -892,8 +953,9 @@ function applyEdgeModel(definition, snapshot) {
     definition.sourceStateId = snapshot.sourceStateId;
     definition.target = snapshot.target;
     definition.targetStateId = snapshot.targetStateId;
-    definition.equation = snapshot.equation;
     definition.parameters = structuredClone(snapshot.parameters);
+    definition.equationModel = normalizeEdgeEquationModel(definition, snapshot.equationModel);
+    definition.equation = definition.equationModel.latex;
     setRelationshipDirectionality(definition, snapshot.directionality);
     updateRelationships();
     if (selectedRelationship?.id === definition.id && !$('#edgeEditor').classList.contains('hidden')) {
@@ -960,28 +1022,55 @@ function renderEdgeEditor(definition) {
         }));
         parameterContainer.appendChild(row);
     });
-    $('#editEdgeEquation').value = definition.equation ?? '';
-    const references = $('#editStateReferenceChips');
-    references.replaceChildren();
+    definition.equationModel = normalizeEdgeEquationModel(definition);
+    definition.equation = definition.equationModel.latex;
+    const mathField = $('#editEdgeMathField');
+    const latexSource = $('#editEdgeEquation');
+    mathField.value = definition.equationModel.latex;
+    latexSource.value = definition.equationModel.latex;
+    const output = $('#editEquationOutput');
+    output.replaceChildren();
     [['source', definition.source], ['target', definition.target]].forEach(([role, nodeId]) => {
         const node = model.nodes.find((candidate) => candidate.id === nodeId);
         node?.states.forEach((state) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = `${role}.${state.symbol}`;
-            button.addEventListener('click', () => {
-                const equation = $('#editEdgeEquation');
-                equation.setRangeText(
-                    button.textContent,
-                    equation.selectionStart,
-                    equation.selectionEnd,
-                    'end'
-                );
-                equation.focus();
-            });
-            references.appendChild(button);
+            output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.id}`));
         });
     });
+    output.value = `${definition.equationModel.output.role}:${definition.equationModel.output.stateId}`;
+    renderEquationDiagnostics(definition.equationModel.latex, definition.equationModel.bindings);
+    const references = $('#editStateReferenceChips');
+    references.replaceChildren();
+    definition.equationModel.bindings.forEach((binding) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = binding.label;
+        button.title = binding.kind === 'parameter' ? 'Insert parameter' : 'Insert state reference';
+        button.addEventListener('click', () => insertEquationBinding(binding));
+        references.appendChild(button);
+    });
+}
+
+function renderEquationDiagnostics(latex, bindings) {
+    const diagnostics = $('#equationDiagnostics');
+    const validation = validateEquationLatex(latex, bindings);
+    diagnostics.classList.toggle('valid', validation.valid);
+    diagnostics.textContent = validation.valid
+        ? 'Valid expression · MathJSON ready'
+        : validation.errors.join(' ');
+    return validation;
+}
+
+function insertEquationBinding(binding) {
+    const latex = latexForBinding(binding);
+    if ($('#editEdgeMathField').hidden) {
+        const source = $('#editEdgeEquation');
+        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
+        source.dispatchEvent(new Event('input', { bubbles: true }));
+        source.focus();
+    } else {
+        $('#editEdgeMathField').insert(latex);
+        $('#editEdgeMathField').focus();
+    }
 }
 
 function openRelationshipEditor(definition, clientX, clientY) {
@@ -989,7 +1078,9 @@ function openRelationshipEditor(definition, clientX, clientY) {
     selectRelationship(definition);
     hideCards(editor);
     renderEdgeEditor(definition);
-    positionCard(editor, clientX, clientY);
+    editor.style.removeProperty('left');
+    editor.style.removeProperty('top');
+    editor.classList.remove('hidden');
 }
 
 function openAddPalette(clientX, clientY) {
@@ -1120,7 +1211,12 @@ function addEdgeParameterRow(values = {}) {
     `;
     $('[data-field="mode"]', row).value = values.mode ?? 'constant';
     $('#edgeParameterRows').appendChild(row);
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
+    $$('input, select', row).forEach((input) => input.addEventListener('input', refreshStateReferences));
+    row.querySelector('.removeBuilderRow').addEventListener('click', () => {
+        row.remove();
+        refreshStateReferences();
+    });
+    refreshStateReferences();
 }
 
 function refreshEndpointOptions() {
@@ -1141,9 +1237,23 @@ function refreshEndpointOptions() {
 function finishEndpointPick() {
     activeEndpointPick = null;
     canvas.classList.remove('pickingEndpoint');
+    $('#endpointPickBanner').hidden = true;
     $$('[data-pick-endpoint]').forEach((button) => button.classList.remove('active'));
+    $$('.node-label-container').forEach((label) => label.classList.remove('endpointEligible'));
+    endpointPickMaterialState.forEach((state, nodeId) => {
+        const material = nodeObjects.get(nodeId)?.material;
+        if (!material) return;
+        material.emissive.copy(state.emissive);
+        material.emissiveIntensity = state.emissiveIntensity;
+        material.opacity = state.opacity;
+        material.transparent = state.transparent;
+        material.needsUpdate = true;
+    });
+    endpointPickMaterialState = new Map();
     dragControls.enabled = currentTool === 'select';
     $('.edgeBuilder > header strong').textContent = 'Connect stateful nodes';
+    if (endpointPickRestoreCard?.isConnected) endpointPickRestoreCard.classList.remove('hidden');
+    endpointPickRestoreCard = null;
 }
 
 function chooseEndpointNode(nodeId) {
@@ -1162,28 +1272,92 @@ function startEndpointPick(endpoint) {
     canvas.classList.add('pickingEndpoint');
     const button = $(`[data-pick-endpoint="${endpoint}"]`);
     button.classList.add('active');
-    $('.edgeBuilder > header strong').textContent = `Pick ${endpoint} node on canvas`;
+    const otherEndpoint = endpoint === 'source' ? $('#edgeTarget').value : $('#edgeSource').value;
+    const eligibleIds = new Set(eligibleEndpointIds(
+        model.nodes,
+        otherEndpoint,
+        (node) => nodeObjects.get(node.id)?.visible !== false
+    ));
+    nodeObjects.forEach((node, nodeId) => {
+        endpointPickMaterialState.set(nodeId, {
+            emissive: node.material.emissive.clone(),
+            emissiveIntensity: node.material.emissiveIntensity,
+            opacity: node.material.opacity,
+            transparent: node.material.transparent
+        });
+        const eligible = eligibleIds.has(nodeId);
+        node.material.emissive.setHex(eligible ? 0x174d49 : 0x000000);
+        node.material.emissiveIntensity = eligible ? 0.85 : 0;
+        node.material.opacity = eligible ? 1 : 0.28;
+        node.material.transparent = !eligible;
+        node.material.needsUpdate = true;
+        node.children.find((child) => child.isCSS2DObject)?.element.classList.toggle('endpointEligible', eligible);
+    });
+    endpointPickRestoreCard = $('#edgeBuilder').classList.contains('hidden') ? null : $('#edgeBuilder');
+    endpointPickRestoreCard?.classList.add('hidden');
+    const endpointLabel = endpoint === 'source' ? 'source' : 'target';
+    $('#endpointPickTitle').textContent = `Choose the ${endpointLabel} node`;
+    $('#endpointPickHint').textContent = eligibleIds.size
+        ? 'Select a highlighted node on the canvas'
+        : 'No eligible nodes are available';
+    $('#endpointPickBanner').hidden = false;
 }
 
 function refreshStateReferences() {
     const container = $('#stateReferenceChips');
     container.replaceChildren();
-    [['source', $('#edgeSource').value], ['target', $('#edgeTarget').value]].forEach(([role, id]) => {
-        const node = model.nodes.find((candidate) => candidate.id === id);
-        node?.states.forEach((state) => {
-            const reference = `${role}.${state.symbol ?? state.label.replaceAll(' ', '_')}`;
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = reference;
-            button.addEventListener('click', () => {
-                const equation = $('#edgeEquation');
-                const start = equation.selectionStart;
-                equation.setRangeText(reference, start, equation.selectionEnd, 'end');
-                equation.focus();
-            });
-            container.appendChild(button);
-        });
+    const sourceNode = model.nodes.find((node) => node.id === $('#edgeSource').value);
+    const targetNode = model.nodes.find((node) => node.id === $('#edgeTarget').value);
+    const parameters = $$('.parameterRow').map((row, index) => ({
+        id: `builderParameter${index}`,
+        symbol: $('[data-field="symbol"]', row).value.trim()
+    })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
+    const bindings = reconcileEquationBindings([], sourceNode, targetNode, parameters);
+    bindings.forEach((binding) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = binding.label;
+        button.addEventListener('click', () => insertBuilderEquationBinding(binding));
+        container.appendChild(button);
     });
+    const output = $('#edgeEquationOutput');
+    const selectedOutput = output.value;
+    output.replaceChildren();
+    for (const [role, node] of [['source', sourceNode], ['target', targetNode]]) {
+        node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.id}`)));
+    }
+    if ([...output.options].some((option) => option.value === selectedOutput)) output.value = selectedOutput;
+    else if (targetNode?.states[0]) output.value = `target:${targetNode.states[0].id}`;
+    renderBuilderEquationDiagnostics(bindings);
+}
+
+function renderBuilderEquationDiagnostics(bindings = null) {
+    const availableBindings = bindings ?? (() => {
+        const sourceNode = model.nodes.find((node) => node.id === $('#edgeSource').value);
+        const targetNode = model.nodes.find((node) => node.id === $('#edgeTarget').value);
+        const parameters = $$('.parameterRow').map((row, index) => ({
+            id: `builderParameter${index}`,
+            symbol: $('[data-field="symbol"]', row).value.trim()
+        })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
+        return reconcileEquationBindings([], sourceNode, targetNode, parameters);
+    })();
+    const validation = validateEquationLatex($('#edgeMathField').value, availableBindings);
+    const diagnostics = $('#builderEquationDiagnostics');
+    diagnostics.classList.toggle('valid', validation.valid);
+    diagnostics.textContent = validation.valid ? 'Valid expression · MathJSON ready' : validation.errors.join(' ');
+}
+
+function insertBuilderEquationBinding(binding) {
+    const latex = latexForBinding(binding);
+    if ($('#edgeMathField').hidden) {
+        const source = $('#edgeEquation');
+        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
+        source.dispatchEvent(new Event('input', { bubbles: true }));
+        source.focus();
+    } else {
+        $('#edgeMathField').insert(latex);
+        $('#edgeMathField').focus();
+    }
 }
 
 function updateModelStatus() {
@@ -1199,51 +1373,119 @@ function updateModelStatus() {
 }
 
 function syncContextualOverlays() {
-    const bundle = activeRelationshipBundle();
-    const bundledRelationships = bundle?.relationships ?? [];
-    bundleAnchor.visible = Boolean(bundle);
-    if (bundle) {
-        const source = model.nodes.find((node) => node.id === bundle.source);
-        const target = model.nodes.find((node) => node.id === bundle.target);
-        $('.bundleLabel header strong').textContent = `${source.title} ↔ ${target.title}`;
-    }
-    $('.bundleLabel header span').textContent = `${bundledRelationships.length} relationships`;
-    const nextBundleSignature = bundledRelationships.map((relationship) => relationship.id).join('|');
-    if (bundleSignature !== nextBundleSignature) {
-        bundleSignature = nextBundleSignature;
-        $$('.relationshipRow', bundleElement).forEach((row) => row.remove());
-        bundledRelationships.forEach((relationship) => {
-            const row = document.createElement('button');
-            const parameter = relationship.parameters?.[0];
-            const summary = parameter
-                ? `${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`
-                : relationship.equation ? 'Equation' : 'No equation';
-            row.className = 'relationshipRow';
-            row.dataset.relationship = relationship.id;
-            row.type = 'button';
-            row.innerHTML = `
-                <i class="relationColor" style="background:#${relationship.color.toString(16).padStart(6, '0')}"></i>
-                <span><b>${relationship.directionality === 'directed' ? '→' : '⇄'}</b> ${escapeHtml(relationship.title)}</span>
-                <em>${escapeHtml(summary)}</em>
-            `;
-            bundleElement.appendChild(row);
-        });
-    }
-
+    const bundles = activeRelationshipBundles();
+    const activeKeys = new Set(bundles.map((bundle) => bundle.key));
+    relationshipBundleObjects.forEach((overlay, key) => {
+        if (activeKeys.has(key)) return;
+        scene.remove(overlay.anchor);
+        overlay.element.remove();
+        relationshipBundleObjects.delete(key);
+    });
+    bundles.forEach((bundle) => {
+        let overlay = relationshipBundleObjects.get(bundle.key);
+        if (!overlay) {
+            overlay = createRelationshipBundleOverlay(bundle.key);
+            relationshipBundleObjects.set(bundle.key, overlay);
+        }
+        const sourceObject = nodeObjects.get(bundle.source);
+        const targetObject = nodeObjects.get(bundle.target);
+        overlay.anchor.visible = Boolean(sourceObject?.visible && targetObject?.visible);
+        const curveMidpoints = bundle.relationships
+            .map((relationship) => relationshipObjects.get(relationship.id)?.line.userData.curve?.getPoint(0.5))
+            .filter(Boolean);
+        if (curveMidpoints.length) {
+            overlay.anchor.position.set(0, 0, 0);
+            curveMidpoints.forEach((point) => overlay.anchor.position.add(point));
+            overlay.anchor.position.multiplyScalar(1 / curveMidpoints.length);
+        } else {
+            overlay.anchor.position.copy(sourceObject.position).lerp(targetObject.position, 0.5);
+        }
+        renderRelationshipBundle(overlay, bundle);
+    });
 }
 
-function activeRelationshipBundle() {
-    const groups = new Map();
-    model.relationships.forEach((relationship) => {
-        if (relationshipObjects.get(relationship.id)?.line.visible !== true) return;
-        if (nodeObjects.get(relationship.source)?.visible !== true) return;
-        if (nodeObjects.get(relationship.target)?.visible !== true) return;
-        const [source, target] = [relationship.source, relationship.target].sort();
-        const key = `${source}|${target}`;
-        if (!groups.has(key)) groups.set(key, { source, target, relationships: [] });
-        groups.get(key).relationships.push(relationship);
+function createRelationshipBundleOverlay(key) {
+    const element = $('#relationshipBundleTemplate').content.firstElementChild.cloneNode(true);
+    element.dataset.bundle = key;
+    const anchor = new THREE.Object3D();
+    const object = new CSS2DObject(element);
+    object.center.set(0.5, 0.5);
+    anchor.add(object);
+    scene.add(anchor);
+    element.addEventListener('pointerdown', (event) => event.stopPropagation());
+    element.addEventListener('click', (event) => {
+        const row = event.target.closest('.relationshipRow');
+        const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
+        const definition = row
+            ? model.relationships.find((relationship) => relationship.id === row.dataset.relationship)
+            : bundle?.relationships[0];
+        if (definition) openRelationshipEditor(definition);
     });
-    return [...groups.values()].find((group) => group.relationships.length > 1) ?? null;
+    element.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = event.target.closest('.relationshipRow');
+        const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
+        const definition = row
+            ? model.relationships.find((relationship) => relationship.id === row.dataset.relationship)
+            : bundle?.relationships[0];
+        if (definition) selectRelationship(definition);
+    });
+    $('.collapseBundle', element).addEventListener('click', (event) => {
+        event.stopPropagation();
+        element.classList.toggle('pinned');
+        const pinned = element.classList.contains('pinned');
+        event.currentTarget.textContent = pinned ? '−' : '＋';
+        event.currentTarget.title = pinned ? 'Use automatic detail' : 'Keep expanded';
+    });
+    return { anchor, element, signature: '' };
+}
+
+function renderRelationshipBundle(overlay, bundle) {
+    const source = model.nodes.find((node) => node.id === bundle.source);
+    const target = model.nodes.find((node) => node.id === bundle.target);
+    $('header strong', overlay.element).textContent = `${source.title} ↔ ${target.title}`;
+    $('header span', overlay.element).textContent = `${bundle.relationships.length} ${bundle.relationships.length === 1 ? 'relationship' : 'relationships'}`;
+    const signature = JSON.stringify(bundle.relationships.map((relationship) => ({
+        id: relationship.id,
+        title: relationship.title,
+        directionality: relationship.directionality,
+        equation: relationship.equation,
+        parameter: relationship.parameters?.[0]
+    })));
+    if (overlay.signature === signature) return;
+    overlay.signature = signature;
+    $$('.relationshipRow', overlay.element).forEach((row) => row.remove());
+    bundle.relationships.forEach((relationship) => {
+        const row = document.createElement('button');
+        const parameter = relationship.parameters?.[0];
+        const summary = parameter
+            ? `${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`
+            : relationship.equation ? 'Equation' : 'No equation';
+        row.className = 'relationshipRow';
+        row.dataset.relationship = relationship.id;
+        row.type = 'button';
+        row.innerHTML = `
+            <i class="relationColor" style="background:#${relationship.color.toString(16).padStart(6, '0')}"></i>
+            <span><b>${relationship.directionality === 'directed' ? '→' : '⇄'}</b> ${escapeHtml(relationship.title)}</span>
+            <em>${escapeHtml(summary)}</em>
+        `;
+        overlay.element.appendChild(row);
+    });
+}
+
+function invalidateRelationshipBundles() {
+    relationshipBundleObjects.forEach((overlay) => {
+        overlay.signature = '';
+    });
+}
+
+function activeRelationshipBundles() {
+    return groupRelationshipBundles(model.relationships, (relationship) => (
+        relationshipObjects.get(relationship.id)?.line.visible === true &&
+        nodeObjects.get(relationship.source)?.visible === true &&
+        nodeObjects.get(relationship.target)?.visible === true
+    ));
 }
 
 function serializeGeometry(geometry) {
@@ -1302,7 +1544,8 @@ function serializeProjectDocument() {
                 source: { nodeId: edge.source, stateId: edge.sourceStateId ?? null },
                 target: { nodeId: edge.target, stateId: edge.targetStateId ?? null },
                 directionality: edge.directionality,
-                equation: edge.equation ?? '',
+                equation: edge.equationModel?.latex ?? edge.equation ?? '',
+                equationModel: normalizeEdgeEquationModel(edge),
                 parameters: edge.parameters ?? [],
                 appearance: {
                     color: `#${edge.color.toString(16).padStart(6, '0')}`,
@@ -1314,6 +1557,11 @@ function serializeProjectDocument() {
 
 function clearRenderedModel() {
     clearSelection();
+    relationshipBundleObjects.forEach((overlay) => {
+        scene.remove(overlay.anchor);
+        overlay.element.remove();
+    });
+    relationshipBundleObjects.clear();
     relationshipObjects.forEach((relationship) => {
         scene.remove(relationship.line);
         relationship.line.geometry.dispose();
@@ -1349,7 +1597,7 @@ function loadProjectDocument(document, {
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.nodes.forEach(createNode);
     model.relationships.forEach(createRelationship);
-    bundleSignature = '';
+    invalidateRelationshipBundles();
     updateRelationships();
     updateModelStatus();
     currentProjectPath = path;
@@ -1385,14 +1633,24 @@ function openEdgeBuilder(clientX, clientY) {
     hideCards(builder);
     $('#newEdgeName').value = 'New relationship';
     $('#edgeEquation').value = '';
+    $('#edgeMathField').setValue('', { silenceNotifications: true });
+    $('#edgeMathField').hidden = false;
+    $('#edgeEquation').hidden = true;
+    $$('[data-builder-equation-mode]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.builderEquationMode === 'visual');
+    });
     $('#edgeParameterRows').replaceChildren();
     finishEndpointPick();
     $('#edgeSource').replaceChildren();
     $('#edgeTarget').replaceChildren();
     refreshEndpointOptions();
     addEdgeParameterRow({ name: 'Coefficient', symbol: 'k', value: '1' });
-    positionCard(builder, clientX, clientY);
+    builder.style.removeProperty('left');
+    builder.style.removeProperty('top');
+    builder.classList.remove('hidden');
 }
+
+let nodePointerDown = null;
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || transformControls.dragging) return;
@@ -1402,24 +1660,44 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     if (node) {
         selectNode(node);
         if (activeEndpointPick) {
+            nodePointerDown = null;
             chooseEndpointNode(node.userData.id);
             return;
         }
+        nodePointerDown = { id: node.userData.id, x: event.clientX, y: event.clientY };
         if (currentTool === 'move') transformControls.attach(node);
         return;
     }
+
+    nodePointerDown = null;
 
     if (activeEndpointPick) return;
 
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
-        selectRelationship(relationshipHit.object.userData.definition);
+        const definition = relationshipHit.object.userData.definition;
+        selectRelationship(definition);
         transformControls.detach();
+        openRelationshipEditor(definition);
         return;
     }
 
     clearSelection();
     hideCards();
+});
+
+renderer.domElement.addEventListener('pointerup', (event) => {
+    if (event.button !== 0 || !nodePointerDown || activeEndpointPick) {
+        nodePointerDown = null;
+        return;
+    }
+    const pointerTravel = Math.hypot(
+        event.clientX - nodePointerDown.x,
+        event.clientY - nodePointerDown.y
+    );
+    const node = nodeObjects.get(nodePointerDown.id);
+    nodePointerDown = null;
+    if (pointerTravel <= 4 && node?.visible) openNodeEditor(node.userData.definition);
 });
 
 renderer.domElement.addEventListener('contextmenu', (event) => {
@@ -1429,15 +1707,12 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
 
     if (node) {
         selectNode(node);
-        openNodeEditor(node.userData.definition, event.clientX, event.clientY);
         return;
     }
 
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
-        const definition = relationshipHit.object.userData.definition;
-        selectRelationship(definition);
-        openRelationshipEditor(definition, event.clientX, event.clientY);
+        selectRelationship(relationshipHit.object.userData.definition);
         return;
     }
 
@@ -1523,12 +1798,52 @@ $('#editEdgeDirectionality').addEventListener('change', (event) => {
         snapshot.directionality = event.target.value;
     });
 });
-$('#editEdgeEquation').addEventListener('change', (event) => {
+
+function previewEdgeEquation(latex, origin) {
+    if (!selectedRelationship) return;
+    const equationModel = normalizeEdgeEquationModel(selectedRelationship, {
+        ...selectedRelationship.equationModel,
+        latex
+    });
+    if (origin !== 'visual') $('#editEdgeMathField').setValue(latex, { silenceNotifications: true });
+    if (origin !== 'latex') $('#editEdgeEquation').value = latex;
+    renderEquationDiagnostics(latex, equationModel.bindings);
+}
+
+function commitEdgeEquation(latex) {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.equation = event.target.value.trim();
+        snapshot.equationModel.latex = latex.trim();
+        snapshot.equation = snapshot.equationModel.latex;
+    });
+}
+
+$('#editEdgeMathField').addEventListener('input', (event) => {
+    previewEdgeEquation(event.target.value, 'visual');
+});
+$('#editEdgeMathField').addEventListener('change', (event) => {
+    commitEdgeEquation(event.target.value);
+});
+$('#editEdgeEquation').addEventListener('input', (event) => {
+    previewEdgeEquation(event.target.value, 'latex');
+});
+$('#editEdgeEquation').addEventListener('change', (event) => {
+    commitEdgeEquation(event.target.value);
+});
+$('#editEquationOutput').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    const [role, stateId] = event.target.value.split(':');
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.equationModel.output = { role, stateId };
     });
 });
+$$('[data-equation-mode]').forEach((button) => button.addEventListener('click', () => {
+    $$('[data-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+    const latexMode = button.dataset.equationMode === 'latex';
+    $('#editEdgeMathField').hidden = latexMode;
+    $('#editEdgeEquation').hidden = !latexMode;
+    (latexMode ? $('#editEdgeEquation') : $('#editEdgeMathField')).focus();
+}));
 $('#editAddEdgeParameter').addEventListener('click', () => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
@@ -1666,8 +1981,21 @@ async function loadExample(id) {
         console.error(error);
         $('#statusText').textContent = `Example failed · ${error.message}`;
     } finally {
-        $('#exampleSelect').value = '';
+        closeExampleMenu();
     }
+}
+
+function closeExampleMenu() {
+    $('#exampleMenu').hidden = true;
+    $('#exampleButton').ariaExpanded = 'false';
+}
+
+function toggleExampleMenu() {
+    const menu = $('#exampleMenu');
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    $('#exampleButton').ariaExpanded = String(opening);
+    if (opening) $('button', menu)?.focus();
 }
 
 function requestProjectPassword({
@@ -1743,10 +2071,18 @@ function requestProjectPassword({
 async function populateExamples() {
     try {
         const examples = await window.projectFiles.listExamples();
-        $('#exampleSelect').append(...examples.map((example) => new Option(example.label, example.id)));
+        const menu = $('#exampleMenu');
+        menu.replaceChildren(...examples.map((example) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.role = 'menuitem';
+            button.textContent = example.label;
+            button.addEventListener('click', () => loadExample(example.id));
+            return button;
+        }));
     } catch (error) {
         console.error(error);
-        $('#exampleSelect').disabled = true;
+        $('#exampleButton').disabled = true;
     }
 }
 
@@ -1800,7 +2136,14 @@ $('#removeEncryptionButton').addEventListener('click', async () => {
 });
 
 $('#encryptionMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
-$('#exampleSelect').addEventListener('change', (event) => loadExample(event.target.value));
+$('#exampleButton').addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleExampleMenu();
+});
+$('#exampleMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
+window.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('.examplePicker')) closeExampleMenu();
+});
 populateExamples();
 
 $$('[data-add-kind]').forEach((button) => {
@@ -1816,6 +2159,21 @@ $('#addSourceTerm').addEventListener('click', addSourceTermRow);
 $('#addEdgeParameter').addEventListener('click', () => addEdgeParameterRow());
 $('#edgeSource').addEventListener('change', refreshStateReferences);
 $('#edgeTarget').addEventListener('change', refreshStateReferences);
+$('#edgeMathField').addEventListener('input', (event) => {
+    $('#edgeEquation').value = event.target.value;
+    renderBuilderEquationDiagnostics();
+});
+$('#edgeEquation').addEventListener('input', (event) => {
+    $('#edgeMathField').setValue(event.target.value, { silenceNotifications: true });
+    renderBuilderEquationDiagnostics();
+});
+$$('[data-builder-equation-mode]').forEach((button) => button.addEventListener('click', () => {
+    $$('[data-builder-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+    const latexMode = button.dataset.builderEquationMode === 'latex';
+    $('#edgeMathField').hidden = latexMode;
+    $('#edgeEquation').hidden = !latexMode;
+    (latexMode ? $('#edgeEquation') : $('#edgeMathField')).focus();
+}));
 $('#newNodeShape').addEventListener('change', (event) => {
     $('#geometryImportField').hidden = event.target.value !== 'imported';
 });
@@ -1850,6 +2208,7 @@ $('#nodeGeometryFile').addEventListener('change', async (event) => {
 $$('[data-pick-endpoint]').forEach((button) => {
     button.addEventListener('click', () => startEndpointPick(button.dataset.pickEndpoint));
 });
+$('#cancelEndpointPick').addEventListener('click', finishEndpointPick);
 $('#connectFromNode').addEventListener('click', () => {
     if (!selectedNode) return;
     const sourceId = selectedNode.userData.id;
@@ -1942,12 +2301,24 @@ $('#createEdge').addEventListener('click', () => {
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
         source,
         target,
+        sourceStateId: null,
+        targetStateId: null,
         directionality: 'directed',
         color: 0x9c83c4,
         offset: 0,
         equation: $('#edgeEquation').value.trim(),
         parameters
     };
+    definition.equationModel = normalizeEdgeEquationModel(definition);
+    const [outputRole, outputStateId] = $('#edgeEquationOutput').value.split(':');
+    if (outputRole && outputStateId) {
+        definition.equationModel.output = { role: outputRole, stateId: outputStateId };
+    }
+    if (definition.equation && !definition.equationModel.mathJson) {
+        renderBuilderEquationDiagnostics(definition.equationModel.bindings);
+        ($('#edgeMathField').hidden ? $('#edgeEquation') : $('#edgeMathField')).focus();
+        return;
+    }
 
     finishEndpointPick();
     model.relationships.push(definition);
@@ -1960,38 +2331,6 @@ $('#createEdge').addEventListener('click', () => {
         undo: () => setRelationshipVisibility(definition.id, false),
         redo: () => setRelationshipVisibility(definition.id, true)
     });
-});
-
-bundleElement.addEventListener('pointerdown', (event) => event.stopPropagation());
-bundleElement.addEventListener('click', (event) => {
-    const row = event.target.closest('.relationshipRow');
-    if (!row) return;
-    const definition = model.relationships.find(
-        (relationship) => relationship.id === row.dataset.relationship
-    );
-    if (definition) selectRelationship(definition);
-});
-bundleElement.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const row = event.target.closest('.relationshipRow');
-    const definition = row
-        ? model.relationships.find((relationship) => relationship.id === row.dataset.relationship)
-        : model.relationships.find((relationship) => relationshipObjects.get(relationship.id)?.line.visible);
-    if (!definition) return;
-    openRelationshipEditor(
-        definition,
-        event.clientX,
-        event.clientY
-    );
-});
-
-$('.collapseBundle').addEventListener('click', (event) => {
-    event.stopPropagation();
-    bundleElement.classList.toggle('pinned');
-    const pinned = bundleElement.classList.contains('pinned');
-    $('.collapseBundle').textContent = pinned ? '−' : '＋';
-    $('.collapseBundle').title = pinned ? 'Use automatic detail' : 'Keep expanded';
 });
 
 $$('[data-detail]').forEach((button) => {
@@ -2241,6 +2580,11 @@ $('[data-delete-edge]').addEventListener('click', () => {
     $('#edgeEditor').classList.add('hidden');
 });
 window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !$('#exampleMenu').hidden) {
+        closeExampleMenu();
+        $('#exampleButton').focus();
+        return;
+    }
     if (event.key === 'Escape' && activeEndpointPick) {
         finishEndpointPick();
         return;

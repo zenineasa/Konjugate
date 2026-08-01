@@ -17,6 +17,7 @@
     --raised: #16242e;
     --border: #263744;
     --muted: #718692;
+    --math-keyboard-inset: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -70,8 +71,28 @@ input, select { user-select: text; }
 .documentActionIcon { width: 14px; height: 14px; opacity: .8; transition: filter .12s, opacity .12s; }
 .documentActions button:hover .documentActionIcon { filter: brightness(1.65); opacity: 1; }
 .documentActions button:disabled .documentActionIcon { filter: brightness(.55); opacity: .55; }
-.documentActions select { height: 25px; margin-left: 4px; padding: 0 22px 0 7px; color: #82949f; background: #0b141b; border: 1px solid #253640; border-radius: 4px; outline: 0; font-size: 9px; }
-.documentActions select:hover { color: #d5e2e7; border-color: #36505d; }
+.examplePicker { position: relative; display: flex; height: 27px; align-items: center; margin-left: 6px; }
+.documentActions .exampleButton {
+    display: flex; width: 148px; height: 27px; align-items: center; justify-content: space-between;
+    padding: 0 10px; color: #82949f; background: #0b141b; border: 1px solid #253640;
+    border-radius: 5px; outline: 0; font-size: 9px;
+}
+.documentActions .exampleButton:hover,
+.documentActions .exampleButton[aria-expanded="true"] { color: #d5e2e7; background: #101d25; border-color: #36505d; }
+.exampleButton i { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.exampleMenu {
+    position: absolute; z-index: 90; top: calc(100% + 5px); left: 0; display: grid; width: 148px;
+    padding: 4px; background: #111c24; border: 1px solid #354650; border-radius: 7px;
+    box-shadow: 0 12px 28px rgb(0 0 0 / 48%);
+}
+.exampleMenu[hidden] { display: none; }
+.documentActions .exampleMenu button {
+    display: flex; width: 100%; height: 29px; align-items: center; justify-content: flex-start;
+    padding: 0 9px; color: #9aabb3; background: transparent; border: 0; border-radius: 4px;
+    font-size: 9px; text-align: left;
+}
+.documentActions .exampleMenu button:hover,
+.documentActions .exampleMenu button:focus-visible { color: #e0ebef; background: #1b2c36; outline: 0; }
 .encryptionMenu { width: 245px; padding: 6px; }
 .encryptionMenu button { display: block; width: 100%; padding: 8px 9px; color: #91a3ac; background: transparent; border: 0; border-radius: 4px; text-align: left; }
 .encryptionMenu button:hover { background: #1a2933; }
@@ -136,15 +157,17 @@ input, select { user-select: text; }
 }
 .canvas::after { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 40%, transparent 0, rgb(5 11 16 / 18%) 52%, rgb(3 8 12 / 58%) 100%); content: ""; }
 .webglContainer,
-.css2dContainer { position: absolute; inset: 0; }
+.css2dContainer { position: absolute; inset: 0; transition: right .18s ease; }
 .webglContainer { z-index: 1; }
 .css2dContainer { z-index: 4; overflow: hidden; pointer-events: none; }
+.canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .webglContainer,
+.canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .css2dContainer { right: 460px; }
 .webglSurface,
 .css2dSurface { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .css2dSurface { pointer-events: none; }
 .node-label-container { pointer-events: none; }
 .objectLabel { position: relative; width: auto; min-width: 112px; padding: 7px 9px; background: rgb(15 27 36 / 91%); border: 1px solid #2c414d; border-radius: 6px; box-shadow: 0 8px 18px rgb(0 0 0 / 24%); backdrop-filter: blur(8px); transition: width .16s, padding .16s, border-color .16s; pointer-events: auto; }
-.objectLabel::before { position: absolute; top: 50%; right: 100%; width: 22px; height: 1px; background: #3d5663; content: ""; }
+.objectLabel::before { position: absolute; top: 50%; right: 100%; width: 12px; height: 1px; background: #3d5663; content: ""; }
 .objectLabel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .objectLabel strong { color: #d5e2e8; font-size: 11px; font-weight: 650; }
 .typeBadge { display: none; padding: 2px 5px; color: #70d8cf; background: rgb(66 201 188 / 10%); border-radius: 3px; font-size: 7px; }
@@ -168,7 +191,8 @@ input, select { user-select: text; }
 .objectLabel:focus-within .stateCount,
 .showNodesDetails .objectLabel .stateCount { display: inline; }
 
-.bundleLabel { width: 112px; color: #b9c8d0; background: rgb(13 24 32 / 94%); border: 1px solid #3b4e59; border-radius: 7px; box-shadow: 0 10px 25px rgb(0 0 0 / 32%); backdrop-filter: blur(10px); pointer-events: auto; transition: width .16s; }
+.bundleLabel { width: 112px; color: #b9c8d0; background: rgb(13 24 32 / 68%); border: 1px solid rgb(59 78 89 / 72%); border-radius: 7px; box-shadow: 0 8px 20px rgb(0 0 0 / 22%); backdrop-filter: blur(7px); pointer-events: auto; transition: width .16s, background .16s, border-color .16s, box-shadow .16s; }
+.bundleLabel:hover, .bundleLabel:focus-within, .bundleLabel.pinned { background: rgb(13 24 32 / 95%); border-color: #3b4e59; box-shadow: 0 10px 25px rgb(0 0 0 / 34%); }
 .bundleLabel header { display: flex; height: 36px; align-items: center; justify-content: space-between; padding: 0 8px 0 11px; border-bottom: 1px solid #293b46; }
 .bundleLabel header strong, .bundleLabel header span { display: block; }
 .bundleLabel header strong { font-size: 9px; }
@@ -198,6 +222,19 @@ input, select { user-select: text; }
 .contextCard.hidden { display: none; }
 .editorCard { width: 390px; }
 .edgeEditor { width: 440px; }
+.contextCard.nodeEditor,
+.contextCard.edgeEditor,
+.contextCard.edgeBuilder {
+    position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); right: 10px;
+    bottom: calc(var(--math-keyboard-inset) + 10px); left: auto; max-height: none; overflow: auto;
+    overscroll-behavior: contain; transition: bottom .2s ease, opacity .14s ease, transform .14s ease;
+}
+.contextCard.nodeEditor > header,
+.contextCard.edgeEditor > header,
+.contextCard.edgeBuilder > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
+.contextCard.nodeEditor > footer,
+.contextCard.edgeEditor > footer,
+.contextCard.edgeBuilder > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
 .editorCard > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; }
 .editorCard > header strong, .contextKicker { display: block; }
 .editorCard > header strong { margin-top: 3px; color: #d5e1e6; font-size: 12px; }
@@ -235,6 +272,16 @@ input, select { user-select: text; }
 .editorField { display: grid; gap: 5px; margin-bottom: 10px; color: #6c818d; font-size: 8px; }
 .editorField select, .editorField input { width: 100%; height: 29px; padding: 0 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .editorCard textarea { width: 100%; padding: 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.45; }
+.equationHeading { display: flex; align-items: center; justify-content: space-between; }
+.equationHeading h3 { margin-bottom: 0 !important; }
+.equationModes { display: flex; padding: 2px; background: #09141b; border: 1px solid #293b46; border-radius: 4px; }
+.equationModes button { height: 21px; padding: 0 7px; color: #627783; background: transparent; border: 0; border-radius: 3px; font-size: 7px; }
+.equationModes button.active { color: #80d9d1; background: rgb(66 201 188 / 12%); }
+.equationMathField { display: block; width: 100%; min-height: 47px; margin-top: 3px; padding: 8px 9px; color: #d4e1e6; background: #09141b; border: 1px solid #2b3d48; border-radius: 5px; font-size: 17px; --caret-color: var(--accent); --selection-background-color: rgb(66 201 188 / 22%); }
+.equationMathField:focus-within { border-color: #47746f; outline: 0; }
+.equationSource[hidden], .equationMathField[hidden] { display: none; }
+.equationDiagnostics { min-height: 19px; padding: 5px 2px 0; color: #d08187; font-size: 7px; line-height: 1.4; }
+.equationDiagnostics.valid { color: #69b9b2; }
 .unitInput { display: grid; grid-template-columns: 1fr 38px; }
 .unitInput input { border-radius: 4px 0 0 4px; }
 .unitInput b { display: grid; place-items: center; color: #647985; background: #172630; border: 1px solid #2b3d48; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; font-weight: 500; }
@@ -267,6 +314,26 @@ input, select { user-select: text; }
 .endpointField button { padding: 0 7px; color: #73bdb7; background: #13242c; border: 1px solid #2b4650; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; }
 .endpointField button.active { color: #09201e; background: var(--accent); border-color: var(--accent); }
 .canvas.pickingEndpoint .webglSurface { cursor: crosshair; }
+.endpointPickBanner {
+    position: absolute; z-index: 36; top: 14px; left: 50%; display: flex; min-width: 310px;
+    align-items: center; justify-content: space-between; gap: 20px; padding: 9px 10px 9px 13px;
+    color: #bdd0d7; background: rgb(11 23 31 / 94%); border: 1px solid #48706f; border-radius: 7px;
+    box-shadow: 0 12px 30px rgb(0 0 0 / 38%); backdrop-filter: blur(10px); transform: translateX(-50%);
+}
+.endpointPickBanner[hidden] { display: none; }
+.endpointPickBanner span, .endpointPickBanner strong, .endpointPickBanner small { display: block; }
+.endpointPickBanner strong { color: #d7e7eb; font-size: 9px; }
+.endpointPickBanner small { margin-top: 2px; color: #6f858f; font-size: 7px; }
+.endpointPickBanner button { height: 27px; padding: 0 8px; color: #89a1aa; background: #152630; border: 1px solid #324853; border-radius: 4px; font-size: 8px; }
+.endpointPickBanner kbd { margin-left: 5px; color: #607781; font-family: inherit; font-size: 7px; }
+.canvas.pickingEndpoint .node-label-container { opacity: .32; transition: opacity .14s; }
+.canvas.pickingEndpoint .node-label-container.endpointEligible { opacity: 1; }
+.canvas.pickingEndpoint .node-label-container.endpointEligible .objectLabel { border-color: #58a69f; box-shadow: 0 0 0 1px rgb(66 201 188 / 20%), 0 8px 22px rgb(0 0 0 / 30%); }
+@media (max-width: 820px) {
+    .contextCard.nodeEditor, .contextCard.edgeEditor, .contextCard.edgeBuilder { width: calc(100vw - 20px); }
+    .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .webglContainer,
+    .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .css2dContainer { right: 0; }
+}
 .referencePicker { margin: 9px 0; color: #607581; font-size: 7px; }
 .referencePicker button { padding: 4px 6px; color: #7dbab5; background: rgb(66 201 188 / 7%); border: 1px solid #29454a; border-radius: 9px; font-size: 7px; }
 .referencePicker > span { display: block; margin-bottom: 6px; }

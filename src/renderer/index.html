@@ -5,13 +5,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-R99P3T/HWhyAgXfcKO1LXdBqflZS8lIqy/ATk8AYBTc='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self'">
     <title>Konjugate</title>
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
         {
             "imports": {
                 "three": "../../node_modules/three/build/three.module.js",
-                "three/addons/": "../../node_modules/three/examples/jsm/"
+                "three/addons/": "../../node_modules/three/examples/jsm/",
+                "mathlive": "../../node_modules/mathlive/mathlive.min.mjs",
+                "@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js"
             }
         }
     </script>
@@ -42,7 +45,12 @@
                 <button id="saveEncryptedButton" type="button" aria-label="Save encrypted project" data-tooltip="Save encrypted…">
                     <img class="documentActionIcon" src="../../assets/saveEncrypted.svg" alt="">
                 </button>
-                <select id="exampleSelect" aria-label="Load example"><option value="">Examples</option></select>
+                <span class="examplePicker">
+                    <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="menu" aria-expanded="false">
+                        <span>Examples</span><i aria-hidden="true"></i>
+                    </button>
+                    <span id="exampleMenu" class="exampleMenu" role="menu" hidden></span>
+                </span>
             </div>
         </div>
         <div class="windowControls">
@@ -95,15 +103,21 @@
     <main id="canvas" class="canvas" data-tool="select">
         <div id="webglContainer" class="webglContainer"></div>
         <div id="css2dContainer" class="css2dContainer"></div>
-
-        <div id="bundleLabel" class="bundleLabel" tabindex="0">
-            <header>
-                <div><strong>Relationships</strong><span>0 relationships</span></div>
-                <button class="collapseBundle" type="button" title="Keep expanded">＋</button>
-            </header>
+        <div id="endpointPickBanner" class="endpointPickBanner" role="status" aria-live="polite" hidden>
+            <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
+            <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>
         </div>
 
-        <div id="nodeEditor" class="contextCard editorCard hidden">
+        <template id="relationshipBundleTemplate">
+            <div class="bundleLabel" tabindex="0">
+                <header>
+                    <div><strong>Relationships</strong><span>0 relationships</span></div>
+                    <button class="collapseBundle" type="button" title="Keep expanded">＋</button>
+                </header>
+            </div>
+        </template>
+
+        <div id="nodeEditor" class="contextCard editorCard nodeEditor hidden">
             <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
             <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
             <div data-node-panel="model">
@@ -145,9 +159,12 @@
                 <div id="edgeEditorParameters"></div>
             </section>
             <section>
-                <h3>Equation</h3>
-                <textarea id="editEdgeEquation" rows="3" placeholder="No equation defined"></textarea>
-                <div class="referencePicker"><span>Available state references</span><div id="editStateReferenceChips"></div></div>
+                <div class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <label class="editorField"><span>Updates</span><select id="editEquationOutput"></select></label>
+                <math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
+                <textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
+                <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
+                <div class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
             </section>
             <footer><button data-delete-edge type="button">Delete edge</button><button class="doneButton" data-close-card type="button">Done</button></footer>
         </div>
@@ -188,8 +205,12 @@
             </section>
             <section>
                 <label class="editorField"><span>Edge name</span><input id="newEdgeName" value="New relationship" autocomplete="off"></label>
-                <label class="editorField"><span>Equation</span><textarea id="edgeEquation" rows="3" placeholder="e.g. output = k * (source.x - target.x)"></textarea></label>
-                <div class="referencePicker"><span>Available state references</span><div id="stateReferenceChips"></div></div>
+                <div class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-builder-equation-mode="visual" type="button">Visual</button><button data-builder-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <label class="editorField"><span>Updates</span><select id="edgeEquationOutput"></select></label>
+                <math-field id="edgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
+                <textarea id="edgeEquation" class="equationSource" rows="3" placeholder="Choose references below, or enter LaTeX" hidden></textarea>
+                <div id="builderEquationDiagnostics" class="equationDiagnostics" role="status"></div>
+                <div class="referencePicker"><span>Available references</span><div id="stateReferenceChips"></div></div>
             </section>
             <section>
                 <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>

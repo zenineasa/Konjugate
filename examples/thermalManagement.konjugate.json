@@ -49,7 +49,7 @@
             "source": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
             "target": { "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
             "directionality": "bidirectional",
-            "equation": "qDot = conductance * (source.temperature - target.temperature)",
+            "equation": "\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})",
             "parameters": [{ "id": "b3279da6-5836-455e-8d7f-3a4f95eb4bc5", "name": "Conductance", "symbol": "conductance", "value": 12, "unit": "W/K", "mode": "constant" }],
             "appearance": { "color": "#e6a15b", "offset": -0.11 }
         },
@@ -59,7 +59,7 @@
             "source": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
             "target": { "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
             "directionality": "directed",
-            "equation": "target.temperature = source.temperature",
+            "equation": "\\mathrm{sourceTemperature}",
             "parameters": [],
             "appearance": { "color": "#b68bd5", "offset": 0.16 }
         },
@@ -69,7 +69,7 @@
             "source": { "nodeId": "b93df980-1897-4778-8b6d-d321f6686bd6", "stateId": "46454e49-fb72-4769-ab33-07a795476015" },
             "target": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
             "directionality": "directed",
-            "equation": "target.temperatureDot += source.qDot / heatCapacity",
+            "equation": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{heatCapacity}}",
             "parameters": [{ "id": "f14d5df2-c506-4c4a-91ab-acde738b26c0", "name": "Heat capacity", "symbol": "heatCapacity", "value": 1000, "unit": "J/K", "mode": "constant" }],
             "appearance": { "color": "#c88be0", "offset": 0 }
         }

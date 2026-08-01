@@ -6,7 +6,7 @@ import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { validateWithEngine } from './engineAdapter.mjs';
+import { runWithEngine, validateWithEngine } from './engineAdapter.mjs';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
@@ -186,6 +186,12 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
 });
 
 ipcMain.handle('engineValidate', async (_event, content) => validateWithEngine(content, {
+    applicationPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    packaged: app.isPackaged
+}));
+
+ipcMain.handle('engineRun', async (_event, content, configuration) => runWithEngine(content, configuration, {
     applicationPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     packaged: app.isPackaged

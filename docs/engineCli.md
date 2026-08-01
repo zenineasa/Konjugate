@@ -24,3 +24,5 @@ Exit codes:
 | 64 | Invalid command-line usage |
 
 Passwords must never be supplied as command-line arguments. The initial non-interactive integration uses the inherited `KONJUGATE_PASSWORD` environment variable; interactive prompting and protected platform channels may be added later.
+
+The version 1 run configuration contains a name plus finite positive `duration`, `globalTimeStep`, and `outputInterval` numbers; timestep and output interval cannot exceed duration, and output interval is an integer multiple of the global timestep. The engine uses deterministic snapshot-coupled, node-local explicit Euler subcycling. A `.kjr` result contains `resultVersion`, engine and run metadata, global step count, each node's substep count and effective timestep, final state values, and sampled states at the requested synchronization intervals.

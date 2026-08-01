@@ -16,6 +16,7 @@ add_executable(konjugateEngine
     src/main.cpp
     src/modelValidator.cpp
     src/projectContainer.cpp
+    src/simulationRunner.cpp
     src/validationReport.cpp
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR})

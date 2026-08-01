@@ -57,3 +57,21 @@ export async function validateWithEngine(content, options) {
         await rm(directory, { recursive: true, force: true });
     }
 }
+
+export async function runWithEngine(content, configuration, options) {
+    const executable = await resolveEnginePath(options);
+    if (!executable) return { available: false };
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateRun-'));
+    const inputPath = join(directory, 'input.kjt');
+    const configurationPath = join(directory, 'runConfiguration.json');
+    const outputPath = join(directory, 'simulationResults.kjr');
+    try {
+        await writeFile(inputPath, await encodeProjectFile(content));
+        await writeFile(configurationPath, JSON.stringify(configuration));
+        const execution = await runEngine(executable, ['run', inputPath, '--configuration', configurationPath, '--output', outputPath]);
+        if (execution.code !== 0) throw new Error(execution.diagnostics || `The simulation engine exited with code ${execution.code}.`);
+        return { available: true, result: JSON.parse(await readFile(outputPath, 'utf8')) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}

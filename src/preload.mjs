@@ -41,5 +41,6 @@ contextBridge.exposeInMainWorld('projectFiles', {
 });
 
 contextBridge.exposeInMainWorld('engine', {
-    validate: (content) => ipcRenderer.invoke('engineValidate', content)
+    validate: (content) => ipcRenderer.invoke('engineValidate', content),
+    run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration)
 });

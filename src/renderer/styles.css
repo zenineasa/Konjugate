@@ -113,6 +113,9 @@ input, select { user-select: text; }
 .passwordDialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
+.runConfigurationDialog { width: 360px; }
+.derivedTimeStep { display: flex; justify-content: space-between; margin-top: 12px; padding: 8px; color: #657984; background: #0a151d; border: 1px solid #293b46; border-radius: 4px; font-size: 8px; }
+.derivedTimeStep strong { color: #86c9c3; }
 .windowControls { display: flex; height: 100%; -webkit-app-region: no-drag; }
 .windowControls button { display: grid; width: 46px; height: 100%; padding: 0; place-items: center; background: transparent; border: 0; font-size: 17px; }
 .windowControls .uiZoomButton { width: 34px; color: #7f929c; font-size: 9px; font-weight: 650; letter-spacing: -.04em; }

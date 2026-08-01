@@ -1,9 +1,12 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "modelValidator.hpp"
+#include <cmath>
 #include <regex>
+#include <cstdlib>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace konjugate {
@@ -23,6 +26,39 @@ std::string value(const boost::property_tree::ptree& tree, const std::string& ke
 std::string upperFirst(std::string input) {
     if (!input.empty()) input[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(input[0])));
     return input;
+}
+
+bool numericToken(const std::string& token) {
+    if (token.empty()) return false;
+    char* end = nullptr;
+    std::strtod(token.c_str(), &end);
+    return end == token.c_str() + token.size();
+}
+
+void validateMathJson(const boost::property_tree::ptree& expression,
+                      const std::set<std::string>& symbols,
+                      std::vector<std::string>& errors) {
+    if (expression.empty()) {
+        const auto token = expression.data();
+        if (!numericToken(token) && !symbols.contains(token)) errors.push_back("Unknown executable symbol: " + token + ".");
+        return;
+    }
+    std::vector<const boost::property_tree::ptree*> items;
+    for (const auto& item : expression) items.push_back(&item.second);
+    if (items.empty() || !items.front()->empty()) {
+        errors.push_back("The executable expression is malformed.");
+        return;
+    }
+    const auto operation = items.front()->data();
+    const std::set<std::string> unary = {"Abs", "Cos", "Exp", "Ln", "Log", "Negate", "Sin", "Sqrt", "Tan"};
+    const std::set<std::string> binary = {"Divide", "Max", "Min", "Power"};
+    if ((!unary.contains(operation) && !binary.contains(operation) && operation != "Add" && operation != "Multiply") ||
+        (unary.contains(operation) && items.size() != 2) || (binary.contains(operation) && items.size() != 3) ||
+        ((operation == "Add" || operation == "Multiply") && items.size() < 3)) {
+        errors.push_back("Unsupported or malformed executable operation: " + operation + ".");
+        return;
+    }
+    for (std::size_t index = 1; index < items.size(); ++index) validateMathJson(*items[index], symbols, errors);
 }
 
 std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
@@ -97,6 +133,31 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         else if (!allIds.insert(id).second) add(result, "duplicateUuid", "error", label + " reuses an existing UUID.", kind, entityId, "id");
     };
 
+    std::set<std::string> runConfigurationIds;
+    if (const auto configurations = document.get_child_optional("runConfigurations")) {
+        for (const auto& configurationEntry : *configurations) {
+            const auto& configuration = configurationEntry.second;
+            const auto configurationId = value(configuration, "id");
+            registerId(configurationId, "runConfiguration", configurationId, "Run configuration \"" + value(configuration, "name") + "\"");
+            runConfigurationIds.insert(configurationId);
+            try {
+                const auto duration = configuration.get<double>("duration");
+                const auto globalTimeStep = configuration.get<double>("globalTimeStep");
+                const auto outputInterval = configuration.get<double>("outputInterval");
+                if (!(duration > 0) || !(globalTimeStep > 0) || globalTimeStep > duration ||
+                    !(outputInterval > 0) || outputInterval > duration || !std::isfinite(duration) ||
+                    !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) throw std::out_of_range("configuration");
+                const auto ratio = outputInterval / globalTimeStep;
+                if (outputInterval < globalTimeStep || std::abs(ratio - std::round(ratio)) > 1e-9) throw std::out_of_range("configuration");
+            } catch (...) {
+                add(result, "runConfigurationInvalid", "error", "Run configuration values must be finite and positive; output interval must be an integer multiple of the global timestep.", "runConfiguration", configurationId, "numerics");
+            }
+        }
+        if (!configurations->empty() && !runConfigurationIds.contains(value(document, "activeRunConfigurationId"))) {
+            add(result, "activeRunConfigurationMissing", "error", "Choose an existing active run configuration.", "model", {}, "runConfigurations");
+        }
+    }
+
     result.nodeCount = nodesOptional->size();
     if (!result.nodeCount) add(result, "emptyModel", "warning", "Add at least one node to begin building a model.");
     for (const auto& entry : *nodesOptional) {
@@ -105,6 +166,16 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         const auto name = value(node, "name");
         registerId(id, "node", id, "Node \"" + (name.empty() ? std::string("Untitled") : name) + "\"");
         nodesById[id] = &node;
+        const auto substepsValue = value(node, "numerics.substepsPerGlobalStep");
+        if (!substepsValue.empty()) {
+            try {
+                std::size_t consumed = 0;
+                const auto substeps = std::stoull(substepsValue, &consumed);
+                if (consumed != substepsValue.size() || !substeps || substeps > 10000) throw std::out_of_range("substeps");
+            } catch (...) {
+                add(result, "nodeSubstepsInvalid", "error", "Node substeps per global step must be an integer from 1 through 10000.", "node", id, "numerics");
+            }
+        }
         const auto states = node.get_child_optional("states");
         if (!states || states->empty()) add(result, "nodeStatesEmpty", "warning", "This node has no state variables.", "node", id, "states");
         if (states) for (const auto& stateEntry : *states) {
@@ -122,6 +193,25 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             const auto state = value(term, "state");
             if (!stateSymbols[id].contains(state)) add(result, "sourceStateMissing", "error", "Source term references a missing state.", "node", id, "sourceTerms");
             if (value(term, "expression").empty()) add(result, "sourceExpressionEmpty", "error", "Source term requires an expression.", "node", id, "sourceTerms");
+            const auto mathJson = term.get_child_optional("expressionModel.mathJson");
+            if (!mathJson) add(result, "sourceExpressionInvalid", "error", "Source term requires a valid executable expression.", "node", id, "sourceTerms");
+            else {
+                std::set<std::string> executableSymbols;
+                if (const auto bindings = term.get_child_optional("expressionModel.bindings")) {
+                    for (const auto& binding : *bindings) {
+                        executableSymbols.insert(value(binding.second, "symbol"));
+                        if (!stateIds[id].contains(value(binding.second, "stateId"))) {
+                            add(result, "sourceBindingMissing", "error", "Source term binding references a missing local state.", "node", id, "sourceTerms");
+                        }
+                    }
+                }
+                std::vector<std::string> errors;
+                validateMathJson(*mathJson, executableSymbols, errors);
+                if (!errors.empty()) add(result, "sourceExpressionInvalid", "error", errors.front(), "node", id, "sourceTerms");
+            }
+            if (!stateIds[id].contains(value(term, "expressionModel.output.stateId"))) {
+                add(result, "sourceOutputMissing", "error", "Source term requires an existing output state.", "node", id, "sourceTerms");
+            }
         }
     }
 
@@ -140,17 +230,39 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         if (!sourceState.empty() && !stateIds[sourceNode].contains(sourceState)) add(result, "edgeSourceStateMissing", "error", "Relationship source state no longer exists.", "edge", id, "source");
         if (!targetState.empty() && !stateIds[targetNode].contains(targetState)) add(result, "edgeTargetStateMissing", "error", "Relationship target state no longer exists.", "edge", id, "target");
         std::set<std::string> parameters;
+        std::set<std::string> parameterIds;
         if (const auto parameterList = edge.get_child_optional("parameters")) for (const auto& parameterEntry : *parameterList) {
             const auto& parameter = parameterEntry.second;
             registerId(value(parameter, "id"), "edge", id, "Parameter \"" + value(parameter, "name") + "\"");
             const auto symbol = value(parameter, "symbol");
+            parameterIds.insert(value(parameter, "id"));
             if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "edge", id, "parameters");
             else if (!parameters.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Parameter symbol \"" + symbol + "\" is duplicated.", "edge", id, "parameters");
+        }
+        if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& bindingEntry : *bindings) {
+            const auto& binding = bindingEntry.second;
+            if (value(binding, "kind") == "parameter") {
+                if (!parameterIds.contains(value(binding, "parameterId"))) add(result, "edgeBindingMissing", "error", "Equation binding references a missing parameter.", "edge", id, "equation");
+            } else {
+                const auto bindingNode = value(binding, "nodeId");
+                if ((bindingNode != sourceNode && bindingNode != targetNode) || !stateIds[bindingNode].contains(value(binding, "stateId"))) {
+                    add(result, "edgeBindingMissing", "error", "Equation binding references a missing endpoint state.", "edge", id, "equation");
+                }
+            }
         }
         const auto latex = value(edge, "equationModel.latex").empty() ? value(edge, "equation") : value(edge, "equationModel.latex");
         if (latex.empty()) add(result, "edgeEquationEmpty", "error", "Relationship requires an equation.", "edge", id, "equation");
         else if (nodesById.contains(sourceNode) && nodesById.contains(targetNode)) {
-            const auto errors = equationErrors(edge, *nodesById[sourceNode], *nodesById[targetNode]);
+            auto errors = equationErrors(edge, *nodesById[sourceNode], *nodesById[targetNode]);
+            const auto mathJson = edge.get_child_optional("equationModel.mathJson");
+            if (!mathJson) errors.push_back("Equation requires a valid executable expression.");
+            else {
+                std::set<std::string> executableSymbols;
+                if (const auto bindings = edge.get_child_optional("equationModel.bindings")) {
+                    for (const auto& binding : *bindings) executableSymbols.insert(value(binding.second, "symbol"));
+                }
+                validateMathJson(*mathJson, executableSymbols, errors);
+            }
             if (!errors.empty()) {
                 std::ostringstream message;
                 for (std::size_t index = 0; index < errors.size(); ++index) message << (index ? " " : "") << errors[index];
@@ -160,6 +272,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         const auto outputState = value(edge, "equationModel.output.stateId");
         if (!outputState.empty()) {
             const auto role = value(edge, "equationModel.output.role");
+            if (role != "source" && role != "target") add(result, "edgeOutputMissing", "error", "Equation output role must be source or target.", "edge", id, "output");
             const auto& candidates = role == "source" ? stateIds[sourceNode] : stateIds[targetNode];
             if (!candidates.contains(outputState)) add(result, "edgeOutputMissing", "error", "Choose an existing state updated by this equation.", "edge", id, "output");
         } else if (targetState.empty()) {

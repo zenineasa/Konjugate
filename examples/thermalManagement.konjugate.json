@@ -50,6 +50,16 @@
             "target": { "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
             "directionality": "bidirectional",
             "equation": "\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})",
+            "equationModel": {
+                "latex": "\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})",
+                "output": { "role": "target", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "symbol": "sourceTemperature" },
+                    { "kind": "state", "role": "target", "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb", "symbol": "targetTemperature" },
+                    { "kind": "parameter", "parameterId": "b3279da6-5836-455e-8d7f-3a4f95eb4bc5", "symbol": "conductance" }
+                ],
+                "mathJson": ["Multiply", "conductance", ["Add", "sourceTemperature", ["Negate", "targetTemperature"]]]
+            },
             "parameters": [{ "id": "b3279da6-5836-455e-8d7f-3a4f95eb4bc5", "name": "Conductance", "symbol": "conductance", "value": 12, "unit": "W/K", "mode": "constant" }],
             "appearance": { "color": "#e6a15b", "offset": -0.11 }
         },
@@ -60,6 +70,15 @@
             "target": { "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
             "directionality": "directed",
             "equation": "\\mathrm{sourceTemperature}",
+            "equationModel": {
+                "latex": "\\mathrm{sourceTemperature}",
+                "output": { "role": "target", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "symbol": "sourceTemperature" },
+                    { "kind": "state", "role": "target", "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb", "symbol": "targetTemperature" }
+                ],
+                "mathJson": "sourceTemperature"
+            },
             "parameters": [],
             "appearance": { "color": "#b68bd5", "offset": 0.16 }
         },
@@ -70,6 +89,17 @@
             "target": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
             "directionality": "directed",
             "equation": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{heatCapacity}}",
+            "equationModel": {
+                "latex": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{heatCapacity}}",
+                "output": { "role": "target", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "b93df980-1897-4778-8b6d-d321f6686bd6", "stateId": "46454e49-fb72-4769-ab33-07a795476015", "symbol": "sourceQDot" },
+                    { "kind": "state", "role": "target", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "symbol": "targetTemperature" },
+                    { "kind": "state", "role": "target", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "e588894c-80ef-42f1-a7b9-da21249177c6", "symbol": "targetStateOfCharge" },
+                    { "kind": "parameter", "parameterId": "f14d5df2-c506-4c4a-91ab-acde738b26c0", "symbol": "heatCapacity" }
+                ],
+                "mathJson": ["Divide", "sourceQDot", "heatCapacity"]
+            },
             "parameters": [{ "id": "f14d5df2-c506-4c4a-91ab-acde738b26c0", "name": "Heat capacity", "symbol": "heatCapacity", "value": 1000, "unit": "J/K", "mode": "constant" }],
             "appearance": { "color": "#c88be0", "offset": 0 }
         }

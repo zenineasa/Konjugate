@@ -32,6 +32,9 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 }[character]));
 const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const defaultRunConfiguration = () => ({
+    id: crypto.randomUUID(), name: 'Default', duration: 1, globalTimeStep: 0.01, outputInterval: 0.1
+});
 
 const canvas = $('#canvas');
 const webglContainer = $('#webglContainer');
@@ -157,6 +160,7 @@ function hydrateProjectDocument(document) {
             importedGeometry,
             geometryFileName: appearance.fileName ?? null,
             badgeClass: '',
+            substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
             sourceTerms: node.sourceTerms ?? [],
             states: (node.states ?? []).map((state) => ({
                 id: state.id,
@@ -188,8 +192,20 @@ function hydrateProjectDocument(document) {
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: Number(edge.appearance?.offset) || 0
     }));
+    const runConfigurations = Array.isArray(document.runConfigurations) && document.runConfigurations.length
+        ? document.runConfigurations.map((configuration) => ({
+            id: configuration.id ?? crypto.randomUUID(),
+            name: configuration.name || 'Untitled',
+            duration: Number(configuration.duration) || 1,
+            globalTimeStep: Number(configuration.globalTimeStep) || 0.01,
+            outputInterval: Number(configuration.outputInterval) || 0.1
+        }))
+        : [defaultRunConfiguration()];
     return {
         metadata: { units: document.metadata?.units || 'SI' },
+        runConfigurations,
+        activeRunConfigurationId: runConfigurations.some((item) => item.id === document.activeRunConfigurationId)
+            ? document.activeRunConfigurationId : runConfigurations[0].id,
         nodes,
         relationships
     };
@@ -200,6 +216,7 @@ const emptyProjectDocument = {
     version: 1,
     copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
     metadata: { units: 'SI' },
+    runConfigurations: [],
     nodes: [],
     edges: []
 };
@@ -255,6 +272,7 @@ let currentValidation = { valid: false, issues: [], executableModel: null };
 let validationRevision = 0;
 let engineValidationTimer = null;
 let equationEditSession = null;
+let simulationRunning = false;
 const documentController = new DocumentController();
 
 function updateHistoryControls() {
@@ -794,6 +812,7 @@ function captureNodeModel(node) {
         type: definition.type,
         states: structuredClone(definition.states),
         sourceTerms: structuredClone(definition.sourceTerms),
+        substepsPerGlobalStep: definition.substepsPerGlobalStep,
         bindings: model.relationships.map((edge) => ({
             id: edge.id,
             sourceStateId: edge.sourceStateId,
@@ -817,6 +836,7 @@ function applyNodeModel(node, snapshot) {
     definition.type = snapshot.type;
     definition.states = structuredClone(snapshot.states);
     definition.sourceTerms = structuredClone(snapshot.sourceTerms);
+    definition.substepsPerGlobalStep = snapshot.substepsPerGlobalStep;
     snapshot.bindings.forEach((binding) => {
         const edge = model.relationships.find((candidate) => candidate.id === binding.id);
         if (edge) {
@@ -860,6 +880,9 @@ function renderNodeEditorModel(node) {
     $('#nodeEditorTitle').textContent = definition.title;
     $('#editNodeName').value = definition.title;
     $('#editNodeType').value = definition.type;
+    $('#editNodeSubsteps').value = definition.substepsPerGlobalStep;
+    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+    $('#nodeEffectiveTimeStep').textContent = `${(configuration.globalTimeStep / definition.substepsPerGlobalStep).toPrecision(6)} s`;
     const stateContainer = $('#nodeEditorStates');
     stateContainer.replaceChildren();
     if (!definition.states.length) stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
@@ -1486,8 +1509,8 @@ function renderValidationStatus() {
     summary.classList.toggle('warning', !errors && warnings > 0);
     $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
         : warnings ? `${warnings} model ${warnings === 1 ? 'warning' : 'warnings'}` : 'Model valid';
-    $('#runButton').disabled = true;
-    $('#runButton').title = errors ? 'Resolve model errors before running' : 'A simulation engine is not configured';
+    $('#runButton').disabled = errors > 0 || simulationRunning;
+    $('#runButton').title = errors ? 'Resolve model errors before running' : 'Run simulation';
 
     const severityByEntity = new Map();
     currentValidation.issues.forEach((item) => {
@@ -1525,6 +1548,81 @@ function renderValidationStatus() {
         container.appendChild(button);
     });
 }
+
+function applySimulationResult(result) {
+    result.states.forEach((stateResult) => {
+        const node = model.nodes.find((candidate) => candidate.id === stateResult.nodeId);
+        const state = node?.states.find((candidate) => candidate.id === stateResult.stateId);
+        if (!state) return;
+        state.value = `${Number(stateResult.value).toPrecision(6)}${state.unit ? ` ${state.unit}` : ''}`;
+        const label = $(`.node-label-container[data-node="${stateResult.nodeId}"]`);
+        const stateIndex = node.states.indexOf(state);
+        const value = $$('dd', label)[stateIndex];
+        if (value) value.textContent = state.value;
+    });
+}
+
+$('#runButton').addEventListener('click', async () => {
+    if (simulationRunning || !currentValidation.valid) return;
+    simulationRunning = true;
+    $('#runButton').disabled = true;
+    $('#runButton').title = 'Simulation is running';
+    $('#statusText').textContent = 'Running simulation…';
+    try {
+        const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+        const execution = await window.engine.run(JSON.stringify(serializeProjectDocument()), configuration);
+        if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
+        applySimulationResult(execution.result);
+        $('#statusText').textContent = `Simulation complete · ${execution.result.duration} s`;
+    } catch (error) {
+        console.error('C++ simulation failed.', error);
+        $('#statusText').textContent = 'Simulation failed';
+        $('#runButton').title = error.message;
+    } finally {
+        simulationRunning = false;
+        $('#runButton').disabled = !currentValidation.valid;
+        if (currentValidation.valid) $('#runButton').title = 'Run simulation';
+    }
+});
+
+function applyRunConfiguration(configuration) {
+    const index = model.runConfigurations.findIndex((item) => item.id === configuration.id);
+    model.runConfigurations[index] = structuredClone(configuration);
+    if (selectedNode && !$('#nodeEditor').classList.contains('hidden')) renderNodeEditorModel(selectedNode);
+    updateValidationStatus();
+}
+
+$('#runConfigurationButton').addEventListener('click', () => {
+    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+    $('#runConfigurationName').value = configuration.name;
+    $('#runDuration').value = configuration.duration;
+    $('#runGlobalTimeStep').value = configuration.globalTimeStep;
+    $('#runOutputInterval').value = configuration.outputInterval;
+    $('#runConfigurationError').textContent = '';
+    $('#runConfigurationDialog').showModal();
+});
+$('#runConfigurationCancel').addEventListener('click', () => $('#runConfigurationDialog').close());
+$('#runConfigurationDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const before = structuredClone(model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId));
+    const after = {
+        ...before,
+        name: $('#runConfigurationName').value.trim() || 'Untitled',
+        duration: Number($('#runDuration').value),
+        globalTimeStep: Number($('#runGlobalTimeStep').value),
+        outputInterval: Number($('#runOutputInterval').value)
+    };
+    const outputRatio = after.outputInterval / after.globalTimeStep;
+    if (!(after.duration > 0) || !(after.globalTimeStep > 0) || after.globalTimeStep > after.duration ||
+        !(after.outputInterval > 0) || after.outputInterval > after.duration || after.outputInterval < after.globalTimeStep ||
+        Math.abs(outputRatio - Math.round(outputRatio)) > 1e-9) {
+        $('#runConfigurationError').textContent = 'Use positive values; output interval must be an integer multiple of the global timestep.';
+        return;
+    }
+    applyRunConfiguration(after);
+    recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
+    $('#runConfigurationDialog').close();
+});
 
 function syncContextualOverlays() {
     const bundles = activeRelationshipBundles();
@@ -1658,12 +1756,15 @@ function serializeProjectDocument() {
         version: 1,
         copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
         metadata: { units: model.metadata.units },
+        runConfigurations: structuredClone(model.runConfigurations),
+        activeRunConfigurationId: model.activeRunConfigurationId,
         nodes: visibleNodes.map((node) => {
             const object = nodeObjects.get(node.id);
             return {
                 id: node.id,
                 name: node.title,
                 type: node.type,
+                numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep },
                 position: object.position.toArray(),
                 states: node.states.map((state) => ({
                     id: state.id ?? crypto.randomUUID(),
@@ -1672,7 +1773,21 @@ function serializeProjectDocument() {
                     initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
                     unit: state.unit ?? ''
                 })),
-                sourceTerms: node.sourceTerms ?? [],
+                sourceTerms: (node.sourceTerms ?? []).map((term) => {
+                    const bindings = node.states.map((state) => ({
+                        kind: 'state', nodeId: node.id, stateId: state.id, symbol: state.symbol
+                    }));
+                    const validation = validateEquationLatex(term.expression, bindings);
+                    return {
+                        ...term,
+                        expressionModel: {
+                            latex: term.expression,
+                            bindings,
+                            output: { stateId: node.states.find((state) => state.symbol === term.state)?.id ?? null },
+                            mathJson: validation.valid ? validation.mathJson : null
+                        }
+                    };
+                }),
                 appearance: node.importedGeometry
                     ? {
                         type: 'mesh',
@@ -1747,6 +1862,8 @@ function loadProjectDocument(document, {
     const nextModel = hydrateProjectDocument(document);
     clearRenderedModel();
     model.metadata = nextModel.metadata;
+    model.runConfigurations = nextModel.runConfigurations;
+    model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.nodes.forEach(createNode);
@@ -1901,6 +2018,11 @@ $('#editNodeType').addEventListener('change', (event) => {
     changeNodeModel(selectedNode, (snapshot) => {
         snapshot.type = event.target.value.trim() || 'Custom node';
     });
+});
+$('#editNodeSubsteps').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    const substeps = Math.max(1, Math.min(10000, Math.trunc(Number(event.target.value) || 1)));
+    changeNodeModel(selectedNode, (snapshot) => { snapshot.substepsPerGlobalStep = substeps; });
 });
 $('#editAddState').addEventListener('click', () => {
     if (!selectedNode) return;
@@ -2425,7 +2547,8 @@ $('#createNode').addEventListener('click', () => {
             id: crypto.randomUUID(),
             state: $('.sourceState', row).value,
             expression: $('.sourceExpression', row).value.trim()
-        })).filter((term) => term.state && term.expression)
+        })).filter((term) => term.state && term.expression),
+        substepsPerGlobalStep: 1
     };
 
     hideCards();
@@ -2664,10 +2787,6 @@ $('[data-nav-action="zoomIn"]').addEventListener('click', () => zoomCamera('in')
 $('[data-nav-action="zoomOut"]').addEventListener('click', () => zoomCamera('out'));
 $$('[data-nav-pan]').forEach((button) => {
     button.addEventListener('click', () => panCamera(button.dataset.navPan));
-});
-
-$('#fitButton').addEventListener('click', () => {
-    fitCurrentView();
 });
 
 function updateViewCube() {

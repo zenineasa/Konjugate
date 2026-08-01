@@ -82,6 +82,20 @@
         </form>
     </dialog>
 
+    <dialog id="runConfigurationDialog" class="passwordDialog runConfigurationDialog">
+        <form method="dialog">
+            <span class="contextKicker">Simulation</span>
+            <strong>Run configuration</strong>
+            <p>Configure the global synchronization step. Individual nodes can substep within it.</p>
+            <label><span>Name</span><input id="runConfigurationName" autocomplete="off" required></label>
+            <label><span>Duration (s)</span><input id="runDuration" type="number" min="0" step="any" required></label>
+            <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
+            <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
+            <div class="passwordError" id="runConfigurationError" role="alert"></div>
+            <footer><button id="runConfigurationCancel" type="button">Cancel</button><button id="applyRunConfiguration" class="doneButton" type="submit">Apply</button></footer>
+        </form>
+    </dialog>
+
     <nav class="toolstrip" aria-label="Model tools">
         <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
         <span class="divider"></span>
@@ -98,7 +112,7 @@
             <button data-detail="nodes" type="button" title="Expand all node labels">Nodes</button>
             <button data-detail="edges" type="button" title="Expand all relationship labels">Edges</button>
         </div>
-        <button id="fitButton" class="squareTool" type="button" aria-label="Frame model" data-tooltip="Frame model">⌗</button>
+        <button id="runConfigurationButton" class="squareTool" type="button" aria-label="Run configuration" data-tooltip="Run configuration">⚙</button>
         <button id="runButton" class="runButton" type="button" title="A simulation engine is not configured" disabled><span>▶</span> Run</button>
     </nav>
 
@@ -125,7 +139,7 @@
 
         <div id="nodeEditor" class="contextCard editorCard nodeEditor hidden">
             <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="numerics" type="button">Numerics</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
             <div data-node-panel="model">
             <section>
                 <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
@@ -139,6 +153,13 @@
                 <h3>Source terms <button id="editAddSourceTerm" type="button">＋</button></h3>
                 <div id="nodeEditorSourceTerms"></div>
             </section>
+            </div>
+            <div data-node-panel="numerics" hidden>
+                <section>
+                    <label class="editorField"><span>Substeps per global step</span><input id="editNodeSubsteps" type="number" min="1" max="10000" step="1"></label>
+                    <p class="builderHint">The node timestep is the global timestep divided by this integer. Cross-node values remain fixed until the next global synchronization.</p>
+                    <div class="derivedTimeStep">Effective timestep <strong id="nodeEffectiveTimeStep">—</strong></div>
+                </section>
             </div>
             <div data-node-panel="appearance" hidden>
                 <section>

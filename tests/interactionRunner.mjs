@@ -45,13 +45,39 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#closeValidationPanel').click()`);
     });
 
+    await run('run configuration and node substeps are editable', async () => {
+        await evaluate(window, `document.querySelector('#runConfigurationButton').click()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#runConfigurationName').value = 'Fast response';
+            document.querySelector('#runDuration').value = '0.2';
+            document.querySelector('#runGlobalTimeStep').value = '0.02';
+            document.querySelector('#runOutputInterval').value = '0.1';
+            document.querySelector('#applyRunConfiguration').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runConfigurationDialog').open`), false);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="numerics"]').click()`);
+        await evaluate(window, `(() => { const input = document.querySelector('#editNodeSubsteps'); input.value = '2'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeSubsteps').value`), '2');
+        assert.match(await evaluate(window, `document.querySelector('#nodeEffectiveTimeStep').textContent`), /0\.01/);
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Updated numerical settings were not validated.');
+    });
+
+    await run('Run invokes the C++ simulation and displays state results', async () => {
+        assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
+        const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
+        await evaluate(window, `document.querySelector('#runButton').click()`);
+        await waitFor(window, `document.querySelector('#statusText').textContent.includes('Simulation complete')`, 'C++ simulation did not complete.', 10000);
+        assert.notEqual(await evaluate(window, `document.querySelector('.node-label-container dd').textContent`), before);
+    });
+
     await run('icon-only toolstrip controls expose custom accessible tooltips', async () => {
         const controls = await evaluate(window, `[...document.querySelectorAll('.toolstrip .squareTool')].map((button) => ({
             label: button.getAttribute('aria-label'),
             tooltip: button.dataset.tooltip,
             nativeTitle: button.getAttribute('title')
         }))`);
-        assert.ok(controls.length >= 6);
+        assert.ok(controls.length >= 5);
         assert.ok(controls.every((control) => control.label && control.tooltip && control.nativeTitle === null));
     });
 

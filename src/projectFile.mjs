@@ -67,8 +67,6 @@ async function keyFromPassword(password, kdf) {
 
 export function inspectProjectFile(buffer) {
     const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
-    const first = bytes.subarray(0, 64).toString('utf8').trimStart();
-    if (first.startsWith('{')) return { format: 'json', encrypted: false, version: null };
     const { flags } = parseHeader(bytes);
     return { format: 'kjt', encrypted: Boolean(flags & encryptedFlag), version };
 }
@@ -103,7 +101,6 @@ export async function encodeProjectFile(content, { password = null, scryptCost =
 
 export async function decodeProjectFile(buffer, { password = null } = {}) {
     const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
-    if (inspectProjectFile(bytes).format === 'json') return bytes.toString('utf8');
     const { flags, metadata, payload } = parseHeader(bytes);
     let compressed = payload;
 

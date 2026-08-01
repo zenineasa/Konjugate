@@ -11,6 +11,7 @@ appId := com.konjugate
 appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
+engineBuildDir := out/engine
 hostSystem := $(shell uname -s)
 hostMachine := $(shell uname -m)
 macSignIdentity ?=
@@ -47,6 +48,7 @@ endif
 
 .PHONY: \
 	icons iconsPng iconsWindows iconsMacos iconsWeb cleanIcons \
+	engine \
 	installDependencies checkPackaging packageApp packageMacos packageWindows packageLinux \
 	distributable distributableMacos distributableWindows distributableLinux \
 	build cleanPackage clean
@@ -131,6 +133,10 @@ installDependencies:
 checkPackaging: installDependencies
 	@test -x node_modules/.bin/electron-packager || { echo "Electron Packager installation failed."; exit 1; }
 
+engine:
+	cmake -S engine -B $(engineBuildDir)
+	cmake --build $(engineBuildDir) --config Release
+
 packageApp:
 ifeq ($(hostPlatform),darwin)
 	@$(MAKE) packageMacos
@@ -143,33 +149,36 @@ else
 	@exit 1
 endif
 
-packageMacos: checkPackaging iconsMacos
+packageMacos: checkPackaging iconsMacos engine
 	node_modules/.bin/electron-packager . $(appName) \
 		--platform=darwin \
 		--arch=$(hostArch) \
 		--app-bundle-id=$(appId) \
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.icns \
+		--extra-resource=$(engineBuildDir) \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
 
-packageWindows: checkPackaging iconsWindows
+packageWindows: checkPackaging iconsWindows engine
 	node_modules/.bin/electron-packager . $(appName) \
 		--platform=win32 \
 		--arch=$(hostArch) \
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.ico \
+		--extra-resource=$(engineBuildDir) \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
 
-packageLinux: checkPackaging iconsPng
+packageLinux: checkPackaging iconsPng engine
 	node_modules/.bin/electron-packager . $(appName) \
 		--platform=linux \
 		--arch=$(hostArch) \
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.png \
+		--extra-resource=$(engineBuildDir) \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true

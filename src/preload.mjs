@@ -39,3 +39,7 @@ contextBridge.exposeInMainWorld('projectFiles', {
     save: (path, content, suggestedFilename, password) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password }),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });
+
+contextBridge.exposeInMainWorld('engine', {
+    validate: (content) => ipcRenderer.invoke('engineValidate', content)
+});

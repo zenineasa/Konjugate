@@ -30,6 +30,8 @@
         "test": "node --test",
         "test:interaction": "node scripts/runInteractionTests.mjs",
         "test:all": "npm test && npm run test:interaction",
+        "build:engine": "cmake -S engine -B out/engine && cmake --build out/engine",
+        "test:engine": "npm run build:engine && node tests/engine/engineCompatibility.mjs out/engine/konjugateEngine",
         "start": "make iconsPng && electron .",
         "dev": "npm start",
         "build": "make build",

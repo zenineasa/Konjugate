@@ -6,6 +6,7 @@ import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
+import { validateWithEngine } from './engineAdapter.mjs';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
@@ -115,12 +116,12 @@ ipcMain.handle('projectOpen', async (event) => {
         title: 'Open Konjugate project',
         properties: ['openFile'],
         filters: [
-            { name: 'Konjugate project', extensions: ['kjt'] },
-            { name: 'Legacy JSON project', extensions: ['json', 'konjugate'] }
+            { name: 'Konjugate project', extensions: ['kjt'] }
         ]
     });
     if (result.canceled) return null;
     const [path] = result.filePaths;
+    if (!path.toLowerCase().endsWith('.kjt')) throw new Error('Only .kjt project files are supported.');
     const bytes = await readFile(path);
     const inspection = inspectProjectFile(bytes);
     if (inspection.encrypted) {
@@ -145,25 +146,15 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         const result = await dialog.showSaveDialog(targetWindow, {
             title: 'Save Konjugate project',
             defaultPath: defaultName,
-            filters: password
-                ? [{ name: 'Encrypted Konjugate project', extensions: ['kjt'] }]
-                : [
-                    { name: 'Konjugate project', extensions: ['kjt'] },
-                    { name: 'Legacy JSON project', extensions: ['json'] }
-                ]
+            filters: [{ name: password ? 'Encrypted Konjugate project' : 'Konjugate project', extensions: ['kjt'] }]
         });
         if (result.canceled) return null;
         path = result.filePath;
-        if (password && !path.toLowerCase().endsWith('.kjt')) {
-            path = path.replace(/(?:\.konjugate)?\.json$/i, '') + '.kjt';
-        }
     }
-    const isJson = path.toLowerCase().endsWith('.json') && !password;
-    const bytes = isJson ? Buffer.from(content, 'utf8') : await encodeProjectFile(content, { password });
-    if (!isJson) {
-        const verification = await decodeProjectFile(bytes, { password });
-        if (verification !== content) throw new Error('The saved project could not be verified.');
-    }
+    if (!path.toLowerCase().endsWith('.kjt')) path = path.replace(/(?:\.konjugate)?\.json$/i, '') + '.kjt';
+    const bytes = await encodeProjectFile(content, { password });
+    const verification = await decodeProjectFile(bytes, { password });
+    if (verification !== content) throw new Error('The saved project could not be verified.');
     const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
     try {
         await writeFile(temporaryPath, bytes);
@@ -193,6 +184,12 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
     });
     return result.response === 1;
 });
+
+ipcMain.handle('engineValidate', async (_event, content) => validateWithEngine(content, {
+    applicationPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    packaged: app.isPackaged
+}));
 
 app.whenReady().then(() => {
     createWindow();

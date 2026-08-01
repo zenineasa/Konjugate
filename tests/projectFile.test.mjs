@@ -66,9 +66,16 @@ test('supports removing encryption while retaining the project container', async
     assert.equal(await decodeProjectFile(unencrypted), content);
 });
 
-test('continues to open legacy JSON projects', async () => {
-    assert.deepEqual(inspectProjectFile(Buffer.from(content)), { format: 'json', encrypted: false, version: null });
-    assert.equal(await decodeProjectFile(Buffer.from(content)), content);
+test('rejects data that is not a KJT container', async () => {
+    const unsupported = Buffer.from('unsupported project data');
+    assert.throws(
+        () => inspectProjectFile(unsupported),
+        (error) => error.code === 'INVALID_FORMAT'
+    );
+    await assert.rejects(
+        decodeProjectFile(unsupported),
+        (error) => error.code === 'INVALID_FORMAT'
+    );
 });
 
 test('detects damage in an unencrypted compressed payload', async () => {

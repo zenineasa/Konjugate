@@ -253,6 +253,8 @@ let cameraAnimation = null;
 let pendingImportedGeometry = null;
 let pendingGeometryFileName = '';
 let currentValidation = { valid: true, issues: [], executableModel: null };
+let validationRevision = 0;
+let engineValidationTimer = null;
 const documentController = new DocumentController();
 
 function updateHistoryControls() {
@@ -1422,6 +1424,30 @@ function navigateToValidationIssue(item) {
 
 function updateValidationStatus() {
     currentValidation = validateModel(visibleValidationModel());
+    renderValidationStatus();
+    scheduleEngineValidation();
+}
+
+function scheduleEngineValidation() {
+    const revision = ++validationRevision;
+    clearTimeout(engineValidationTimer);
+    engineValidationTimer = setTimeout(async () => {
+        try {
+            const result = await window.engine.validate(JSON.stringify(serializeProjectDocument()));
+            if (revision !== validationRevision || !result.available) return;
+            currentValidation = {
+                valid: result.report.valid,
+                issues: result.report.issues,
+                executableModel: null
+            };
+            renderValidationStatus();
+        } catch (error) {
+            console.warn('C++ model validation was unavailable; retaining local validation.', error);
+        }
+    }, 180);
+}
+
+function renderValidationStatus() {
     const errors = currentValidation.issues.filter((item) => item.severity === 'error').length;
     const warnings = currentValidation.issues.filter((item) => item.severity === 'warning').length;
     const summary = $('#validationSummary');

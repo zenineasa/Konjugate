@@ -19,6 +19,7 @@
         }
     </script>
     <script src="../../node_modules/occt-import-js/dist/occt-import-js.js"></script>
+    <script src="../../node_modules/plotly.js-dist-min/plotly.min.js"></script>
     <script type="module" src="renderer.mjs"></script>
 </head>
 <body>
@@ -139,7 +140,8 @@
 
         <div id="nodeEditor" class="contextCard editorCard nodeEditor hidden">
             <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="numerics" type="button">Numerics</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="results" type="button">Results</button><button data-node-tab="numerics" type="button">Numerics</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-node-panel="model">
             <section>
                 <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
@@ -153,6 +155,15 @@
                 <h3>Source terms <button id="editAddSourceTerm" type="button">＋</button></h3>
                 <div id="nodeEditorSourceTerms"></div>
             </section>
+            </div>
+            <div data-node-panel="results" hidden>
+                <section class="nodeResultsPanel">
+                    <div id="nodeResultPlot" class="nodeResultPlot" role="img" aria-label="Selected node state history"></div>
+                    <div id="nodeResultEmpty" class="nodeResultEmpty">
+                        <strong>No simulation results</strong>
+                        <span>Run the model to inspect this node's state history.</span>
+                    </div>
+                </section>
             </div>
             <div data-node-panel="numerics" hidden>
                 <section>
@@ -170,11 +181,12 @@
                     </label>
                 </section>
             </div>
-            <footer><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
+            <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
         </div>
 
         <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Edge</span><strong>Relationship</strong></div><button data-close-card type="button">×</button></header>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <section>
                 <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
                 <div class="endpointGrid">
@@ -246,6 +258,20 @@
             </section>
             <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
         </div>
+
+        <section id="resultTransport" class="resultTransport" aria-label="Simulation result playback" hidden>
+            <span class="resultMode"><b>Results</b><small>Model locked</small></span>
+            <button id="resultStart" type="button" aria-label="First result sample">|◀</button>
+            <button id="resultPrevious" type="button" aria-label="Previous result sample">◀</button>
+            <button id="resultPlayPause" class="resultPlayPause" type="button" aria-label="Play results">▶</button>
+            <button id="resultNext" type="button" aria-label="Next result sample">▶</button>
+            <button id="resultEnd" type="button" aria-label="Last result sample">▶|</button>
+            <output id="resultCurrentTime">0 s</output>
+            <input id="resultTimeline" type="range" min="0" max="0" value="0" step="1" aria-label="Simulation time">
+            <output id="resultDuration">0 s</output>
+            <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option></select>
+            <button id="closeResults" class="closeResults" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
+        </section>
 
         <div class="canvasHelp">
             <span><b>Left click</b> inspect</span><i></i><span><b>Drag</b> move or orbit</span><i></i><span><b>Shift-drag</b> pan</span><i></i><span><b>Scroll or −/+</b> zoom</span>

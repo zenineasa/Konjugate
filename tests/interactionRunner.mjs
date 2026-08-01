@@ -67,8 +67,35 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
         await evaluate(window, `document.querySelector('#runButton').click()`);
-        await waitFor(window, `document.querySelector('#statusText').textContent.includes('Simulation complete')`, 'C++ simulation did not complete.', 10000);
-        assert.notEqual(await evaluate(window, `document.querySelector('.node-label-container dd').textContent`), before);
+        await waitFor(window, `!document.querySelector('#resultTransport').hidden`, 'C++ simulation did not produce a playable result.', 10000);
+        assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('showNodesDetails')`), true);
+        const finalValue = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
+        assert.notEqual(finalValue, before);
+        assert.ok(Number(await evaluate(window, `document.querySelector('#resultTimeline').max`)) > 0);
+        await evaluate(window, `(() => { const timeline = document.querySelector('#resultTimeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#resultCurrentTime').value`), '0 s');
+        assert.notEqual(await evaluate(window, `document.querySelector('.node-label-container dd').textContent`), finalValue);
+        await evaluate(window, `document.querySelector('#resultPlayPause').click()`);
+        await waitFor(window, `Number(document.querySelector('#resultTimeline').value) > 0`, 'Result playback did not advance the timeline.', 3000);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        await waitFor(window, `document.querySelector('.nodeResultsPanel').classList.contains('hasResults')`, 'Selected-node result plot did not render.', 5000);
+        assert.equal(await evaluate(window, `document.querySelector('[data-node-tab="results"]').classList.contains('active')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#addButton').disabled && document.querySelector('[data-tool="move"]').disabled && document.querySelector('[data-action="delete"]').disabled`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor [data-result-readonly]').hidden`), true);
+        assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').data.length`) > 0);
+        assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').layout.shapes.length`) > 0);
+        await evaluate(window, `document.querySelector('[data-node-tab="model"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled`), true);
+        await evaluate(window, `(() => { const input = document.querySelector('#editNodeName'); input.value = 'Changed during results'; input.dispatchEvent(new Event('change', { bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module'))`), true);
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#resultTransport').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || document.querySelector('#nodeModelActions').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), false);
     });
 
     await run('icon-only toolstrip controls expose custom accessible tooltips', async () => {
@@ -144,7 +171,9 @@ export async function runInteractionTests(window) {
 
     await run('node appearance changes and participates in undo', async () => {
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), false);
         await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), true);
         await evaluate(window, `(() => { const field = document.querySelector('#editNodeShape'); field.value = 'sphere'; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'sphere');
         await evaluate(window, `document.querySelector('#undoButton').click()`);

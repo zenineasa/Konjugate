@@ -16,6 +16,7 @@ import {
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
+import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -273,20 +274,36 @@ let validationRevision = 0;
 let engineValidationTimer = null;
 let equationEditSession = null;
 let simulationRunning = false;
+let activeResult = null;
+let activeResultSampleIndex = 0;
+let resultPlaybackTimer = null;
+let resultPlaying = false;
+let nodeDetailsBeforeResult = null;
+let toolBeforeResult = null;
+const nodeResultPlot = new ResultPlot($('#nodeResultPlot'), {
+    onSeek: (time) => {
+        if (!activeResult) return;
+        stopResultPlayback();
+        projectResultSample(nearestSampleIndex(activeResult.samples, time));
+    }
+});
 const documentController = new DocumentController();
 
 function updateHistoryControls() {
-    $('#undoButton').disabled = !documentController.canUndo;
-    $('#redoButton').disabled = !documentController.canRedo;
+    $('#undoButton').disabled = Boolean(activeResult) || !documentController.canUndo;
+    $('#redoButton').disabled = Boolean(activeResult) || !documentController.canRedo;
     $('#saveButton').disabled = !documentController.dirty && currentProjectPath !== null;
     $('.windowTitle i').style.visibility = documentController.dirty ? 'visible' : 'hidden';
 }
 
 function recordHistory(action) {
+    if (activeResult) return false;
     documentController.record(action);
+    return true;
 }
 
 function undo() {
+    if (activeResult) return;
     finishEquationEdit();
     clearSelection();
     hideCards();
@@ -294,6 +311,7 @@ function undo() {
 }
 
 function redo() {
+    if (activeResult) return;
     finishEquationEdit();
     clearSelection();
     hideCards();
@@ -647,6 +665,7 @@ function applyNodeAppearance(node, appearance) {
 }
 
 function changeNodeAppearance(node, appearance) {
+    if (activeResult) return;
     const before = captureNodeAppearance(node.userData.definition);
     applyNodeAppearance(node, appearance);
     const after = captureNodeAppearance(node.userData.definition);
@@ -854,6 +873,7 @@ function applyNodeModel(node, snapshot) {
 }
 
 function changeNodeModel(node, mutate) {
+    if (activeResult) return;
     const before = captureNodeModel(node);
     const after = structuredClone(before);
     mutate(after);
@@ -942,17 +962,35 @@ function renderNodeEditorModel(node) {
     });
 }
 
+async function renderNodeResults(node) {
+    const panel = $('.nodeResultsPanel');
+    const series = nodeResultSeries(activeResult, node.userData.definition);
+    panel.classList.toggle('hasResults', Boolean(series.length));
+    if (!series.length) {
+        nodeResultPlot.clear();
+        return;
+    }
+    await nodeResultPlot.render(series, activeResult.samples[activeResultSampleIndex]?.time ?? 0);
+}
+
+function selectNodeEditorTab(tabName) {
+    $$('[data-node-tab]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.nodeTab === tabName);
+    });
+    $$('[data-node-panel]').forEach((panel) => {
+        panel.hidden = panel.dataset.nodePanel !== tabName;
+    });
+    $('#nodeModelActions').hidden = Boolean(activeResult) || tabName !== 'model';
+    if (tabName === 'results' && selectedNode) requestAnimationFrame(() => renderNodeResults(selectedNode));
+}
+
 function openNodeEditor(definition, clientX, clientY) {
     const editor = $('#nodeEditor');
     hideCards(editor);
     const node = nodeObjects.get(definition.id);
     renderNodeEditorModel(node);
-    $$('[data-node-tab]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.nodeTab === 'model');
-    });
-    $$('[data-node-panel]').forEach((panel) => {
-        panel.hidden = panel.dataset.nodePanel !== 'model';
-    });
+    const initialTab = activeResult ? 'results' : 'model';
+    selectNodeEditorTab(initialTab);
     $('#editNodeShape').value = definition.shape === 'imported' ? '' : definition.shape;
     $('#editNodeGeometryFile').value = '';
     $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file';
@@ -960,6 +998,7 @@ function openNodeEditor(definition, clientX, clientY) {
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
     editor.classList.remove('hidden');
+    applyInspectorReadOnly();
 }
 
 function normalizeEdgeEquationModel(definition, equationModel = definition.equationModel) {
@@ -1013,6 +1052,7 @@ function applyEdgeModel(definition, snapshot) {
 }
 
 function changeEdgeModel(definition, mutate) {
+    if (activeResult) return;
     finishEquationEdit();
     const before = captureEdgeModel(definition);
     const after = structuredClone(before);
@@ -1111,6 +1151,7 @@ function renderEquationDiagnostics(latex, bindings) {
 }
 
 function insertEquationBinding(binding) {
+    if (activeResult) return;
     const latex = latexForBinding(binding);
     if ($('#editEdgeMathField').hidden) {
         const source = $('#editEdgeEquation');
@@ -1131,6 +1172,7 @@ function openRelationshipEditor(definition, clientX, clientY) {
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
     editor.classList.remove('hidden');
+    applyInspectorReadOnly();
 }
 
 function openAddPalette(clientX, clientY) {
@@ -1300,7 +1342,7 @@ function finishEndpointPick() {
         material.needsUpdate = true;
     });
     endpointPickMaterialState = new Map();
-    dragControls.enabled = currentTool === 'select';
+    dragControls.enabled = !activeResult && currentTool === 'select';
     $('.edgeBuilder > header strong').textContent = 'Connect stateful nodes';
     if (endpointPickRestoreCard?.isConnected) endpointPickRestoreCard.classList.remove('hidden');
     endpointPickRestoreCard = null;
@@ -1509,7 +1551,7 @@ function renderValidationStatus() {
     summary.classList.toggle('warning', !errors && warnings > 0);
     $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
         : warnings ? `${warnings} model ${warnings === 1 ? 'warning' : 'warnings'}` : 'Model valid';
-    $('#runButton').disabled = errors > 0 || simulationRunning;
+    $('#runButton').disabled = Boolean(activeResult) || errors > 0 || simulationRunning;
     $('#runButton').title = errors ? 'Resolve model errors before running' : 'Run simulation';
 
     const severityByEntity = new Map();
@@ -1549,18 +1591,139 @@ function renderValidationStatus() {
     });
 }
 
-function applySimulationResult(result) {
-    result.states.forEach((stateResult) => {
-        const node = model.nodes.find((candidate) => candidate.id === stateResult.nodeId);
-        const state = node?.states.find((candidate) => candidate.id === stateResult.stateId);
-        if (!state) return;
-        state.value = `${Number(stateResult.value).toPrecision(6)}${state.unit ? ` ${state.unit}` : ''}`;
-        const label = $(`.node-label-container[data-node="${stateResult.nodeId}"]`);
-        const stateIndex = node.states.indexOf(state);
-        const value = $$('dd', label)[stateIndex];
-        if (value) value.textContent = state.value;
+function formatResultTime(time) {
+    return `${Number(time).toLocaleString(undefined, { maximumSignificantDigits: 6 })} s`;
+}
+
+function updateDisplayedState(stateId, numericValue) {
+    const node = model.nodes.find((candidate) => candidate.states.some((state) => state.id === stateId));
+    const state = node?.states.find((candidate) => candidate.id === stateId);
+    if (!state) return;
+    state.value = `${Number(numericValue).toPrecision(6)}${state.unit ? ` ${state.unit}` : ''}`;
+    const label = $(`.node-label-container[data-node="${node.id}"]`);
+    const value = $$('dd', label)[node.states.indexOf(state)];
+    if (value) value.textContent = state.value;
+}
+
+function projectResultSample(index) {
+    if (!activeResult?.samples.length) return;
+    activeResultSampleIndex = Math.max(0, Math.min(index, activeResult.samples.length - 1));
+    const sample = activeResult.samples[activeResultSampleIndex];
+    sample.states.forEach((state) => updateDisplayedState(state.stateId, state.value));
+    $('#resultTimeline').value = String(activeResultSampleIndex);
+    $('#resultCurrentTime').value = formatResultTime(sample.time);
+    $('#statusText').textContent = `Result · ${formatResultTime(sample.time)}`;
+    nodeResultPlot.setCursor(sample.time);
+}
+
+function stopResultPlayback() {
+    clearTimeout(resultPlaybackTimer);
+    resultPlaybackTimer = null;
+    resultPlaying = false;
+    $('#resultPlayPause').textContent = '▶';
+    $('#resultPlayPause').ariaLabel = 'Play results';
+}
+
+function scheduleResultPlayback() {
+    if (!resultPlaying || !activeResult) return;
+    if (activeResultSampleIndex >= activeResult.samples.length - 1) {
+        stopResultPlayback();
+        return;
+    }
+    const current = activeResult.samples[activeResultSampleIndex];
+    const next = activeResult.samples[activeResultSampleIndex + 1];
+    const rate = Number($('#resultPlaybackRate').value) || 1;
+    resultPlaybackTimer = setTimeout(() => {
+        projectResultSample(activeResultSampleIndex + 1);
+        scheduleResultPlayback();
+    }, Math.max(40, (next.time - current.time) * 1000 / rate));
+}
+
+function applyInspectorReadOnly() {
+    const locked = Boolean(activeResult);
+    $$('[data-result-readonly]').forEach((notice) => { notice.hidden = !locked; });
+    $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button), #edgeEditor > footer button').forEach((control) => {
+        control.disabled = locked;
+    });
+    $$('#nodeEditor math-field, #edgeEditor math-field').forEach((field) => {
+        field.readOnly = locked;
+        field.toggleAttribute('read-only', locked);
     });
 }
+
+function setResultModeLocked(locked) {
+    canvas.classList.toggle('resultModeLocked', locked);
+    $('#addButton').disabled = locked;
+    $('[data-action="delete"]').disabled = locked;
+    $('[data-tool="move"]').disabled = locked;
+    $('#runConfigurationButton').disabled = locked;
+    $('#runButton').disabled = locked || simulationRunning || !currentValidation.valid;
+    transformControls.detach();
+    if (locked) {
+        $$('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === 'select'));
+        setTool('select');
+    } else if (toolBeforeResult) {
+        const restoredTool = toolBeforeResult;
+        toolBeforeResult = null;
+        $$('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === restoredTool));
+        setTool(restoredTool);
+    }
+    $('#nodeModelActions').hidden = locked || !$('[data-node-tab="model"]').classList.contains('active');
+    applyInspectorReadOnly();
+    updateHistoryControls();
+}
+
+function activateResult(result) {
+    stopResultPlayback();
+    if (!activeResult) nodeDetailsBeforeResult = $('[data-detail="nodes"]').classList.contains('active');
+    if (!activeResult) toolBeforeResult = currentTool;
+    activeResult = result;
+    setResultModeLocked(true);
+    setLabelDetail('nodes', true);
+    $('#resultTransport').hidden = false;
+    $('#resultTimeline').max = String(result.samples.length - 1);
+    $('#resultDuration').value = formatResultTime(result.duration);
+    projectResultSample(result.samples.length - 1);
+    if (selectedNode && !$('#nodeEditor').classList.contains('hidden')) selectNodeEditorTab('results');
+}
+
+function clearResultPlayback() {
+    if (!activeResult) return;
+    stopResultPlayback();
+    activeResult = null;
+    setResultModeLocked(false);
+    nodeResultPlot.clear();
+    $('.nodeResultsPanel').classList.remove('hasResults');
+    $('#resultTransport').hidden = true;
+    model.nodes.forEach((node) => node.states.forEach((state) => updateDisplayedState(state.id, state.initialValue)));
+    if (nodeDetailsBeforeResult !== null) setLabelDetail('nodes', nodeDetailsBeforeResult);
+    nodeDetailsBeforeResult = null;
+    renderValidationStatus();
+}
+
+$('#resultTimeline').addEventListener('input', (event) => {
+    stopResultPlayback();
+    projectResultSample(Number(event.target.value));
+});
+$('#resultStart').addEventListener('click', () => { stopResultPlayback(); projectResultSample(0); });
+$('#resultPrevious').addEventListener('click', () => { stopResultPlayback(); projectResultSample(activeResultSampleIndex - 1); });
+$('#resultNext').addEventListener('click', () => { stopResultPlayback(); projectResultSample(activeResultSampleIndex + 1); });
+$('#resultEnd').addEventListener('click', () => { stopResultPlayback(); projectResultSample(activeResult.samples.length - 1); });
+$('#resultPlayPause').addEventListener('click', () => {
+    if (resultPlaying) {
+        stopResultPlayback();
+        return;
+    }
+    if (activeResultSampleIndex >= activeResult.samples.length - 1) projectResultSample(0);
+    resultPlaying = true;
+    $('#resultPlayPause').textContent = '❚❚';
+    $('#resultPlayPause').ariaLabel = 'Pause results';
+    scheduleResultPlayback();
+});
+$('#resultPlaybackRate').addEventListener('change', () => {
+    if (resultPlaying) { clearTimeout(resultPlaybackTimer); scheduleResultPlayback(); }
+});
+$('#closeResults').addEventListener('click', clearResultPlayback);
 
 $('#runButton').addEventListener('click', async () => {
     if (simulationRunning || !currentValidation.valid) return;
@@ -1572,15 +1735,14 @@ $('#runButton').addEventListener('click', async () => {
         const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
         const execution = await window.engine.run(JSON.stringify(serializeProjectDocument()), configuration);
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
-        applySimulationResult(execution.result);
-        $('#statusText').textContent = `Simulation complete · ${execution.result.duration} s`;
+        activateResult(execution.result);
     } catch (error) {
         console.error('C++ simulation failed.', error);
         $('#statusText').textContent = 'Simulation failed';
         $('#runButton').title = error.message;
     } finally {
         simulationRunning = false;
-        $('#runButton').disabled = !currentValidation.valid;
+        $('#runButton').disabled = Boolean(activeResult) || !currentValidation.valid;
         if (currentValidation.valid) $('#runButton').title = 'Run simulation';
     }
 });
@@ -1593,6 +1755,7 @@ function applyRunConfiguration(configuration) {
 }
 
 $('#runConfigurationButton').addEventListener('click', () => {
+    if (activeResult) return;
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#runConfigurationName').value = configuration.name;
     $('#runDuration').value = configuration.duration;
@@ -1604,6 +1767,7 @@ $('#runConfigurationButton').addEventListener('click', () => {
 $('#runConfigurationCancel').addEventListener('click', () => $('#runConfigurationDialog').close());
 $('#runConfigurationDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
+    if (activeResult) return;
     const before = structuredClone(model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId));
     const after = {
         ...before,
@@ -1859,6 +2023,7 @@ function loadProjectDocument(document, {
     saved = true,
     password = null
 } = {}) {
+    clearResultPlayback();
     const nextModel = hydrateProjectDocument(document);
     clearRenderedModel();
     model.metadata = nextModel.metadata;
@@ -1936,7 +2101,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
             return;
         }
         nodePointerDown = { id: node.userData.id, x: event.clientX, y: event.clientY };
-        if (currentTool === 'move') transformControls.attach(node);
+        if (!activeResult && currentTool === 'move') transformControls.attach(node);
         return;
     }
 
@@ -1987,7 +2152,7 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
         return;
     }
 
-    openAddPalette(event.clientX, event.clientY);
+    if (!activeResult) openAddPalette(event.clientX, event.clientY);
 });
 
 $$('[data-close-card]').forEach((button) => {
@@ -1999,12 +2164,7 @@ $$('[data-close-card]').forEach((button) => {
 });
 
 $$('[data-node-tab]').forEach((button) => {
-    button.addEventListener('click', () => {
-        $$('[data-node-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
-        $$('[data-node-panel]').forEach((panel) => {
-            panel.hidden = panel.dataset.nodePanel !== button.dataset.nodeTab;
-        });
-    });
+    button.addEventListener('click', () => selectNodeEditorTab(button.dataset.nodeTab));
 });
 
 $('#editNodeName').addEventListener('change', (event) => {
@@ -2077,7 +2237,7 @@ $('#editEdgeDirectionality').addEventListener('change', (event) => {
 });
 
 function previewEdgeEquation(latex, origin) {
-    if (!selectedRelationship) return;
+    if (activeResult || !selectedRelationship) return;
     const definition = selectedRelationship;
     if (!equationEditSession || equationEditSession.relationshipId !== definition.id) {
         finishEquationEdit();
@@ -2190,6 +2350,7 @@ $('#editNodeGeometryFile').addEventListener('change', async (event) => {
 });
 
 $('#addButton').addEventListener('click', (event) => {
+    if (activeResult) return;
     const rect = event.currentTarget.getBoundingClientRect();
     openAddPalette(rect.left, rect.bottom + 3);
 });
@@ -2500,7 +2661,7 @@ $$('[data-pick-endpoint]').forEach((button) => {
 });
 $('#cancelEndpointPick').addEventListener('click', finishEndpointPick);
 $('#connectFromNode').addEventListener('click', () => {
-    if (!selectedNode) return;
+    if (activeResult || !selectedNode) return;
     const sourceId = selectedNode.userData.id;
     const editorRect = $('#nodeEditor').getBoundingClientRect();
     openEdgeBuilder(editorRect.left, editorRect.top);
@@ -2510,6 +2671,7 @@ $('#connectFromNode').addEventListener('click', () => {
 });
 
 $('#createNode').addEventListener('click', () => {
+    if (activeResult) return;
     const states = stateVariablesFromBuilder();
     if (!states.length) {
         $('#stateVariableRows input').focus();
@@ -2567,6 +2729,7 @@ $('#createNode').addEventListener('click', () => {
 });
 
 $('#createEdge').addEventListener('click', () => {
+    if (activeResult) return;
     const source = $('#edgeSource').value;
     const target = $('#edgeTarget').value;
     if (!source || !target || source === target) {
@@ -2624,15 +2787,16 @@ $('#createEdge').addEventListener('click', () => {
     });
 });
 
+function setLabelDetail(detail, expanded) {
+    const button = $(`[data-detail="${detail}"]`);
+    button.classList.toggle('active', expanded);
+    button.ariaPressed = String(expanded);
+    canvas.classList.toggle(`show${detail[0].toUpperCase()}${detail.slice(1)}Details`, expanded);
+}
+
 $$('[data-detail]').forEach((button) => {
-    button.addEventListener('click', () => {
-        const detail = button.dataset.detail;
-        button.classList.toggle('active');
-        canvas.classList.toggle(
-            `show${detail[0].toUpperCase()}${detail.slice(1)}Details`,
-            button.classList.contains('active')
-        );
-    });
+    button.ariaPressed = 'false';
+    button.addEventListener('click', () => setLabelDetail(button.dataset.detail, !button.classList.contains('active')));
 });
 
 $('#validationSummary').addEventListener('click', () => {
@@ -2646,9 +2810,10 @@ $('#closeValidationPanel').addEventListener('click', () => {
 });
 
 function setTool(tool) {
+    if (activeResult && tool !== 'select') return;
     currentTool = tool;
-    dragControls.enabled = tool === 'select';
-    transformControls.enabled = tool === 'move';
+    dragControls.enabled = !activeResult && tool === 'select';
+    transformControls.enabled = !activeResult && tool === 'move';
 
     if (tool !== 'move') transformControls.detach();
     if (tool === 'move' && selectedNode) transformControls.attach(selectedNode);
@@ -2815,6 +2980,7 @@ function updateViewCube() {
 }
 
 function deleteSelected() {
+    if (activeResult) return;
     finishEquationEdit();
     if (selectedNode) {
         const node = selectedNode;

@@ -51,6 +51,7 @@
         "@cortex-js/compute-engine": "^0.99.0",
         "mathlive": "^0.110.0",
         "occt-import-js": "^0.0.23",
+        "plotly.js-dist-min": "^3.7.0",
         "three": "^0.185.1"
     }
 }

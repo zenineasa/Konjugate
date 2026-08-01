@@ -1,6 +1,24 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
+
+const minimumUiZoom = 0.75;
+const maximumUiZoom = 1.5;
+const uiZoomStep = 0.1;
+
+function setUiZoom(factor) {
+    const nextFactor = Math.min(maximumUiZoom, Math.max(minimumUiZoom, Math.round(factor * 10) / 10));
+    webFrame.setZoomFactor(nextFactor);
+    return nextFactor;
+}
+
+contextBridge.exposeInMainWorld('uiZoom', {
+    get: () => webFrame.getZoomFactor(),
+    increase: () => setUiZoom(webFrame.getZoomFactor() + uiZoomStep),
+    decrease: () => setUiZoom(webFrame.getZoomFactor() - uiZoomStep),
+    reset: () => setUiZoom(1),
+    limits: { minimum: minimumUiZoom, maximum: maximumUiZoom }
+});
 
 contextBridge.exposeInMainWorld('windowControls', {
     minimize: () => ipcRenderer.send('windowMinimize'),

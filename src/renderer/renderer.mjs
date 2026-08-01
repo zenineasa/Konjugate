@@ -279,6 +279,16 @@ function redo() {
 documentController.subscribe(updateHistoryControls);
 
 function initializeWindowControls() {
+    const updateUiZoomControls = (factor = window.uiZoom.get()) => {
+        const percent = Math.round(factor * 100);
+        $('#zoomOutButton').disabled = factor <= window.uiZoom.limits.minimum;
+        $('#zoomInButton').disabled = factor >= window.uiZoom.limits.maximum;
+        $('#zoomOutButton').dataset.tooltip = `Zoom interface out · ${percent}%`;
+        $('#zoomInButton').dataset.tooltip = `Zoom interface in · ${percent}%`;
+    };
+    $('#zoomOutButton').addEventListener('click', () => updateUiZoomControls(window.uiZoom.decrease()));
+    $('#zoomInButton').addEventListener('click', () => updateUiZoomControls(window.uiZoom.increase()));
+    updateUiZoomControls();
     $('#minimizeButton').addEventListener('click', () => window.windowControls.minimize());
     $('#maximizeButton').ariaLabel = isMac ? 'Enter full screen' : 'Maximize';
     $('#maximizeButton').dataset.tooltip = isMac ? 'Enter full screen' : 'Maximize';
@@ -2591,6 +2601,25 @@ window.addEventListener('keydown', (event) => {
     }
     const isEditing = event.target.matches('input, textarea, select') || event.target.isContentEditable;
     const commandKey = isMac ? event.metaKey : event.ctrlKey;
+    if (commandKey && (event.key === '+' || event.key === '=')) {
+        event.preventDefault();
+        $('#zoomInButton').click();
+        return;
+    }
+    if (commandKey && event.key === '-') {
+        event.preventDefault();
+        $('#zoomOutButton').click();
+        return;
+    }
+    if (commandKey && event.key === '0') {
+        event.preventDefault();
+        window.uiZoom.reset();
+        $('#zoomOutButton').disabled = false;
+        $('#zoomInButton').disabled = false;
+        $('#zoomOutButton').dataset.tooltip = 'Zoom interface out · 100%';
+        $('#zoomInButton').dataset.tooltip = 'Zoom interface in · 100%';
+        return;
+    }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         newProject();

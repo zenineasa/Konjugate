@@ -114,7 +114,10 @@ input, select { user-select: text; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .windowControls { display: flex; height: 100%; -webkit-app-region: no-drag; }
 .windowControls button { display: grid; width: 46px; height: 100%; padding: 0; place-items: center; background: transparent; border: 0; font-size: 17px; }
+.windowControls .uiZoomButton { width: 34px; color: #7f929c; font-size: 9px; font-weight: 650; letter-spacing: -.04em; }
+.windowControls .uiZoomButton:disabled { color: #344751; cursor: default; }
 .windowControls button:hover { background: #1a2730; }
+.windowControls .uiZoomButton:disabled:hover { background: transparent; }
 .windowControls .closeButton:hover { background: #d64853; }
 
 .toolstrip {

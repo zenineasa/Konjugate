@@ -17,6 +17,7 @@ import { validateProjectPassword } from './passwordValidation.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
+import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -287,6 +288,15 @@ let resultPlaying = false;
 let nodeDetailsBeforeResult = null;
 let toolBeforeResult = null;
 let addonToolstripContributions = [];
+let pendingAssistantProposal = null;
+let assistantPreviewRevision = 0;
+let assistantGenerationController = null;
+let assistantHasBeenPositioned = false;
+let activeAssistantConfigurationUuid = null;
+let assistantConfigurationCatalog = { configurations: [], providers: [], credentialStorage: null };
+let assistantConfigurationBaseline = '';
+let assistantDiscoveryTimer = null;
+let assistantDiscoveryRevision = 0;
 const nodeResultPlot = new ResultPlot($('#nodeResultPlot'), {
     onSeek: (time) => {
         if (!activeResult) return;
@@ -1009,6 +1019,7 @@ function openNodeEditor(definition, clientX, clientY) {
     editor.style.removeProperty('top');
     editor.classList.remove('hidden');
     applyInspectorReadOnly();
+    requestAnimationFrame(avoidAssistantInspectorOverlap);
 }
 
 function normalizeEdgeEquationModel(definition, equationModel = definition.equationModel) {
@@ -1183,6 +1194,7 @@ function openRelationshipEditor(definition, clientX, clientY) {
     editor.style.removeProperty('top');
     editor.classList.remove('hidden');
     applyInspectorReadOnly();
+    requestAnimationFrame(avoidAssistantInspectorOverlap);
 }
 
 function openAddPalette(clientX, clientY) {
@@ -1677,12 +1689,15 @@ function applyInspectorReadOnly() {
 function setResultModeLocked(locked) {
     canvas.classList.toggle('resultModeLocked', locked);
     $('#addButton').disabled = locked;
+    $('#assistantButton').disabled = locked;
     $('[data-action="delete"]').disabled = locked;
     $('[data-tool="move"]').disabled = locked;
     $('#runConfigurationButton').disabled = locked;
     $('#runButton').disabled = locked || simulationRunning || !currentValidation.valid;
     transformControls.detach();
     if (locked) {
+        discardAssistantProposal();
+        hideAssistantPanel();
         $$('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === 'select'));
         setTool('select');
     } else if (toolBeforeResult) {
@@ -2268,6 +2283,7 @@ function clearRenderedModel() {
         }
     });
     nodeObjects.forEach((node) => {
+        node.traverse((child) => child.element?.remove());
         scene.remove(node);
         node.geometry.dispose();
         node.material.dispose();
@@ -2286,6 +2302,8 @@ function loadProjectDocument(document, {
     password = null
 } = {}) {
     clearResultPlayback();
+    discardAssistantProposal();
+    hideAssistantPanel();
     const nextModel = hydrateProjectDocument(document);
     clearRenderedModel();
     model.metadata = nextModel.metadata;
@@ -2306,6 +2324,632 @@ function loadProjectDocument(document, {
     updateEncryptionControls();
     setCameraView('orbit');
 }
+
+function replaceModelContents(document) {
+    const nextModel = hydrateProjectDocument(document);
+    clearRenderedModel();
+    model.metadata = nextModel.metadata;
+    model.runConfigurations = nextModel.runConfigurations;
+    model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
+    model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
+    model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
+    model.nodes.forEach(createNode);
+    model.relationships.forEach(createRelationship);
+    invalidateRelationshipBundles();
+    updateRelationships();
+    updateModelStatus();
+}
+
+function showAssistantPanel() {
+    $('#validationPanel').hidden = true;
+    $('#validationSummary').ariaExpanded = 'false';
+    $('#assistantPanel').hidden = false;
+    $('#assistantButton').ariaExpanded = 'true';
+    if (!assistantHasBeenPositioned) positionAssistantPanel();
+    else clampAssistantPanel();
+    requestAnimationFrame(avoidAssistantInspectorOverlap);
+    refreshAssistantConfigurations();
+}
+
+function hideAssistantPanel() {
+    assistantGenerationController?.abort();
+    assistantGenerationController = null;
+    $('#assistantPanel').hidden = true;
+    $('#assistantButton').ariaExpanded = 'false';
+}
+
+function visibleModelInspector() {
+    return [$('#nodeEditor'), $('#edgeEditor')].find((editor) => !editor.classList.contains('hidden')) ?? null;
+}
+
+function assistantBounds(left, top) {
+    const panel = $('#assistantPanel');
+    const canvasRect = canvas.getBoundingClientRect();
+    return {
+        left: Math.max(10, Math.min(left, window.innerWidth - panel.offsetWidth - 10)),
+        top: Math.max(canvasRect.top + 10, Math.min(top, window.innerHeight - panel.offsetHeight - 10))
+    };
+}
+
+function setAssistantPosition(left, top) {
+    const panel = $('#assistantPanel');
+    const bounds = assistantBounds(left, top);
+    panel.style.left = `${bounds.left}px`;
+    panel.style.top = `${bounds.top}px`;
+    panel.style.removeProperty('right');
+    panel.style.removeProperty('bottom');
+    assistantHasBeenPositioned = true;
+}
+
+function positionAssistantPanel() {
+    const panel = $('#assistantPanel');
+    const inspector = visibleModelInspector();
+    const rightBoundary = inspector ? inspector.getBoundingClientRect().left - 10 : window.innerWidth - 10;
+    setAssistantPosition(rightBoundary - panel.offsetWidth, canvas.getBoundingClientRect().top + 10);
+}
+
+function clampAssistantPanel() {
+    const panel = $('#assistantPanel');
+    if (panel.hidden) return;
+    const rect = panel.getBoundingClientRect();
+    setAssistantPosition(rect.left, rect.top);
+}
+
+function avoidAssistantInspectorOverlap() {
+    const panel = $('#assistantPanel');
+    const inspector = visibleModelInspector();
+    if (panel.hidden || !inspector) return;
+    const panelRect = panel.getBoundingClientRect();
+    const inspectorRect = inspector.getBoundingClientRect();
+    const overlaps = panelRect.right > inspectorRect.left && panelRect.left < inspectorRect.right &&
+        panelRect.bottom > inspectorRect.top && panelRect.top < inspectorRect.bottom;
+    if (overlaps) setAssistantPosition(inspectorRect.left - panelRect.width - 10, panelRect.top);
+}
+
+function setAssistantCollapsed(collapsed) {
+    const panel = $('#assistantPanel');
+    panel.classList.toggle('collapsed', collapsed);
+    $('#collapseAssistantPanel').textContent = collapsed ? '□' : '−';
+    $('#collapseAssistantPanel').ariaLabel = collapsed ? 'Expand model assistant' : 'Collapse model assistant';
+    $('#collapseAssistantPanel').ariaExpanded = String(!collapsed);
+    requestAnimationFrame(clampAssistantPanel);
+}
+
+function updateAssistantCollapsedStatus(text) {
+    $('#assistantCollapsedStatus').textContent = text;
+}
+
+function installAssistantDragging() {
+    const panel = $('#assistantPanel');
+    const header = $('#assistantPanelHeader');
+    let drag = null;
+    header.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || event.target.closest('button')) return;
+        const rect = panel.getBoundingClientRect();
+        drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+        header.setPointerCapture(event.pointerId);
+    });
+    header.addEventListener('pointermove', (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        setAssistantPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY);
+    });
+    const finish = (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (header.hasPointerCapture(event.pointerId)) header.releasePointerCapture(event.pointerId);
+        drag = null;
+    };
+    header.addEventListener('pointerup', finish);
+    header.addEventListener('pointercancel', finish);
+}
+
+function renderAssistantProposal(proposal, prepared) {
+    $('#assistantEmpty').hidden = true;
+    $('#assistantProposal').hidden = false;
+    $('#assistantProposalSummary').textContent = proposal.summary?.trim() || 'Proposed model changes';
+    const assumptions = Array.isArray(proposal.assumptions) ? proposal.assumptions.filter((item) => typeof item === 'string' && item.trim()) : [];
+    $('#assistantAssumptionsSection').hidden = !assumptions.length;
+    $('#assistantAssumptions').replaceChildren(...assumptions.map((assumption) => {
+        const item = document.createElement('li');
+        item.textContent = assumption;
+        return item;
+    }));
+    $('#assistantChanges').replaceChildren(...prepared.changes.map((change) => {
+        const item = document.createElement('li');
+        item.className = `assistantChange ${change.action ?? 'update'}`;
+        const content = document.createElement(change.focusEntityId ? 'button' : 'div');
+        if (change.focusEntityId) {
+            content.type = 'button';
+            content.dataset.focusEntity = change.focusEntityId;
+            content.setAttribute('aria-label', `${change.label}. Inspect this object in the current model.`);
+        }
+        const heading = document.createElement('span');
+        const badge = document.createElement('b');
+        badge.textContent = change.action === 'remove' ? 'Remove' : change.action === 'add' ? 'Add' : 'Update';
+        const label = document.createElement('strong');
+        label.textContent = change.label;
+        heading.append(badge, label);
+        content.append(heading);
+        if (change.fields?.length) {
+            const details = document.createElement('dl');
+            change.fields.forEach((field) => {
+                const row = document.createElement('div');
+                const name = document.createElement('dt');
+                const values = document.createElement('dd');
+                name.textContent = field.field;
+                values.textContent = `${formatAssistantValue(field.before)} → ${formatAssistantValue(field.after)}`;
+                row.append(name, values);
+                details.append(row);
+            });
+            content.append(details);
+        }
+        item.append(content);
+        return item;
+    }));
+    $('#assistantError').hidden = true;
+    $('#assistantProposalStatus').className = 'pending';
+    $('#assistantProposalStatus').textContent = 'Validating the candidate model with the C++ engine…';
+    $('#applyAssistantProposal').disabled = true;
+}
+
+function formatAssistantValue(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+}
+
+function inspectAssistantEntity(entityId) {
+    const node = nodeObjects.get(entityId);
+    if (node?.visible) {
+        selectNode(node);
+        openNodeEditor(node.userData.definition);
+        return true;
+    }
+    const relationship = relationshipObjects.get(entityId);
+    if (relationship?.line.visible) {
+        openRelationshipEditor(relationship.definition);
+        return true;
+    }
+    return false;
+}
+
+async function previewAssistantProposal(proposal) {
+    if (activeResult) throw new Error('Close simulation results before preparing model changes.');
+    const revision = ++assistantPreviewRevision;
+    showAssistantPanel();
+    try {
+        const baseDocument = serializeProjectDocument();
+        const prepared = buildAssistantProposal(baseDocument, proposal);
+        renderAssistantProposal(proposal, prepared);
+        const validation = await window.engine.validate(JSON.stringify(prepared.document));
+        if (revision !== assistantPreviewRevision) return { valid: false, superseded: true };
+        if (!validation.available) throw new Error('The native validation engine is unavailable.');
+        if (!validation.report.valid) {
+            const message = validation.report.issues
+                .filter((issue) => issue.severity === 'error')
+                .map((issue) => issue.message)
+                .join(' ') || 'The native validator rejected this proposal.';
+            throw new Error(message);
+        }
+        pendingAssistantProposal = {
+            proposal: structuredClone(proposal),
+            document: prepared.document,
+            baseDocument: JSON.stringify(baseDocument),
+            changes: prepared.changes
+        };
+        $('#assistantProposalStatus').className = 'valid';
+        $('#assistantProposalStatus').textContent = `Native validation passed · ${prepared.changes.length} ${prepared.changes.length === 1 ? 'change' : 'changes'}`;
+        $('#applyAssistantProposal').disabled = false;
+        $('#generateAssistantProposal').textContent = 'Revise proposal';
+        updateAssistantCollapsedStatus('Proposal ready to review');
+        return { valid: true, changes: structuredClone(prepared.changes) };
+    } catch (error) {
+        if (revision !== assistantPreviewRevision) return { valid: false, superseded: true };
+        pendingAssistantProposal = null;
+        $('#assistantEmpty').hidden = true;
+        $('#assistantProposal').hidden = false;
+        $('#assistantProposalStatus').className = '';
+        $('#assistantProposalStatus').textContent = 'Proposal rejected';
+        $('#assistantError').textContent = error.message;
+        $('#assistantError').hidden = false;
+        $('#applyAssistantProposal').disabled = true;
+        return { valid: false, error: error.message };
+    }
+}
+
+function discardAssistantProposal() {
+    assistantPreviewRevision += 1;
+    pendingAssistantProposal = null;
+    $('#assistantProposal').hidden = true;
+    $('#assistantEmpty').hidden = false;
+    $('#generateAssistantProposal').textContent = 'Generate proposal';
+    updateAssistantCollapsedStatus('Your model remains unchanged');
+}
+
+function commitAssistantProposal() {
+    if (!pendingAssistantProposal || activeResult) return false;
+    const currentDocument = serializeProjectDocument();
+    if (JSON.stringify(currentDocument) !== pendingAssistantProposal.baseDocument) {
+        $('#assistantError').textContent = 'The model changed after this proposal was prepared. Preview it again against the current model.';
+        $('#assistantError').hidden = false;
+        $('#applyAssistantProposal').disabled = true;
+        pendingAssistantProposal = null;
+        return false;
+    }
+    const before = currentDocument;
+    const after = structuredClone(pendingAssistantProposal.document);
+    replaceModelContents(after);
+    recordHistory({
+        undo: () => replaceModelContents(before),
+        redo: () => replaceModelContents(after)
+    });
+    discardAssistantProposal();
+    hideAssistantPanel();
+    return true;
+}
+
+function assistantModelSummary() {
+    const document = serializeProjectDocument();
+    return {
+        format: document.format,
+        version: document.version,
+        units: document.metadata.units,
+        nodes: document.nodes.map((node) => ({
+            id: node.id, name: node.name, type: node.type,
+            states: node.states.map((state) => ({ id: state.id, name: state.name, symbol: state.symbol, initialValue: state.initialValue, unit: state.unit }))
+        })),
+        edges: document.edges.map((edge) => ({
+            id: edge.id, name: edge.name, sourceNodeId: edge.source.nodeId,
+            targetNodeId: edge.target.nodeId, directionality: edge.directionality
+        }))
+    };
+}
+
+async function refreshAssistantConfigurations() {
+    const select = $('#assistantConfiguration');
+    try {
+        const result = await window.aiProviders.listConfigurations();
+        assistantConfigurationCatalog = result;
+        const previous = activeAssistantConfigurationUuid || select.value;
+        select.replaceChildren(...result.configurations.map((configuration) => {
+            const locality = configuration.provider === 'localDemonstration' || configuration.provider === 'ollama' ? 'Local' : 'Online';
+            return new Option(`${configuration.name} · ${locality}`, configuration.uuid);
+        }));
+        activeAssistantConfigurationUuid = result.configurations.some((item) => item.uuid === previous)
+            ? previous : result.activeConfigurationUuid;
+        select.value = activeAssistantConfigurationUuid;
+        select.disabled = false;
+    } catch (error) {
+        select.replaceChildren(new Option('Configurations unavailable', ''));
+        select.disabled = true;
+        renderAssistantGenerationError(error.message);
+    }
+}
+
+function activeConfigurationRecord() {
+    return assistantConfigurationCatalog.configurations.find((configuration) => configuration.uuid === $('#assistantConfiguration').value);
+}
+
+function selectedProviderDescriptor() {
+    return assistantConfigurationCatalog.providers.find((provider) => provider.id === $('#assistantConfigurationProvider').value);
+}
+
+function assistantConfigurationDraftSignature() {
+    return JSON.stringify({ ...assistantConfigurationFormValue(), credential: $('#assistantConfigurationCredential').value });
+}
+
+function assistantConfigurationIsDirty() {
+    return assistantConfigurationBaseline && assistantConfigurationDraftSignature() !== assistantConfigurationBaseline;
+}
+
+function selectedAssistantModel() {
+    return $('#assistantConfigurationModel').value === '__custom__'
+        ? $('#assistantCustomModel').value.trim() : $('#assistantConfigurationModel').value;
+}
+
+function setAssistantModelChoices(models, selectedModel = '') {
+    const discovered = models.some((model) => model.id === selectedModel);
+    const options = [new Option(models.length ? 'Select a model' : 'Discover available models', '')];
+    options.push(...models.map((model) => new Option(model.name, model.id)));
+    if (selectedModel && !discovered) options.push(new Option(selectedModel, selectedModel));
+    options.push(new Option('Custom model ID…', '__custom__'));
+    $('#assistantConfigurationModel').replaceChildren(...options);
+    $('#assistantConfigurationModel').value = selectedModel || '';
+    $('#assistantCustomModel').value = '';
+    $('#assistantCustomModel').hidden = true;
+}
+
+function syncAssistantCustomModel() {
+    const custom = $('#assistantConfigurationModel').value === '__custom__';
+    $('#assistantCustomModel').hidden = !custom;
+    if (custom) $('#assistantCustomModel').focus();
+}
+
+function setAssistantConfigurationStatus(message = '', tone = 'neutral') {
+    const status = $('#assistantConfigurationStatus');
+    status.textContent = message;
+    status.className = `assistantConfigurationStatus ${tone}`;
+}
+
+function assistantConfigurationErrorMessage(error) {
+    const message = error?.message || 'The model provider could not be reached.';
+    if ($('#assistantConfigurationProvider').value === 'ollama' &&
+        /connect|fetch|network|refused|abort|timed?\s*out/i.test(message)) {
+        return 'Ollama is not reachable. Install Ollama if needed, start the Ollama service, then try again.';
+    }
+    return message;
+}
+
+function confirmAssistantConfigurationNavigation() {
+    return !assistantConfigurationIsDirty() || window.confirm('Discard unsaved changes to this model configuration?');
+}
+
+function renderAssistantConfigurationList() {
+    const query = $('#searchAssistantConfigurations').value.trim().toLowerCase();
+    const selectedUuid = $('#assistantConfigurationUuid').value;
+    const configurations = assistantConfigurationCatalog.configurations.filter((configuration) =>
+        `${configuration.name} ${configuration.provider} ${configuration.model}`.toLowerCase().includes(query));
+    $('#assistantConfigurationList').replaceChildren(...configurations.map((configuration) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.configurationUuid = configuration.uuid;
+        button.classList.toggle('selected', configuration.uuid === selectedUuid);
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', String(configuration.uuid === selectedUuid));
+        const provider = assistantConfigurationCatalog.providers.find((item) => item.id === configuration.provider);
+        const title = document.createElement('strong');
+        title.textContent = configuration.name;
+        const details = document.createElement('span');
+        details.textContent = configuration.builtIn ? 'Built-in · Local' : `${provider?.name ?? configuration.provider} · ${configuration.model || 'No model selected'}`;
+        button.append(title, details);
+        if (configuration.uuid === activeAssistantConfigurationUuid) {
+            const active = document.createElement('i');
+            active.textContent = 'Active';
+            button.append(active);
+        }
+        return button;
+    }));
+}
+
+function syncAssistantProviderFields({ replaceEndpoint = false } = {}) {
+    const provider = selectedProviderDescriptor();
+    if (!provider) return;
+    if (replaceEndpoint || !$('#assistantConfigurationEndpoint').value) $('#assistantConfigurationEndpoint').value = provider.defaultEndpoint;
+    if (replaceEndpoint && !$('#assistantConfigurationUuid').value) {
+        $('#assistantConfigurationTimeout').value = provider.defaultTimeoutSeconds ?? 60;
+    }
+    $('#assistantCredentialField').hidden = !provider.credentialRequired;
+    const existing = assistantConfigurationCatalog.configurations.find((item) => item.uuid === $('#assistantConfigurationUuid').value);
+    $('#assistantConfigurationCredential').required = provider.credentialRequired && !existing?.credentialConfigured;
+}
+
+function populateAssistantConfiguration(configuration = null) {
+    assistantDiscoveryRevision += 1;
+    const providers = assistantConfigurationCatalog.providers;
+    const selectableProviders = providers.filter((provider) => provider.id !== 'localDemonstration');
+    const initialProvider = configuration?.provider ?? selectableProviders.find((provider) => provider.id === 'ollama')?.id ?? selectableProviders[0]?.id ?? '';
+    $('#assistantConfigurationUuid').value = configuration?.uuid ?? '';
+    $('#assistantConfigurationName').value = configuration?.name ?? 'My local model';
+    $('#assistantConfigurationProvider').value = initialProvider;
+    $('#assistantConfigurationEndpoint').value = configuration?.endpoint ?? '';
+    setAssistantModelChoices([], configuration?.model ?? '');
+    const initialDescriptor = providers.find((provider) => provider.id === initialProvider);
+    $('#assistantConfigurationTimeout').value = configuration?.timeoutSeconds ?? initialDescriptor?.defaultTimeoutSeconds ?? 60;
+    $('#assistantConfigurationCredential').value = '';
+    $('#assistantConfigurationDialogTitle').textContent = configuration?.name ?? 'New configuration';
+    $('#assistantCredentialHint').textContent = configuration?.credentialConfigured ? 'Leave blank to preserve the stored key' : 'Stored only when this configuration is saved';
+    $('#assistantConfigurationFields').disabled = Boolean(configuration?.builtIn);
+    $('#deleteAssistantConfiguration').hidden = !configuration || configuration.builtIn;
+    $('#testAssistantConfiguration').hidden = Boolean(configuration?.builtIn);
+    $('#saveAssistantConfiguration').hidden = Boolean(configuration?.builtIn);
+    setAssistantConfigurationStatus(
+        assistantConfigurationCatalog.credentialStorage?.plainText
+            ? 'Secure persistent credentials are unavailable with the current operating-system backend.' : '',
+        assistantConfigurationCatalog.credentialStorage?.plainText ? 'error' : 'neutral'
+    );
+    syncAssistantProviderFields();
+    assistantConfigurationBaseline = assistantConfigurationDraftSignature();
+    renderAssistantConfigurationList();
+    clearTimeout(assistantDiscoveryTimer);
+    if (!configuration?.builtIn && initialProvider === 'ollama') {
+        assistantDiscoveryTimer = setTimeout(discoverAssistantModels, 350);
+    }
+}
+
+function openAssistantConfigurationDialog() {
+    const providers = assistantConfigurationCatalog.providers;
+    $('#assistantConfigurationProvider').replaceChildren(...providers.map((provider) => {
+        const option = new Option(provider.name, provider.id);
+        option.disabled = provider.id === 'localDemonstration';
+        return option;
+    }));
+    $('#searchAssistantConfigurations').value = '';
+    populateAssistantConfiguration(activeConfigurationRecord());
+    $('#assistantConfigurationDialog').showModal();
+}
+
+function assistantConfigurationFormValue() {
+    return {
+        uuid: $('#assistantConfigurationUuid').value || undefined,
+        name: $('#assistantConfigurationName').value,
+        provider: $('#assistantConfigurationProvider').value,
+        endpoint: $('#assistantConfigurationEndpoint').value,
+        model: selectedAssistantModel(),
+        timeoutSeconds: Number($('#assistantConfigurationTimeout').value)
+    };
+}
+
+async function saveAssistantConfiguration() {
+    const credential = $('#assistantConfigurationCredential').value || undefined;
+    const saved = await window.aiProviders.saveConfiguration(assistantConfigurationFormValue(), credential);
+    activeAssistantConfigurationUuid = saved.uuid;
+    await window.aiProviders.setActiveConfiguration(saved.uuid);
+    await refreshAssistantConfigurations();
+    $('#assistantConfiguration').value = saved.uuid;
+    $('#assistantConfigurationCredential').value = '';
+    populateAssistantConfiguration(assistantConfigurationCatalog.configurations.find((configuration) => configuration.uuid === saved.uuid));
+    setAssistantConfigurationStatus('Configuration saved and selected.');
+}
+
+async function discoverAssistantModels() {
+    const revision = ++assistantDiscoveryRevision;
+    setAssistantConfigurationStatus('Discovering models…');
+    try {
+        const models = await window.aiProviders.listDraftModels(
+            assistantConfigurationFormValue(), $('#assistantConfigurationCredential').value || undefined
+        );
+        if (revision !== assistantDiscoveryRevision || !$('#assistantConfigurationDialog').open) return;
+        const selectedModel = selectedAssistantModel();
+        setAssistantModelChoices(models, selectedModel || models[0]?.id || '');
+        setAssistantConfigurationStatus(models.length ? '' : 'Connected, but no compatible models were found.', models.length ? 'neutral' : 'warning');
+    } catch (error) {
+        if (revision !== assistantDiscoveryRevision || !$('#assistantConfigurationDialog').open) return;
+        setAssistantConfigurationStatus(assistantConfigurationErrorMessage(error), 'error');
+    }
+}
+
+function renderAssistantGenerationError(message) {
+    pendingAssistantProposal = null;
+    $('#assistantEmpty').hidden = true;
+    $('#assistantProposal').hidden = false;
+    $('#assistantProposalSummary').textContent = 'No proposal generated';
+    $('#assistantProposalStatus').className = '';
+    $('#assistantProposalStatus').textContent = 'The request needs attention';
+    $('#assistantAssumptionsSection').hidden = true;
+    $('#assistantChanges').replaceChildren();
+    $('#assistantError').textContent = message;
+    $('#assistantError').hidden = false;
+    $('#applyAssistantProposal').disabled = true;
+    updateAssistantCollapsedStatus('Request needs attention');
+}
+
+async function requestAssistantProposal() {
+    if (activeResult) return { valid: false, error: 'Close simulation results before preparing model changes.' };
+    assistantGenerationController?.abort();
+    const controller = new AbortController();
+    assistantGenerationController = controller;
+    const requestUuid = crypto.randomUUID();
+    controller.signal.addEventListener('abort', () => {
+        window.aiProviders.cancelRequest(requestUuid).catch(() => {});
+    }, { once: true });
+    const request = $('#assistantPrompt').value.trim();
+    const button = $('#generateAssistantProposal');
+    button.disabled = true;
+    button.textContent = 'Preparing…';
+    updateAssistantCollapsedStatus('Preparing proposal…');
+    $('#assistantEmpty').hidden = false;
+    $('#assistantProposal').hidden = true;
+    try {
+        const proposal = await window.aiProviders.generateProposal(
+            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary()
+        );
+        if (controller.signal.aborted) return { valid: false, cancelled: true };
+        return await previewAssistantProposal(proposal);
+    } catch (error) {
+        if (controller.signal.aborted || error.name === 'AbortError') return { valid: false, cancelled: true };
+        renderAssistantGenerationError(error.message);
+        return { valid: false, error: error.message };
+    } finally {
+        if (assistantGenerationController === controller) {
+            assistantGenerationController = null;
+            button.disabled = false;
+            button.textContent = pendingAssistantProposal ? 'Revise proposal' : 'Generate proposal';
+        }
+    }
+}
+
+$('#assistantButton').addEventListener('click', () => {
+    if ($('#assistantPanel').hidden) showAssistantPanel();
+    else hideAssistantPanel();
+});
+$('#closeAssistantPanel').addEventListener('click', hideAssistantPanel);
+$('#collapseAssistantPanel').addEventListener('click', () => {
+    setAssistantCollapsed(!$('#assistantPanel').classList.contains('collapsed'));
+});
+$('#discardAssistantProposal').addEventListener('click', discardAssistantProposal);
+$('#applyAssistantProposal').addEventListener('click', commitAssistantProposal);
+$('#assistantChanges').addEventListener('click', (event) => {
+    const control = event.target.closest('[data-focus-entity]');
+    if (control) inspectAssistantEntity(control.dataset.focusEntity);
+});
+$('#assistantPromptForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    requestAssistantProposal();
+});
+$('#assistantConfiguration').addEventListener('change', async () => {
+    activeAssistantConfigurationUuid = $('#assistantConfiguration').value;
+    assistantGenerationController?.abort();
+    discardAssistantProposal();
+    await window.aiProviders.setActiveConfiguration(activeAssistantConfigurationUuid).catch((error) => renderAssistantGenerationError(error.message));
+});
+$('#manageAssistantConfigurations').addEventListener('click', openAssistantConfigurationDialog);
+$('#assistantConfigurationProvider').addEventListener('change', () => {
+    syncAssistantProviderFields({ replaceEndpoint: true });
+    setAssistantModelChoices([]);
+    clearTimeout(assistantDiscoveryTimer);
+    if ($('#assistantConfigurationProvider').value === 'ollama') {
+        assistantDiscoveryTimer = setTimeout(discoverAssistantModels, 350);
+    }
+});
+$('#assistantConfigurationModel').addEventListener('change', syncAssistantCustomModel);
+$('#cancelAssistantConfiguration').addEventListener('click', () => {
+    if (confirmAssistantConfigurationNavigation()) $('#assistantConfigurationDialog').close();
+});
+$('#assistantConfigurationDialog').addEventListener('cancel', (event) => {
+    if (!confirmAssistantConfigurationNavigation()) event.preventDefault();
+});
+$('#newAssistantConfiguration').addEventListener('click', () => {
+    if (!confirmAssistantConfigurationNavigation()) return;
+    populateAssistantConfiguration();
+});
+$('#searchAssistantConfigurations').addEventListener('input', renderAssistantConfigurationList);
+$('#assistantConfigurationList').addEventListener('click', (event) => {
+    const control = event.target.closest('[data-configuration-uuid]');
+    if (!control || !confirmAssistantConfigurationNavigation()) return;
+    const configuration = assistantConfigurationCatalog.configurations.find((item) => item.uuid === control.dataset.configurationUuid);
+    if (configuration) populateAssistantConfiguration(configuration);
+});
+$('#assistantConfigurationDialog').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setAssistantConfigurationStatus('Saving configuration…');
+    try { await saveAssistantConfiguration(); } catch (error) { setAssistantConfigurationStatus(error.message, 'error'); }
+});
+$('#discoverAssistantModels').addEventListener('click', discoverAssistantModels);
+$('#testAssistantConfiguration').addEventListener('click', async () => {
+    setAssistantConfigurationStatus('Testing connection…');
+    try {
+        const result = await window.aiProviders.testDraftConnection(
+            assistantConfigurationFormValue(), $('#assistantConfigurationCredential').value || undefined
+        );
+        setAssistantConfigurationStatus('Connection successful.');
+    } catch (error) { setAssistantConfigurationStatus(assistantConfigurationErrorMessage(error), 'error'); }
+});
+$('#deleteAssistantConfiguration').addEventListener('click', async () => {
+    const uuid = $('#assistantConfigurationUuid').value;
+    if (!uuid || !window.confirm('Delete this model configuration and its stored credential?')) return;
+    const index = assistantConfigurationCatalog.configurations.findIndex((configuration) => configuration.uuid === uuid);
+    await window.aiProviders.removeConfiguration(uuid);
+    activeAssistantConfigurationUuid = null;
+    await refreshAssistantConfigurations();
+    const next = assistantConfigurationCatalog.configurations[Math.min(index, assistantConfigurationCatalog.configurations.length - 1)];
+    populateAssistantConfiguration(next ?? null);
+    setAssistantConfigurationStatus('Configuration deleted.');
+});
+$('#assistantPrompt').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        $('#assistantPromptForm').requestSubmit();
+    }
+});
+installAssistantDragging();
+window.addEventListener('resize', clampAssistantPanel);
+
+window.konjugateAssistant = Object.freeze({
+    getModelSummary: assistantModelSummary,
+    requestProposal: requestAssistantProposal,
+    previewProposal: previewAssistantProposal,
+    applyProposal: commitAssistantProposal,
+    discardProposal: discardAssistantProposal
+});
 
 function openNodeBuilder(clientX, clientY) {
     const builder = $('#nodeBuilder');

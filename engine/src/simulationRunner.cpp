@@ -218,7 +218,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto writeResult = [&](const std::string& lifecycle, double simulationTime, bool completeSnapshot = false) {
         resultStream.flush();
         std::ostringstream json;
-        json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.1.0\",\"configurationName\":\""
+        json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.2.0\",\"configurationName\":\""
              << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"snapshotMode\":\"" << (completeSnapshot ? "full" : "live")
              << "\",\"lifecycle\":\"" << lifecycle
              << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time

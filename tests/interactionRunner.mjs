@@ -46,6 +46,75 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#closeValidationPanel').click()`);
     });
 
+    await run('local assistant prepares, validates and applies one undoable transaction', async () => {
+        await evaluate(window, `window.dispatchEvent(new Event('resize')); document.querySelector('#assistantButton').click(); (() => {
+            const prompt = document.querySelector('#assistantPrompt');
+            prompt.value = 'Add an ambient boundary at 298 K and connect it to the battery with a conductance of 15 W/K.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantButton').parentElement.classList.contains('windowControls')`), true);
+        assert.ok(await evaluate(window, `Math.abs(document.querySelector('#assistantPanel').getBoundingClientRect().top - document.querySelector('#canvas').getBoundingClientRect().top - 10)`) < 2);
+        assert.ok(await evaluate(window, `Math.abs(document.querySelector('#assistantPanel').getBoundingClientRect().right - (window.innerWidth - 10))`) < 2);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The local assistant proposal was not ready to apply.');
+        await waitFor(window, `document.querySelector('#assistantConfiguration').options.length === 1`, 'Assistant configurations did not load through the main process.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantConfiguration').selectedOptions[0].textContent`), /Local demonstration · Local/);
+        assert.equal(await evaluate(window, `typeof window.aiProviders.getCredential`), 'undefined');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container').length`), 3);
+        assert.equal(await evaluate(window, `!document.querySelector('#assistantPanel').hidden && !document.querySelector('#applyAssistantProposal').disabled`), true);
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalStatus').textContent`), /Native validation passed/);
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalSummary').textContent`), /Battery module/);
+        assert.equal(await evaluate(window, `document.querySelector('#generateAssistantProposal').textContent`), 'Revise proposal');
+        await evaluate(window, `document.querySelector('#collapseAssistantPanel').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPanel').classList.contains('collapsed')`), true);
+        assert.match(await evaluate(window, `document.querySelector('#assistantCollapsedStatus').textContent`), /Proposal ready/);
+        await evaluate(window, `document.querySelector('#collapseAssistantPanel').click()`);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#assistantPanel').hidden && !document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
+        await waitFor(window, `document.querySelector('#assistantPanel').getBoundingClientRect().right <= document.querySelector('#nodeEditor').getBoundingClientRect().left`, 'Assistant did not move beside the model inspector.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        assert.equal(await evaluate(window, `window.konjugateAssistant.applyProposal()`), true);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Ambient boundary'))`, 'Applied assistant node did not appear on the canvas.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'Undo did not restore the original canvas.');
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 4`, 'Redo did not restore the assistant proposal.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'Undo did not restore the model before testing an assistant update.');
+        await evaluate(window, `document.querySelector('#assistantButton').click(); (() => {
+            document.querySelector('#assistantPrompt').value = 'Set the battery initial temperature to 325 K.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The assistant update proposal was not ready.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantChange.update').length`), 1);
+        assert.match(await evaluate(window, `document.querySelector('.assistantChange dd').textContent`), /353\.2 → 325/);
+        await evaluate(window, `document.querySelector('.assistantChange button').click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && !document.querySelector('#assistantPanel').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').value`), 'Battery module');
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#nodeEditor [data-close-card]').click(); document.querySelector('#closeAssistantPanel').click()`);
+    });
+
+    await run('model configurations expose all provider adapters without renderer credential access', async () => {
+        await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
+        assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [
+            'localDemonstration', 'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'
+        ]);
+        await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantCredentialField').hidden`), true);
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantConfigurationName').value = 'Interaction Ollama';
+            document.querySelector('#assistantConfigurationModel').value = '__custom__';
+            document.querySelector('#assistantCustomModel').value = 'test-model';
+            document.querySelector('#assistantConfigurationDialog').querySelector('form').requestSubmit();
+        })()`);
+        await waitFor(window, `[...document.querySelectorAll('#assistantConfiguration option')].some((option) => option.textContent.includes('Interaction Ollama'))`, 'Saved Ollama configuration did not appear.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationDialog').open`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#assistantConfigurationList button')].some((button) => button.textContent.includes('Interaction Ollama'))`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationUuid').value.length > 0`), true);
+        await evaluate(window, `window.confirm = () => true; document.querySelector('#deleteAssistantConfiguration').click()`);
+        await waitFor(window, `document.querySelectorAll('#assistantConfiguration option').length === 1`, 'Deleted configuration remained available.');
+        await evaluate(window, `document.querySelector('#cancelAssistantConfiguration').click(); document.querySelector('#closeAssistantPanel').click()`);
+    });
+
     await run('run configuration and node substeps are editable', async () => {
         await evaluate(window, `document.querySelector('#runConfigurationButton').click()`);
         await evaluate(window, `(() => {

@@ -1,0 +1,131 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://konjugate.com/schemas/assistantOperations.schema.json",
+    "$comment": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "title": "Konjugate assistant proposal",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["proposalVersion", "operations"],
+    "properties": {
+        "proposalVersion": { "const": 1 },
+        "summary": { "type": "string" },
+        "assumptions": { "type": "array", "items": { "type": "string" } },
+        "operations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "oneOf": [
+                    { "$ref": "#/$defs/addNode" },
+                    { "$ref": "#/$defs/addState" },
+                    { "$ref": "#/$defs/addSourceTerm" },
+                    { "$ref": "#/$defs/addEdge" },
+                    { "$ref": "#/$defs/addParameter" },
+                    { "$ref": "#/$defs/setEdgeEquation" },
+                    { "$ref": "#/$defs/updateNode" },
+                    { "$ref": "#/$defs/updateState" },
+                    { "$ref": "#/$defs/updateEdge" },
+                    { "$ref": "#/$defs/updateParameter" },
+                    { "$ref": "#/$defs/removeEntity" }
+                ]
+            }
+        }
+    },
+    "$defs": {
+        "ref": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "entityRef": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "addNode": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "ref", "name"],
+            "properties": {
+                "kind": { "const": "addNode" }, "ref": { "$ref": "#/$defs/ref" }, "name": { "type": "string", "minLength": 1 },
+                "type": { "type": "string" }, "shape": { "enum": ["box", "cylinder", "sphere"] },
+                "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+                "position": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }, { "type": "number" }], "items": false }
+            }
+        },
+        "addState": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "ref", "nodeRef", "name", "symbol", "initialValue"],
+            "properties": {
+                "kind": { "const": "addState" }, "ref": { "$ref": "#/$defs/ref" }, "nodeRef": { "$ref": "#/$defs/entityRef" },
+                "name": { "type": "string", "minLength": 1 }, "symbol": { "$ref": "#/$defs/symbol" }, "initialValue": { "type": "number" }, "unit": { "type": "string" }
+            }
+        },
+        "addSourceTerm": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "ref", "nodeRef", "outputStateRef", "latex"],
+            "properties": {
+                "kind": { "const": "addSourceTerm" }, "ref": { "$ref": "#/$defs/ref" }, "nodeRef": { "$ref": "#/$defs/entityRef" },
+                "outputStateRef": { "$ref": "#/$defs/entityRef" }, "latex": { "type": "string", "minLength": 1 }
+            }
+        },
+        "addEdge": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "ref", "name", "sourceNodeRef", "targetNodeRef"],
+            "properties": {
+                "kind": { "const": "addEdge" }, "ref": { "$ref": "#/$defs/ref" }, "name": { "type": "string", "minLength": 1 },
+                "sourceNodeRef": { "$ref": "#/$defs/entityRef" }, "targetNodeRef": { "$ref": "#/$defs/entityRef" },
+                "directionality": { "enum": ["directed", "bidirectional"] }
+            }
+        },
+        "addParameter": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "ref", "edgeRef", "name", "symbol", "value"],
+            "properties": {
+                "kind": { "const": "addParameter" }, "ref": { "$ref": "#/$defs/ref" }, "edgeRef": { "$ref": "#/$defs/entityRef" },
+                "name": { "type": "string", "minLength": 1 }, "symbol": { "$ref": "#/$defs/symbol" }, "value": { "type": "number" },
+                "unit": { "type": "string" }, "mode": { "enum": ["constant", "live"] }
+            }
+        },
+        "setEdgeEquation": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "edgeRef", "outputStateRef", "latex"],
+            "properties": {
+                "kind": { "const": "setEdgeEquation" }, "edgeRef": { "$ref": "#/$defs/entityRef" },
+                "outputStateRef": { "$ref": "#/$defs/entityRef" }, "latex": { "type": "string", "minLength": 1 }
+            }
+        },
+        "updateNode": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "nodeRef"], "minProperties": 3,
+            "properties": {
+                "kind": { "const": "updateNode" }, "nodeRef": { "$ref": "#/$defs/entityRef" },
+                "name": { "type": "string", "minLength": 1 }, "type": { "type": "string", "minLength": 1 },
+                "substepsPerGlobalStep": { "type": "integer", "minimum": 1 },
+                "shape": { "enum": ["box", "cylinder", "sphere"] }, "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+            }
+        },
+        "updateState": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "stateRef"], "minProperties": 3,
+            "properties": {
+                "kind": { "const": "updateState" }, "stateRef": { "$ref": "#/$defs/entityRef" },
+                "name": { "type": "string", "minLength": 1 }, "initialValue": { "type": "number" }, "unit": { "type": "string" }
+            }
+        },
+        "updateEdge": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "edgeRef"], "minProperties": 3,
+            "properties": {
+                "kind": { "const": "updateEdge" }, "edgeRef": { "$ref": "#/$defs/entityRef" },
+                "name": { "type": "string", "minLength": 1 }, "sourceNodeRef": { "$ref": "#/$defs/entityRef" },
+                "targetNodeRef": { "$ref": "#/$defs/entityRef" }, "directionality": { "enum": ["directed", "bidirectional"] }
+            }
+        },
+        "updateParameter": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "parameterRef"], "minProperties": 3,
+            "properties": {
+                "kind": { "const": "updateParameter" }, "parameterRef": { "$ref": "#/$defs/entityRef" },
+                "name": { "type": "string", "minLength": 1 }, "value": { "type": "number" },
+                "unit": { "type": "string" }, "mode": { "enum": ["constant", "live"] }
+            }
+        },
+        "removeEntity": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "entityRef"],
+            "properties": { "kind": { "const": "removeEntity" }, "entityRef": { "$ref": "#/$defs/entityRef" } }
+        }
+    }
+}

@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -14,6 +14,13 @@ import {
     readSignalSeries,
     validateAddonManifest
 } from './addonHost.mjs';
+import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
+import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
+import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
+
+if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
+    app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
+}
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
@@ -24,6 +31,9 @@ let visualizerManifest = null;
 let visualizerSession = null;
 const addonRegistry = new Map();
 const activeEngineJobs = new Map();
+const activeAIRequests = new Map();
+let aiProviderRegistry = null;
+let aiConfigurationStore = null;
 
 function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
@@ -84,6 +94,14 @@ function createWindow() {
 
 function senderIs(window, event) {
     return Boolean(window && !window.isDestroyed() && event.sender === window.webContents);
+}
+
+function requireProjectWindow(event) {
+    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can access AI providers.');
+}
+
+function aiRequestKey(sender, requestUuid) {
+    return `${sender.id}:${requestUuid}`;
 }
 
 function visualizerCan(permission) {
@@ -373,6 +391,115 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
     return result.response === 1;
 });
 
+ipcMain.handle('aiListConfigurations', async (event) => {
+    requireProjectWindow(event);
+    const result = await aiConfigurationStore.list();
+    return { ...result, providers: aiProviderRegistry.descriptors() };
+});
+
+ipcMain.handle('aiListModels', async (event, configurationUuid) => {
+    requireProjectWindow(event);
+    const resolved = await aiConfigurationStore.resolve(configurationUuid);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
+    try {
+        return await aiProviderRegistry.listModels({ ...resolved, signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
+});
+
+ipcMain.handle('aiListDraftModels', async (event, configuration, credential) => {
+    requireProjectWindow(event);
+    const resolved = await aiConfigurationStore.resolveDraft(configuration, credential);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
+    try {
+        return await aiProviderRegistry.listModels({ ...resolved, signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
+});
+
+ipcMain.handle('aiSaveConfiguration', async (event, configuration, credential) => {
+    requireProjectWindow(event);
+    return aiConfigurationStore.save(configuration, credential);
+});
+
+ipcMain.handle('aiRemoveConfiguration', async (event, configurationUuid) => {
+    requireProjectWindow(event);
+    return aiConfigurationStore.remove(configurationUuid);
+});
+
+ipcMain.handle('aiSetActiveConfiguration', async (event, configurationUuid) => {
+    requireProjectWindow(event);
+    return aiConfigurationStore.setActive(configurationUuid);
+});
+
+ipcMain.handle('aiTestConnection', async (event, configurationUuid) => {
+    requireProjectWindow(event);
+    const resolved = await aiConfigurationStore.resolve(configurationUuid);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
+    try {
+        return await aiProviderRegistry.testConnection({ ...resolved, signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
+});
+
+ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential) => {
+    requireProjectWindow(event);
+    const resolved = await aiConfigurationStore.resolveDraft(configuration, credential);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
+    try {
+        return await aiProviderRegistry.testConnection({ ...resolved, signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
+});
+
+ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context }) => {
+    requireProjectWindow(event);
+    if (typeof requestUuid !== 'string' || requestUuid.length > 100) throw new Error('A valid AI request identifier is required.');
+    if (typeof request !== 'string' || !request.trim() || request.length > 8000) throw new Error('The AI request must contain between 1 and 8,000 characters.');
+    if (!context || typeof context !== 'object' || JSON.stringify(context).length > 1_000_000) throw new Error('The model context is invalid or too large.');
+    const key = aiRequestKey(event.sender, requestUuid);
+    activeAIRequests.get(key)?.controller.abort();
+    const resolved = await aiConfigurationStore.resolve(configurationUuid);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, resolved.configuration.timeoutSeconds * 1000);
+    activeAIRequests.set(key, { owner: event.sender, controller });
+    try {
+        const proposal = await aiProviderRegistry.generate({ ...resolved, context, request: request.trim(), signal: controller.signal });
+        return { ok: true, proposal };
+    } catch (error) {
+        const message = timedOut
+            ? `The model did not respond within ${resolved.configuration.timeoutSeconds} seconds. Increase the timeout in this model configuration or choose a faster model.`
+            : error.name === 'AbortError' ? 'Proposal generation was cancelled.' : error.message;
+        const code = timedOut ? 'requestTimedOut' : error.name === 'AbortError' ? 'requestCancelled' : error.code ?? 'providerError';
+        return { ok: false, error: { message, code } };
+    } finally {
+        clearTimeout(timeout);
+        if (activeAIRequests.get(key)?.controller === controller) activeAIRequests.delete(key);
+    }
+});
+
+ipcMain.handle('aiCancelRequest', async (event, requestUuid) => {
+    requireProjectWindow(event);
+    const key = aiRequestKey(event.sender, requestUuid);
+    const active = activeAIRequests.get(key);
+    if (!active || active.owner !== event.sender) return false;
+    active.controller.abort();
+    activeAIRequests.delete(key);
+    return true;
+});
+
 const engineOptions = () => ({
     applicationPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
@@ -441,7 +568,13 @@ ipcMain.handle('engineCancel', async (event, jobId) => {
     return true;
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    const operationSchema = JSON.parse(await readFile(join(currentDir, '..', 'schemas', 'assistantOperations.schema.json'), 'utf8'));
+    aiProviderRegistry = createAIProviderRegistry(createRemoteAIProviders({ operationSchema }));
+    aiConfigurationStore = createAIConfigurationStore({
+        directory: join(app.getPath('userData'), 'ai'),
+        credentialVault: createElectronCredentialVault(safeStorage)
+    });
     createWindow();
 
     app.on('activate', () => {

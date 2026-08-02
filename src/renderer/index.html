@@ -57,6 +57,9 @@
         <div class="windowControls">
             <button id="zoomOutButton" class="uiZoomButton" type="button" aria-label="Zoom interface out" data-tooltip="Zoom interface out">A−</button>
             <button id="zoomInButton" class="uiZoomButton" type="button" aria-label="Zoom interface in" data-tooltip="Zoom interface in">A+</button>
+            <span class="windowControlDivider" aria-hidden="true"></span>
+            <button id="assistantButton" class="titleAssistantControl" type="button" aria-label="Model assistant" data-tooltip="Model assistant" aria-expanded="false" aria-controls="assistantPanel">✦</button>
+            <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="minimizeButton" type="button" aria-label="Minimize" data-tooltip="Minimize">−</button>
             <button id="maximizeButton" type="button" aria-label="Maximize" data-tooltip="Maximize"><span id="maximizeIcon">□</span></button>
             <button id="closeButton" class="closeButton" type="button" aria-label="Close" data-tooltip="Close">×</button>
@@ -110,6 +113,33 @@
         </form>
     </dialog>
 
+    <dialog id="assistantConfigurationDialog" class="passwordDialog assistantConfigurationDialog">
+        <form method="dialog">
+            <header class="assistantConfigurationHeader"><span><span class="contextKicker">Model assistant</span><strong>Model configurations</strong></span><button id="cancelAssistantConfiguration" type="button" aria-label="Close model configurations">×</button></header>
+            <div class="assistantConfigurationWorkspace">
+                <aside>
+                    <button id="newAssistantConfiguration" class="doneButton" type="button">＋ New configuration</button>
+                    <input id="searchAssistantConfigurations" type="search" placeholder="Search configurations" aria-label="Search model configurations">
+                    <div id="assistantConfigurationList" class="assistantConfigurationList" role="listbox" aria-label="Model configurations"></div>
+                </aside>
+                <section class="assistantConfigurationDetails">
+                    <div><span class="contextKicker">Configuration</span><strong id="assistantConfigurationDialogTitle">New configuration</strong><p>Discover and test a model before saving. Credentials remain transient until Save is clicked.</p></div>
+                    <fieldset id="assistantConfigurationFields">
+                        <input id="assistantConfigurationUuid" type="hidden">
+                        <label><span>Name</span><input id="assistantConfigurationName" autocomplete="off" required></label>
+                        <label><span>Provider</span><select id="assistantConfigurationProvider"></select></label>
+                        <label><span>Endpoint</span><input id="assistantConfigurationEndpoint" type="url" autocomplete="off" required></label>
+                        <label><span>Model</span><span class="configurationModelControl"><span class="configurationModelField"><select id="assistantConfigurationModel"><option value="">Discover available models</option><option value="__custom__">Custom model ID…</option></select><button id="discoverAssistantModels" type="button">Discover</button></span><input id="assistantCustomModel" autocomplete="off" placeholder="Enter a model ID" hidden></span></label>
+                        <label id="assistantCredentialField"><span>API key <small id="assistantCredentialHint">Stored only when this configuration is saved</small></span><input id="assistantConfigurationCredential" type="password" autocomplete="new-password"></label>
+                        <label><span>Timeout (seconds)</span><input id="assistantConfigurationTimeout" type="number" min="1" max="600" value="60" required></label>
+                    </fieldset>
+                    <div class="assistantConfigurationStatus" id="assistantConfigurationStatus" role="status"></div>
+                </section>
+            </div>
+            <footer><button id="deleteAssistantConfiguration" type="button" hidden>Delete configuration</button><span></span><button id="testAssistantConfiguration" type="button">Test connection</button><button id="saveAssistantConfiguration" class="doneButton" type="submit">Save configuration</button></footer>
+        </form>
+    </dialog>
+
     <nav class="toolstrip" aria-label="Model tools">
         <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
         <span class="divider"></span>
@@ -139,6 +169,32 @@
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>
         </div>
+        <aside id="assistantPanel" class="assistantPanel" aria-labelledby="assistantPanelTitle" hidden>
+            <header id="assistantPanelHeader">
+                <div><span class="contextKicker">Model assistant</span><strong id="assistantPanelTitle">Describe a model change</strong><small id="assistantCollapsedStatus">Your model remains unchanged</small></div>
+                <span class="assistantWindowActions">
+                    <button id="collapseAssistantPanel" type="button" aria-label="Collapse model assistant" aria-expanded="true">−</button>
+                    <button id="closeAssistantPanel" type="button" aria-label="Close model assistant">×</button>
+                </span>
+            </header>
+            <form id="assistantPromptForm" class="assistantPromptForm">
+                <label for="assistantPrompt">What should change?</label>
+                <textarea id="assistantPrompt" rows="4" placeholder="Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K."></textarea>
+                <div><select id="assistantConfiguration" aria-label="Assistant model configuration"></select><button id="manageAssistantConfigurations" class="assistantManageConfigurations" type="button" aria-label="Manage model configurations">⚙</button><button id="generateAssistantProposal" class="doneButton" type="submit">Generate proposal</button></div>
+            </form>
+            <div id="assistantEmpty" class="assistantEmpty">
+                <span aria-hidden="true">✦</span>
+                <strong>Your model remains unchanged</strong>
+                <p>The assistant will prepare a structured proposal, explain its assumptions and run native validation before you can apply it.</p>
+            </div>
+            <div id="assistantProposal" hidden>
+                <section class="assistantSummary"><strong id="assistantProposalSummary">Proposed model changes</strong><p id="assistantProposalStatus">Checking the proposal…</p></section>
+                <section id="assistantAssumptionsSection" hidden><h3>Assumptions</h3><ul id="assistantAssumptions"></ul></section>
+                <section><h3>Changes</h3><ol id="assistantChanges"></ol></section>
+                <div id="assistantError" class="assistantError" role="alert" hidden></div>
+                <footer><button id="discardAssistantProposal" type="button">Discard</button><button id="applyAssistantProposal" class="doneButton" type="button" disabled>Apply changes</button></footer>
+            </div>
+        </aside>
         <aside id="validationPanel" class="validationPanel" aria-label="Model issues" hidden>
             <header><div><span class="contextKicker">Model validation</span><strong id="validationPanelTitle">No issues</strong></div><button id="closeValidationPanel" type="button" aria-label="Close issues">×</button></header>
             <div id="validationIssues"></div>

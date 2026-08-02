@@ -114,6 +114,39 @@ input, select { user-select: text; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .runConfigurationDialog { width: 360px; }
+.assistantConfigurationDialog { width: min(780px, calc(100vw - 40px)); max-width: none; }
+.assistantConfigurationDialog form { padding: 0; }
+.assistantConfigurationHeader { display: flex; align-items: center; justify-content: space-between; padding: 15px 17px 12px; border-bottom: 1px solid #263a44; }
+.assistantConfigurationHeader > span { display: block; }
+.assistantConfigurationHeader strong { margin-bottom: 0; }
+.assistantConfigurationHeader > button { width: 26px; height: 26px; padding: 0; color: #718690; background: transparent; border: 0; font-size: 15px; }
+.assistantConfigurationWorkspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 410px; }
+.assistantConfigurationWorkspace > aside { display: flex; flex-direction: column; gap: 9px; padding: 13px; background: #09141b; border-right: 1px solid #263a44; }
+.assistantConfigurationWorkspace > aside > button { width: 100%; height: 30px; border: 0; border-radius: 4px; font-size: 8px; }
+.assistantConfigurationWorkspace > aside > input { width: 100%; }
+.assistantConfigurationList { display: grid; align-content: start; gap: 4px; min-height: 0; overflow-y: auto; }
+.assistantConfigurationList button { position: relative; display: grid; gap: 4px; width: 100%; padding: 9px 10px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 4px; }
+.assistantConfigurationList button:hover { background: #102029; }
+.assistantConfigurationList button.selected { background: #132630; border-color: #31505a; }
+.assistantConfigurationList strong { margin: 0; padding-right: 35px; color: #c7d5da; font-size: 9px; }
+.assistantConfigurationList span { overflow: hidden; color: #647984; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.assistantConfigurationList i { position: absolute; top: 8px; right: 8px; color: #66c8bf; font-size: 6px; font-style: normal; text-transform: uppercase; letter-spacing: .6px; }
+.assistantConfigurationDetails { padding: 15px 18px; }
+.assistantConfigurationDetails > div:first-child { min-height: 58px; }
+.assistantConfigurationDetails fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.assistantConfigurationDetails fieldset:disabled { opacity: .65; }
+.assistantConfigurationStatus { min-height: 16px; padding-top: 6px; color: #718691; font-size: 8px; }
+.assistantConfigurationStatus.error { color: #d48288; }
+.assistantConfigurationStatus.warning { color: #d6a35f; }
+.assistantConfigurationDialog > form > footer { display: grid; grid-template-columns: auto 1fr auto auto; margin: 0; padding: 11px 17px; border-top: 1px solid #263a44; }
+.configurationModelControl { display: grid; gap: 5px; }
+.configurationModelField { display: grid; grid-template-columns: 1fr auto; }
+.passwordDialog .configurationModelField :is(input, select) { border-radius: 4px 0 0 4px; }
+.passwordDialog .configurationModelField button { padding: 0 9px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; }
+.assistantConfigurationDialog footer #deleteAssistantConfiguration { color: #c17980; }
+@media (max-width: 650px) {
+    .assistantConfigurationWorkspace { grid-template-columns: 180px minmax(0, 1fr); }
+}
 .passwordDialog .runModeSwitch { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 13px; padding: 9px; background: #0a151d; border: 1px solid #293b46; border-radius: 4px; cursor: pointer; }
 .runModeSwitch > span { display: grid; gap: 3px; }
 .runModeSwitch b { color: #b9c9d0; font-size: 8px; font-weight: 650; }
@@ -128,8 +161,12 @@ input, select { user-select: text; }
 .windowControls button { display: grid; width: 46px; height: 100%; padding: 0; place-items: center; background: transparent; border: 0; font-size: 17px; }
 .windowControls .uiZoomButton { width: 34px; color: #7f929c; font-size: 9px; font-weight: 650; letter-spacing: -.04em; }
 .windowControls .uiZoomButton:disabled { color: #344751; cursor: default; }
+.windowControls .titleAssistantControl { position: relative; width: 38px; color: #82cfc8; font-size: 15px; }
+.windowControls .titleAssistantControl[aria-expanded="true"] { color: #a1f2ea; background: rgb(66 201 188 / 10%); }
+.windowControls .titleAssistantControl:disabled { color: #344751; cursor: default; }
+.windowControlDivider { width: 1px; height: 17px; align-self: center; background: #263944; }
 .windowControls button:hover { background: #1a2730; }
-.windowControls .uiZoomButton:disabled:hover { background: transparent; }
+.windowControls :is(.uiZoomButton, .titleAssistantControl):disabled:hover { background: transparent; }
 .windowControls .closeButton:hover { background: #d64853; }
 
 .toolstrip {
@@ -169,6 +206,57 @@ input, select { user-select: text; }
 .runButton:hover { background: var(--accent-bright); }
 .runButton:disabled, .runButton:disabled:hover { color: #52666e; background: #1b2b33; cursor: not-allowed; }
 @keyframes pulse { 50% { opacity: .28; } }
+
+.assistantPanel { position: fixed; z-index: 40; width: min(390px, calc(100vw - 20px)); height: min(620px, calc(100vh - var(--title-height) - var(--tools-height) - 24px)); overflow: auto; color: #b8c7ce; background: rgb(14 25 34 / 98%); border: 1px solid #3a4d58; border-radius: 8px 8px 3px 3px; box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px); }
+.assistantPanel[hidden] { display: none; }
+.assistantPanel > header { position: sticky; z-index: 2; top: 0; display: flex; min-height: 43px; align-items: center; justify-content: space-between; padding: 9px 10px 8px 13px; background: rgb(14 25 34 / 98%); border-bottom: 1px solid #263742; cursor: grab; user-select: none; }
+.assistantPanel > header:active { cursor: grabbing; }
+.assistantPanel > header strong { display: block; margin-top: 3px; color: #d5e1e6; font-size: 12px; }
+.assistantPanel > header small { display: none; margin-top: 2px; color: #6f858f; font-size: 7px; font-weight: 500; }
+.assistantWindowActions { display: flex; align-items: center; gap: 2px; }
+.assistantPanel > header button { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; color: #60747f; background: transparent; border: 0; border-radius: 4px; font-size: 16px; }
+.assistantPanel > header button:hover { color: #b9c9d0; background: #1a2a34; }
+.assistantPanel.collapsed { height: 43px; overflow: hidden; }
+.assistantPanel.collapsed > :not(header) { display: none; }
+.assistantPanel.collapsed > header { border-bottom: 0; }
+.assistantPanel.collapsed > header strong { font-size: 10px; }
+.assistantPanel.collapsed > header small { display: block; }
+.assistantPromptForm { display: grid; gap: 8px; padding: 13px; border-bottom: 1px solid #263742; }
+.assistantPromptForm label { color: #718690; font-size: 8px; font-weight: 650; }
+.assistantPromptForm textarea { width: 100%; min-height: 76px; resize: vertical; padding: 9px 10px; color: #c9d7dc; background: #09151d; border: 1px solid #30434e; border-radius: 5px; outline: none; font: inherit; font-size: 9px; line-height: 1.5; }
+.assistantPromptForm textarea:focus { border-color: #4c8e8a; box-shadow: 0 0 0 2px rgb(66 201 188 / 8%); }
+.assistantPromptForm > div { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.assistantPromptForm > div select { min-width: 0; height: 27px; flex: 1; padding: 0 6px; overflow: hidden; color: #718690; background: #0a161e; border: 1px solid #293d47; border-radius: 4px; font-size: 7px; text-overflow: ellipsis; }
+.assistantPromptForm .assistantManageConfigurations { min-width: 28px; width: 28px; padding: 0; color: #78909a; background: #172630; border: 1px solid #30444e; }
+.assistantPromptForm button { min-width: 100px; height: 28px; padding: 0 10px; color: #09201e; background: var(--accent); border: 0; border-radius: 4px; font-size: 8px; font-weight: 700; }
+.assistantPromptForm button:disabled { color: #647780; background: #24343d; cursor: default; }
+.assistantEmpty { display: grid; min-height: 205px; place-content: center; justify-items: center; gap: 8px; padding: 34px; color: #607681; text-align: center; }
+.assistantEmpty > span { display: grid; width: 38px; height: 38px; place-items: center; margin-bottom: 4px; color: #83d9d1; background: rgb(66 201 188 / 10%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 50%; font-size: 18px; }
+.assistantEmpty strong { color: #aabdc5; font-size: 10px; }
+.assistantEmpty p { max-width: 260px; font-size: 8px; line-height: 1.6; }
+.assistantPanel section { padding: 13px; border-bottom: 1px solid #263742; }
+.assistantPanel section h3 { margin-bottom: 8px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
+.assistantSummary strong { color: #d4e1e5; font-size: 11px; }
+.assistantSummary p { margin-top: 5px; color: #718690; font-size: 8px; }
+.assistantSummary p.valid { color: #78cfc7; }
+.assistantSummary p.pending { color: #70a9c8; }
+.assistantPanel :is(ul, ol) { display: grid; gap: 6px; padding-left: 17px; color: #8ea1aa; font-size: 8px; line-height: 1.5; }
+.assistantPanel #assistantChanges { padding-left: 0; list-style: none; }
+.assistantChange > :is(button, div) { display: grid; width: 100%; gap: 6px; padding: 8px; color: #8ea1aa; background: #0a161e; border: 1px solid #263943; border-radius: 5px; text-align: left; }
+.assistantChange > button:hover { background: #12232c; border-color: #3a555f; }
+.assistantChange > :is(button, div) > span { display: flex; align-items: center; gap: 7px; }
+.assistantChange b { min-width: 39px; padding: 2px 5px; color: #77cfc7; background: rgb(66 201 188 / 9%); border-radius: 8px; font-size: 6px; text-align: center; text-transform: uppercase; }
+.assistantChange.remove b { color: #d68a91; background: rgb(185 75 85 / 10%); }
+.assistantChange.add b { color: #83bfe0; background: rgb(83 164 205 / 10%); }
+.assistantChange strong { color: #aebfc7; font-size: 8px; font-weight: 600; }
+.assistantChange dl { display: grid; gap: 3px; margin: 0; padding-top: 5px; border-top: 1px solid #22343e; }
+.assistantChange dl div { display: grid; grid-template-columns: 72px 1fr; gap: 6px; }
+.assistantChange dt { overflow: hidden; color: #617681; text-overflow: ellipsis; white-space: nowrap; }
+.assistantChange dd { overflow-wrap: anywhere; margin: 0; color: #899da6; }
+.assistantError { margin: 12px; padding: 9px; color: #d99096; background: rgb(134 52 62 / 12%); border: 1px solid #633942; border-radius: 4px; font-size: 8px; }
+.assistantPanel footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 7px; padding: 10px 12px; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
+.assistantPanel footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: 8px; }
+.assistantPanel footer button:disabled { opacity: .45; cursor: default; }
 
 .canvas {
     position: fixed; inset: calc(var(--title-height) + var(--tools-height)) 0 0; overflow: hidden;

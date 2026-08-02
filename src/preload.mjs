@@ -52,6 +52,26 @@ contextBridge.exposeInMainWorld('engine', {
     onError: (callback) => ipcRenderer.on('engineRunError', (_event, update) => callback(update))
 });
 
+contextBridge.exposeInMainWorld('aiProviders', {
+    listConfigurations: () => ipcRenderer.invoke('aiListConfigurations'),
+    listModels: (configurationUuid) => ipcRenderer.invoke('aiListModels', configurationUuid),
+    listDraftModels: (configuration, credential) => ipcRenderer.invoke('aiListDraftModels', configuration, credential),
+    saveConfiguration: (configuration, credential) => ipcRenderer.invoke('aiSaveConfiguration', configuration, credential),
+    removeConfiguration: (configurationUuid) => ipcRenderer.invoke('aiRemoveConfiguration', configurationUuid),
+    setActiveConfiguration: (configurationUuid) => ipcRenderer.invoke('aiSetActiveConfiguration', configurationUuid),
+    testConnection: (configurationUuid) => ipcRenderer.invoke('aiTestConnection', configurationUuid),
+    testDraftConnection: (configuration, credential) => ipcRenderer.invoke('aiTestDraftConnection', configuration, credential),
+    generateProposal: async (requestUuid, configurationUuid, request, context) => {
+        const result = await ipcRenderer.invoke('aiGenerateProposal', { requestUuid, configurationUuid, request, context });
+        if (result.ok) return result.proposal;
+        if (result.error?.code === 'requestCancelled') throw new DOMException(result.error.message, 'AbortError');
+        const error = new Error(result.error?.message ?? 'The model provider could not generate a proposal.');
+        error.code = result.error?.code;
+        throw error;
+    },
+    cancelRequest: (requestUuid) => ipcRenderer.invoke('aiCancelRequest', requestUuid)
+});
+
 contextBridge.exposeInMainWorld('addons', {
     listToolstripContributions: () => ipcRenderer.invoke('addonListToolstripContributions'),
     invokeCommand: (addonId, commandId, contexts) => ipcRenderer.invoke('addonInvokeCommand', { addonId, commandId, contexts }),

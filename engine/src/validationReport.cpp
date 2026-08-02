@@ -38,7 +38,7 @@ void atomicWrite(const std::filesystem::path& path, const std::string& content) 
 
 void writeValidationReport(const std::filesystem::path& path, const ValidationResult& result) {
     std::ostringstream json;
-    json << "{\"reportVersion\":1,\"engineVersion\":\"0.1.0\",\"valid\":" << (result.valid ? "true" : "false")
+    json << "{\"reportVersion\":1,\"engineVersion\":\"0.2.0\",\"valid\":" << (result.valid ? "true" : "false")
          << ",\"summary\":{\"nodes\":" << result.nodeCount << ",\"edges\":" << result.edgeCount << "},\"issues\":[";
     for (std::size_t index = 0; index < result.issues.size(); ++index) {
         if (index) json << ',';

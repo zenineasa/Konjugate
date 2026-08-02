@@ -4,7 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { runWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import {
@@ -39,6 +39,19 @@ function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
 }
 
+function installCustomWindowState(window) {
+    const sendExpandedState = (expanded) => {
+        if (!window.webContents.isDestroyed()) window.webContents.send('windowMaximizedChange', expanded);
+    };
+    window.on('maximize', () => sendExpandedState(true));
+    window.on('unmaximize', () => sendExpandedState(false));
+    window.on('enter-full-screen', () => sendExpandedState(true));
+    window.on('leave-full-screen', () => sendExpandedState(false));
+    window.webContents.on('did-finish-load', () => {
+        sendExpandedState(process.platform === 'darwin' ? window.isFullScreen() : window.isMaximized());
+    });
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
@@ -58,23 +71,7 @@ function createWindow() {
         }
     });
 
-    const sendExpandedState = (expanded) => {
-        if (!mainWindow.webContents.isDestroyed()) {
-            mainWindow.webContents.send('windowMaximizedChange', expanded);
-        }
-    };
-
-    mainWindow.on('maximize', () => sendExpandedState(true));
-    mainWindow.on('unmaximize', () => sendExpandedState(false));
-    mainWindow.on('enter-full-screen', () => sendExpandedState(true));
-    mainWindow.on('leave-full-screen', () => sendExpandedState(false));
-
-    mainWindow.webContents.on('did-finish-load', () => {
-        mainWindow.webContents.send(
-            'windowMaximizedChange',
-            process.platform === 'darwin' ? mainWindow.isFullScreen() : mainWindow.isMaximized()
-        );
-    });
+    installCustomWindowState(mainWindow);
 
     if (process.argv.includes('--interaction-test')) {
         mainWindow.webContents.once('did-finish-load', async () => {
@@ -152,6 +149,7 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
         minWidth: 720,
         minHeight: 480,
         title: `${visualizerSession.projectName} — Results`,
+        frame: false,
         backgroundColor: '#081119',
         webPreferences: {
             preload: join(currentDir, 'addonPreload.cjs'),
@@ -161,6 +159,7 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
             backgroundThrottling: false
         }
     });
+    installCustomWindowState(createdWindow);
     analysisWindow = createdWindow;
     createdWindow.on('closed', () => {
         if (analysisWindow === createdWindow) {
@@ -256,6 +255,11 @@ ipcMain.handle('visualizerReadSeries', (event, { signalUuids, options }) => {
     return readSignalSeries(visualizerSession, signalUuids, options);
 });
 
+ipcMain.handle('visualizerTitlebarStylesheet', (event) => {
+    if (!senderIs(analysisWindow, event)) throw new Error('The titlebar stylesheet is available only to the active add-on window.');
+    return pathToFileURL(join(currentDir, 'addonTitlebar.css')).href;
+});
+
 ipcMain.on('visualizerSeek', (event, time) => {
     if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('timeline.seek')) return;
     if (['running', 'paused'].includes(visualizerSession.run.lifecycle)) return;
@@ -290,8 +294,11 @@ ipcMain.on('windowMinimize', (event) => {
     getWindowFromEvent(event)?.minimize();
 });
 
-ipcMain.on('windowClose', () => {
-    app.quit();
+ipcMain.on('windowClose', (event) => {
+    const targetWindow = getWindowFromEvent(event);
+    if (!targetWindow) return;
+    if (targetWindow === mainWindow) app.quit();
+    else targetWindow.close();
 });
 
 const examplesDir = join(currentDir, '..', 'examples');

@@ -9,11 +9,11 @@ button, input, select { font: inherit; }
 .analysisHeader > div:first-child { display: grid; gap: 2px; }
 .analysisHeader span { color: #647b86; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
 .analysisHeader strong { color: #d3e0e5; font-size: 13px; }
-.runIdentity { display: flex; min-width: 0; align-items: baseline; gap: 8px; margin-left: auto; }
+.runIdentity { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
 .runIdentity strong { overflow: hidden; max-width: 280px; text-overflow: ellipsis; white-space: nowrap; }
 .runIdentity span { text-transform: none; }
 .analysisHeader .readOnlyBadge { padding: 5px 8px; color: #7ed4cc; background: rgb(66 201 188 / 9%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 12px; }
-.liveControls { display: flex; align-items: center; gap: 8px; }
+.liveControls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .liveControls select { height: 27px; padding: 0 7px; color: #8fcfc9; background: #0a151d; border: 1px solid #31505a; border-radius: 5px; font-size: 9px; }
 main { display: grid; min-height: 0; grid-template-columns: 250px minmax(0, 1fr); }
 .signalBrowser { min-height: 0; padding: 14px; overflow: auto; background: #0b1720; border-right: 1px solid #263943; }

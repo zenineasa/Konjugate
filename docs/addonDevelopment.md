@@ -91,6 +91,8 @@ The host creates the button; add-on code does not manipulate the main applicatio
 
 The button and its add-on separator appear only while results are active. Invoking it opens or focuses the add-on's modeless window. Version 1 supports one active result-visualizer window at a time.
 
+Konjugate supplies the add-on window's titlebar, branding and operating-system-aware minimize, maximize or full-screen and close controls. Add-ons should not create their own window chrome or reserve space for it; the host inserts the titlebar and adjusts the document automatically.
+
 ## Permissions
 
 Permissions are declared explicitly. Unknown permissions cause the manifest to be rejected.

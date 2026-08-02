@@ -68,6 +68,14 @@ Together, these smaller contributions determine how the state of every component
 
 By composing nodes and relationships, complex systems can be assembled from reusable models.
 
+### A more comprehensive interaction graph
+
+Real systems are often better represented as directed multigraphs than as networks with only one relationship between each pair of nodes. Two components may exchange several quantities through distinct physical mechanisms. For example, conduction, convection and radiation can act simultaneously between a battery and its surroundings, while retaining their own equations, parameters and directionality.
+
+Relationships may be unidirectional, such as an electrical input, diode current or command signal, or reciprocal, such as a thermal or mechanical coupling that contributes to the evolution of both connected components. Reciprocal mechanisms are expressed as complementary state-update contributions and can be grouped together in the interface without losing their individual definitions.
+
+![Advanced multigraph with parallel thermal relationships and unidirectional electrical interactions](assets/ForReadme/advancedGraphRepresentation.png)
+
 ---
 
 ## Current Status

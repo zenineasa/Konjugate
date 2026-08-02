@@ -242,6 +242,25 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#edgeEditor .doneButton') === null`), true);
     });
 
+    await run('live parameters expose labelled slider bounds with validation', async () => {
+        const labels = await evaluate(window, `[...document.querySelectorAll('.editorParameterRow:first-child .parameterField > span')].map((label) => label.textContent)`);
+        assert.deepEqual(labels.slice(0, 5), ['Name', 'Symbol', 'Initial value', 'Unit', 'Mode']);
+        await evaluate(window, `(() => {
+            const mode = document.querySelector('.editorParameterRow:first-child [data-field="mode"]');
+            mode.value = 'live';
+            mode.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `!document.querySelector('.editorParameterRow:first-child .parameterControlFields').hidden`), true);
+        const controlLabels = await evaluate(window, `[...document.querySelectorAll('.editorParameterRow:first-child .parameterControlFields .parameterField > span')].map((label) => label.textContent)`);
+        assert.deepEqual(controlLabels, ['Slider minimum', 'Slider maximum', 'Slider step']);
+        await evaluate(window, `(() => {
+            const minimum = document.querySelector('.editorParameterRow:first-child [data-control-field="minimum"]');
+            minimum.value = '30';
+            minimum.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        assert.match(await evaluate(window, `document.querySelector('.editorParameterRow:first-child .parameterControlError').textContent`), /Minimum must be less than maximum/);
+    });
+
     await run('equation editor switches between visual and LaTeX modes', async () => {
         await evaluate(window, `document.querySelector('[data-equation-mode="latex"]').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#editEdgeMathField').hidden && document.querySelector('#editEdgeEquation').hidden`), false);

@@ -236,6 +236,19 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             parameterIds.insert(value(parameter, "id"));
             if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "edge", id, "parameters");
             else if (!parameters.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Parameter symbol \"" + symbol + "\" is duplicated.", "edge", id, "parameters");
+            const auto mode = value(parameter, "mode");
+            if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "edge", id, "parameters");
+            if (mode == "live" && parameter.get_child_optional("control")) {
+                const auto minimum = parameter.get_optional<double>("control.minimum");
+                const auto maximum = parameter.get_optional<double>("control.maximum");
+                const auto step = parameter.get_optional<double>("control.step");
+                const auto initialValue = parameter.get_optional<double>("value");
+                if (!minimum || !maximum || !step || !initialValue || !std::isfinite(*minimum) || !std::isfinite(*maximum) ||
+                    !std::isfinite(*step) || !std::isfinite(*initialValue) || !(*minimum < *maximum) || !(*step > 0) ||
+                    *initialValue < *minimum || *initialValue > *maximum) {
+                    add(result, "parameterControlInvalid", "error", "Live parameter slider settings require minimum < maximum, step > 0 and an initial value within the bounds.", "edge", id, "parameters");
+                }
+            }
         }
         if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& bindingEntry : *bindings) {
             const auto& binding = bindingEntry.second;

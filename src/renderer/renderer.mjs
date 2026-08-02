@@ -143,6 +143,16 @@ function hydrateProjectDocument(document) {
             if (!modelSymbolPattern.test(parameter.symbol) || parameterSymbols.has(parameter.symbol)) {
                 throw new Error(`Parameter symbols in “${edge.name ?? edge.id}” must be unique lower camel case identifiers.`);
             }
+            if (!['constant', 'live'].includes(parameter.mode)) {
+                throw new Error(`Parameter mode in “${edge.name ?? edge.id}” must be constant or live.`);
+            }
+            if (parameter.mode === 'live' && parameter.control && parameterControlError(Number(parameter.value), {
+                minimum: Number(parameter.control.minimum),
+                maximum: Number(parameter.control.maximum),
+                step: Number(parameter.control.step)
+            })) {
+                throw new Error(`Live parameter slider settings in “${edge.name ?? edge.id}” are invalid.`);
+            }
             parameterSymbols.add(parameter.symbol);
         });
     });
@@ -276,6 +286,8 @@ let equationEditSession = null;
 let simulationRunning = false;
 let activeResult = null;
 let activeEngineJobId = null;
+let liveParameterValues = new Map();
+const liveParameterUpdateTimers = new Map();
 let runLaunchSettings = {
     targetTime: 1,
     online: false,
@@ -1094,6 +1106,23 @@ function changeEdgeModel(definition, mutate) {
     });
 }
 
+function normalizedParameterControl(parameter) {
+    const { minimum, maximum, step } = liveParameterRange(parameter);
+    return {
+        minimum: Number(parameter.control?.minimum ?? minimum),
+        maximum: Number(parameter.control?.maximum ?? maximum),
+        step: Number(parameter.control?.step ?? step)
+    };
+}
+
+function parameterControlError(value, control) {
+    if (![value, control.minimum, control.maximum, control.step].every(Number.isFinite)) return 'Value and slider settings must be finite numbers.';
+    if (!(control.minimum < control.maximum)) return 'Minimum must be less than maximum.';
+    if (!(control.step > 0)) return 'Step must be greater than zero.';
+    if (value < control.minimum || value > control.maximum) return 'The initial value must be within the slider bounds.';
+    return '';
+}
+
 function renderEdgeEditor(definition) {
     $('.edgeEditor > header strong').textContent = definition.title;
     $('#editEdgeName').value = definition.title;
@@ -1109,26 +1138,54 @@ function renderEdgeEditor(definition) {
     parameterContainer.replaceChildren();
     if (!definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
     definition.parameters.forEach((parameter) => {
+        const control = normalizedParameterControl(parameter);
         const row = document.createElement('div');
         row.className = 'editorParameterRow';
         row.innerHTML = `
-            <input data-field="name" value="${escapeHtml(parameter.name)}" aria-label="Parameter name">
-            <input data-field="symbol" value="${escapeHtml(parameter.symbol)}" aria-label="Parameter symbol">
-            <input data-field="value" type="number" value="${escapeHtml(parameter.value)}" aria-label="Value">
-            <input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}" aria-label="Unit">
-            <select data-field="mode" aria-label="Mode"><option value="constant">Constant</option><option value="live">Live</option></select>
+            <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(parameter.name)}"></label>
+            <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(parameter.symbol)}"></label>
+            <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value)}"></label>
+            <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
+            <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
             <button type="button" title="Remove parameter">×</button>
+            <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
+                <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
+                <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
+                <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+                <span class="parameterControlError" role="status"></span>
+            </div>
         `;
         $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
-        $$('input, select', row).forEach((input) => input.addEventListener('change', () => {
+        const readControl = () => Object.fromEntries($$('[data-control-field]', row)
+            .map((input) => [input.dataset.controlField, Number(input.value)]));
+        const showControlError = () => {
+            const error = $('[data-field="mode"]', row).value === 'live'
+                ? parameterControlError(Number($('[data-field="value"]', row).value), readControl()) : '';
+            $('.parameterControlError', row).textContent = error;
+            return error;
+        };
+        $$('[data-control-field], [data-field="value"]', row).forEach((input) => input.addEventListener('input', showControlError));
+        $$('[data-field]', row).forEach((input) => input.addEventListener('change', () => {
+            if (input.dataset.field === 'mode') $('.parameterControlFields', row).hidden = input.value !== 'live';
+            if (showControlError()) return;
             changeEdgeModel(definition, (snapshot) => {
                 const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
                 targetParameter[input.dataset.field] = input.dataset.field === 'value'
                     ? Number(input.value) || 0
                     : input.value.trim();
+                if (targetParameter.mode === 'live') targetParameter.control = readControl();
+                else delete targetParameter.control;
             });
         }));
-        $('button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
+        $$('[data-control-field]', row).forEach((input) => input.addEventListener('change', () => {
+            if (showControlError()) return;
+            changeEdgeModel(definition, (snapshot) => {
+                const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
+                targetParameter.value = Number($('[data-field="value"]', row).value) || 0;
+                targetParameter.control = readControl();
+            });
+        }));
+        $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
             snapshot.parameters = snapshot.parameters.filter((candidate) => candidate.id !== parameter.id);
         }));
         parameterContainer.appendChild(row);
@@ -1313,19 +1370,38 @@ function addSourceTermRow() {
 }
 
 function addEdgeParameterRow(values = {}) {
+    const control = normalizedParameterControl({ value: Number(values.value) || 0, control: values.control });
     const row = document.createElement('div');
     row.className = 'builderRow parameterRow';
     row.innerHTML = `
-        <input data-field="name" placeholder="Name" value="${values.name ?? ''}">
-        <input data-field="symbol" placeholder="Symbol" value="${values.symbol ?? ''}">
-        <input data-field="value" type="number" placeholder="Value" value="${values.value ?? ''}">
-        <input data-field="unit" placeholder="Unit" value="${values.unit ?? ''}">
-        <select data-field="mode" aria-label="Parameter mode"><option value="constant">Constant</option><option value="live">Live</option></select>
+        <label class="parameterField"><span>Name</span><input data-field="name" value="${values.name ?? ''}"></label>
+        <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${values.symbol ?? ''}"></label>
+        <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${values.value ?? ''}"></label>
+        <label class="parameterField"><span>Unit</span><input data-field="unit" value="${values.unit ?? ''}"></label>
+        <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
+        <div class="parameterControlFields" ${values.mode === 'live' ? '' : 'hidden'}>
+            <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
+            <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
+            <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+            <span class="parameterControlError" role="status"></span>
+        </div>
     `;
     $('[data-field="mode"]', row).value = values.mode ?? 'constant';
     $('#edgeParameterRows').appendChild(row);
-    $$('input, select', row).forEach((input) => input.addEventListener('input', refreshStateReferences));
+    const validateControl = () => {
+        $('.parameterControlFields', row).hidden = $('[data-field="mode"]', row).value !== 'live';
+        const controlValues = Object.fromEntries($$('[data-control-field]', row)
+            .map((input) => [input.dataset.controlField, Number(input.value)]));
+        const error = $('[data-field="mode"]', row).value === 'live'
+            ? parameterControlError(Number($('[data-field="value"]', row).value), controlValues) : '';
+        $('.parameterControlError', row).textContent = error;
+        return error;
+    };
+    $$('input, select', row).forEach((input) => input.addEventListener('input', () => {
+        validateControl();
+        refreshStateReferences();
+    }));
     row.querySelector('.removeBuilderRow').addEventListener('click', () => {
         row.remove();
         refreshStateReferences();
@@ -1745,12 +1821,84 @@ function updateLiveResultControls() {
     $$('.reviewControl').forEach((control) => { control.hidden = live; });
     $('#resultPlaybackRate').hidden = live;
     $('#simulationPacing').hidden = !live || activeResult?.pacing?.mode === 'fastest';
+    const liveParameters = model.relationships.flatMap((relationship) => (relationship.parameters ?? [])
+        .filter((parameter) => parameter.mode === 'live')
+        .map((parameter) => ({ relationship, parameter })));
+    const hasLiveControls = live && runLaunchSettings.online && liveParameters.length > 0;
+    $('#liveParameterButton').hidden = !hasLiveControls;
+    $('#liveParameterCount').textContent = liveParameters.length ? String(liveParameters.length) : '';
+    if (!hasLiveControls) {
+        $('#liveParameterPanel').hidden = true;
+        $('#liveParameterButton').ariaExpanded = 'false';
+    }
     $('#closeResults').lastChild.textContent = 'Close results and edit';
     if (activeResult?.pacing) {
         const { mode, simulationSecondsPerWallSecond: ratio } = activeResult.pacing;
         const value = mode === 'limitedRatio' ? `limitedRatio:${ratio}` : mode;
         if ([...$('#simulationPacing').options].some((option) => option.value === value)) $('#simulationPacing').value = value;
     }
+}
+
+function liveParameterRange(parameter) {
+    const value = Number(parameter.value) || 0;
+    const magnitude = Math.max(Math.abs(value), 1);
+    const minimum = Number.isFinite(Number(parameter.control?.minimum))
+        ? Number(parameter.control.minimum) : Math.min(0, value - magnitude);
+    const maximum = Number.isFinite(Number(parameter.control?.maximum))
+        ? Number(parameter.control.maximum) : Math.max(0, value + magnitude);
+    const fallbackStep = Math.max((maximum - minimum) / 100, 0.001);
+    const step = Number(parameter.control?.step) > 0 ? Number(parameter.control.step) : fallbackStep;
+    return { minimum, maximum, step };
+}
+
+function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
+    liveParameterValues.set(parameterId, value);
+    clearTimeout(liveParameterUpdateTimers.get(parameterId));
+    const apply = async () => {
+        liveParameterUpdateTimers.delete(parameterId);
+        if (!activeEngineJobId || !simulationRunning) return;
+        try {
+            await window.engine.setParameterValue(activeEngineJobId, parameterId, value);
+        } catch (error) {
+            $('#statusText').textContent = error.message;
+        }
+    };
+    if (immediate) apply();
+    else liveParameterUpdateTimers.set(parameterId, setTimeout(apply, 50));
+}
+
+function renderLiveParameterControls() {
+    const container = $('#liveParameterRows');
+    container.replaceChildren();
+    model.relationships.forEach((relationship) => (relationship.parameters ?? [])
+        .filter((parameter) => parameter.mode === 'live')
+        .forEach((parameter) => {
+            const { minimum, maximum, step } = liveParameterRange(parameter);
+            const value = (liveParameterValues.get(parameter.id) ?? Number(parameter.value)) || 0;
+            const row = document.createElement('div');
+            row.className = 'liveParameterRow';
+            row.innerHTML = `
+                <div class="liveParameterLabel"><strong>${escapeHtml(parameter.name)}</strong><small>${escapeHtml(relationship.title)}${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''}</small></div>
+                <button data-adjust="-1" type="button" aria-label="Decrease ${escapeHtml(parameter.name)}">−</button>
+                <input type="range" min="${minimum}" max="${maximum}" step="${step}" value="${value}" aria-label="${escapeHtml(parameter.name)}">
+                <button data-adjust="1" type="button" aria-label="Increase ${escapeHtml(parameter.name)}">+</button>
+                <input type="number" step="${step}" value="${value}" aria-label="${escapeHtml(parameter.name)} value">
+            `;
+            const slider = $('input[type="range"]', row);
+            const numberInput = $('input[type="number"]', row);
+            const setValue = (nextValue, immediate = false) => {
+                const normalized = Math.min(maximum, Math.max(minimum, Number(nextValue)));
+                slider.value = normalized;
+                numberInput.value = normalized;
+                scheduleLiveParameterUpdate(parameter.id, normalized, immediate);
+            };
+            slider.addEventListener('input', () => setValue(slider.value));
+            slider.addEventListener('change', () => setValue(slider.value, true));
+            numberInput.addEventListener('change', () => setValue(numberInput.value, true));
+            $$('[data-adjust]', row).forEach((button) => button.addEventListener('click', () =>
+                setValue((Number(numberInput.value) || 0) + Number(button.dataset.adjust) * step, true)));
+            container.appendChild(row);
+        }));
 }
 
 function applyLiveResult(jobId, result) {
@@ -1784,6 +1932,7 @@ async function clearResultPlayback() {
     activeResult = null;
     activeEngineJobId = null;
     simulationRunning = false;
+    $('#liveParameterPanel').hidden = true;
     setResultModeLocked(false);
     nodeResultPlot.clear();
     $('.nodeResultsPanel').classList.remove('hasResults');
@@ -1824,6 +1973,16 @@ $('#simulationPacing').addEventListener('change', async (event) => {
         mode,
         simulationSecondsPerWallSecond: mode === 'realTime' ? 1 : Number(ratio || 1)
     });
+});
+$('#liveParameterButton').addEventListener('click', () => {
+    const panel = $('#liveParameterPanel');
+    panel.hidden = !panel.hidden;
+    $('#liveParameterButton').ariaExpanded = String(!panel.hidden);
+    if (!panel.hidden) renderLiveParameterControls();
+});
+$('#closeLiveParameterPanel').addEventListener('click', () => {
+    $('#liveParameterPanel').hidden = true;
+    $('#liveParameterButton').ariaExpanded = 'false';
 });
 $('#simulationPauseResume').addEventListener('click', async () => {
     if (!activeEngineJobId || !simulationRunning) return;
@@ -1931,6 +2090,9 @@ async function initializeAddonToolstripContributions() {
 async function startSimulation() {
     if (simulationRunning || !currentValidation.valid) return;
     simulationRunning = true;
+    liveParameterValues = new Map(model.relationships.flatMap((relationship) =>
+        (relationship.parameters ?? []).filter((parameter) => parameter.mode === 'live')
+            .map((parameter) => [parameter.id, Number(parameter.value) || 0])));
     if (pendingRestart && activeResult) {
         activeResult = { ...activeResult, lifecycle: 'running' };
         updateLiveResultControls();
@@ -3649,11 +3811,22 @@ $('#createEdge').addEventListener('click', () => {
         symbol: $('[data-field="symbol"]', row).value.trim(),
         value: Number($('[data-field="value"]', row).value) || 0,
         unit: $('[data-field="unit"]', row).value.trim(),
-        mode: $('[data-field="mode"]', row).value
+        mode: $('[data-field="mode"]', row).value,
+        ...($('[data-field="mode"]', row).value === 'live' ? {
+            control: Object.fromEntries($$('[data-control-field]', row)
+                .map((input) => [input.dataset.controlField, Number(input.value)]))
+        } : {})
     })).filter((parameter) => parameter.name && parameter.symbol);
     if (parameters.some((parameter) => !modelSymbolPattern.test(parameter.symbol)) ||
         new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
         $('.parameterRow [data-field="symbol"]')?.focus();
+        return;
+    }
+    const invalidLiveParameter = parameters.find((parameter) => parameter.mode === 'live' && parameterControlError(parameter.value, parameter.control));
+    if (invalidLiveParameter) {
+        const row = $$('.parameterRow').find((candidate) => $('[data-field="symbol"]', candidate).value.trim() === invalidLiveParameter.symbol);
+        $('.parameterControlError', row).textContent = parameterControlError(invalidLiveParameter.value, invalidLiveParameter.control);
+        $('[data-control-field="minimum"]', row).focus();
         return;
     }
     const definition = {

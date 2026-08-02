@@ -21,7 +21,7 @@ using Values = std::unordered_map<std::string, double>;
 struct Sample { double time; Values states; };
 struct Checkpoint { std::string uuid; double time; Values states; };
 struct Pacing { std::string mode = "fastest"; double ratio = 1; };
-struct RunControl { Pacing pacing; std::string executionState = "running"; };
+struct RunControl { Pacing pacing; std::string executionState = "running"; Values parameterValues; };
 
 std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
     return tree.get<std::string>(key, "");
@@ -123,7 +123,14 @@ RunControl readRunControl(const std::filesystem::path& path, const RunControl& c
         boost::property_tree::read_json(path.string(), control);
         const auto executionState = control.get<std::string>("executionState", current.executionState);
         if (executionState != "running" && executionState != "paused" && executionState != "stopped") return current;
-        return {pacingFromTree(control, current.pacing), executionState};
+        auto parameterValues = current.parameterValues;
+        if (const auto values = control.get_child_optional("parameterValues")) {
+            for (const auto& item : *values) {
+                const auto parameterValue = item.second.get_value<double>();
+                if (std::isfinite(parameterValue)) parameterValues[item.first] = parameterValue;
+            }
+        }
+        return {pacingFromTree(control, current.pacing), executionState, std::move(parameterValues)};
     } catch (...) {
         return current;
     }
@@ -139,7 +146,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto outputInterval = configuration.get<double>("outputInterval", globalTimeStep);
     const auto outputRatio = outputInterval / globalTimeStep;
     auto pacing = pacingFromTree(configuration);
-    RunControl runControl{pacing, "running"};
+    RunControl runControl{pacing, "running", {}};
     if (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
         !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
         throw std::runtime_error("A run requires a finite positive targetTime and numerical timestep values.");
@@ -331,7 +338,11 @@ void runSimulation(const boost::property_tree::ptree& document,
                     Values symbols;
                     std::unordered_map<std::string, double> parameters;
                     for (const auto& parameterItem : edge.get_child("parameters")) {
-                        parameters[value(parameterItem.second, "id")] = parameterItem.second.get<double>("value", 0);
+                        const auto parameterId = value(parameterItem.second, "id");
+                        const auto override = runControl.parameterValues.find(parameterId);
+                        const auto isLive = value(parameterItem.second, "mode") == "live";
+                        parameters[parameterId] = isLive && override != runControl.parameterValues.end()
+                            ? override->second : parameterItem.second.get<double>("value", 0);
                     }
                     for (const auto& bindingItem : edge.get_child("equationModel.bindings")) {
                         const auto& binding = bindingItem.second;

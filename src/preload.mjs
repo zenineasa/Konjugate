@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('engine', {
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),
     setPacing: (jobId, pacing) => ipcRenderer.invoke('engineSetPacing', jobId, pacing),
     setExecutionState: (jobId, executionState) => ipcRenderer.invoke('engineSetExecutionState', jobId, executionState),
+    setParameterValue: (jobId, parameterId, value) => ipcRenderer.invoke('engineSetParameterValue', jobId, parameterId, value),
     cancel: (jobId) => ipcRenderer.invoke('engineCancel', jobId),
     onUpdate: (callback) => ipcRenderer.on('engineRunUpdate', (_event, update) => callback(update)),
     onComplete: (callback) => ipcRenderer.on('engineRunComplete', (_event, update) => callback(update)),

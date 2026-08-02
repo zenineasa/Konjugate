@@ -568,6 +568,12 @@ ipcMain.handle('engineSetExecutionState', async (event, jobId, executionState) =
     return job.setExecutionState(executionState);
 });
 
+ipcMain.handle('engineSetParameterValue', async (event, jobId, parameterId, value) => {
+    const job = activeEngineJobs.get(jobId);
+    if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
+    return job.setParameterValue(parameterId, value);
+});
+
 ipcMain.handle('engineCancel', async (event, jobId) => {
     const job = activeEngineJobs.get(jobId);
     if (!job || job.owner !== event.sender) return false;

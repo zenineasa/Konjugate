@@ -88,7 +88,9 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const initialPacing = normalizePacing(configuration.pacing);
     await writeFile(inputPath, await encodeProjectFile(content));
     await writeFile(configurationPath, JSON.stringify({ ...configuration, pacing: initialPacing }));
-    let control = { executionState: 'running', pacing: initialPacing };
+    const liveParameterIds = new Set(JSON.parse(content).edges.flatMap((edge) =>
+        (edge.parameters ?? []).filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)));
+    let control = { executionState: 'running', pacing: initialPacing, parameterValues: {} };
     let controlWrite = Promise.resolve();
     await writeFile(pacingControlPath, JSON.stringify(control));
 
@@ -208,6 +210,14 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             control = { ...control, executionState };
             await persistControl();
             return executionState;
+        },
+        setParameterValue: async (parameterId, parameterValue) => {
+            const value = Number(parameterValue);
+            if (!liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
+            if (!Number.isFinite(value)) throw new Error('A live parameter value must be finite.');
+            control = { ...control, parameterValues: { ...control.parameterValues, [parameterId]: value } };
+            await persistControl();
+            return { parameterId, value };
         },
         cancel: () => child.kill()
     };

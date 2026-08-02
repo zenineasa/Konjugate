@@ -25,6 +25,13 @@ test('preserves equation symbols when a state is renamed', () => {
     assert.equal(reconciled[0].stateId, 'source-state');
 });
 
+test('uses the current parameter symbol after a parameter is renamed', () => {
+    const bindings = reconcileEquationBindings([], source, target, [{ id: 'parameter', symbol: 'p1' }]);
+    const reconciled = reconcileEquationBindings(bindings, source, target, [{ id: 'parameter', symbol: 'x' }]);
+    assert.equal(reconciled[2].symbol, 'x');
+    assert.equal(validateEquationLatex('x+1', reconciled).valid, true);
+});
+
 test('parses bound LaTeX into MathJSON', () => {
     const bindings = reconcileEquationBindings([], source, target, [parameter]);
     const latex = `${latexForBinding(bindings[2])}\\cdot(${latexForBinding(bindings[0])}-${latexForBinding(bindings[1])})`;

@@ -140,7 +140,10 @@ assert.ok(liveResult.samples.length > liveResult.checkpoints.length);
 assert.deepEqual(liveResult.checkpoints.map((checkpoint) => checkpoint.time), [0, 0.5]);
 
 const controlledUpdates = [];
-const controlledRun = await startEngineRun(example, {
+const liveParameterProject = JSON.parse(example);
+const liveParameter = liveParameterProject.edges[0].parameters[0];
+liveParameter.mode = 'live';
+const controlledRun = await startEngineRun(JSON.stringify(liveParameterProject), {
     name: 'Controlled adapter', targetTime: 0.4, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
@@ -153,6 +156,11 @@ for (let attempt = 0; attempt < 50 && !controlledUpdates.some((result) => result
     await new Promise((resolve) => setTimeout(resolve, 20));
 }
 assert.ok(controlledUpdates.some((result) => result.lifecycle === 'paused'));
+assert.deepEqual(await controlledRun.setParameterValue(liveParameter.id, Number(liveParameter.value) * 2), {
+    parameterId: liveParameter.id,
+    value: Number(liveParameter.value) * 2
+});
+await assert.rejects(() => controlledRun.setParameterValue('not-live', 1), /not available for live control/);
 await Promise.all([
     controlledRun.setPacing({ mode: 'realTime' }),
     controlledRun.setPacing({ mode: 'limitedRatio', simulationSecondsPerWallSecond: 2 }),

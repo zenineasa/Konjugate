@@ -385,9 +385,13 @@ input, select { user-select: text; }
 .editorSourceTermRow { display: grid; grid-template-columns: .8fr 1.4fr 18px; gap: 4px; margin-bottom: 5px; }
 .editorStateRow input, .editorSourceTermRow input, .editorSourceTermRow select { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
 .editorStateRow button, .editorSourceTermRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
-.editorParameterRow { display: grid; grid-template-columns: 1fr .6fr .55fr .55fr .75fr 18px; gap: 4px; margin-bottom: 5px; }
+.editorParameterRow { display: grid; grid-template-columns: 1fr .6fr .55fr .55fr .75fr 18px; gap: 5px 4px; margin-bottom: 9px; }
+.parameterField { display: grid; min-width: 0; gap: 3px; color: #607580; font-size: 6px; }
 .editorParameterRow input, .editorParameterRow select { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
-.editorParameterRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
+.editorParameterRow > button { align-self: end; height: 27px; padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
+.parameterControlFields { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 7px; background: rgb(66 201 188 / 4%); border: 1px solid #263d45; border-radius: 5px; }
+.parameterControlFields[hidden] { display: none; }
+.parameterControlError { grid-column: 1 / -1; min-height: 8px; color: #d2767f; font-size: 6px; }
 .editorCard footer { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 10px 12px; }
 .editorCard footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 8px; }
 .editorCard footer button:first-child { margin-right: auto; color: #bc6c73; }
@@ -484,7 +488,8 @@ input, select { user-select: text; }
 .builderRows { display: grid; gap: 6px; }
 .builderRow { display: grid; grid-template-columns: 1.4fr .7fr .8fr .6fr 18px; gap: 5px; align-items: center; }
 .builderRow.sourceTermRow { grid-template-columns: .9fr 1.5fr 18px; }
-.builderRow.parameterRow { grid-template-columns: 1fr .55fr .55fr .55fr .7fr 18px; }
+.builderRow.parameterRow { grid-template-columns: 1fr .55fr .55fr .55fr .7fr 18px; align-items: end; }
+.builderRow.parameterRow .parameterControlFields { grid-column: 1 / -1; }
 .builderRow input, .builderRow select, .builderCard textarea { width: 100%; min-width: 0; height: 27px; padding: 0 6px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .builderCard textarea { height: auto; padding: 7px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.4; }
 .geometryImportField { display: flex; min-height: 42px; align-items: center; padding: 7px 9px; color: #7ec8c2; background: #0b171f; border: 1px dashed #31515a; border-radius: 5px; cursor: pointer; }
@@ -506,6 +511,21 @@ input, select { user-select: text; }
 .canvasHelp { position: absolute; z-index: 8; bottom: 13px; left: 50%; display: flex; align-items: center; gap: 8px; padding: 5px 9px; color: #4f6571; background: rgb(8 17 24 / 80%); border: 1px solid #22343f; border-radius: 5px; font-size: 7px; transform: translateX(-50%); }
 .canvasHelp b { color: #758995; font-weight: 600; }
 .canvasHelp i { width: 1px; height: 9px; background: #2a3b46; }
+.liveParameterPanel { position: absolute; z-index: 13; right: 18px; bottom: 62px; width: min(390px, calc(100% - 36px)); max-height: min(430px, calc(100% - 150px)); overflow: auto; color: #91a5ae; background: rgb(9 18 25 / 96%); border: 1px solid #304651; border-radius: 9px; box-shadow: 0 14px 38px rgb(0 0 0 / 38%); backdrop-filter: blur(12px); }
+.liveParameterPanel[hidden] { display: none; }
+.liveParameterPanel > header { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 11px 12px; background: #0b1922; border-bottom: 1px solid #263b46; }
+.liveParameterPanel > header div { display: grid; gap: 2px; }
+.liveParameterPanel > header strong { color: #d6e6e9; font-size: 9px; }
+.liveParameterPanel > header small { color: #637984; font-size: 7px; }
+.liveParameterPanel > header button { width: 22px; height: 22px; color: #78909a; background: transparent; border: 0; }
+.liveParameterRow { display: grid; grid-template-columns: 26px minmax(110px, 1fr) 26px 72px; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid #1e313b; }
+.liveParameterRow:last-child { border-bottom: 0; }
+.liveParameterLabel { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.liveParameterLabel strong { color: #c4d6da; font-size: 8px; }
+.liveParameterLabel small { color: #647984; font-size: 7px; }
+.liveParameterRow button { width: 26px; height: 26px; padding: 0; color: #91aaaF; background: #12242e; border: 1px solid #304852; border-radius: 50%; }
+.liveParameterRow input[type="range"] { min-width: 0; accent-color: var(--accent); }
+.liveParameterRow input[type="number"] { width: 72px; height: 26px; padding: 0 6px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
 .resultTransport { position: absolute; z-index: 12; bottom: 12px; left: 50%; display: flex; width: min(1100px, calc(100% - 300px)); height: 40px; align-items: center; gap: 4px; padding: 5px 7px; color: #758a95; background: rgb(9 18 25 / 92%); border: 1px solid #304651; border-radius: 8px; box-shadow: 0 10px 28px rgb(0 0 0 / 32%); transform: translateX(-50%); backdrop-filter: blur(10px); }
 .resultTransport.liveMode { width: max-content; max-width: calc(100% - 300px); }
 .resultTransport[hidden] { display: none; }

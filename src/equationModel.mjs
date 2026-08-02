@@ -46,8 +46,7 @@ export function reconcileEquationBindings(existing = [], sourceNode, targetNode,
             kind: 'parameter', parameterId: parameter.id,
             symbol: parameter.symbol, label: parameter.symbol
         };
-        const prior = previous.get(bindingKey(candidate));
-        candidate.symbol = uniqueSymbol(prior?.symbol ?? candidate.symbol, used);
+        candidate.symbol = uniqueSymbol(candidate.symbol, used);
         bindings.push(candidate);
     }
     return bindings;

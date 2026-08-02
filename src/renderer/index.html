@@ -266,6 +266,7 @@
                 </div>
                 <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
                 <h3>Parameters <button id="editAddEdgeParameter" type="button">＋</button></h3>
+                <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
                 <div id="edgeEditorParameters"></div>
             </section>
             <section>
@@ -324,12 +325,16 @@
             </section>
             <section>
                 <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>
-                <p class="builderHint">Parameters include units and can be marked for future runtime control.</p>
+                <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
                 <div id="edgeParameterRows" class="builderRows"></div>
             </section>
             <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
         </div>
 
+        <section id="liveParameterPanel" class="liveParameterPanel" aria-label="Live simulation parameters" hidden>
+            <header><div><strong>Live controls</strong><small>Applied at the next synchronization step</small></div><button id="closeLiveParameterPanel" type="button" aria-label="Close live controls">×</button></header>
+            <div id="liveParameterRows"></div>
+        </section>
         <section id="resultTransport" class="resultTransport" aria-label="Simulation status and results" hidden>
             <span class="resultMode"><b>Results</b><small>Model locked</small></span>
             <div id="simulationExecutionControls" class="transportGroup" hidden>
@@ -350,6 +355,7 @@
             <output id="resultExtent" class="reviewControl" aria-label="Available and target simulation time">available 0 · target 0 s</output>
             <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option></select>
             <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
+            <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
             <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
         </section>
 

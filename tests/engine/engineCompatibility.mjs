@@ -74,8 +74,14 @@ assert.equal(simulation.resultVersion, 1);
 assert.equal(simulation.targetTime, 1);
 assert.equal(simulation.globalSteps, 100);
 assert.equal(simulation.samples.length, 11);
-assert.equal(simulation.states.length, 5);
+assert.equal(simulation.states.length, 4);
 assert.ok(simulation.states.every((state) => Number.isFinite(state.value)));
+const exampleStates = new Map(simulation.states.map((state) => [state.stateId, state.value]));
+const batteryTemperature = exampleStates.get('bdf343a3-54a2-4ab0-a1eb-1dd68507c130');
+const airTemperature = exampleStates.get('a9a1552b-dd1a-4860-889b-300d1888a2cb');
+assert.ok(batteryTemperature < 353.2 && batteryTemperature > airTemperature);
+assert.ok(airTemperature > 293.15 && airTemperature < batteryTemperature);
+assert.ok(Math.abs(1000 * (batteryTemperature - 353.2) + 5025 * (airTemperature - 293.15) - 420) < 1e-8);
 
 const damaged = JSON.parse(project);
 damaged.nodes[0].states[0].symbol = 'Not camel case';

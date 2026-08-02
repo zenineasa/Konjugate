@@ -290,10 +290,10 @@ export async function runInteractionTests(window) {
         await evaluate(window, `(() => {
             const field = document.querySelector('#editEdgeMathField');
             field.focus();
-            field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', bubbles: true, composed: true, cancelable: true }));
-            field.position = field.value.length;
-            field.executeCommand('deleteBackward');
+            field.executeCommand('selectAll');
         })()`);
+        window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' });
+        window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' });
         await waitFor(window, `document.querySelector('#editEdgeMathField').value !== ${JSON.stringify(equationBefore)}`, 'Backspace did not edit the equation.');
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
         await evaluate(window, `(() => {
@@ -350,7 +350,7 @@ export async function runInteractionTests(window) {
         await evaluate(window, `(() => {
             const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
             choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Coolant reservoir');
+            choose('#edgeTarget', 'Enclosed air');
             document.querySelector('#newEdgeName').value = 'Interaction relationship';
             const field = document.querySelector('#edgeMathField');
             field.setValue('\\\\mathrm{sourceQDot}');

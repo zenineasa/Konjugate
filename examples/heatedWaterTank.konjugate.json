@@ -1,0 +1,81 @@
+{
+    "format": "konjugate",
+    "version": 1,
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "metadata": { "units": "SI" },
+    "nodes": [
+        {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "name": "Water tank",
+            "type": "Lumped thermal mass",
+            "position": [0, 0, 0],
+            "states": [{ "id": "10000000-0000-4000-8000-000000000011", "name": "Water temperature", "symbol": "temperature", "initialValue": 293.15, "unit": "K" }],
+            "sourceTerms": [],
+            "appearance": { "type": "primitive", "shape": "cylinder", "color": "#2e7591" }
+        },
+        {
+            "id": "10000000-0000-4000-8000-000000000002",
+            "name": "Electric heater",
+            "type": "Heat source",
+            "position": [-4, -2.5, 0],
+            "states": [{ "id": "10000000-0000-4000-8000-000000000012", "name": "Heat flow", "symbol": "qDot", "initialValue": 2000, "unit": "W" }],
+            "sourceTerms": [],
+            "appearance": { "type": "primitive", "shape": "sphere", "color": "#c16f55" }
+        },
+        {
+            "id": "10000000-0000-4000-8000-000000000003",
+            "name": "Ambient air",
+            "type": "Temperature boundary",
+            "position": [4, 1, 0],
+            "states": [{ "id": "10000000-0000-4000-8000-000000000013", "name": "Temperature", "symbol": "temperature", "initialValue": 293.15, "unit": "K" }],
+            "sourceTerms": [],
+            "appearance": { "type": "primitive", "shape": "box", "color": "#52727a" }
+        }
+    ],
+    "edges": [
+        {
+            "id": "10000000-0000-4000-8000-000000000101",
+            "name": "Heater input",
+            "source": { "nodeId": "10000000-0000-4000-8000-000000000002", "stateId": "10000000-0000-4000-8000-000000000012" },
+            "target": { "nodeId": "10000000-0000-4000-8000-000000000001", "stateId": "10000000-0000-4000-8000-000000000011" },
+            "directionality": "directed",
+            "equation": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{waterThermalCapacitance}}",
+            "equationModel": {
+                "latex": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{waterThermalCapacitance}}",
+                "output": { "role": "target", "stateId": "10000000-0000-4000-8000-000000000011" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "10000000-0000-4000-8000-000000000002", "stateId": "10000000-0000-4000-8000-000000000012", "symbol": "sourceQDot" },
+                    { "kind": "state", "role": "target", "nodeId": "10000000-0000-4000-8000-000000000001", "stateId": "10000000-0000-4000-8000-000000000011", "symbol": "targetTemperature" },
+                    { "kind": "parameter", "parameterId": "10000000-0000-4000-8000-000000000201", "symbol": "waterThermalCapacitance" }
+                ],
+                "mathJson": ["Divide", "sourceQDot", "waterThermalCapacitance"]
+            },
+            "parameters": [{ "id": "10000000-0000-4000-8000-000000000201", "name": "Water thermal capacitance", "symbol": "waterThermalCapacitance", "value": 418000, "unit": "J/K", "mode": "constant" }],
+            "appearance": { "color": "#d98b54", "offset": 0 }
+        },
+        {
+            "id": "10000000-0000-4000-8000-000000000102",
+            "name": "Ambient heat loss",
+            "source": { "nodeId": "10000000-0000-4000-8000-000000000003", "stateId": "10000000-0000-4000-8000-000000000013" },
+            "target": { "nodeId": "10000000-0000-4000-8000-000000000001", "stateId": "10000000-0000-4000-8000-000000000011" },
+            "directionality": "directed",
+            "equation": "\\frac{\\mathrm{heatLossCoefficient}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{waterThermalCapacitance}}",
+            "equationModel": {
+                "latex": "\\frac{\\mathrm{heatLossCoefficient}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{waterThermalCapacitance}}",
+                "output": { "role": "target", "stateId": "10000000-0000-4000-8000-000000000011" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "10000000-0000-4000-8000-000000000003", "stateId": "10000000-0000-4000-8000-000000000013", "symbol": "sourceTemperature" },
+                    { "kind": "state", "role": "target", "nodeId": "10000000-0000-4000-8000-000000000001", "stateId": "10000000-0000-4000-8000-000000000011", "symbol": "targetTemperature" },
+                    { "kind": "parameter", "parameterId": "10000000-0000-4000-8000-000000000202", "symbol": "heatLossCoefficient" },
+                    { "kind": "parameter", "parameterId": "10000000-0000-4000-8000-000000000203", "symbol": "waterThermalCapacitance" }
+                ],
+                "mathJson": ["Divide", ["Multiply", "heatLossCoefficient", ["Add", "sourceTemperature", ["Negate", "targetTemperature"]]], "waterThermalCapacitance"]
+            },
+            "parameters": [
+                { "id": "10000000-0000-4000-8000-000000000202", "name": "Heat loss coefficient", "symbol": "heatLossCoefficient", "value": 15, "unit": "W/K", "mode": "constant" },
+                { "id": "10000000-0000-4000-8000-000000000203", "name": "Water thermal capacitance", "symbol": "waterThermalCapacitance", "value": 418000, "unit": "J/K", "mode": "constant" }
+            ],
+            "appearance": { "color": "#73b9c2", "offset": 0 }
+        }
+    ]
+}

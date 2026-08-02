@@ -1,0 +1,46 @@
+{
+    "format": "konjugate",
+    "version": 1,
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "metadata": { "units": "SI" },
+    "nodes": [{
+        "id": "20000000-0000-4000-8000-000000000001",
+        "name": "Suspended mass",
+        "type": "Spring-mass-damper",
+        "position": [0, 0, 0],
+        "numerics": { "substepsPerGlobalStep": 4 },
+        "states": [
+            { "id": "20000000-0000-4000-8000-000000000011", "name": "Displacement", "symbol": "displacement", "initialValue": 0.1, "unit": "m" },
+            { "id": "20000000-0000-4000-8000-000000000012", "name": "Velocity", "symbol": "velocity", "initialValue": 0, "unit": "m/s" }
+        ],
+        "sourceTerms": [
+            {
+                "id": "20000000-0000-4000-8000-000000000101",
+                "state": "displacement",
+                "expression": "\\mathrm{velocity}",
+                "expressionModel": {
+                    "latex": "\\mathrm{velocity}",
+                    "bindings": [{ "kind": "state", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012", "symbol": "velocity" }],
+                    "output": { "stateId": "20000000-0000-4000-8000-000000000011" },
+                    "mathJson": "velocity"
+                }
+            },
+            {
+                "id": "20000000-0000-4000-8000-000000000102",
+                "state": "velocity",
+                "expression": "-4\\cdot\\mathrm{displacement}-0.4\\cdot\\mathrm{velocity}",
+                "expressionModel": {
+                    "latex": "-4\\cdot\\mathrm{displacement}-0.4\\cdot\\mathrm{velocity}",
+                    "bindings": [
+                        { "kind": "state", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000011", "symbol": "displacement" },
+                        { "kind": "state", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012", "symbol": "velocity" }
+                    ],
+                    "output": { "stateId": "20000000-0000-4000-8000-000000000012" },
+                    "mathJson": ["Add", ["Multiply", -4, "displacement"], ["Multiply", -0.4, "velocity"]]
+                }
+            }
+        ],
+        "appearance": { "type": "primitive", "shape": "box", "color": "#5d7885" }
+    }],
+    "edges": []
+}

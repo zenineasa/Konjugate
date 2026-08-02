@@ -62,7 +62,7 @@ where:
 
 ![Graph representation of node states, interactions and local source terms](assets/ForReadme/graphRepresentation.png)
 
-In more practical terms, each node represents a component with values that can change over time. A relationship term $f_{ij}$ describes how one component influences another—for example, heat transferred between a battery and a coolant reservoir. A local term $s_i$ describes what happens within or directly to a component, such as electrical heating, heat loss to the environment or an externally applied input.
+In more practical terms, each node represents a component with values that can change over time. A relationship term $f_{ij}$ describes how one component influences another—for example, convective heat transfer between a battery and its surrounding air. A local term $s_i$ describes what happens within or directly to a component, such as electrical heating, heat loss to the environment or an externally applied input.
 
 Together, these smaller contributions determine how the state of every component evolves.
 

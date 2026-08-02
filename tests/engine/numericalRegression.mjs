@@ -1,0 +1,80 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { encodeProjectFile } from '../../src/projectFile.mjs';
+
+function execute(executable, args) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(executable, args, { stdio: ['ignore', 'ignore', 'inherit'] });
+        child.once('error', reject);
+        child.once('exit', resolve);
+    });
+}
+
+function closeEnough(actual, expected, absoluteTolerance, relativeTolerance) {
+    return Math.abs(actual - expected) <= absoluteTolerance + relativeTolerance * Math.max(Math.abs(actual), Math.abs(expected));
+}
+
+function stateMap(sample) {
+    return new Map(sample.states.map((state) => [state.stateId, state.value]));
+}
+
+const executable = process.argv[2];
+if (!executable) throw new Error('Pass the konjugateEngine executable path.');
+const expectations = JSON.parse(await readFile(new URL('./expected/exampleResults.json', import.meta.url), 'utf8'));
+const directory = await mkdtemp(join(tmpdir(), 'konjugateNumericalRegression-'));
+
+try {
+    for (const testCase of expectations.cases) {
+        const content = await readFile(new URL(`../../examples/${testCase.example}.konjugate.json`, import.meta.url), 'utf8');
+        const inputPath = join(directory, `${testCase.example}.kjt`);
+        const configurationPath = join(directory, `${testCase.example}Configuration.json`);
+        const outputPath = join(directory, `${testCase.example}Results.kjr`);
+        const validationPath = join(directory, `${testCase.example}Validation.json`);
+        await writeFile(inputPath, await encodeProjectFile(content));
+        await writeFile(configurationPath, JSON.stringify({ name: testCase.example, ...testCase.configuration }, null, 4));
+        assert.equal(await execute(executable, ['validate', inputPath, '--report', validationPath]), 0, `${testCase.example} must validate`);
+        assert.equal(await execute(executable, ['run', inputPath, '--configuration', configurationPath, '--output', outputPath]), 0, `${testCase.example} must run`);
+        const result = JSON.parse(await readFile(outputPath, 'utf8'));
+        for (const expectedSample of testCase.samples) {
+            const actualSample = result.samples.find((sample) => Math.abs(sample.time - expectedSample.time) < 1e-12);
+            assert.ok(actualSample, `${testCase.example} did not emit its ${expectedSample.time} s sample`);
+            const values = stateMap(actualSample);
+            for (const [stateId, expectedValue] of Object.entries(expectedSample.states)) {
+                const actualValue = values.get(stateId);
+                assert.ok(Number.isFinite(actualValue), `${testCase.example} did not produce state ${stateId}`);
+                assert.ok(closeEnough(actualValue, expectedValue, expectations.absoluteTolerance, expectations.relativeTolerance),
+                    `${testCase.example} state ${stateId} at ${expectedSample.time} s: expected ${expectedValue}, received ${actualValue}`);
+            }
+        }
+
+        const dynamicSeries = result.samples.map(stateMap);
+        if (testCase.example === 'thermalManagement') {
+            const final = dynamicSeries.at(-1);
+            const energyChange = 1000 * (final.get('bdf343a3-54a2-4ab0-a1eb-1dd68507c130') - 353.2)
+                + 5025 * (final.get('a9a1552b-dd1a-4860-889b-300d1888a2cb') - 293.15);
+            assert.ok(Math.abs(energyChange - 420) < 1e-8, 'Thermal management must conserve transferred energy.');
+        } else if (testCase.example === 'heatedWaterTank') {
+            const temperatures = dynamicSeries.map((states) => states.get('10000000-0000-4000-8000-000000000011'));
+            assert.ok(temperatures.every((value, index) => !index || value > temperatures[index - 1]), 'The heated tank must warm monotonically.');
+        } else if (testCase.example === 'springMassDamper') {
+            const energy = (states) => 2 * states.get('20000000-0000-4000-8000-000000000011') ** 2
+                + 0.5 * states.get('20000000-0000-4000-8000-000000000012') ** 2;
+            assert.ok(energy(dynamicSeries.at(-1)) < energy(dynamicSeries[0]), 'Damping must reduce mechanical energy.');
+        } else if (testCase.example === 'dcMotor') {
+            const final = dynamicSeries.at(-1);
+            assert.ok(Math.abs(final.get('30000000-0000-4000-8000-000000000011') - 9.8) < 1e-4);
+            assert.ok(Math.abs(final.get('30000000-0000-4000-8000-000000000012') - 44) < 1e-3);
+        } else if (testCase.example === 'twoRoomBuilding') {
+            assert.ok(dynamicSeries.every((states) => states.get('40000000-0000-4000-8000-000000000011')
+                > states.get('40000000-0000-4000-8000-000000000012')), 'The initially warmer room must remain warmer during this run.');
+        }
+        console.log(`✓ numerical regression: ${testCase.example}`);
+    }
+} finally {
+    await rm(directory, { recursive: true, force: true });
+}

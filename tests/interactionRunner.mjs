@@ -37,6 +37,27 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'thermalManagement');
     });
 
+    await run('example selection opens its companion guide', async () => {
+        const guideWindow = BrowserWindow.getAllWindows().find((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide'));
+        assert.ok(guideWindow, 'Example guide window did not open.');
+        await waitFor(guideWindow, `document.querySelector('#guideTitle').textContent.includes('Thermal Management')`, 'Example guide content did not render.');
+        assert.match(await evaluate(guideWindow, `document.querySelector('#content').textContent`), /enclosed-air volume/i);
+        assert.doesNotMatch(await evaluate(guideWindow, `document.querySelector('#content').textContent`), /Copyright/);
+        await waitFor(guideWindow, `document.querySelectorAll('.equation .ML__latex').length > 0`, 'Example equations did not render with MathLive.');
+        assert.equal(await evaluate(guideWindow, `document.querySelectorAll('math-field').length`), 0);
+        assert.equal(await evaluate(guideWindow, `[...document.querySelectorAll('.equation [style]')].every((element) => element.style.length > 0)`), true);
+        assert.equal(await evaluate(guideWindow, `document.querySelector('.equation').scrollWidth <= document.querySelector('.equation').clientWidth`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#exampleGuideButton').hidden`), false);
+        guideWindow.close();
+        await waitFor(window, `!document.querySelector('#exampleGuideButton').hidden`, 'Example guide reopen control disappeared.');
+        await evaluate(window, `document.querySelector('#exampleGuideButton').click()`);
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < 5000 && !BrowserWindow.getAllWindows().some((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide'))) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(BrowserWindow.getAllWindows().some((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide')), 'Example guide did not reopen.');
+    });
+
     await run('validation summary reports and displays a valid model', async () => {
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'C++ validation report did not reach the UI.');
         assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('error')`), false);

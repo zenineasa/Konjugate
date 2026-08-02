@@ -26,6 +26,8 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
 let mainWindow = null;
 let analysisWindow = null;
+let exampleGuideWindow = null;
+let exampleGuideBounds = null;
 let analysisAddonId = null;
 let visualizerManifest = null;
 let visualizerSession = null;
@@ -87,6 +89,43 @@ function createWindow() {
     }
 
     mainWindow.loadFile(join(currentDir, 'renderer', 'index.html'));
+}
+
+async function openExampleGuide(id) {
+    if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
+    const guideName = id.replace(/\.konjugate\.json$/, '.md');
+    const markdown = await readFile(join(examplesDir, guideName), 'utf8');
+    const payload = { id, title: exampleLabel(id), markdown };
+    if (!exampleGuideWindow || exampleGuideWindow.isDestroyed()) {
+        exampleGuideWindow = new BrowserWindow({
+            width: 720,
+            height: 760,
+            ...exampleGuideBounds,
+            minWidth: 480,
+            minHeight: 420,
+            frame: false,
+            backgroundColor: '#09131b',
+            title: `${payload.title} · Example Guide`,
+            parent: mainWindow,
+            webPreferences: {
+                preload: join(currentDir, 'exampleGuide', 'preload.cjs'),
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: true
+            }
+        });
+        installCustomWindowState(exampleGuideWindow);
+        exampleGuideWindow.on('close', () => { exampleGuideBounds = exampleGuideWindow?.getBounds() ?? exampleGuideBounds; });
+        exampleGuideWindow.on('closed', () => { exampleGuideWindow = null; });
+        exampleGuideWindow.webContents.once('did-finish-load', () => exampleGuideWindow?.webContents.send('exampleGuideContent', payload));
+        await exampleGuideWindow.loadFile(join(currentDir, 'exampleGuide', 'index.html'));
+    } else {
+        exampleGuideWindow.setTitle(`${payload.title} · Example Guide`);
+        exampleGuideWindow.webContents.send('exampleGuideContent', payload);
+        exampleGuideWindow.show();
+        exampleGuideWindow.focus();
+    }
+    return true;
 }
 
 function senderIs(window, event) {
@@ -321,6 +360,11 @@ ipcMain.handle('projectListExamples', async () => (await exampleFiles()).map((fi
 ipcMain.handle('projectLoadExample', async (_event, id) => {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     return { content: await readFile(join(examplesDir, id), 'utf8'), suggestedFilename: id };
+});
+
+ipcMain.handle('projectOpenExampleGuide', async (event, id) => {
+    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can open example guides.');
+    return openExampleGuide(id);
 });
 
 ipcMain.handle('projectOpen', async (event) => {

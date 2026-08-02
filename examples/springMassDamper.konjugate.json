@@ -24,23 +24,73 @@
                     "output": { "stateId": "20000000-0000-4000-8000-000000000011" },
                     "mathJson": "velocity"
                 }
-            },
-            {
-                "id": "20000000-0000-4000-8000-000000000102",
-                "state": "velocity",
-                "expression": "-4\\cdot\\mathrm{displacement}-0.4\\cdot\\mathrm{velocity}",
-                "expressionModel": {
-                    "latex": "-4\\cdot\\mathrm{displacement}-0.4\\cdot\\mathrm{velocity}",
-                    "bindings": [
-                        { "kind": "state", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000011", "symbol": "displacement" },
-                        { "kind": "state", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012", "symbol": "velocity" }
-                    ],
-                    "output": { "stateId": "20000000-0000-4000-8000-000000000012" },
-                    "mathJson": ["Add", ["Multiply", -4, "displacement"], ["Multiply", -0.4, "velocity"]]
-                }
             }
         ],
         "appearance": { "type": "primitive", "shape": "box", "color": "#5d7885" }
+    }, {
+        "id": "20000000-0000-4000-8000-000000000002",
+        "name": "Fixed support",
+        "type": "Mechanical boundary",
+        "position": [-4, 0, 0],
+        "states": [
+            { "id": "20000000-0000-4000-8000-000000000013", "name": "Displacement", "symbol": "displacement", "initialValue": 0, "unit": "m" },
+            { "id": "20000000-0000-4000-8000-000000000014", "name": "Velocity", "symbol": "velocity", "initialValue": 0, "unit": "m/s" }
+        ],
+        "sourceTerms": [],
+        "appearance": { "type": "primitive", "shape": "box", "color": "#354a55" }
     }],
-    "edges": []
+    "edges": [
+        {
+            "id": "20000000-0000-4000-8000-000000000201",
+            "name": "Spring force",
+            "source": { "nodeId": "20000000-0000-4000-8000-000000000002", "stateId": "20000000-0000-4000-8000-000000000013" },
+            "target": { "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012" },
+            "directionality": "directed",
+            "equation": "\\frac{\\mathrm{stiffness}\\cdot(\\mathrm{sourceDisplacement}-\\mathrm{targetDisplacement})}{\\mathrm{mass}}",
+            "equationModel": {
+                "latex": "\\frac{\\mathrm{stiffness}\\cdot(\\mathrm{sourceDisplacement}-\\mathrm{targetDisplacement})}{\\mathrm{mass}}",
+                "output": { "role": "target", "stateId": "20000000-0000-4000-8000-000000000012" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "20000000-0000-4000-8000-000000000002", "stateId": "20000000-0000-4000-8000-000000000013", "symbol": "sourceDisplacement" },
+                    { "kind": "state", "role": "source", "nodeId": "20000000-0000-4000-8000-000000000002", "stateId": "20000000-0000-4000-8000-000000000014", "symbol": "sourceVelocity" },
+                    { "kind": "state", "role": "target", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000011", "symbol": "targetDisplacement" },
+                    { "kind": "state", "role": "target", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012", "symbol": "targetVelocity" },
+                    { "kind": "parameter", "parameterId": "20000000-0000-4000-8000-000000000301", "symbol": "stiffness" },
+                    { "kind": "parameter", "parameterId": "20000000-0000-4000-8000-000000000302", "symbol": "mass" }
+                ],
+                "mathJson": ["Divide", ["Multiply", "stiffness", ["Add", "sourceDisplacement", ["Negate", "targetDisplacement"]]], "mass"]
+            },
+            "parameters": [
+                { "id": "20000000-0000-4000-8000-000000000301", "name": "Spring stiffness", "symbol": "stiffness", "value": 4, "unit": "N/m", "mode": "constant" },
+                { "id": "20000000-0000-4000-8000-000000000302", "name": "Mass", "symbol": "mass", "value": 1, "unit": "kg", "mode": "constant" }
+            ],
+            "appearance": { "color": "#d6a14f", "offset": -0.12 }
+        },
+        {
+            "id": "20000000-0000-4000-8000-000000000202",
+            "name": "Damper force",
+            "source": { "nodeId": "20000000-0000-4000-8000-000000000002", "stateId": "20000000-0000-4000-8000-000000000014" },
+            "target": { "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012" },
+            "directionality": "directed",
+            "equation": "\\frac{\\mathrm{dampingCoefficient}\\cdot(\\mathrm{sourceVelocity}-\\mathrm{targetVelocity})}{\\mathrm{mass}}",
+            "equationModel": {
+                "latex": "\\frac{\\mathrm{dampingCoefficient}\\cdot(\\mathrm{sourceVelocity}-\\mathrm{targetVelocity})}{\\mathrm{mass}}",
+                "output": { "role": "target", "stateId": "20000000-0000-4000-8000-000000000012" },
+                "bindings": [
+                    { "kind": "state", "role": "source", "nodeId": "20000000-0000-4000-8000-000000000002", "stateId": "20000000-0000-4000-8000-000000000013", "symbol": "sourceDisplacement" },
+                    { "kind": "state", "role": "source", "nodeId": "20000000-0000-4000-8000-000000000002", "stateId": "20000000-0000-4000-8000-000000000014", "symbol": "sourceVelocity" },
+                    { "kind": "state", "role": "target", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000011", "symbol": "targetDisplacement" },
+                    { "kind": "state", "role": "target", "nodeId": "20000000-0000-4000-8000-000000000001", "stateId": "20000000-0000-4000-8000-000000000012", "symbol": "targetVelocity" },
+                    { "kind": "parameter", "parameterId": "20000000-0000-4000-8000-000000000303", "symbol": "dampingCoefficient" },
+                    { "kind": "parameter", "parameterId": "20000000-0000-4000-8000-000000000304", "symbol": "mass" }
+                ],
+                "mathJson": ["Divide", ["Multiply", "dampingCoefficient", ["Add", "sourceVelocity", ["Negate", "targetVelocity"]]], "mass"]
+            },
+            "parameters": [
+                { "id": "20000000-0000-4000-8000-000000000303", "name": "Damping coefficient", "symbol": "dampingCoefficient", "value": 0.4, "unit": "N·s/m", "mode": "constant" },
+                { "id": "20000000-0000-4000-8000-000000000304", "name": "Mass", "symbol": "mass", "value": 1, "unit": "kg", "mode": "constant" }
+            ],
+            "appearance": { "color": "#9c83c4", "offset": 0.12 }
+        }
+    ]
 }

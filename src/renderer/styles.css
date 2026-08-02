@@ -81,6 +81,8 @@ input, select { user-select: text; }
 .documentActions .exampleButton:hover,
 .documentActions .exampleButton[aria-expanded="true"] { color: #d5e2e7; background: #101d25; border-color: #36505d; }
 .exampleButton i { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.documentActions .exampleGuideButton { width: 25px; height: 25px; padding: 0; color: #78aaa7; background: rgb(66 201 188 / 6%); border: 1px solid #2d484c; border-radius: 50%; font-size: 9px; }
+.documentActions .exampleGuideButton[hidden] { display: none; }
 .exampleMenu {
     position: absolute; z-index: 90; top: calc(100% + 5px); left: 0; display: grid; width: 148px;
     padding: 4px; background: #111c24; border: 1px solid #354650; border-radius: 7px;

@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('windowControls', {
 contextBridge.exposeInMainWorld('projectFiles', {
     listExamples: () => ipcRenderer.invoke('projectListExamples'),
     loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),
+    openExampleGuide: (id) => ipcRenderer.invoke('projectOpenExampleGuide', id),
     open: () => ipcRenderer.invoke('projectOpen'),
     unlock: (path, password) => ipcRenderer.invoke('projectUnlock', { path, password }),
     save: (path, content, suggestedFilename, password) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password }),

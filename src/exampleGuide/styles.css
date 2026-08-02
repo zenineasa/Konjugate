@@ -1,0 +1,24 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #09131b; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #9eb0b9; background: radial-gradient(circle at 20% 0, rgb(34 84 88 / 15%), transparent 35%), #09131b; }
+.titleBar { position: sticky; z-index: 2; top: 0; display: flex; height: 38px; align-items: center; justify-content: space-between; background: #081119; border-bottom: 1px solid #253944; -webkit-app-region: drag; }
+.title { display: flex; align-items: center; gap: 8px; padding-left: 12px; }
+.title img { width: 18px; height: 18px; }
+.title strong { color: #edf5f6; font-size: 11px; }
+.title span { margin-left: 12px; color: #778d98; font-size: 10px; }
+.windowControls { display: flex; height: 100%; -webkit-app-region: no-drag; }
+.windowControls button { width: 44px; color: #8499a3; background: transparent; border: 0; font-size: 14px; }
+.windowControls button:hover { background: #182730; }
+.windowControls .close:hover { color: white; background: #d64853; }
+main { width: min(760px, calc(100% - 44px)); margin: 0 auto; padding: 34px 0 70px; }
+h1 { margin: 0 0 8px; color: #e6f0f2; font-size: 28px; letter-spacing: -.03em; }
+h2 { margin: 32px 0 10px; padding-top: 14px; color: #cfe0e3; border-top: 1px solid #263a44; font-size: 17px; }
+h3 { margin: 22px 0 8px; color: #b8ced2; font-size: 13px; }
+p, li { font-size: 12px; line-height: 1.75; }
+ul { padding-left: 21px; }
+code { padding: 2px 5px; color: #83d7cf; background: #10242b; border-radius: 4px; }
+pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243944; border-radius: 7px; }
+.inlineMath { display: inline-block; padding: 0 2px; color: #d3e7e8; font-size: 1em; vertical-align: -.15em; }
+.equation { display: flex; width: 100%; min-height: 48px; margin: 16px 0; padding: 14px; align-items: center; justify-content: center; overflow-x: auto; color: #d3e7e8; background: rgb(66 201 188 / 6%); border-left: 2px solid #42c9bc; font-size: 17px; }

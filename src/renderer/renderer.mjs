@@ -235,6 +235,7 @@ const model = hydrateProjectDocument(emptyProjectDocument);
 let currentProjectPath = null;
 let currentProjectFilename = 'untitled.kjt';
 let currentProjectPassword = null;
+let activeExampleId = null;
 
 function filenameStem(fileName) {
     return fileName.replace(/\.kjt$/i, '').replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '');
@@ -3448,6 +3449,8 @@ async function openProject() {
             fileName: file.fileName,
             password: file.encrypted ? password : null
         });
+        activeExampleId = null;
+        $('#exampleGuideButton').hidden = true;
         $('#statusText').textContent = 'Project loaded';
     } catch (error) {
         console.error(error);
@@ -3483,6 +3486,8 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
 async function newProject() {
     if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
     loadProjectDocument(emptyProjectDocument);
+    activeExampleId = null;
+    $('#exampleGuideButton').hidden = true;
     $('#statusText').textContent = 'New project';
 }
 
@@ -3495,6 +3500,9 @@ async function loadExample(id) {
             fileName: example.suggestedFilename,
             saved: false
         });
+        activeExampleId = id;
+        $('#exampleGuideButton').hidden = false;
+        await window.projectFiles.openExampleGuide(id);
         $('#statusText').textContent = 'Example loaded as an unsaved copy';
     } catch (error) {
         console.error(error);
@@ -3503,6 +3511,10 @@ async function loadExample(id) {
         closeExampleMenu();
     }
 }
+
+$('#exampleGuideButton').addEventListener('click', () => {
+    if (activeExampleId) window.projectFiles.openExampleGuide(activeExampleId);
+});
 
 function closeExampleMenu() {
     $('#exampleMenu').hidden = true;

@@ -116,6 +116,12 @@ input, select { user-select: text; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .runConfigurationDialog { width: 360px; }
+.executionConfiguration { margin-top: 13px; padding-top: 11px; border-top: 1px solid #263a44; }
+.configurationSectionTitle { display: block; color: #8aa0aa; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+.executionAdvanced { margin-top: 11px; padding: 8px 9px; background: #0a161d; border: 1px solid #263b45; border-radius: 5px; }
+.executionAdvanced summary { color: #8499a3; font-size: 8px; cursor: pointer; user-select: none; }
+.executionAdvanced[open] summary { margin-bottom: 8px; color: #b8cbd1; }
+.executionAdvanced label:first-of-type { margin-top: 0; }
 .assistantConfigurationDialog { width: min(780px, calc(100vw - 40px)); max-width: none; }
 .assistantConfigurationDialog form { padding: 0; }
 .assistantConfigurationHeader { display: flex; align-items: center; justify-content: space-between; padding: 15px 17px 12px; border-bottom: 1px solid #263a44; }
@@ -555,6 +561,16 @@ input, select { user-select: text; }
 #simulationProgress { min-width: 76px; white-space: nowrap; }
 .resultTransport select { height: 25px; padding: 0 4px; color: #8297a1; background: #101e27; border: 1px solid #2d414c; border-radius: 4px; font-size: 7px; }
 .canvas:has(.resultTransport:not([hidden])) .canvasHelp { display: none; }
+.executionSummaryCard { position: absolute; z-index: 13; right: 18px; bottom: 62px; width: 285px; padding: 0; overflow: hidden; }
+.executionSummaryCard header { display: flex; align-items: center; justify-content: space-between; padding: 11px 12px 9px; border-bottom: 1px solid #29404a; }
+.executionSummaryCard header small, .executionSummaryCard header strong { display: block; }
+.executionSummaryCard header small { color: #607782; font-size: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+.executionSummaryCard header strong { margin-top: 3px; color: #d0dfe3; font-size: 10px; }
+.executionSummaryCard header button { width: 22px; height: 22px; padding: 0; color: #70858f; background: transparent; border: 0; font-size: 13px; }
+.executionSummaryCard > p { margin: 0; padding: 9px 12px; color: #77909a; background: rgb(66 201 188 / 5%); border-bottom: 1px solid #263b45; font-size: 7px; line-height: 1.45; }
+.executionSummaryCard dl { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; padding: 11px 12px 12px; font-size: 7px; }
+.executionSummaryCard dt { color: #718791; }
+.executionSummaryCard dd { margin: 0; color: #b9cbd0; text-align: right; }
 .viewCube { position: absolute; z-index: 9; bottom: 18px; left: 18px; width: 176px; height: 180px; background: rgb(9 18 25 / 75%); border: 1px solid #293f4a; border-radius: 16px; box-shadow: 0 10px 28px rgb(0 0 0 / 28%); backdrop-filter: blur(10px); }
 .viewCubeScene { position: absolute; z-index: 2; top: 28px; left: 40px; width: 96px; height: 96px; perspective: 260px; pointer-events: none; }
 .viewCubeObject { position: relative; top: 48px; left: 48px; width: 0; height: 0; transform-style: preserve-3d; }

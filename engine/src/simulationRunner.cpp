@@ -1,12 +1,22 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "simulationRunner.hpp"
+#include "dependencyGraph.hpp"
+#include "executionBackend.hpp"
+#include "executionPlan.hpp"
+#include "partitionPlan.hpp"
+#include "partitionRuntime.hpp"
+#include "taskExecutor.hpp"
 #include <boost/property_tree/json_parser.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <future>
+#include <memory>
+#include <numeric>
 #include <random>
 #include <set>
 #include <sstream>
@@ -17,21 +27,28 @@
 
 namespace konjugate {
 namespace {
-using Values = std::unordered_map<std::string, double>;
+using Values = StateValues;
 struct Sample { double time; Values states; };
 struct Checkpoint { std::string uuid; double time; Values states; };
 struct Pacing { std::string mode = "fastest"; double ratio = 1; };
 struct RunControl { Pacing pacing; std::string executionState = "running"; Values parameterValues; };
+struct ExecutionSettings {
+    std::string requestedBackend = "automatic";
+    std::string backend = "serial";
+    std::size_t workerThreads = 1;
+    std::size_t estimatedOperationsPerSynchronization = 0;
+    std::size_t automaticParallelThreshold = 128;
+};
+struct NodeIntegrationResult { Values states; std::uint64_t computeNanoseconds = 0; };
+struct NodeRuntimeMetrics {
+    std::uint64_t invocations = 0;
+    std::uint64_t executedSubsteps = 0;
+    std::uint64_t evaluatedContributions = 0;
+    std::uint64_t computeNanoseconds = 0;
+};
 
 std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
     return tree.get<std::string>(key, "");
-}
-
-double number(const std::string& input) {
-    std::size_t consumed = 0;
-    const auto result = std::stod(input, &consumed);
-    if (consumed != input.size() || !std::isfinite(result)) throw std::runtime_error("Expression contains a non-finite number.");
-    return result;
 }
 
 std::string createUuid() {
@@ -48,34 +65,6 @@ std::string createUuid() {
         value << std::setw(2) << bytes[index];
     }
     return value.str();
-}
-
-double evaluate(const boost::property_tree::ptree& expression, const Values& symbols) {
-    if (expression.empty()) {
-        const auto token = expression.data();
-        if (const auto found = symbols.find(token); found != symbols.end()) return found->second;
-        try { return number(token); } catch (...) { throw std::runtime_error("Unknown executable symbol: " + token + "."); }
-    }
-    std::vector<const boost::property_tree::ptree*> items;
-    for (const auto& item : expression) items.push_back(&item.second);
-    if (items.empty()) throw std::runtime_error("Expression array is empty.");
-    const auto operation = items.front()->data();
-    const auto argument = [&](std::size_t index) { return evaluate(*items.at(index + 1), symbols); };
-    if (operation == "Add") { double result = 0; for (std::size_t i = 0; i + 1 < items.size(); ++i) result += argument(i); return result; }
-    if (operation == "Multiply") { double result = 1; for (std::size_t i = 0; i + 1 < items.size(); ++i) result *= argument(i); return result; }
-    if (operation == "Negate") return -argument(0);
-    if (operation == "Divide") return argument(0) / argument(1);
-    if (operation == "Power") return std::pow(argument(0), argument(1));
-    if (operation == "Sqrt") return std::sqrt(argument(0));
-    if (operation == "Abs") return std::abs(argument(0));
-    if (operation == "Exp") return std::exp(argument(0));
-    if (operation == "Ln" || operation == "Log") return std::log(argument(0));
-    if (operation == "Sin") return std::sin(argument(0));
-    if (operation == "Cos") return std::cos(argument(0));
-    if (operation == "Tan") return std::tan(argument(0));
-    if (operation == "Min") return std::min(argument(0), argument(1));
-    if (operation == "Max") return std::max(argument(0), argument(1));
-    throw std::runtime_error("Unsupported executable operation: " + operation + ".");
 }
 
 std::string escape(const std::string& input) {
@@ -135,6 +124,51 @@ RunControl readRunControl(const std::filesystem::path& path, const RunControl& c
         return current;
     }
 }
+
+ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& tree, const ExecutionPlan& plan) {
+    ExecutionSettings settings;
+    settings.requestedBackend = tree.get<std::string>("execution.backend", "automatic");
+    if (settings.requestedBackend != "automatic" && settings.requestedBackend != "serial" &&
+        settings.requestedBackend != "threadPool" && settings.requestedBackend != "partitioned") {
+        throw std::runtime_error("Execution backend must be automatic, serial, threadPool or partitioned.");
+    }
+    settings.automaticParallelThreshold = tree.get<std::size_t>("execution.automaticParallelThreshold", 128);
+    if (!settings.automaticParallelThreshold || settings.automaticParallelThreshold > 1000000) {
+        throw std::runtime_error("execution.automaticParallelThreshold must be an integer from 1 through 1000000.");
+    }
+    for (const auto& node : plan.nodes) {
+        settings.estimatedOperationsPerSynchronization += node.estimatedOperationsPerSubstep * node.substeps;
+    }
+    const auto hardwareThreads = std::max(1u, std::thread::hardware_concurrency());
+    const auto requestedThreads = tree.get<std::size_t>("execution.workerThreads", hardwareThreads);
+    if (!requestedThreads || requestedThreads > 256) {
+        throw std::runtime_error("execution.workerThreads must be an integer from 1 through 256.");
+    }
+    settings.backend = settings.requestedBackend;
+    settings.workerThreads = settings.requestedBackend == "serial"
+        ? 1 : std::min(requestedThreads, std::max<std::size_t>(1, plan.nodes.size()));
+    return settings;
+}
+
+NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
+                                    const Values& synchronizationSnapshot,
+                                    const Values& liveParameterValues,
+                                    double synchronizationStep) {
+    const auto startedAt = std::chrono::steady_clock::now();
+    Values localStates;
+    localStates.reserve(node.stateIds.size());
+    for (const auto& stateId : node.stateIds) localStates[stateId] = synchronizationSnapshot.at(stateId);
+    const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
+    for (std::size_t substep = 0; substep < node.substeps; ++substep) {
+        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, liveParameterValues);
+        const auto derivatives = reduceContributions(evaluated);
+        for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
+    }
+    Values result;
+    for (const auto& stateId : node.stateIds) result[stateId] = localStates.at(stateId);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
+    return {std::move(result), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+}
 }
 
 void runSimulation(const boost::property_tree::ptree& document,
@@ -155,21 +189,81 @@ void runSimulation(const boost::property_tree::ptree& document,
         throw std::runtime_error("outputInterval must be an integer multiple of globalTimeStep.");
     }
 
-    Values states;
-    std::unordered_map<std::string, std::string> stateNodes;
-    std::unordered_map<std::string, std::size_t> nodeSubsteps;
-    std::unordered_map<std::string, std::vector<std::string>> nodeStates;
-    for (const auto& nodeItem : document.get_child("nodes")) {
-        const auto nodeId = value(nodeItem.second, "id");
-        const auto substeps = nodeItem.second.get<std::size_t>("numerics.substepsPerGlobalStep", 1);
-        if (!substeps || substeps > 10000) throw std::runtime_error("Node substepsPerGlobalStep must be an integer from 1 through 10000.");
-        nodeSubsteps[nodeId] = substeps;
-        for (const auto& stateItem : nodeItem.second.get_child("states")) {
-            const auto stateId = value(stateItem.second, "id");
-            states[stateId] = stateItem.second.get<double>("initialValue", 0);
-            stateNodes[stateId] = nodeId;
-            nodeStates[nodeId].push_back(stateId);
+    const auto planningStartedAt = std::chrono::steady_clock::now();
+    const auto executionPlan = compileExecutionPlan(document);
+    const auto dependencyGraph = buildDependencyGraph(executionPlan);
+    auto executionSettings = executionSettingsFromTree(configuration, executionPlan);
+    const auto requestedPartitions = configuration.get<std::size_t>("execution.partitionCount", executionSettings.workerThreads);
+    if (!requestedPartitions || requestedPartitions > 256) {
+        throw std::runtime_error("Partition count must be an integer from 1 through 256.");
+    }
+    const auto executablePartitions = executionSettings.requestedBackend == "partitioned" ||
+        executionSettings.requestedBackend == "automatic"
+        ? std::min(requestedPartitions, executionSettings.workerThreads) : requestedPartitions;
+    const auto communicationBias = configuration.get<double>("execution.partitionCommunicationBias", 4);
+    auto partitionPlan = createGreedyPartitionPlan(dependencyGraph, executablePartitions, communicationBias);
+    partitionPlan.requestedPartitions = requestedPartitions;
+    const auto totalCommunicationWeight = std::accumulate(
+        dependencyGraph.dependencies.begin(), dependencyGraph.dependencies.end(), std::size_t{0},
+        [](std::size_t total, const auto& dependency) { return total + dependency.communicationWeight; });
+    const auto maximumPartitionCutFraction = configuration.get<double>("execution.automaticMaximumPartitionCutFraction", 0.25);
+    const auto backendDecision = selectExecutionBackend(
+        executionSettings.requestedBackend, executionPlan.nodes.size(),
+        executionSettings.estimatedOperationsPerSynchronization, executionSettings.automaticParallelThreshold,
+        partitionPlan.greedy.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
+    executionSettings.backend = backendDecision.backend;
+    if (executionSettings.backend == "serial") executionSettings.workerThreads = 1;
+    const auto planningNanoseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - planningStartedAt).count());
+    std::unique_ptr<TaskExecutor> taskExecutor;
+    if (executionSettings.backend == "threadPool") taskExecutor = std::make_unique<TaskExecutor>(executionSettings.workerThreads);
+    std::vector<std::vector<std::size_t>> partitionNodeIndexes;
+    std::vector<std::vector<std::string>> partitionSnapshotStateIds;
+    std::vector<std::unique_ptr<PartitionRuntime>> partitionRuntimes;
+    std::unique_ptr<InMemoryPartitionTransport> partitionTransport;
+    const auto partitionReceiveTimeoutMilliseconds = configuration.get<std::size_t>(
+        "execution.partitionReceiveTimeoutMilliseconds", 5000);
+    if (!partitionReceiveTimeoutMilliseconds || partitionReceiveTimeoutMilliseconds > 60000) {
+        throw std::runtime_error("execution.partitionReceiveTimeoutMilliseconds must be an integer from 1 through 60000.");
+    }
+    if (executionSettings.backend == "partitioned") {
+        partitionRuntimes.reserve(partitionPlan.effectivePartitions);
+        partitionNodeIndexes.resize(partitionPlan.effectivePartitions);
+        partitionSnapshotStateIds.resize(partitionPlan.effectivePartitions);
+        std::unordered_map<std::string, std::size_t> executionNodeIndexes;
+        std::unordered_map<std::string, std::size_t> nodePartitions;
+        for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+            executionNodeIndexes[executionPlan.nodes[index].nodeId] = index;
         }
+        for (const auto& assignment : partitionPlan.assignments) {
+            nodePartitions[assignment.nodeId] = assignment.partition;
+            partitionNodeIndexes[assignment.partition].push_back(executionNodeIndexes.at(assignment.nodeId));
+        }
+        for (std::size_t partition = 0; partition < partitionNodeIndexes.size(); ++partition) {
+            std::set<std::string> snapshotStateIds;
+            for (const auto nodeIndex : partitionNodeIndexes[partition]) {
+                snapshotStateIds.insert(executionPlan.nodes[nodeIndex].stateIds.begin(), executionPlan.nodes[nodeIndex].stateIds.end());
+            }
+            for (const auto& dependency : dependencyGraph.dependencies) {
+                if (nodePartitions.at(dependency.targetNodeId) == partition) {
+                    snapshotStateIds.insert(dependency.remoteStateIds.begin(), dependency.remoteStateIds.end());
+                }
+            }
+            partitionSnapshotStateIds[partition].assign(snapshotStateIds.begin(), snapshotStateIds.end());
+        }
+        for (std::size_t partition = 0; partition < partitionPlan.effectivePartitions; ++partition) {
+            partitionRuntimes.push_back(std::make_unique<PartitionRuntime>(
+                partition, executionPlan, partitionNodeIndexes[partition]));
+        }
+        partitionTransport = std::make_unique<InMemoryPartitionTransport>();
+    }
+    const auto activeWorkerThreads = executionSettings.backend == "partitioned"
+        ? partitionPlan.effectivePartitions : executionSettings.workerThreads;
+    Values states = executionPlan.initialStates;
+    const auto& stateNodes = executionPlan.stateNodes;
+    std::unordered_map<std::string, std::size_t> nodeSubsteps;
+    for (const auto& node : executionPlan.nodes) {
+        nodeSubsteps[node.nodeId] = node.substeps;
     }
 
     double startTime = 0;
@@ -185,14 +279,19 @@ void runSimulation(const boost::property_tree::ptree& document,
     }
     if (!(startTime >= 0) || !(targetTime > startTime)) throw std::runtime_error("targetTime must be later than the restart checkpoint.");
 
-    std::vector<std::string> stateIds;
-    for (const auto& item : states) stateIds.push_back(item.first);
-    std::sort(stateIds.begin(), stateIds.end());
+    const auto& stateIds = executionPlan.stateIds;
     std::vector<std::string> nodeIds;
     for (const auto& item : nodeSubsteps) nodeIds.push_back(item.first);
     std::sort(nodeIds.begin(), nodeIds.end());
 
     const auto steps = static_cast<std::size_t>(std::ceil((targetTime - startTime) / globalTimeStep));
+    std::vector<NodeRuntimeMetrics> nodeMetrics(executionPlan.nodes.size());
+    std::uint64_t synchronizationComputeNanoseconds = 0;
+    std::uint64_t partitionBoundaryMessages = 0;
+    std::uint64_t partitionBoundaryPayloadBytes = 0;
+    std::uint64_t partitionMessagePreparationNanoseconds = 0;
+    std::uint64_t partitionTransportPublishNanoseconds = 0;
+    std::uint64_t partitionBoundaryWaitNanoseconds = 0;
     std::vector<Sample> samples = {{startTime, states}};
     std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states}};
     const auto streamPath = std::filesystem::path(outputPath.string() + ".stream");
@@ -231,6 +330,83 @@ void runSimulation(const boost::property_tree::ptree& document,
              << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time
              << ",\"pacing\":{\"mode\":\"" << escape(pacing.mode) << "\",\"simulationSecondsPerWallSecond\":" << pacing.ratio << "}"
              << ",\"targetTime\":" << targetTime << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval
+             << ",\"execution\":{\"planVersion\":1,\"requestedBackend\":\"" << executionSettings.requestedBackend
+             << "\",\"backend\":\"" << executionSettings.backend
+             << "\",\"workerThreads\":" << activeWorkerThreads << ",\"planningNanoseconds\":" << planningNanoseconds
+             << ",\"estimatedOperationsPerSynchronization\":" << executionSettings.estimatedOperationsPerSynchronization
+             << ",\"automaticParallelThreshold\":" << executionSettings.automaticParallelThreshold
+             << ",\"selectionReason\":\"" << backendDecision.reason << "\",\"communicationCutFraction\":"
+             << backendDecision.communicationCutFraction << ",\"automaticMaximumPartitionCutFraction\":"
+             << maximumPartitionCutFraction
+             << ",\"schedulingPolicy\":\"" << (executionSettings.backend == "partitioned"
+                 ? "partitionAffinity" : "largestEstimatedWorkFirst")
+             << "\",\"synchronizationComputeNanoseconds\":"
+             << synchronizationComputeNanoseconds << ",\"partitionCommunication\":{\"messageVersion\":1,\"transport\":\"inMemory\""
+             << ",\"boundaryMessages\":" << partitionBoundaryMessages << ",\"boundaryPayloadBytes\":"
+             << partitionBoundaryPayloadBytes << ",\"messagePreparationNanoseconds\":"
+             << partitionMessagePreparationNanoseconds << ",\"serializationNanoseconds\":0,\"transportPublishNanoseconds\":"
+             << partitionTransportPublishNanoseconds << ",\"boundaryWaitNanoseconds\":"
+             << partitionBoundaryWaitNanoseconds << "},\"nodeMetrics\":[";
+        for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+            if (index) json << ',';
+            const auto& node = executionPlan.nodes[index];
+            const auto& metrics = nodeMetrics[index];
+            json << "{\"nodeId\":\"" << escape(node.nodeId) << "\",\"estimatedOperationsPerSubstep\":"
+                 << node.estimatedOperationsPerSubstep << ",\"invocations\":" << metrics.invocations
+                 << ",\"executedSubsteps\":" << metrics.executedSubsteps << ",\"evaluatedContributions\":"
+                 << metrics.evaluatedContributions << ",\"computeNanoseconds\":" << metrics.computeNanoseconds << '}';
+        }
+        json << "]},\"dependencyGraph\":{\"version\":" << dependencyGraph.version << ",\"componentCount\":"
+             << dependencyGraph.componentCount << ",\"nodes\":[";
+        for (std::size_t index = 0; index < dependencyGraph.nodes.size(); ++index) {
+            if (index) json << ',';
+            const auto& node = dependencyGraph.nodes[index];
+            json << "{\"nodeId\":\"" << escape(node.nodeId) << "\",\"stateCount\":" << node.stateCount
+                 << ",\"substeps\":" << node.substeps << ",\"estimatedOperationsPerSynchronization\":"
+                 << node.estimatedOperationsPerSynchronization << ",\"component\":" << node.component << '}';
+        }
+        json << "],\"dependencies\":[";
+        for (std::size_t index = 0; index < dependencyGraph.dependencies.size(); ++index) {
+            if (index) json << ',';
+            const auto& dependency = dependencyGraph.dependencies[index];
+            json << "{\"sourceNodeId\":\"" << escape(dependency.sourceNodeId) << "\",\"targetNodeId\":\""
+                 << escape(dependency.targetNodeId) << "\",\"remoteStateIds\":[";
+            for (std::size_t stateIndex = 0; stateIndex < dependency.remoteStateIds.size(); ++stateIndex) {
+                if (stateIndex) json << ',';
+                json << '\"' << escape(dependency.remoteStateIds[stateIndex]) << '\"';
+            }
+            json << "],\"contributionTaskCount\":" << dependency.contributionTaskCount << ",\"remoteBindingsPerSubstep\":"
+                 << dependency.remoteBindingsPerSubstep << ",\"estimatedDependentOperationsPerSynchronization\":"
+                 << dependency.estimatedDependentOperationsPerSynchronization << ",\"communicationWeight\":"
+                 << dependency.communicationWeight << '}';
+        }
+        json << "]},\"partitionPlan\":{\"version\":" << partitionPlan.version << ",\"algorithm\":\""
+             << partitionPlan.algorithm << "\",\"requestedPartitions\":" << partitionPlan.requestedPartitions
+             << ",\"effectivePartitions\":" << partitionPlan.effectivePartitions << ",\"communicationBias\":"
+             << partitionPlan.communicationBias << ",\"assignments\":[";
+        for (std::size_t index = 0; index < partitionPlan.assignments.size(); ++index) {
+            if (index) json << ',';
+            json << "{\"nodeId\":\"" << escape(partitionPlan.assignments[index].nodeId) << "\",\"partition\":"
+                 << partitionPlan.assignments[index].partition << '}';
+        }
+        json << "],\"partitions\":[";
+        for (std::size_t index = 0; index < partitionPlan.partitions.size(); ++index) {
+            if (index) json << ',';
+            const auto& partition = partitionPlan.partitions[index];
+            json << "{\"partition\":" << partition.partition << ",\"nodeCount\":" << partition.nodeCount
+                 << ",\"computeWeight\":" << partition.computeWeight << ",\"localStateCount\":"
+                 << partition.localStateCount << ",\"boundaryStateCount\":" << partition.boundaryStateCount << '}';
+        }
+        const auto appendComparison = [&json](const PartitionComparison& comparison) {
+            json << "{\"communicationCutWeight\":" << comparison.communicationCutWeight
+                 << ",\"cutDependencyCount\":" << comparison.cutDependencyCount
+                 << ",\"computeImbalance\":" << comparison.computeImbalance << '}';
+        };
+        json << "],\"greedy\":";
+        appendComparison(partitionPlan.greedy);
+        json << ",\"roundRobin\":";
+        appendComparison(partitionPlan.roundRobin);
+        json << '}'
              << ",\"globalSteps\":" << steps << ",\"nodeTimesteps\":[";
         for (std::size_t index = 0; index < nodeIds.size(); ++index) {
             if (index) json << ',';
@@ -310,57 +486,75 @@ void runSimulation(const boost::property_tree::ptree& document,
         }
         const auto wallStepStarted = std::chrono::steady_clock::now();
         const auto synchronizationStep = std::min(globalTimeStep, targetTime - startTime - static_cast<double>(step) * globalTimeStep);
+        const auto synchronizationStartedAt = std::chrono::steady_clock::now();
         const auto snapshot = states;
         auto synchronizedStates = snapshot;
-        for (const auto& nodeItem : document.get_child("nodes")) {
-            const auto& node = nodeItem.second;
-            const auto nodeId = value(node, "id");
-            auto localStates = snapshot;
-            const auto substeps = nodeSubsteps.at(nodeId);
-            const auto nodeTimeStep = synchronizationStep / static_cast<double>(substeps);
-            for (std::size_t substep = 0; substep < substeps; ++substep) {
-                Values derivatives;
-                for (const auto& termItem : node.get_child("sourceTerms")) {
-                    const auto& term = termItem.second;
-                    Values symbols;
-                    for (const auto& bindingItem : term.get_child("expressionModel.bindings")) {
-                        symbols[value(bindingItem.second, "symbol")] = localStates.at(value(bindingItem.second, "stateId"));
-                    }
-                    const auto outputState = value(term, "expressionModel.output.stateId");
-                    const auto contribution = evaluate(term.get_child("expressionModel.mathJson"), symbols);
-                    if (!std::isfinite(contribution)) throw std::runtime_error("A source term produced a non-finite derivative.");
-                    derivatives[outputState] += contribution;
-                }
-                for (const auto& edgeItem : document.get_child("edges")) {
-                    const auto& edge = edgeItem.second;
-                    const auto outputState = value(edge, "equationModel.output.stateId");
-                    if (stateNodes.at(outputState) != nodeId) continue;
-                    Values symbols;
-                    std::unordered_map<std::string, double> parameters;
-                    for (const auto& parameterItem : edge.get_child("parameters")) {
-                        const auto parameterId = value(parameterItem.second, "id");
-                        const auto override = runControl.parameterValues.find(parameterId);
-                        const auto isLive = value(parameterItem.second, "mode") == "live";
-                        parameters[parameterId] = isLive && override != runControl.parameterValues.end()
-                            ? override->second : parameterItem.second.get<double>("value", 0);
-                    }
-                    for (const auto& bindingItem : edge.get_child("equationModel.bindings")) {
-                        const auto& binding = bindingItem.second;
-                        const auto symbol = value(binding, "symbol");
-                        if (value(binding, "kind") == "parameter") symbols[symbol] = parameters.at(value(binding, "parameterId"));
-                        else {
-                            const auto stateId = value(binding, "stateId");
-                            symbols[symbol] = value(binding, "nodeId") == nodeId ? localStates.at(stateId) : snapshot.at(stateId);
-                        }
-                    }
-                    const auto contribution = evaluate(edge.get_child("equationModel.mathJson"), symbols);
-                    if (!std::isfinite(contribution)) throw std::runtime_error("An equation produced a non-finite derivative.");
-                    derivatives[outputState] += contribution;
-                }
-                for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
+        std::vector<NodeIntegrationResult> nodeResults(executionPlan.nodes.size());
+        if (taskExecutor) {
+            const auto parameterValues = runControl.parameterValues;
+            std::vector<std::future<NodeIntegrationResult>> futures;
+            futures.reserve(executionPlan.nodes.size());
+            futures.resize(executionPlan.nodes.size());
+            for (const auto index : executionPlan.taskSubmissionOrder) {
+                const auto* nodePlan = &executionPlan.nodes[index];
+                futures[index] = taskExecutor->submit([nodePlan, &snapshot, &parameterValues, synchronizationStep] {
+                    return integrateNode(*nodePlan, snapshot, parameterValues, synchronizationStep);
+                });
             }
-            for (const auto& stateId : nodeStates.at(nodeId)) synchronizedStates[stateId] = localStates.at(stateId);
+            for (std::size_t index = 0; index < futures.size(); ++index) nodeResults[index] = futures[index].get();
+        } else if (!partitionRuntimes.empty()) {
+            const auto parameterValues = runControl.parameterValues;
+            for (std::size_t partition = 0; partition < partitionRuntimes.size(); ++partition) {
+                const auto preparationStartedAt = std::chrono::steady_clock::now();
+                PartitionBoundaryMessage message;
+                message.synchronizationIndex = step;
+                message.targetPartition = partition;
+                message.states.reserve(partitionSnapshotStateIds[partition].size());
+                for (const auto& stateId : partitionSnapshotStateIds[partition]) message.states[stateId] = snapshot.at(stateId);
+                partitionMessagePreparationNanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - preparationStartedAt).count());
+                partitionBoundaryPayloadBytes += partitionMessagePayloadBytes(message);
+                ++partitionBoundaryMessages;
+                const auto publishStartedAt = std::chrono::steady_clock::now();
+                partitionTransport->publish(std::move(message));
+                partitionTransportPublishNanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - publishStartedAt).count());
+            }
+            std::vector<std::future<PartitionResultMessage>> futures;
+            futures.reserve(partitionRuntimes.size());
+            for (auto& runtime : partitionRuntimes) {
+                futures.push_back(runtime->submit(
+                    *partitionTransport, step, parameterValues, synchronizationStep,
+                    std::chrono::milliseconds(partitionReceiveTimeoutMilliseconds)));
+            }
+            for (std::size_t partition = 0; partition < futures.size(); ++partition) {
+                const auto result = futures[partition].get();
+                if (result.version != 1 || result.synchronizationIndex != step || result.sourcePartition != partition) {
+                    throw std::runtime_error("A partition returned an incompatible result message.");
+                }
+                partitionBoundaryWaitNanoseconds += result.boundaryWaitNanoseconds;
+                for (const auto& nodeResult : result.nodes) {
+                    nodeResults[nodeResult.nodeIndex] = {nodeResult.states, nodeResult.computeNanoseconds};
+                }
+            }
+        } else {
+            for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+                nodeResults[index] = integrateNode(executionPlan.nodes[index], snapshot, runControl.parameterValues, synchronizationStep);
+            }
         }
+        for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+            const auto& node = executionPlan.nodes[index];
+            const auto& result = nodeResults[index];
+            for (const auto& stateId : node.stateIds) synchronizedStates[stateId] = result.states.at(stateId);
+            auto& metrics = nodeMetrics[index];
+            ++metrics.invocations;
+            metrics.executedSubsteps += node.substeps;
+            metrics.evaluatedContributions += node.substeps * node.contributions.size();
+            metrics.computeNanoseconds += result.computeNanoseconds;
+        }
+        const auto synchronizationElapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - synchronizationStartedAt).count();
+        synchronizationComputeNanoseconds += static_cast<std::uint64_t>(std::max<std::int64_t>(0, synchronizationElapsed));
         states = std::move(synchronizedStates);
         const auto elapsed = std::min(targetTime, startTime + static_cast<double>(step + 1) * globalTimeStep);
         currentTime = elapsed;

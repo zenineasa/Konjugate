@@ -14,20 +14,49 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ZLIB REQUIRED)
 set(OPENSSL_USE_STATIC_LIBS TRUE)
 find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
 
 add_executable(konjugateEngine
+    src/dependencyGraph.cpp
+    src/executionBackend.cpp
+    src/executionPlan.cpp
     src/main.cpp
     src/modelValidator.cpp
+    src/partitionPlan.cpp
+    src/partitionRuntime.cpp
     src/projectContainer.cpp
     src/simulationRunner.cpp
+    src/taskExecutor.cpp
     src/validationReport.cpp
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR})
-target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto)
+target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto Threads::Threads)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(executionPlanTests
+        tests/executionPlanTests.cpp
+        src/dependencyGraph.cpp
+        src/executionBackend.cpp
+        src/executionPlan.cpp
+        src/partitionPlan.cpp
+        src/partitionRuntime.cpp
+        src/taskExecutor.cpp
+    )
+    target_include_directories(executionPlanTests PRIVATE include ${BOOST_INCLUDE_DIR})
+    target_link_libraries(executionPlanTests PRIVATE Threads::Threads)
+    add_test(NAME executionPlanTests COMMAND executionPlanTests)
+endif()
 
 if(MSVC)
     target_compile_options(konjugateEngine PRIVATE /W4 /permissive-)
+    if(BUILD_TESTING)
+        target_compile_options(executionPlanTests PRIVATE /W4 /permissive-)
+    endif()
 else()
     target_compile_options(konjugateEngine PRIVATE -Wall -Wextra -Wpedantic)
+    if(BUILD_TESTING)
+        target_compile_options(executionPlanTests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
 endif()

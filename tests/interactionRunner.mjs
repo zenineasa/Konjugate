@@ -138,10 +138,15 @@ export async function runInteractionTests(window) {
 
     await run('run configuration and node substeps are editable', async () => {
         await evaluate(window, `document.querySelector('#runConfigurationButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runExecutionBackend').value`), 'automatic');
+        assert.equal(await evaluate(window, `document.querySelector('#runExecutionAdvanced').open`), false);
         await evaluate(window, `(() => {
             document.querySelector('#runConfigurationName').value = 'Fast response';
             document.querySelector('#runGlobalTimeStep').value = '0.02';
             document.querySelector('#runOutputInterval').value = '0.1';
+            document.querySelector('#runWorkerThreads').value = '2';
+            document.querySelector('#runPartitionCount').value = '2';
+            document.querySelector('#runPartitionCommunicationBias').value = '4';
             document.querySelector('#applyRunConfiguration').click();
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#runConfigurationDialog').open`), false);
@@ -177,6 +182,13 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#continueRun')).display !== 'none' && document.querySelector('#continueRun').textContent === 'Extend simulation' && getComputedStyle(document.querySelector('#resultTimeline')).display !== 'none'`), true);
         assert.equal(await evaluate(window, `document.querySelector('.resultMode b').textContent`), 'Results');
         assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#simulationProgress')).display === 'none'`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#executionSummaryButton').hidden`), false);
+        await evaluate(window, `document.querySelector('#executionSummaryButton').click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#executionSummaryCard').classList.contains('hidden')`), true);
+        assert.match(await evaluate(window, `document.querySelector('#executionSummaryTitle').textContent`), /(Serial|Thread pool|Partitioned) · \d+ workers?/);
+        assert.ok(await evaluate(window, `document.querySelectorAll('#executionSummaryMetrics dt').length`) >= 8);
+        assert.match(await evaluate(window, `document.querySelector('#executionSummaryMetrics').textContent`), /Communication cut/);
+        await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('showNodesDetails')`), true);
         const finalValue = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
@@ -434,7 +446,7 @@ export async function runInteractionTests(window) {
     });
 
     await run('project title editing applies camel case filenames', async () => {
-        await evaluate(window, `(() => { document.querySelector('.documentTitle').click(); const input = document.querySelector('.documentTitleInput'); input.value = 'My Test Model'; input.blur(); })()`);
+        await evaluate(window, `(() => { document.querySelector('.documentTitle').click(); const input = document.querySelector('.documentTitleInput'); input.value = 'My Test Model'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'myTestModel');
     });
 

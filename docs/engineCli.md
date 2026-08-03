@@ -25,4 +25,6 @@ Exit codes:
 
 Passwords must never be supplied as command-line arguments. The initial non-interactive integration uses the inherited `KONJUGATE_PASSWORD` environment variable; interactive prompting and protected platform channels may be added later.
 
-The version 1 run configuration contains a name plus finite positive `duration`, `globalTimeStep`, and `outputInterval` numbers; timestep and output interval cannot exceed duration, and output interval is an integer multiple of the global timestep. The engine uses deterministic snapshot-coupled, node-local explicit Euler subcycling. A `.kjr` result contains `resultVersion`, engine and run metadata, global step count, each node's substep count and effective timestep, final state values, and sampled states at the requested synchronization intervals.
+The version 1 CLI run request contains a name plus finite positive `targetTime`, `globalTimeStep`, and `outputInterval` numbers; timestep and output interval cannot exceed the target time, and output interval is an integer multiple of the global timestep. It may also select automatic, serial, thread-pool or partitioned execution. See [Parallel execution](parallelExecution.md) for the configuration, selection rules and result telemetry.
+
+The engine uses deterministic snapshot-coupled, node-local explicit Euler subcycling. A `.kjr` result contains `resultVersion`, engine and run metadata, global step count, each node's substep count and effective timestep, final state values, sampled states at the requested synchronization intervals and execution diagnostics.

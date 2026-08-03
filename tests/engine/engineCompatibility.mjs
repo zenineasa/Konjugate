@@ -54,6 +54,10 @@ assert.ok(Math.abs(sourceResult.states[0].value - 1.1025) < 1e-12);
 assert.deepEqual(sourceResult.nodeTimesteps[0], {
     nodeId: '11111111-1111-4111-8111-111111111111', substepsPerGlobalStep: 2, effectiveTimeStep: 0.05
 });
+assert.equal(sourceResult.execution.planVersion, 1);
+assert.equal(sourceResult.execution.nodeMetrics[0].invocations, 1);
+assert.equal(sourceResult.execution.nodeMetrics[0].executedSubsteps, 2);
+assert.equal(sourceResult.execution.nodeMetrics[0].evaluatedContributions, 2);
 assert.deepEqual(sourceResult.samples.map((sample) => sample.time), [0, 0.1]);
 assert.deepEqual(sourceResult.checkpoints.map((checkpoint) => checkpoint.time), [0, 0.1]);
 assert.ok(sourceResult.checkpoints.every((checkpoint) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(checkpoint.uuid)));
@@ -67,10 +71,40 @@ assert.equal(await run(executable, ['validate', exampleInput, '--report', exampl
 assert.equal(JSON.parse(await readFile(exampleReport, 'utf8')).valid, true);
 const runConfiguration = join(directory, 'runConfiguration.json');
 const simulationOutput = join(directory, 'simulationResults.kjr');
-await writeFile(runConfiguration, JSON.stringify({ name: 'Compatibility', targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1 }));
+await writeFile(runConfiguration, JSON.stringify({
+    name: 'Compatibility', targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1,
+    execution: { partitionCount: 2 }
+}));
 assert.equal(await run(executable, ['run', exampleInput, '--configuration', runConfiguration, '--output', simulationOutput]), 0);
 const simulation = JSON.parse(await readFile(simulationOutput, 'utf8'));
 assert.equal(simulation.resultVersion, 1);
+assert.equal(simulation.execution.requestedBackend, 'automatic');
+assert.equal(simulation.execution.backend, 'serial');
+assert.equal(simulation.execution.workerThreads, 1);
+assert.equal(simulation.execution.selectionReason, 'belowParallelWorkThreshold');
+assert.ok(simulation.execution.communicationCutFraction >= 0 && simulation.execution.communicationCutFraction <= 1);
+assert.equal(simulation.execution.nodeMetrics.length, 3);
+assert.ok(simulation.execution.nodeMetrics.every((metrics) => metrics.invocations === simulation.globalSteps));
+assert.ok(simulation.execution.nodeMetrics.every((metrics) => metrics.computeNanoseconds >= 0));
+assert.equal(simulation.dependencyGraph.version, 1);
+assert.equal(simulation.dependencyGraph.componentCount, 1);
+assert.equal(simulation.dependencyGraph.nodes.length, 3);
+assert.equal(simulation.dependencyGraph.dependencies.length, 3);
+assert.ok(simulation.dependencyGraph.dependencies.every((dependency) => dependency.communicationWeight >= 1));
+const exampleNodeNames = new Map(JSON.parse(example).nodes.map((node) => [node.id, node.name]));
+const dependencyDirections = simulation.dependencyGraph.dependencies.map((dependency) =>
+    `${exampleNodeNames.get(dependency.sourceNodeId)} -> ${exampleNodeNames.get(dependency.targetNodeId)}`);
+assert.deepEqual(dependencyDirections.toSorted(), [
+    'Battery module -> Enclosed air',
+    'Electrical losses -> Battery module',
+    'Enclosed air -> Battery module'
+]);
+assert.equal(simulation.partitionPlan.algorithm, 'communicationAwareGreedy');
+assert.equal(simulation.partitionPlan.requestedPartitions, 2);
+assert.equal(simulation.partitionPlan.effectivePartitions, 2);
+assert.equal(simulation.partitionPlan.assignments.length, 3);
+assert.equal(simulation.partitionPlan.partitions.reduce((total, partition) => total + partition.nodeCount, 0), 3);
+assert.ok(simulation.partitionPlan.greedy.computeImbalance >= 1);
 assert.equal(simulation.targetTime, 1);
 assert.equal(simulation.globalSteps, 100);
 assert.equal(simulation.samples.length, 11);
@@ -82,6 +116,50 @@ const airTemperature = exampleStates.get('a9a1552b-dd1a-4860-889b-300d1888a2cb')
 assert.ok(batteryTemperature < 353.2 && batteryTemperature > airTemperature);
 assert.ok(airTemperature > 293.15 && airTemperature < batteryTemperature);
 assert.ok(Math.abs(1000 * (batteryTemperature - 353.2) + 5025 * (airTemperature - 293.15) - 420) < 1e-8);
+
+const serialConfiguration = join(directory, 'serialRunConfiguration.json');
+const serialOutput = join(directory, 'serialSimulationResults.kjr');
+await writeFile(serialConfiguration, JSON.stringify({
+    name: 'Serial compatibility', targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1,
+    execution: { backend: 'serial', workerThreads: 1 }
+}));
+assert.equal(await run(executable, ['run', exampleInput, '--configuration', serialConfiguration, '--output', serialOutput]), 0);
+const serialSimulation = JSON.parse(await readFile(serialOutput, 'utf8'));
+assert.equal(serialSimulation.execution.backend, 'serial');
+assert.equal(serialSimulation.execution.workerThreads, 1);
+assert.deepEqual(serialSimulation.states, simulation.states);
+assert.deepEqual(serialSimulation.samples, simulation.samples);
+
+const parallelResults = [];
+for (const backend of ['threadPool', 'partitioned']) {
+    const configurationPath = join(directory, `${backend}RunConfiguration.json`);
+    const outputPath = join(directory, `${backend}SimulationResults.kjr`);
+    await writeFile(configurationPath, JSON.stringify({
+        name: `${backend} compatibility`, targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1,
+        execution: { backend, workerThreads: 2, partitionCount: backend === 'partitioned' ? 3 : 2 }
+    }));
+    assert.equal(await run(executable, ['run', exampleInput, '--configuration', configurationPath, '--output', outputPath]), 0);
+    const result = JSON.parse(await readFile(outputPath, 'utf8'));
+    assert.equal(result.execution.backend, backend);
+    assert.equal(result.execution.workerThreads, 2);
+    if (backend === 'partitioned') {
+        assert.equal(result.partitionPlan.requestedPartitions, 3);
+        assert.equal(result.partitionPlan.effectivePartitions, 2);
+        assert.equal(result.execution.schedulingPolicy, 'partitionAffinity');
+        assert.equal(result.execution.partitionCommunication.transport, 'inMemory');
+        assert.equal(result.execution.partitionCommunication.messageVersion, 1);
+        assert.equal(result.execution.partitionCommunication.boundaryMessages, result.globalSteps * 2);
+        assert.ok(result.execution.partitionCommunication.boundaryPayloadBytes > 0);
+        assert.ok(result.execution.partitionCommunication.messagePreparationNanoseconds > 0);
+        assert.ok(result.execution.partitionCommunication.transportPublishNanoseconds > 0);
+        assert.ok(result.execution.partitionCommunication.boundaryWaitNanoseconds >= 0);
+        assert.equal(result.execution.partitionCommunication.serializationNanoseconds, 0);
+    }
+    assert.deepEqual(result.states, serialSimulation.states);
+    assert.deepEqual(result.samples, serialSimulation.samples);
+    parallelResults.push(result);
+}
+assert.deepEqual(parallelResults[0].states, parallelResults[1].states);
 
 const damaged = JSON.parse(project);
 damaged.nodes[0].states[0].symbol = 'Not camel case';

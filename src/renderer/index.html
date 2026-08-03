@@ -95,6 +95,18 @@
             <label><span>Name</span><input id="runConfigurationName" autocomplete="off" required></label>
             <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
             <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">Execution</span>
+                <label><span>Backend</span><select id="runExecutionBackend"><option value="automatic">Automatic</option><option value="serial">Serial</option><option value="threadPool">Thread pool</option><option value="partitioned">Partitioned</option></select></label>
+                <label><span>Worker limit</span><input id="runWorkerThreads" type="number" min="1" max="256" step="1" required></label>
+                <details id="runExecutionAdvanced" class="executionAdvanced">
+                    <summary>Advanced execution</summary>
+                    <label><span>Partition count</span><input id="runPartitionCount" type="number" min="1" max="256" step="1" required></label>
+                    <label><span>Communication bias</span><input id="runPartitionCommunicationBias" type="number" min="0" step="any" required></label>
+                    <label><span>Parallel work threshold</span><input id="runAutomaticParallelThreshold" type="number" min="1" max="1000000" step="1" required></label>
+                    <label><span>Maximum automatic cut fraction</span><input id="runAutomaticMaximumPartitionCutFraction" type="number" min="0" max="1" step="0.01" required></label>
+                </details>
+            </section>
             <div class="passwordError" id="runConfigurationError" role="alert"></div>
             <footer><button id="runConfigurationCancel" type="button">Cancel</button><button id="applyRunConfiguration" class="doneButton" type="submit">Apply</button></footer>
         </form>
@@ -357,7 +369,13 @@
             <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option></select>
             <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
             <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
+            <button id="executionSummaryButton" class="executionButton" type="button" aria-label="Show execution summary" aria-expanded="false" hidden><span aria-hidden="true">⌁</span> <span id="executionSummaryBackend">Execution</span></button>
             <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
+        </section>
+        <section id="executionSummaryCard" class="contextCard executionSummaryCard hidden" aria-label="Execution summary">
+            <header><span><small>Execution summary</small><strong id="executionSummaryTitle">Automatic</strong></span><button id="closeExecutionSummary" type="button" aria-label="Close execution summary">×</button></header>
+            <p id="executionSummaryReason"></p>
+            <dl id="executionSummaryMetrics"></dl>
         </section>
 
         <div class="canvasHelp">

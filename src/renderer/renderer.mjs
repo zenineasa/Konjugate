@@ -34,8 +34,21 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 }[character]));
 const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const defaultWorkerThreads = Math.max(1, Math.min(256, Number(navigator.hardwareConcurrency) || 1));
+const normalizeExecutionConfiguration = (execution = {}) => ({
+    backend: ['automatic', 'serial', 'threadPool', 'partitioned'].includes(execution.backend) ? execution.backend : 'automatic',
+    workerThreads: Math.max(1, Math.min(256, Math.round(Number(execution.workerThreads) || defaultWorkerThreads))),
+    partitionCount: Math.max(1, Math.min(256, Math.round(Number(execution.partitionCount) || defaultWorkerThreads))),
+    partitionCommunicationBias: Math.max(0, Number.isFinite(Number(execution.partitionCommunicationBias))
+        ? Number(execution.partitionCommunicationBias) : 4),
+    automaticParallelThreshold: Math.max(1, Math.min(1000000, Math.round(Number(execution.automaticParallelThreshold) || 128))),
+    automaticMaximumPartitionCutFraction: Math.max(0, Math.min(1,
+        Number.isFinite(Number(execution.automaticMaximumPartitionCutFraction))
+            ? Number(execution.automaticMaximumPartitionCutFraction) : 0.25))
+});
 const defaultRunConfiguration = () => ({
-    id: crypto.randomUUID(), name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1
+    id: crypto.randomUUID(), name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1,
+    execution: normalizeExecutionConfiguration()
 });
 
 const canvas = $('#canvas');
@@ -209,7 +222,8 @@ function hydrateProjectDocument(document) {
             id: configuration.id ?? crypto.randomUUID(),
             name: configuration.name || 'Untitled',
             globalTimeStep: Number(configuration.globalTimeStep) || 0.01,
-            outputInterval: Number(configuration.outputInterval) || 0.1
+            outputInterval: Number(configuration.outputInterval) || 0.1,
+            execution: normalizeExecutionConfiguration(configuration.execution)
         }))
         : [defaultRunConfiguration()];
     return {
@@ -1803,6 +1817,68 @@ function activateResult(result) {
     if (selectedNode && !$('#nodeEditor').classList.contains('hidden')) selectNodeEditorTab('results');
 }
 
+function formatExecutionDuration(nanoseconds) {
+    const milliseconds = Number(nanoseconds || 0) / 1e6;
+    return milliseconds < 0.01 ? `${Math.round(Number(nanoseconds || 0) / 1000)} µs` : `${milliseconds.toFixed(milliseconds < 10 ? 2 : 1)} ms`;
+}
+
+function formatExecutionBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function renderExecutionSummary() {
+    const execution = activeResult?.execution;
+    const partitionPlan = activeResult?.partitionPlan;
+    const available = Boolean(execution && partitionPlan);
+    $('#executionSummaryButton').hidden = !available;
+    if (!available) {
+        $('#executionSummaryCard').classList.add('hidden');
+        $('#executionSummaryButton').ariaExpanded = 'false';
+        return;
+    }
+    const backendNames = { serial: 'Serial', threadPool: 'Thread pool', partitioned: 'Partitioned' };
+    const reasonDescriptions = {
+        explicitSelection: 'This backend was selected explicitly in the run configuration.',
+        singleNode: 'Serial execution was selected because the model has only one node.',
+        belowParallelWorkThreshold: 'Serial execution was selected because the estimated work is below the parallel threshold.',
+        independentParallelWork: 'Partitioned execution was selected because the heavy node workloads are independent.',
+        partitionCutWithinLimit: 'Partitioned execution was selected because the communication cut remains within the configured limit.',
+        partitionCommunicationCutTooHigh: 'The shared thread pool was selected to avoid an expensive partition communication cut.'
+    };
+    const backendName = backendNames[execution.backend] ?? execution.backend;
+    $('#executionSummaryBackend').textContent = backendName;
+    $('#executionSummaryTitle').textContent = `${backendName} · ${execution.workerThreads} worker${execution.workerThreads === 1 ? '' : 's'}`;
+    $('#executionSummaryReason').textContent = reasonDescriptions[execution.selectionReason] ?? 'The engine selected this execution strategy for the current model.';
+    const communication = execution.partitionCommunication ?? {};
+    const greedy = partitionPlan.greedy ?? {};
+    const roundRobin = partitionPlan.roundRobin ?? {};
+    const nodeComputeNanoseconds = (execution.nodeMetrics ?? []).reduce((total, item) => total + Number(item.computeNanoseconds || 0), 0);
+    const metrics = [
+        ['Planning', formatExecutionDuration(execution.planningNanoseconds)],
+        ['Node computation', formatExecutionDuration(nodeComputeNanoseconds)],
+        ['Synchronization', formatExecutionDuration(execution.synchronizationComputeNanoseconds)],
+        ['Compute imbalance', `${Number(greedy.computeImbalance || 1).toFixed(2)}×`],
+        ['Communication cut', `${greedy.communicationCutWeight ?? 0} · round robin ${roundRobin.communicationCutWeight ?? 0}`],
+        ['Boundary messages', Number(communication.boundaryMessages || 0).toLocaleString()],
+        ['Boundary payload', formatExecutionBytes(communication.boundaryPayloadBytes)],
+        ['Message preparation', formatExecutionDuration(communication.messagePreparationNanoseconds)],
+        ['Transport publishing', formatExecutionDuration(communication.transportPublishNanoseconds)],
+        ['Partition waiting', formatExecutionDuration(communication.boundaryWaitNanoseconds)]
+    ];
+    const list = $('#executionSummaryMetrics');
+    list.replaceChildren();
+    metrics.forEach(([label, value]) => {
+        const term = document.createElement('dt');
+        const description = document.createElement('dd');
+        term.textContent = label;
+        description.textContent = value;
+        list.append(term, description);
+    });
+}
+
 function updateLiveResultControls() {
     const lifecycle = activeResult?.lifecycle;
     const live = simulationRunning && ['running', 'paused'].includes(lifecycle);
@@ -1838,7 +1914,18 @@ function updateLiveResultControls() {
         const value = mode === 'limitedRatio' ? `limitedRatio:${ratio}` : mode;
         if ([...$('#simulationPacing').options].some((option) => option.value === value)) $('#simulationPacing').value = value;
     }
+    renderExecutionSummary();
 }
+
+$('#executionSummaryButton').addEventListener('click', () => {
+    const opening = $('#executionSummaryCard').classList.contains('hidden');
+    $('#executionSummaryCard').classList.toggle('hidden', !opening);
+    $('#executionSummaryButton').ariaExpanded = String(opening);
+});
+$('#closeExecutionSummary').addEventListener('click', () => {
+    $('#executionSummaryCard').classList.add('hidden');
+    $('#executionSummaryButton').ariaExpanded = 'false';
+});
 
 function liveParameterRange(parameter) {
     const value = Number(parameter.value) || 0;
@@ -1934,6 +2021,8 @@ async function clearResultPlayback() {
     activeEngineJobId = null;
     simulationRunning = false;
     $('#liveParameterPanel').hidden = true;
+    $('#executionSummaryCard').classList.add('hidden');
+    $('#executionSummaryButton').ariaExpanded = 'false';
     setResultModeLocked(false);
     nodeResultPlot.clear();
     $('.nodeResultsPanel').classList.remove('hasResults');
@@ -2197,15 +2286,34 @@ function applyRunConfiguration(configuration) {
     updateValidationStatus();
 }
 
+function updateExecutionConfigurationFields() {
+    const backend = $('#runExecutionBackend').value;
+    $('#runWorkerThreads').disabled = backend === 'serial';
+    const partitionControlsEnabled = backend === 'automatic' || backend === 'partitioned';
+    $('#runPartitionCount').disabled = !partitionControlsEnabled;
+    $('#runPartitionCommunicationBias').disabled = !partitionControlsEnabled;
+    $('#runAutomaticParallelThreshold').disabled = backend !== 'automatic';
+    $('#runAutomaticMaximumPartitionCutFraction').disabled = backend !== 'automatic';
+}
+
 $('#runConfigurationButton').addEventListener('click', () => {
     if (activeResult) return;
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#runConfigurationName').value = configuration.name;
     $('#runGlobalTimeStep').value = configuration.globalTimeStep;
     $('#runOutputInterval').value = configuration.outputInterval;
+    const execution = normalizeExecutionConfiguration(configuration.execution);
+    $('#runExecutionBackend').value = execution.backend;
+    $('#runWorkerThreads').value = execution.workerThreads;
+    $('#runPartitionCount').value = execution.partitionCount;
+    $('#runPartitionCommunicationBias').value = execution.partitionCommunicationBias;
+    $('#runAutomaticParallelThreshold').value = execution.automaticParallelThreshold;
+    $('#runAutomaticMaximumPartitionCutFraction').value = execution.automaticMaximumPartitionCutFraction;
+    updateExecutionConfigurationFields();
     $('#runConfigurationError').textContent = '';
     $('#runConfigurationDialog').showModal();
 });
+$('#runExecutionBackend').addEventListener('change', updateExecutionConfigurationFields);
 $('#runConfigurationCancel').addEventListener('click', () => $('#runConfigurationDialog').close());
 $('#runConfigurationDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -2215,12 +2323,30 @@ $('#runConfigurationDialog form').addEventListener('submit', (event) => {
         ...before,
         name: $('#runConfigurationName').value.trim() || 'Untitled',
         globalTimeStep: Number($('#runGlobalTimeStep').value),
-        outputInterval: Number($('#runOutputInterval').value)
+        outputInterval: Number($('#runOutputInterval').value),
+        execution: {
+            backend: $('#runExecutionBackend').value,
+            workerThreads: Number($('#runWorkerThreads').value),
+            partitionCount: Number($('#runPartitionCount').value),
+            partitionCommunicationBias: Number($('#runPartitionCommunicationBias').value),
+            automaticParallelThreshold: Number($('#runAutomaticParallelThreshold').value),
+            automaticMaximumPartitionCutFraction: Number($('#runAutomaticMaximumPartitionCutFraction').value)
+        }
     };
     const outputRatio = after.outputInterval / after.globalTimeStep;
+    const execution = after.execution;
+    const validExecution = Number.isInteger(execution.workerThreads) && execution.workerThreads >= 1 && execution.workerThreads <= 256 &&
+        Number.isInteger(execution.partitionCount) && execution.partitionCount >= 1 && execution.partitionCount <= 256 &&
+        Number.isFinite(execution.partitionCommunicationBias) && execution.partitionCommunicationBias >= 0 &&
+        Number.isInteger(execution.automaticParallelThreshold) && execution.automaticParallelThreshold >= 1 &&
+        execution.automaticParallelThreshold <= 1000000 &&
+        Number.isFinite(execution.automaticMaximumPartitionCutFraction) &&
+        execution.automaticMaximumPartitionCutFraction >= 0 && execution.automaticMaximumPartitionCutFraction <= 1;
     if (!(after.globalTimeStep > 0) || !(after.outputInterval > 0) || after.outputInterval < after.globalTimeStep ||
-        Math.abs(outputRatio - Math.round(outputRatio)) > 1e-9) {
-        $('#runConfigurationError').textContent = 'Use positive values; output interval must be an integer multiple of the global timestep.';
+        Math.abs(outputRatio - Math.round(outputRatio)) > 1e-9 || !validExecution) {
+        $('#runConfigurationError').textContent = validExecution
+            ? 'Use positive values; output interval must be an integer multiple of the global timestep.'
+            : 'Execution values must be within their displayed bounds.';
         return;
     }
     applyRunConfiguration(after);
@@ -4152,6 +4278,7 @@ function cancelFilenameEdit() {
 }
 
 documentTitle.addEventListener('click', beginFilenameEdit);
+documentTitleInput.addEventListener('change', commitFilenameEdit);
 documentTitleInput.addEventListener('blur', commitFilenameEdit);
 documentTitleInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {

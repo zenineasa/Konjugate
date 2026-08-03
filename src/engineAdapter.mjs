@@ -28,16 +28,21 @@ export async function resolveEnginePath({ applicationPath, resourcesPath, packag
     return null;
 }
 
-function runEngine(executable, args, environment = {}) {
+function runEngine(executable, args, environment = {}, signal = null) {
     return new Promise((resolve, reject) => {
         const child = spawn(executable, args, {
             env: { ...process.env, ...environment },
-            stdio: ['ignore', 'ignore', 'pipe']
+            stdio: ['ignore', 'ignore', 'pipe'],
+            ...(signal ? { signal } : {})
         });
         let diagnostics = '';
+        let processError = null;
         child.stderr.on('data', (chunk) => { diagnostics += chunk; });
-        child.once('error', reject);
-        child.once('exit', (code) => resolve({ code, diagnostics: diagnostics.trim() }));
+        child.once('error', (error) => { processError = error; });
+        child.once('close', (code) => {
+            if (processError) reject(processError);
+            else resolve({ code, diagnostics: diagnostics.trim() });
+        });
     });
 }
 
@@ -49,7 +54,7 @@ export async function validateWithEngine(content, options) {
     const reportPath = join(directory, 'validation.json');
     try {
         await writeFile(inputPath, await encodeProjectFile(content));
-        const execution = await runEngine(executable, ['validate', inputPath, '--report', reportPath]);
+        const execution = await runEngine(executable, ['validate', inputPath, '--report', reportPath], {}, options.signal);
         if (execution.code !== 0 && execution.code !== 2) {
             throw new Error(execution.diagnostics || `The validation engine exited with code ${execution.code}.`);
         }
@@ -73,6 +78,10 @@ export function normalizePacing(pacing = {}) {
         throw new Error('Limited simulation pacing requires a finite positive ratio.');
     }
     return { mode, simulationSecondsPerWallSecond: ratio };
+}
+
+function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export async function startEngineRun(content, configuration, options, { onUpdate } = {}) {
@@ -107,6 +116,8 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     let streamRemainder = '';
     let accumulatedSamples = [];
     let accumulatedCheckpoints = [];
+    let childExited = false;
+    let shutdownPromise = null;
     child.stderr.on('data', (chunk) => { diagnostics += chunk; });
 
     const readStream = async () => {
@@ -165,21 +176,32 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const pollTimer = setInterval(readSnapshot, 100);
 
     const completion = new Promise((resolve, reject) => {
-        child.once('error', reject);
-        child.once('exit', async (code) => {
+        let finalized = false;
+        const finalize = async (code, processError = null) => {
+            if (finalized) return;
+            finalized = true;
+            childExited = true;
             clearInterval(pollTimer);
             while (polling) await new Promise((resolvePolling) => setTimeout(resolvePolling, 5));
             const result = await readSnapshot();
+            let failure = processError;
             try {
+                if (failure) throw failure;
                 if (code !== 0) throw new Error(diagnostics.trim() || `The simulation engine exited with code ${code}.`);
                 if (!result) throw new Error('The simulation engine did not produce a result.');
-                resolve(result);
             } catch (error) {
-                reject(error);
-            } finally {
-                await rm(directory, { recursive: true, force: true });
+                failure = error;
             }
-        });
+            try {
+                await rm(directory, { recursive: true, force: true });
+            } catch (error) {
+                failure ??= error;
+            }
+            if (failure) reject(failure);
+            else resolve(result);
+        };
+        child.once('error', (error) => { void finalize(null, error); });
+        child.once('exit', (code) => { void finalize(code); });
     });
 
     const persistControl = () => {
@@ -193,6 +215,44 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             }
         });
         return controlWrite;
+    };
+
+    const awaitExit = async (timeoutMilliseconds) => {
+        if (childExited) {
+            await completion.catch(() => {});
+            return true;
+        }
+        return Promise.race([
+            completion.then(() => true, () => true),
+            delay(timeoutMilliseconds).then(() => false)
+        ]);
+    };
+
+    const shutdown = ({ gracefulTimeoutMilliseconds = 1500, terminationTimeoutMilliseconds = 1000 } = {}) => {
+        if (shutdownPromise) return shutdownPromise;
+        shutdownPromise = (async () => {
+            if (!childExited) {
+                control = { ...control, executionState: 'stopped' };
+                await persistControl().catch(() => {});
+            }
+            if (await awaitExit(gracefulTimeoutMilliseconds)) return;
+            child.kill('SIGTERM');
+            if (await awaitExit(terminationTimeoutMilliseconds)) return;
+            if (!child.kill('SIGKILL') && !childExited) throw new Error('The simulation engine could not be terminated.');
+            await completion.catch(() => {});
+        })();
+        return shutdownPromise;
+    };
+
+    const cancel = () => {
+        if (shutdownPromise) return shutdownPromise;
+        shutdownPromise = (async () => {
+            if (!childExited) child.kill('SIGTERM');
+            if (await awaitExit(1000)) return;
+            if (!child.kill('SIGKILL') && !childExited) throw new Error('The simulation engine could not be cancelled.');
+            await completion.catch(() => {});
+        })();
+        return shutdownPromise;
     };
 
     return {
@@ -219,6 +279,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             await persistControl();
             return { parameterId, value };
         },
-        cancel: () => child.kill()
+        shutdown,
+        cancel
     };
 }

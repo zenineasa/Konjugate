@@ -273,6 +273,25 @@ assert.equal(stoppedResult.lifecycle, 'stopped');
 assert.ok(stoppedResult.availableResultTime > 0 && stoppedResult.availableResultTime < stoppedResult.targetTime);
 assert.equal(stoppedResult.checkpoints.at(-1).time, stoppedResult.availableResultTime);
 
+let resolveShutdownProgress;
+const shutdownProgress = new Promise((resolve) => { resolveShutdownProgress = resolve; });
+const shutdownRun = await startEngineRun(example, {
+    name: 'Application shutdown', targetTime: 10, globalTimeStep: 0.01, outputInterval: 0.05,
+    pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
+}, {
+    applicationPath: new URL('../..', import.meta.url).pathname,
+    resourcesPath: '', packaged: false
+}, { onUpdate: (result) => {
+    if (result.lifecycle === 'running' && result.availableResultTime > 0) resolveShutdownProgress();
+} });
+await shutdownProgress;
+const firstShutdown = shutdownRun.shutdown();
+assert.equal(shutdownRun.shutdown(), firstShutdown, 'Engine shutdown must be idempotent.');
+await firstShutdown;
+const shutdownResult = await shutdownRun.completion;
+assert.equal(shutdownResult.lifecycle, 'stopped');
+assert.ok(shutdownResult.availableResultTime > 0 && shutdownResult.availableResultTime < shutdownResult.targetTime);
+
 await writeFile(join(directory, 'restartRun.json'), JSON.stringify({
     name: 'Restart', targetTime: 0.2, globalTimeStep: 0.1, outputInterval: 0.1,
     startCheckpoint: sourceResult.checkpoints.at(-1)

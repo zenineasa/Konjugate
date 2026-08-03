@@ -6,7 +6,7 @@ import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { runWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import {
     createVisualizerSession,
     publicToolstripContributions,
@@ -34,8 +34,12 @@ let visualizerSession = null;
 const addonRegistry = new Map();
 const activeEngineJobs = new Map();
 const activeAIRequests = new Map();
+const activeAIOperations = new Set();
+const activeValidationOperations = new Set();
 let aiProviderRegistry = null;
 let aiConfigurationStore = null;
+let applicationShutdownPromise = null;
+let applicationShutdownComplete = false;
 
 function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
@@ -72,6 +76,15 @@ function createWindow() {
             backgroundThrottling: false
         }
     });
+
+    const owner = mainWindow.webContents;
+    const ownerUnavailable = () => {
+        abortAIOperations(owner);
+        shutdownValidationOperations(owner);
+        shutdownEngineJobs(owner);
+    };
+    owner.once('destroyed', ownerUnavailable);
+    owner.once('render-process-gone', ownerUnavailable);
 
     installCustomWindowState(mainWindow);
 
@@ -138,6 +151,50 @@ function requireProjectWindow(event) {
 
 function aiRequestKey(sender, requestUuid) {
     return `${sender.id}:${requestUuid}`;
+}
+
+async function withAIOperation(owner, timeoutSeconds, operation) {
+    const controller = new AbortController();
+    const active = { owner, controller };
+    const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    activeAIOperations.add(active);
+    try {
+        return await operation(controller.signal);
+    } finally {
+        clearTimeout(timeout);
+        activeAIOperations.delete(active);
+    }
+}
+
+function abortAIOperations(owner = null) {
+    for (const [key, active] of activeAIRequests) {
+        if (owner && active.owner !== owner) continue;
+        active.controller.abort();
+        activeAIRequests.delete(key);
+    }
+    for (const active of activeAIOperations) {
+        if (owner && active.owner !== owner) continue;
+        active.controller.abort();
+        activeAIOperations.delete(active);
+    }
+}
+
+async function shutdownValidationOperations(owner = null) {
+    const operations = [...activeValidationOperations].filter((active) => !owner || active.owner === owner);
+    for (const active of operations) active.controller.abort();
+    await Promise.allSettled(operations.map((active) => active.completion));
+}
+
+async function shutdownEngineJobs(owner = null) {
+    const jobs = [...activeEngineJobs.values()].filter((job) => !owner || job.owner === owner);
+    await Promise.allSettled(jobs.map((job) => job.shutdown()));
+}
+
+function beginApplicationShutdown() {
+    if (applicationShutdownPromise) return applicationShutdownPromise;
+    abortAIOperations();
+    applicationShutdownPromise = Promise.all([shutdownEngineJobs(), shutdownValidationOperations()]);
+    return applicationShutdownPromise;
 }
 
 function visualizerCan(permission) {
@@ -451,25 +508,15 @@ ipcMain.handle('aiListConfigurations', async (event) => {
 ipcMain.handle('aiListModels', async (event, configurationUuid) => {
     requireProjectWindow(event);
     const resolved = await aiConfigurationStore.resolve(configurationUuid);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
-    try {
-        return await aiProviderRegistry.listModels({ ...resolved, signal: controller.signal });
-    } finally {
-        clearTimeout(timeout);
-    }
+    return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
+        (signal) => aiProviderRegistry.listModels({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiListDraftModels', async (event, configuration, credential) => {
     requireProjectWindow(event);
     const resolved = await aiConfigurationStore.resolveDraft(configuration, credential);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
-    try {
-        return await aiProviderRegistry.listModels({ ...resolved, signal: controller.signal });
-    } finally {
-        clearTimeout(timeout);
-    }
+    return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
+        (signal) => aiProviderRegistry.listModels({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiSaveConfiguration', async (event, configuration, credential) => {
@@ -490,25 +537,15 @@ ipcMain.handle('aiSetActiveConfiguration', async (event, configurationUuid) => {
 ipcMain.handle('aiTestConnection', async (event, configurationUuid) => {
     requireProjectWindow(event);
     const resolved = await aiConfigurationStore.resolve(configurationUuid);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
-    try {
-        return await aiProviderRegistry.testConnection({ ...resolved, signal: controller.signal });
-    } finally {
-        clearTimeout(timeout);
-    }
+    return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
+        (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential) => {
     requireProjectWindow(event);
     const resolved = await aiConfigurationStore.resolveDraft(configuration, credential);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolved.configuration.timeoutSeconds * 1000);
-    try {
-        return await aiProviderRegistry.testConnection({ ...resolved, signal: controller.signal });
-    } finally {
-        clearTimeout(timeout);
-    }
+    return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
+        (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context }) => {
@@ -557,9 +594,27 @@ const engineOptions = () => ({
     packaged: app.isPackaged
 });
 
-ipcMain.handle('engineValidate', async (_event, content) => validateWithEngine(content, engineOptions()));
+ipcMain.handle('engineValidate', async (event, content) => {
+    const active = { owner: event.sender, controller: new AbortController(), completion: null };
+    activeValidationOperations.add(active);
+    try {
+        active.completion = validateWithEngine(content, { ...engineOptions(), signal: active.controller.signal });
+        return await active.completion;
+    } finally {
+        activeValidationOperations.delete(active);
+    }
+});
 
-ipcMain.handle('engineRun', async (_event, content, configuration) => runWithEngine(content, configuration, engineOptions()));
+ipcMain.handle('engineRun', async (event, content, configuration) => {
+    const execution = await startEngineRun(content, configuration, engineOptions());
+    if (!execution.available) return execution;
+    activeEngineJobs.set(execution.jobId, { owner: event.sender, latestResult: null, ...execution });
+    try {
+        return { available: true, result: await execution.completion };
+    } finally {
+        activeEngineJobs.delete(execution.jobId);
+    }
+});
 
 ipcMain.handle('engineStart', async (event, content, configuration) => {
     const owner = event.sender;
@@ -621,7 +676,7 @@ ipcMain.handle('engineSetParameterValue', async (event, jobId, parameterId, valu
 ipcMain.handle('engineCancel', async (event, jobId) => {
     const job = activeEngineJobs.get(jobId);
     if (!job || job.owner !== event.sender) return false;
-    job.cancel();
+    await job.cancel();
     return true;
 });
 
@@ -645,4 +700,13 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
     }
+});
+
+app.on('before-quit', (event) => {
+    if (applicationShutdownComplete) return;
+    event.preventDefault();
+    beginApplicationShutdown().finally(() => {
+        applicationShutdownComplete = true;
+        app.quit();
+    });
 });

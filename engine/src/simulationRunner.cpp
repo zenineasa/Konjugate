@@ -45,7 +45,7 @@ struct Checkpoint { std::string uuid; double time; Values states; };
 enum class PacingMode { fastest, realTime, limitedRatio };
 enum class RunState { running, paused, stopped };
 struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
-struct RunControl { Pacing pacing; RunState executionState = RunState::running; Values parameterValues; };
+struct RunControl { Pacing pacing; RunState executionState = RunState::running; EntityValues parameterValues; };
 struct ExecutionSettings {
     ExecutionBackend requestedBackend = ExecutionBackend::automatic;
     ExecutionBackend backend = ExecutionBackend::serial;
@@ -203,22 +203,22 @@ ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& t
 
 NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const Values& synchronizationSnapshot,
-                                    const Values& liveParameterValues,
+                                    const EntityValues& liveParameterValues,
                                     double synchronizationStep) {
     const auto startedAt = std::chrono::steady_clock::now();
-    Values localStates;
-    localStates.reserve(node.stateIds.size());
-    for (const auto& stateId : node.stateIds) localStates[stateId] = synchronizationSnapshot.at(stateId);
+    Values localStates(node.stateIndexes.size());
+    for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
+        localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
+    }
+    const auto parameterValues = resolveParameterValues(node, liveParameterValues);
     const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
-        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, liveParameterValues);
+        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, parameterValues);
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
     }
-    Values result;
-    for (const auto& stateId : node.stateIds) result[stateId] = localStates.at(stateId);
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
-    return {std::move(result), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+    return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
 }
 }
 
@@ -325,8 +325,11 @@ void runSimulation(const boost::property_tree::ptree& document,
         std::set<EntityId> restored;
         for (const auto& stateItem : checkpoint->get_child("states")) {
             const auto stateId = entityIdValue(stateItem.second, "stateId");
-            if (!states.contains(stateId) || !restored.insert(stateId).second) throw std::runtime_error("The restart checkpoint does not match the model state vector.");
-            states[stateId] = stateItem.second.get<double>("value");
+            const auto stateIndex = executionPlan.stateIndexes.find(stateId);
+            if (stateIndex == executionPlan.stateIndexes.end() || !restored.insert(stateId).second) {
+                throw std::runtime_error("The restart checkpoint does not match the model state vector.");
+            }
+            states[stateIndex->second] = stateItem.second.get<double>("value");
         }
         if (restored.size() != states.size()) throw std::runtime_error("The restart checkpoint is missing model states.");
     }
@@ -364,7 +367,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             auto* batch = event.mutable_sample_batch();
             batch->add_times(time);
             batch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
-            for (const auto& stateId : stateIds) batch->add_values(recordStates.at(stateId));
+            for (const auto& stateId : stateIds) batch->add_values(recordStates.at(executionPlan.stateIndexes.at(stateId)));
             writeFramedEvent(*eventStream, event);
             return;
         }
@@ -374,7 +377,8 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
             if (stateIndex) resultStream << ',';
             const auto& stateId = stateIds[stateIndex];
-            resultStream << "{\"stateId\":" << stateId << ",\"value\":" << recordStates.at(stateId) << '}';
+            resultStream << "{\"stateId\":" << stateId << ",\"value\":"
+                         << recordStates.at(executionPlan.stateIndexes.at(stateId)) << '}';
         }
         resultStream << "]}\n";
     };
@@ -495,7 +499,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             if (index) json << ',';
             const auto& stateId = stateIds[index];
             json << "{\"nodeId\":" << stateNodes.at(stateId) << ",\"stateId\":" << stateId
-                 << ",\"value\":" << states.at(stateId) << '}';
+                 << ",\"value\":" << states.at(executionPlan.stateIndexes.at(stateId)) << '}';
         }
         json << "],\"samples\":[";
         for (std::size_t sampleIndex = 0; completeSnapshot && sampleIndex < samples.size(); ++sampleIndex) {
@@ -504,7 +508,8 @@ void runSimulation(const boost::property_tree::ptree& document,
             for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
                 if (stateIndex) json << ',';
                 const auto& stateId = stateIds[stateIndex];
-                json << "{\"stateId\":" << stateId << ",\"value\":" << samples[sampleIndex].states.at(stateId) << '}';
+                json << "{\"stateId\":" << stateId << ",\"value\":"
+                     << samples[sampleIndex].states.at(executionPlan.stateIndexes.at(stateId)) << '}';
             }
             json << "]}";
         }
@@ -517,7 +522,8 @@ void runSimulation(const boost::property_tree::ptree& document,
             for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
                 if (stateIndex) json << ',';
                 const auto& stateId = stateIds[stateIndex];
-                json << "{\"stateId\":" << stateId << ",\"value\":" << checkpoint.states.at(stateId) << '}';
+                json << "{\"stateId\":" << stateId << ",\"value\":"
+                     << checkpoint.states.at(executionPlan.stateIndexes.at(stateId)) << '}';
             }
             json << "]}";
         }
@@ -586,7 +592,9 @@ void runSimulation(const boost::property_tree::ptree& document,
                 message.synchronizationIndex = step;
                 message.targetPartition = partition;
                 message.states.reserve(partitionSnapshotStateIds[partition].size());
-                for (const auto& stateId : partitionSnapshotStateIds[partition]) message.states[stateId] = snapshot.at(stateId);
+                for (const auto& stateId : partitionSnapshotStateIds[partition]) {
+                    message.states[stateId] = snapshot.at(executionPlan.stateIndexes.at(stateId));
+                }
                 partitionMessagePreparationNanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - preparationStartedAt).count());
                 partitionBoundaryPayloadBytes += partitionMessagePayloadBytes(message);
@@ -621,7 +629,9 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
             const auto& node = executionPlan.nodes[index];
             const auto& result = nodeResults[index];
-            for (const auto& stateId : node.stateIds) synchronizedStates[stateId] = result.states.at(stateId);
+            for (std::size_t stateIndex = 0; stateIndex < node.stateIndexes.size(); ++stateIndex) {
+                synchronizedStates[node.stateIndexes[stateIndex]] = result.states.at(stateIndex);
+            }
             auto& metrics = nodeMetrics[index];
             ++metrics.invocations;
             metrics.executedSubsteps += node.substeps;

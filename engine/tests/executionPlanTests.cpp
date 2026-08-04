@@ -59,15 +59,18 @@ void evaluationSeparatesLocalSnapshotAndLiveParameterInputs() {
         {"gain", konjugate::BindingSource::parameter, 4}
     };
     task.parameters = {{4, 3, true}};
+    task.bindings[0].valueIndex = 0;
+    task.bindings[1].valueIndex = 1;
     task.bindings[2].parameterIndex = 0;
     task.expression = add({symbol("local", 0), symbol("remote", 1), symbol("gain", 2)});
     require(task.expression.operationCount() == 4, "Static expression work was not counted recursively.");
     node.contributions.push_back(std::move(task));
 
-    const konjugate::StateValues local = {{2, 2}, {3, 999}};
-    const konjugate::StateValues snapshot = {{2, -1}, {3, 5}};
-    const konjugate::StateValues overrides = {{4, 7}};
-    const auto evaluated = konjugate::evaluateContributionTasks(node, local, snapshot, overrides);
+    const konjugate::StateValues local = {2, 999};
+    const konjugate::StateValues snapshot = {-1, 5};
+    const konjugate::EntityValues overrides = {{4, 7}};
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, local, snapshot, konjugate::resolveParameterValues(node, overrides));
     require(evaluated.size() == 1, "The contribution task was not evaluated.");
     require(std::abs(evaluated.front().value - 14) < 1e-12,
         "Evaluation did not respect local state, synchronization snapshot and live parameter boundaries.");
@@ -260,15 +263,19 @@ void partitionerSelectionUsesMetisWhenAvailable() {
 
 konjugate::ExecutionPlan singleNodeRuntimePlan() {
     konjugate::ExecutionPlan plan;
-    plan.initialStates = {{2, 1}};
+    plan.initialStates = {1};
     plan.stateIds = {2};
+    plan.stateIndexes = {{2, 0}};
     plan.stateNodes = {{2, 1}};
     konjugate::NodeExecutionPlan node;
     node.nodeId = 1;
     node.stateIds = {2};
+    node.stateIndexes = {0};
     konjugate::ContributionTask contribution;
     contribution.outputStateId = 2;
+    contribution.outputStateIndex = 0;
     contribution.bindings = {{"state", konjugate::BindingSource::localState, 2}};
+    contribution.bindings[0].valueIndex = 0;
     contribution.expression = symbol("state");
     node.contributions = {contribution};
     plan.nodes = {node};
@@ -334,7 +341,7 @@ void partitionRuntimeReplaysDeterministicallyThroughMessages() {
     const auto replay = execute(3);
     require(first.nodes.size() == 1 && replay.nodes.size() == 1, "Partition execution omitted a node result.");
     require(first.nodes.front().states == replay.nodes.front().states &&
-            std::abs(first.nodes.front().states.at(2) - 1.1) < 1e-12,
+            std::abs(first.nodes.front().states.at(0) - 1.1) < 1e-12,
         "Partition replay was not deterministic.");
 }
 

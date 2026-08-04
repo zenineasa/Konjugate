@@ -10,23 +10,23 @@ namespace {
 PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
                                   std::size_t nodeIndex,
                                   const StateValues& synchronizationSnapshot,
-                                  const StateValues& liveParameterValues,
+                                  const EntityValues& liveParameterValues,
                                   double synchronizationStep) {
     const auto startedAt = std::chrono::steady_clock::now();
-    StateValues localStates;
-    localStates.reserve(node.stateIds.size());
-    for (const auto& stateId : node.stateIds) localStates[stateId] = synchronizationSnapshot.at(stateId);
+    StateValues localStates(node.stateIndexes.size());
+    for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
+        localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
+    }
+    const auto parameterValues = resolveParameterValues(node, liveParameterValues);
     const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
-        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, liveParameterValues);
+        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, parameterValues);
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
     }
-    StateValues result;
-    for (const auto& stateId : node.stateIds) result[stateId] = localStates.at(stateId);
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - startedAt).count();
-    return {nodeIndex, std::move(result), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+    return {nodeIndex, std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
 }
 
 }
@@ -74,7 +74,7 @@ const std::vector<std::size_t>& PartitionRuntime::nodeIndexes() const noexcept {
 
 std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport& transport,
                                                              std::size_t synchronizationIndex,
-                                                             StateValues parameterValues,
+                                                             EntityValues parameterValues,
                                                              double synchronizationStep,
                                                              std::chrono::milliseconds receiveTimeout) {
     return executor_.submit([this, &transport, synchronizationIndex, parameterValues = std::move(parameterValues),
@@ -91,10 +91,22 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
         result.synchronizationIndex = synchronizationIndex;
         result.sourcePartition = partition_;
         result.boundaryWaitNanoseconds = static_cast<std::uint64_t>(std::max<std::int64_t>(0, waitNanoseconds));
+        StateValues synchronizationSnapshot(executionPlan_.initialStates.size());
         result.nodes.reserve(nodeIndexes_.size());
         for (const auto nodeIndex : nodeIndexes_) {
+            const auto& node = executionPlan_.nodes[nodeIndex];
+            for (const auto stateId : node.stateIds) {
+                synchronizationSnapshot.at(executionPlan_.stateIndexes.at(stateId)) = boundary.states.at(stateId);
+            }
+            for (const auto& task : node.contributions) {
+                for (const auto& binding : task.bindings) {
+                    if (binding.source == BindingSource::synchronizationSnapshot) {
+                        synchronizationSnapshot.at(binding.valueIndex) = boundary.states.at(binding.valueId);
+                    }
+                }
+            }
             result.nodes.push_back(integrateNode(
-                executionPlan_.nodes[nodeIndex], nodeIndex, boundary.states, parameterValues, synchronizationStep));
+                node, nodeIndex, synchronizationSnapshot, parameterValues, synchronizationStep));
         }
         return result;
     });

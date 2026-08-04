@@ -20,7 +20,7 @@ struct PartitionBoundaryMessage {
     std::size_t version = 1;
     std::size_t synchronizationIndex = 0;
     std::size_t targetPartition = 0;
-    StateValues states;
+    EntityValues states;
 };
 
 struct PartitionNodeResult {
@@ -70,7 +70,7 @@ public:
     const std::vector<std::size_t>& nodeIndexes() const noexcept;
     std::future<PartitionResultMessage> submit(PartitionTransport& transport,
                                                std::size_t synchronizationIndex,
-                                               StateValues parameterValues,
+                                               EntityValues parameterValues,
                                                double synchronizationStep,
                                                std::chrono::milliseconds receiveTimeout = std::chrono::seconds(5));
 

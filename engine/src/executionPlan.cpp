@@ -70,7 +70,9 @@ CompiledExpression compileExpression(const boost::property_tree::ptree& tree) {
 
 std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& bindings,
                                              EntityId outputNodeId,
-                                             bool sourceTerm) {
+                                             bool sourceTerm,
+                                             const std::unordered_map<EntityId, std::size_t>& stateIndexes,
+                                             const std::unordered_map<EntityId, std::size_t>& localStateIndexes) {
     std::vector<CompiledBinding> result;
     for (const auto& bindingItem : bindings) {
         const auto& binding = bindingItem.second;
@@ -83,6 +85,8 @@ std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& 
             compiled.valueId = idValue(binding, "stateId");
             compiled.source = sourceTerm || idValue(binding, "nodeId") == outputNodeId
                 ? BindingSource::localState : BindingSource::synchronizationSnapshot;
+            compiled.valueIndex = compiled.source == BindingSource::localState
+                ? localStateIndexes.at(compiled.valueId) : stateIndexes.at(compiled.valueId);
         }
         result.push_back(std::move(compiled));
     }
@@ -173,9 +177,15 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         for (const auto& stateItem : node.get_child("states")) {
             const auto stateId = idValue(stateItem.second, "id");
             compiledNode.stateIds.push_back(stateId);
-            plan.initialStates[stateId] = stateItem.second.get<double>("initialValue", 0);
+            compiledNode.stateIndexes.push_back(plan.initialStates.size());
+            plan.stateIndexes[stateId] = plan.initialStates.size();
+            plan.initialStates.push_back(stateItem.second.get<double>("initialValue", 0));
             plan.stateNodes[stateId] = compiledNode.nodeId;
             plan.stateIds.push_back(stateId);
+        }
+        std::unordered_map<EntityId, std::size_t> localStateIndexes;
+        for (std::size_t index = 0; index < compiledNode.stateIds.size(); ++index) {
+            localStateIndexes[compiledNode.stateIds[index]] = index;
         }
         std::size_t sequence = 0;
         for (const auto& termItem : node.get_child("sourceTerms")) {
@@ -184,7 +194,9 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             task.sequence = sequence++;
             task.sourceId = idValue(term, "id");
             task.outputStateId = idValue(term, "expressionModel.output.stateId");
-            task.bindings = compileBindings(term.get_child("expressionModel.bindings"), compiledNode.nodeId, true);
+            task.outputStateIndex = localStateIndexes.at(task.outputStateId);
+            task.bindings = compileBindings(term.get_child("expressionModel.bindings"), compiledNode.nodeId, true,
+                plan.stateIndexes, localStateIndexes);
             task.expression = compileExpression(term.get_child("expressionModel.mathJson"));
             bindTask(task);
             compiledNode.estimatedOperationsPerSubstep += task.expression.operationCount();
@@ -199,11 +211,15 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         const auto outputStateId = idValue(edge, "equationModel.output.stateId");
         const auto outputNodeId = plan.stateNodes.at(outputStateId);
         auto& node = plan.nodes.at(nodeIndexes.at(outputNodeId));
+        std::unordered_map<EntityId, std::size_t> localStateIndexes;
+        for (std::size_t index = 0; index < node.stateIds.size(); ++index) localStateIndexes[node.stateIds[index]] = index;
         ContributionTask task;
         task.sequence = node.contributions.size();
         task.sourceId = idValue(edge, "id");
         task.outputStateId = outputStateId;
-        task.bindings = compileBindings(edge.get_child("equationModel.bindings"), outputNodeId, false);
+        task.outputStateIndex = localStateIndexes.at(outputStateId);
+        task.bindings = compileBindings(edge.get_child("equationModel.bindings"), outputNodeId, false,
+            plan.stateIndexes, localStateIndexes);
         for (const auto& parameterItem : edge.get_child("parameters")) {
             const auto& parameter = parameterItem.second;
             task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
@@ -233,41 +249,54 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeExecutionPlan& node,
     const StateValues& localStates,
     const StateValues& synchronizationSnapshot,
-    const StateValues& liveParameterValues) {
+    const NodeParameterValues& parameterValues) {
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
-    for (const auto& task : node.contributions) {
+    for (std::size_t taskIndex = 0; taskIndex < node.contributions.size(); ++taskIndex) {
+        const auto& task = node.contributions[taskIndex];
         std::vector<double> symbols(task.bindings.size());
         for (std::size_t index = 0; index < task.bindings.size(); ++index) {
             const auto& binding = task.bindings[index];
             if (binding.source == BindingSource::parameter) {
-                const auto& parameter = task.parameters.at(binding.parameterIndex);
-                const auto override = liveParameterValues.find(parameter.id);
-                symbols[index] = parameter.live && override != liveParameterValues.end() ? override->second : parameter.value;
-            } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueId);
-            else symbols[index] = synchronizationSnapshot.at(binding.valueId);
+                symbols[index] = parameterValues.at(taskIndex).at(binding.parameterIndex);
+            } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueIndex);
+            else symbols[index] = synchronizationSnapshot.at(binding.valueIndex);
         }
         const auto contribution = task.expression.evaluate(symbols);
         if (!std::isfinite(contribution)) throw std::runtime_error("A contribution task produced a non-finite derivative.");
-        evaluated.push_back({task.sequence, task.outputStateId, contribution});
+        evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
     }
     return evaluated;
 }
 
-std::vector<std::pair<EntityId, double>> reduceContributions(
+NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues) {
+    NodeParameterValues resolved;
+    resolved.reserve(node.contributions.size());
+    for (const auto& task : node.contributions) {
+        auto& values = resolved.emplace_back();
+        values.reserve(task.parameters.size());
+        for (const auto& parameter : task.parameters) {
+            const auto override = liveParameterValues.find(parameter.id);
+            values.push_back(parameter.live && override != liveParameterValues.end() ? override->second : parameter.value);
+        }
+    }
+    return resolved;
+}
+
+std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions) {
     std::stable_sort(contributions.begin(), contributions.end(), [](const auto& left, const auto& right) {
         return left.sequence < right.sequence;
     });
-    std::vector<std::pair<EntityId, double>> derivatives;
-    std::unordered_map<EntityId, std::size_t> derivativeIndexes;
+    std::vector<std::pair<std::size_t, double>> derivatives;
     for (const auto& contribution : contributions) {
-        const auto found = derivativeIndexes.find(contribution.outputStateId);
-        if (found == derivativeIndexes.end()) {
-            derivativeIndexes[contribution.outputStateId] = derivatives.size();
-            derivatives.emplace_back(contribution.outputStateId, contribution.value);
+        const auto found = std::find_if(derivatives.begin(), derivatives.end(), [&](const auto& derivative) {
+            return derivative.first == contribution.outputStateIndex;
+        });
+        if (found == derivatives.end()) {
+            derivatives.emplace_back(contribution.outputStateIndex, contribution.value);
         } else {
-            derivatives[found->second].second += contribution.value;
+            found->second += contribution.value;
         }
     }
     return derivatives;

@@ -14,7 +14,9 @@
 namespace konjugate {
 
 using EntityId = std::uint64_t;
-using StateValues = std::unordered_map<EntityId, double>;
+using EntityValues = std::unordered_map<EntityId, double>;
+using StateValues = std::vector<double>;
+using NodeParameterValues = std::vector<std::vector<double>>;
 
 enum class ExpressionOperation {
     literal,
@@ -52,6 +54,7 @@ struct CompiledBinding {
     std::string symbol;
     BindingSource source = BindingSource::localState;
     EntityId valueId = 0;
+    std::size_t valueIndex = std::numeric_limits<std::size_t>::max();
     std::size_t parameterIndex = std::numeric_limits<std::size_t>::max();
 };
 
@@ -65,6 +68,7 @@ struct ContributionTask {
     std::size_t sequence = 0;
     EntityId sourceId = 0;
     EntityId outputStateId = 0;
+    std::size_t outputStateIndex = std::numeric_limits<std::size_t>::max();
     std::vector<CompiledBinding> bindings;
     std::vector<CompiledParameter> parameters;
     CompiledExpression expression;
@@ -74,6 +78,7 @@ struct NodeExecutionPlan {
     EntityId nodeId = 0;
     std::size_t substeps = 1;
     std::vector<EntityId> stateIds;
+    std::vector<std::size_t> stateIndexes;
     std::vector<ContributionTask> contributions;
     std::size_t estimatedOperationsPerSubstep = 0;
 };
@@ -81,6 +86,7 @@ struct NodeExecutionPlan {
 struct ExecutionPlan {
     StateValues initialStates;
     std::unordered_map<EntityId, EntityId> stateNodes;
+    std::unordered_map<EntityId, std::size_t> stateIndexes;
     std::vector<EntityId> stateIds;
     std::vector<NodeExecutionPlan> nodes;
     std::vector<std::size_t> taskSubmissionOrder;
@@ -88,7 +94,7 @@ struct ExecutionPlan {
 
 struct EvaluatedContribution {
     std::size_t sequence = 0;
-    EntityId outputStateId = 0;
+    std::size_t outputStateIndex = 0;
     double value = 0;
 };
 
@@ -100,9 +106,11 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeExecutionPlan& node,
     const StateValues& localStates,
     const StateValues& synchronizationSnapshot,
-    const StateValues& liveParameterValues);
+    const NodeParameterValues& parameterValues);
 
-std::vector<std::pair<EntityId, double>> reduceContributions(
+NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues);
+
+std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions);
 
 }

@@ -40,9 +40,11 @@ regression tolerances remain separate and are not weakened to accommodate transp
 Closed native control values such as execution backend, backend-selection reason,
 pacing mode and run state are parsed from current JSON strings once and represented
 as strong enums thereafter. Compiled expression symbols and parameter bindings use
-stable integer slots, so each contribution evaluates from a contiguous double vector
-without rebuilding symbol and parameter hash maps during every node substep. Persistent
-model identities are positive JSON-safe integers and state-table IDs use Protobuf `uint64`.
+stable integer slots. Execution-plan compilation also maps persistent state IDs to
+dense global snapshot slots and compact node-local slots. Each contribution therefore
+evaluates from contiguous double vectors without state, symbol or parameter hash-map
+lookups during node substeps. Persistent model identities remain positive JSON-safe
+integers and state-table IDs use Protobuf `uint64`.
 
 ## Migration sequence
 

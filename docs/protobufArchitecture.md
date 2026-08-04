@@ -37,6 +37,13 @@ The engine compatibility suite compares the raw IEEE-754 bit patterns received i
 live Protobuf samples with the corresponding durable engine-result values. Solver
 regression tolerances remain separate and are not weakened to accommodate transport.
 
+Closed native control values such as execution backend, backend-selection reason,
+pacing mode and run state are parsed from current JSON strings once and represented
+as strong enums thereafter. Compiled expression symbols and parameter bindings use
+stable integer slots, so each contribution evaluates from a contiguous double vector
+without rebuilding symbol and parameter hash maps during every node substep. UUIDs
+remain the persistent identity and JSON output remains unchanged.
+
 ## Migration sequence
 
 1. Measure and deploy framed live sample batches.

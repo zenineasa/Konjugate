@@ -42,11 +42,13 @@ void writeFramedEvent(std::ostream& output, const protocol::EngineEvent& event) 
 using Values = StateValues;
 struct Sample { double time; Values states; };
 struct Checkpoint { std::string uuid; double time; Values states; };
-struct Pacing { std::string mode = "fastest"; double ratio = 1; };
-struct RunControl { Pacing pacing; std::string executionState = "running"; Values parameterValues; };
+enum class PacingMode { fastest, realTime, limitedRatio };
+enum class RunState { running, paused, stopped };
+struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
+struct RunControl { Pacing pacing; RunState executionState = RunState::running; Values parameterValues; };
 struct ExecutionSettings {
-    std::string requestedBackend = "automatic";
-    std::string backend = "serial";
+    ExecutionBackend requestedBackend = ExecutionBackend::automatic;
+    ExecutionBackend backend = ExecutionBackend::serial;
     std::size_t workerThreads = 1;
     std::size_t estimatedOperationsPerSynchronization = 0;
     std::size_t automaticParallelThreshold = 128;
@@ -61,6 +63,38 @@ struct NodeRuntimeMetrics {
 
 std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
     return tree.get<std::string>(key, "");
+}
+
+PacingMode pacingModeFromString(const std::string& value) {
+    if (value == "fastest") return PacingMode::fastest;
+    if (value == "realTime") return PacingMode::realTime;
+    if (value == "limitedRatio") return PacingMode::limitedRatio;
+    throw std::runtime_error("Pacing mode must be fastest, realTime, or limitedRatio.");
+}
+
+std::string_view pacingModeName(PacingMode value) noexcept {
+    switch (value) {
+        case PacingMode::fastest: return "fastest";
+        case PacingMode::realTime: return "realTime";
+        case PacingMode::limitedRatio: return "limitedRatio";
+    }
+    return "fastest";
+}
+
+RunState runStateFromString(const std::string& value) {
+    if (value == "running") return RunState::running;
+    if (value == "paused") return RunState::paused;
+    if (value == "stopped") return RunState::stopped;
+    throw std::runtime_error("Run state must be running, paused or stopped.");
+}
+
+std::string_view runStateName(RunState value) noexcept {
+    switch (value) {
+        case RunState::running: return "running";
+        case RunState::paused: return "paused";
+        case RunState::stopped: return "stopped";
+    }
+    return "running";
 }
 
 std::string createUuid() {
@@ -104,14 +138,12 @@ void atomicWrite(const std::filesystem::path& path, const std::string& content) 
 
 Pacing pacingFromTree(const boost::property_tree::ptree& tree, const Pacing& fallback = {}) {
     Pacing pacing;
-    pacing.mode = tree.get<std::string>("pacing.mode", tree.get<std::string>("mode", fallback.mode));
+    pacing.mode = pacingModeFromString(tree.get<std::string>(
+        "pacing.mode", tree.get<std::string>("mode", std::string(pacingModeName(fallback.mode)))));
     pacing.ratio = tree.get<double>("pacing.simulationSecondsPerWallSecond",
         tree.get<double>("simulationSecondsPerWallSecond", fallback.ratio));
-    if (pacing.mode == "realTime") pacing.ratio = 1;
-    if (pacing.mode != "fastest" && pacing.mode != "realTime" && pacing.mode != "limitedRatio") {
-        throw std::runtime_error("Pacing mode must be fastest, realTime, or limitedRatio.");
-    }
-    if (pacing.mode == "limitedRatio" && (!(pacing.ratio > 0) || !std::isfinite(pacing.ratio))) {
+    if (pacing.mode == PacingMode::realTime) pacing.ratio = 1;
+    if (pacing.mode == PacingMode::limitedRatio && (!(pacing.ratio > 0) || !std::isfinite(pacing.ratio))) {
         throw std::runtime_error("Limited pacing requires a finite positive simulationSecondsPerWallSecond value.");
     }
     return pacing;
@@ -122,8 +154,8 @@ RunControl readRunControl(const std::filesystem::path& path, const RunControl& c
     try {
         boost::property_tree::ptree control;
         boost::property_tree::read_json(path.string(), control);
-        const auto executionState = control.get<std::string>("executionState", current.executionState);
-        if (executionState != "running" && executionState != "paused" && executionState != "stopped") return current;
+        const auto executionState = runStateFromString(control.get<std::string>(
+            "executionState", std::string(runStateName(current.executionState))));
         auto parameterValues = current.parameterValues;
         if (const auto values = control.get_child_optional("parameterValues")) {
             for (const auto& item : *values) {
@@ -139,11 +171,7 @@ RunControl readRunControl(const std::filesystem::path& path, const RunControl& c
 
 ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& tree, const ExecutionPlan& plan) {
     ExecutionSettings settings;
-    settings.requestedBackend = tree.get<std::string>("execution.backend", "automatic");
-    if (settings.requestedBackend != "automatic" && settings.requestedBackend != "serial" &&
-        settings.requestedBackend != "threadPool" && settings.requestedBackend != "partitioned") {
-        throw std::runtime_error("Execution backend must be automatic, serial, threadPool or partitioned.");
-    }
+    settings.requestedBackend = executionBackendFromString(tree.get<std::string>("execution.backend", "automatic"));
     settings.automaticParallelThreshold = tree.get<std::size_t>("execution.automaticParallelThreshold", 128);
     if (!settings.automaticParallelThreshold || settings.automaticParallelThreshold > 1000000) {
         throw std::runtime_error("execution.automaticParallelThreshold must be an integer from 1 through 1000000.");
@@ -157,7 +185,7 @@ ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& t
         throw std::runtime_error("execution.workerThreads must be an integer from 1 through 256.");
     }
     settings.backend = settings.requestedBackend;
-    settings.workerThreads = settings.requestedBackend == "serial"
+    settings.workerThreads = settings.requestedBackend == ExecutionBackend::serial
         ? 1 : std::min(requestedThreads, std::max<std::size_t>(1, plan.nodes.size()));
     return settings;
 }
@@ -193,7 +221,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto outputInterval = configuration.get<double>("outputInterval", globalTimeStep);
     const auto outputRatio = outputInterval / globalTimeStep;
     auto pacing = pacingFromTree(configuration);
-    RunControl runControl{pacing, "running", {}};
+    RunControl runControl{pacing, RunState::running, {}};
     if (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
         !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
         throw std::runtime_error("A run requires a finite positive targetTime and numerical timestep values.");
@@ -210,8 +238,8 @@ void runSimulation(const boost::property_tree::ptree& document,
     if (!requestedPartitions || requestedPartitions > 256) {
         throw std::runtime_error("Partition count must be an integer from 1 through 256.");
     }
-    const auto executablePartitions = executionSettings.requestedBackend == "partitioned" ||
-        executionSettings.requestedBackend == "automatic"
+    const auto executablePartitions = executionSettings.requestedBackend == ExecutionBackend::partitioned ||
+        executionSettings.requestedBackend == ExecutionBackend::automatic
         ? std::min(requestedPartitions, executionSettings.workerThreads) : requestedPartitions;
     const auto communicationBias = configuration.get<double>("execution.partitionCommunicationBias", 4);
     const auto partitionAlgorithm = configuration.get<std::string>("execution.partitionAlgorithm", "automatic");
@@ -226,11 +254,11 @@ void runSimulation(const boost::property_tree::ptree& document,
         executionSettings.estimatedOperationsPerSynchronization, executionSettings.automaticParallelThreshold,
         partitionPlan.selected.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
     executionSettings.backend = backendDecision.backend;
-    if (executionSettings.backend == "serial") executionSettings.workerThreads = 1;
+    if (executionSettings.backend == ExecutionBackend::serial) executionSettings.workerThreads = 1;
     const auto planningNanoseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - planningStartedAt).count());
     std::unique_ptr<TaskExecutor> taskExecutor;
-    if (executionSettings.backend == "threadPool") taskExecutor = std::make_unique<TaskExecutor>(executionSettings.workerThreads);
+    if (executionSettings.backend == ExecutionBackend::threadPool) taskExecutor = std::make_unique<TaskExecutor>(executionSettings.workerThreads);
     std::vector<std::vector<std::size_t>> partitionNodeIndexes;
     std::vector<std::vector<std::string>> partitionSnapshotStateIds;
     std::vector<std::unique_ptr<PartitionRuntime>> partitionRuntimes;
@@ -240,7 +268,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     if (!partitionReceiveTimeoutMilliseconds || partitionReceiveTimeoutMilliseconds > 60000) {
         throw std::runtime_error("execution.partitionReceiveTimeoutMilliseconds must be an integer from 1 through 60000.");
     }
-    if (executionSettings.backend == "partitioned") {
+    if (executionSettings.backend == ExecutionBackend::partitioned) {
         partitionRuntimes.reserve(partitionPlan.effectivePartitions);
         partitionNodeIndexes.resize(partitionPlan.effectivePartitions);
         partitionSnapshotStateIds.resize(partitionPlan.effectivePartitions);
@@ -271,7 +299,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         }
         partitionTransport = std::make_unique<InMemoryPartitionTransport>();
     }
-    const auto activeWorkerThreads = executionSettings.backend == "partitioned"
+    const auto activeWorkerThreads = executionSettings.backend == ExecutionBackend::partitioned
         ? partitionPlan.effectivePartitions : executionSettings.workerThreads;
     Values states = executionPlan.initialStates;
     const auto& stateNodes = executionPlan.stateNodes;
@@ -359,17 +387,17 @@ void runSimulation(const boost::property_tree::ptree& document,
              << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"snapshotMode\":\"" << (completeSnapshot ? "full" : "live")
              << "\",\"lifecycle\":\"" << lifecycle
              << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time
-             << ",\"pacing\":{\"mode\":\"" << escape(pacing.mode) << "\",\"simulationSecondsPerWallSecond\":" << pacing.ratio << "}"
+             << ",\"pacing\":{\"mode\":\"" << pacingModeName(pacing.mode) << "\",\"simulationSecondsPerWallSecond\":" << pacing.ratio << "}"
              << ",\"targetTime\":" << targetTime << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval
-             << ",\"execution\":{\"planVersion\":1,\"requestedBackend\":\"" << executionSettings.requestedBackend
-             << "\",\"backend\":\"" << executionSettings.backend
+             << ",\"execution\":{\"planVersion\":1,\"requestedBackend\":\"" << executionBackendName(executionSettings.requestedBackend)
+             << "\",\"backend\":\"" << executionBackendName(executionSettings.backend)
              << "\",\"workerThreads\":" << activeWorkerThreads << ",\"planningNanoseconds\":" << planningNanoseconds
              << ",\"estimatedOperationsPerSynchronization\":" << executionSettings.estimatedOperationsPerSynchronization
              << ",\"automaticParallelThreshold\":" << executionSettings.automaticParallelThreshold
-             << ",\"selectionReason\":\"" << backendDecision.reason << "\",\"communicationCutFraction\":"
+             << ",\"selectionReason\":\"" << backendSelectionReasonName(backendDecision.reason) << "\",\"communicationCutFraction\":"
              << backendDecision.communicationCutFraction << ",\"automaticMaximumPartitionCutFraction\":"
              << maximumPartitionCutFraction
-             << ",\"schedulingPolicy\":\"" << (executionSettings.backend == "partitioned"
+             << ",\"schedulingPolicy\":\"" << (executionSettings.backend == ExecutionBackend::partitioned
                  ? "partitionAffinity" : "largestEstimatedWorkFirst")
              << "\",\"synchronizationComputeNanoseconds\":"
              << synchronizationComputeNanoseconds << ",\"partitionCommunication\":{\"messageVersion\":1,\"transport\":\"inMemory\""
@@ -499,22 +527,22 @@ void runSimulation(const boost::property_tree::ptree& document,
     for (std::size_t step = 0; step < steps; ++step) {
         refreshRunControl();
         pacing = runControl.pacing;
-        if (runControl.executionState == "paused") {
+        if (runControl.executionState == RunState::paused) {
             captureBoundary();
             writeResult("paused", currentTime);
-            while (runControl.executionState == "paused") {
+            while (runControl.executionState == RunState::paused) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(40));
                 refreshRunControl(true);
             }
             pacing = runControl.pacing;
-            if (runControl.executionState == "stopped") {
+            if (runControl.executionState == RunState::stopped) {
                 writeResult("stopped", currentTime, true);
                 resultStream.close();
                 std::filesystem::remove(streamPath);
                 return;
             }
             writeResult("running", currentTime);
-        } else if (runControl.executionState == "stopped") {
+        } else if (runControl.executionState == RunState::stopped) {
             captureBoundary();
             writeResult("stopped", currentTime, true);
             resultStream.close();
@@ -595,7 +623,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         states = std::move(synchronizedStates);
         const auto elapsed = std::min(targetTime, startTime + static_cast<double>(step + 1) * globalTimeStep);
         currentTime = elapsed;
-        while (pacing.mode != "fastest") {
+        while (pacing.mode != PacingMode::fastest) {
             const auto targetDuration = std::chrono::duration<double>(synchronizationStep / pacing.ratio);
             const auto spent = std::chrono::steady_clock::now() - wallStepStarted;
             if (spent >= targetDuration) break;
@@ -603,7 +631,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             std::this_thread::sleep_for(std::min(remaining, std::chrono::milliseconds(20)));
             refreshRunControl(true);
             pacing = runControl.pacing;
-            if (runControl.executionState != "running") break;
+            if (runControl.executionState != RunState::running) break;
         }
         if (elapsed + 1e-12 >= nextOutputTime || step + 1 == steps) {
             samples.push_back({elapsed, states});

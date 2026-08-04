@@ -21,10 +21,11 @@ void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
 }
 
-konjugate::CompiledExpression symbol(const std::string& name) {
+konjugate::CompiledExpression symbol(const std::string& name, std::size_t index = 0) {
     konjugate::CompiledExpression expression;
     expression.operation = konjugate::ExpressionOperation::symbol;
     expression.symbol = name;
+    expression.symbolIndex = index;
     return expression;
 }
 
@@ -58,7 +59,8 @@ void evaluationSeparatesLocalSnapshotAndLiveParameterInputs() {
         {"gain", konjugate::BindingSource::parameter, "gainParameter"}
     };
     task.parameters = {{"gainParameter", 3, true}};
-    task.expression = add({symbol("local"), symbol("remote"), symbol("gain")});
+    task.bindings[2].parameterIndex = 0;
+    task.expression = add({symbol("local", 0), symbol("remote", 1), symbol("gain", 2)});
     require(task.expression.operationCount() == 4, "Static expression work was not counted recursively.");
     node.contributions.push_back(std::move(task));
 
@@ -337,20 +339,22 @@ void partitionRuntimeReplaysDeterministicallyThroughMessages() {
 }
 
 void automaticBackendSelectionAccountsForWorkAndCommunication() {
-    const auto light = konjugate::selectExecutionBackend("automatic", 8, 800, 128, 0, 0, 0.25);
-    require(light.backend == "serial" && light.reason == "belowParallelWorkThreshold",
+    using konjugate::BackendSelectionReason;
+    using konjugate::ExecutionBackend;
+    const auto light = konjugate::selectExecutionBackend(ExecutionBackend::automatic, 8, 800, 128, 0, 0, 0.25);
+    require(light.backend == ExecutionBackend::serial && light.reason == BackendSelectionReason::belowParallelWorkThreshold,
         "A light model was parallelized automatically.");
-    const auto independent = konjugate::selectExecutionBackend("automatic", 8, 8192, 128, 0, 0, 0.25);
-    require(independent.backend == "partitioned" && independent.reason == "independentParallelWork",
+    const auto independent = konjugate::selectExecutionBackend(ExecutionBackend::automatic, 8, 8192, 128, 0, 0, 0.25);
+    require(independent.backend == ExecutionBackend::partitioned && independent.reason == BackendSelectionReason::independentParallelWork,
         "Independent heavy work did not select partitioned execution.");
-    const auto connected = konjugate::selectExecutionBackend("automatic", 8, 8192, 128, 2, 20, 0.25);
-    require(connected.backend == "partitioned" && std::abs(connected.communicationCutFraction - 0.1) < 1e-12,
+    const auto connected = konjugate::selectExecutionBackend(ExecutionBackend::automatic, 8, 8192, 128, 2, 20, 0.25);
+    require(connected.backend == ExecutionBackend::partitioned && std::abs(connected.communicationCutFraction - 0.1) < 1e-12,
         "A low-cut connected graph did not select partitioned execution.");
-    const auto dense = konjugate::selectExecutionBackend("automatic", 8, 8192, 128, 9, 20, 0.25);
-    require(dense.backend == "threadPool" && dense.reason == "partitionCommunicationCutTooHigh",
+    const auto dense = konjugate::selectExecutionBackend(ExecutionBackend::automatic, 8, 8192, 128, 9, 20, 0.25);
+    require(dense.backend == ExecutionBackend::threadPool && dense.reason == BackendSelectionReason::partitionCommunicationCutTooHigh,
         "A communication-heavy partition plan did not fall back to the shared-memory thread pool.");
-    const auto explicitBackend = konjugate::selectExecutionBackend("threadPool", 8, 8192, 128, 20, 20, 0);
-    require(explicitBackend.backend == "threadPool" && explicitBackend.reason == "explicitSelection",
+    const auto explicitBackend = konjugate::selectExecutionBackend(ExecutionBackend::threadPool, 8, 8192, 128, 20, 20, 0);
+    require(explicitBackend.backend == ExecutionBackend::threadPool && explicitBackend.reason == BackendSelectionReason::explicitSelection,
         "An explicit backend selection was overridden.");
 }
 

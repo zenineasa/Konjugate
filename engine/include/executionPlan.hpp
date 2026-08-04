@@ -5,6 +5,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <cstddef>
 #include <string>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -36,9 +37,10 @@ struct CompiledExpression {
     ExpressionOperation operation = ExpressionOperation::literal;
     double literal = 0;
     std::string symbol;
+    std::size_t symbolIndex = std::numeric_limits<std::size_t>::max();
     std::vector<CompiledExpression> arguments;
 
-    double evaluate(const StateValues& symbols) const;
+    double evaluate(const std::vector<double>& symbols) const;
     std::size_t operationCount() const noexcept;
 };
 
@@ -48,6 +50,7 @@ struct CompiledBinding {
     std::string symbol;
     BindingSource source = BindingSource::localState;
     std::string valueId;
+    std::size_t parameterIndex = std::numeric_limits<std::size_t>::max();
 };
 
 struct CompiledParameter {

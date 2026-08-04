@@ -79,21 +79,43 @@ std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& 
     return result;
 }
 
-double requireArgument(const CompiledExpression& expression, std::size_t index, const StateValues& symbols) {
+void bindExpressionSymbols(CompiledExpression& expression, const std::vector<CompiledBinding>& bindings) {
+    if (expression.operation == ExpressionOperation::symbol) {
+        const auto found = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
+            return binding.symbol == expression.symbol;
+        });
+        if (found == bindings.end()) throw std::runtime_error("Unknown executable symbol: " + expression.symbol + ".");
+        expression.symbolIndex = static_cast<std::size_t>(std::distance(bindings.begin(), found));
+    }
+    for (auto& argument : expression.arguments) bindExpressionSymbols(argument, bindings);
+}
+
+void bindTask(ContributionTask& task) {
+    for (auto& binding : task.bindings) {
+        if (binding.source != BindingSource::parameter) continue;
+        const auto found = std::find_if(task.parameters.begin(), task.parameters.end(), [&](const auto& parameter) {
+            return parameter.id == binding.valueId;
+        });
+        if (found == task.parameters.end()) throw std::runtime_error("An executable parameter binding is unresolved.");
+        binding.parameterIndex = static_cast<std::size_t>(std::distance(task.parameters.begin(), found));
+    }
+    bindExpressionSymbols(task.expression, task.bindings);
+}
+
+double requireArgument(const CompiledExpression& expression, std::size_t index, const std::vector<double>& symbols) {
     if (index >= expression.arguments.size()) throw std::runtime_error("Executable expression has too few arguments.");
     return expression.arguments[index].evaluate(symbols);
 }
 
 }
 
-double CompiledExpression::evaluate(const StateValues& symbols) const {
+double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
     const auto argument = [&](std::size_t index) { return requireArgument(*this, index, symbols); };
     switch (operation) {
         case ExpressionOperation::literal: return literal;
         case ExpressionOperation::symbol: {
-            const auto found = symbols.find(symbol);
-            if (found == symbols.end()) throw std::runtime_error("Unknown executable symbol: " + symbol + ".");
-            return found->second;
+            if (symbolIndex >= symbols.size()) throw std::runtime_error("Executable symbol binding is invalid.");
+            return symbols[symbolIndex];
         }
         case ExpressionOperation::add: {
             double result = 0;
@@ -154,6 +176,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             task.outputStateId = value(term, "expressionModel.output.stateId");
             task.bindings = compileBindings(term.get_child("expressionModel.bindings"), compiledNode.nodeId, true);
             task.expression = compileExpression(term.get_child("expressionModel.mathJson"));
+            bindTask(task);
             compiledNode.estimatedOperationsPerSubstep += task.expression.operationCount();
             compiledNode.contributions.push_back(std::move(task));
         }
@@ -176,6 +199,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             task.parameters.push_back({value(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
         }
         task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
+        bindTask(task);
         node.estimatedOperationsPerSubstep += task.expression.operationCount();
         node.contributions.push_back(std::move(task));
     }
@@ -203,16 +227,15 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
     for (const auto& task : node.contributions) {
-        StateValues parameters;
-        for (const auto& parameter : task.parameters) {
-            const auto override = liveParameterValues.find(parameter.id);
-            parameters[parameter.id] = parameter.live && override != liveParameterValues.end() ? override->second : parameter.value;
-        }
-        StateValues symbols;
-        for (const auto& binding : task.bindings) {
-            if (binding.source == BindingSource::parameter) symbols[binding.symbol] = parameters.at(binding.valueId);
-            else if (binding.source == BindingSource::localState) symbols[binding.symbol] = localStates.at(binding.valueId);
-            else symbols[binding.symbol] = synchronizationSnapshot.at(binding.valueId);
+        std::vector<double> symbols(task.bindings.size());
+        for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+            const auto& binding = task.bindings[index];
+            if (binding.source == BindingSource::parameter) {
+                const auto& parameter = task.parameters.at(binding.parameterIndex);
+                const auto override = liveParameterValues.find(parameter.id);
+                symbols[index] = parameter.live && override != liveParameterValues.end() ? override->second : parameter.value;
+            } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueId);
+            else symbols[index] = synchronizationSnapshot.at(binding.valueId);
         }
         const auto contribution = task.expression.evaluate(symbols);
         if (!std::isfinite(contribution)) throw std::runtime_error("A contribution task produced a non-finite derivative.");

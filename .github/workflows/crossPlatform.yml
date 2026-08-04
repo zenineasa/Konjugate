@@ -2,9 +2,10 @@
 
 name: Cross-platform verification
 
+# Automatic verification is intentionally paused during early-alpha development.
+# Keep the workflow manually available while cross-platform validation matures.
 on:
-    push:
-    pull_request:
+    workflow_dispatch:
 
 jobs:
     verify:

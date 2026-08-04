@@ -104,7 +104,7 @@ std::size_t partitionMessagePayloadBytes(const PartitionBoundaryMessage& message
     std::size_t bytes = 0;
     for (const auto& [stateId, stateValue] : message.states) {
         static_cast<void>(stateValue);
-        bytes += stateId.size() + sizeof(double);
+        bytes += sizeof(stateId) + sizeof(double);
     }
     return bytes;
 }

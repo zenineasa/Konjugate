@@ -7,114 +7,361 @@
     },
     "nodes": [
         {
-            "id": "d916ad77-04cb-4c4b-8d77-63f4519d0d21",
+            "id": 1,
             "name": "Battery module",
             "type": "Battery",
-            "position": [-5.2, 0.4, 0],
+            "position": [
+                -5.2,
+                0.4,
+                0
+            ],
             "states": [
-                { "id": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "name": "Temperature", "symbol": "temperature", "initialValue": 353.2, "unit": "K" },
-                { "id": "e588894c-80ef-42f1-a7b9-da21249177c6", "name": "State of charge", "symbol": "stateOfCharge", "initialValue": 84.6, "unit": "%" }
+                {
+                    "id": 2,
+                    "name": "Temperature",
+                    "symbol": "temperature",
+                    "initialValue": 353.2,
+                    "unit": "K"
+                },
+                {
+                    "id": 3,
+                    "name": "State of charge",
+                    "symbol": "stateOfCharge",
+                    "initialValue": 84.6,
+                    "unit": "%"
+                }
             ],
             "sourceTerms": [],
-            "appearance": { "type": "primitive", "shape": "box", "color": "#2f6970" }
+            "appearance": {
+                "type": "primitive",
+                "shape": "box",
+                "color": "#2f6970"
+            }
         },
         {
-            "id": "31c24858-faf7-41a8-a8ee-a31027338e8e",
+            "id": 4,
             "name": "Enclosed air",
             "type": "Air volume",
-            "position": [4.7, 0, -0.8],
+            "position": [
+                4.7,
+                0,
+                -0.8
+            ],
             "states": [
-                { "id": "a9a1552b-dd1a-4860-889b-300d1888a2cb", "name": "Temperature", "symbol": "temperature", "initialValue": 293.15, "unit": "K" }
+                {
+                    "id": 5,
+                    "name": "Temperature",
+                    "symbol": "temperature",
+                    "initialValue": 293.15,
+                    "unit": "K"
+                }
             ],
             "sourceTerms": [],
-            "appearance": { "type": "primitive", "shape": "cylinder", "color": "#2e7591" }
+            "appearance": {
+                "type": "primitive",
+                "shape": "cylinder",
+                "color": "#2e7591"
+            }
         },
         {
-            "id": "b93df980-1897-4778-8b6d-d321f6686bd6",
+            "id": 6,
             "name": "Electrical losses",
             "type": "Heat source",
-            "position": [-4.2, -3.6, 0.8],
+            "position": [
+                -4.2,
+                -3.6,
+                0.8
+            ],
             "states": [
-                { "id": "46454e49-fb72-4769-ab33-07a795476015", "name": "Heat flow", "symbol": "qDot", "initialValue": 420, "unit": "W" }
+                {
+                    "id": 7,
+                    "name": "Heat flow",
+                    "symbol": "qDot",
+                    "initialValue": 420,
+                    "unit": "W"
+                }
             ],
             "sourceTerms": [],
-            "appearance": { "type": "primitive", "shape": "sphere", "color": "#b66755" }
+            "appearance": {
+                "type": "primitive",
+                "shape": "sphere",
+                "color": "#b66755"
+            }
         }
     ],
     "edges": [
         {
-            "id": "16d95cf2-5330-4c1c-82f0-7019be033dca",
+            "id": 8,
             "name": "Air convection gain",
-            "source": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
-            "target": { "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
+            "source": {
+                "nodeId": 1,
+                "stateId": 2
+            },
+            "target": {
+                "nodeId": 4,
+                "stateId": 5
+            },
             "directionality": "directed",
             "equation": "\\frac{\\mathrm{heatTransferCoefficient}\\cdot\\mathrm{surfaceArea}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{airThermalCapacitance}}",
             "equationModel": {
                 "latex": "\\frac{\\mathrm{heatTransferCoefficient}\\cdot\\mathrm{surfaceArea}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{airThermalCapacitance}}",
-                "output": { "role": "target", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
+                "output": {
+                    "role": "target",
+                    "stateId": 5
+                },
                 "bindings": [
-                    { "kind": "state", "role": "source", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "symbol": "sourceTemperature" },
-                    { "kind": "state", "role": "target", "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb", "symbol": "targetTemperature" },
-                    { "kind": "parameter", "parameterId": "b3279da6-5836-455e-8d7f-3a4f95eb4bc5", "symbol": "heatTransferCoefficient" },
-                    { "kind": "parameter", "parameterId": "2960ddac-3cc4-43b6-83eb-248c8298ac34", "symbol": "surfaceArea" },
-                    { "kind": "parameter", "parameterId": "76c5bfc0-5c46-41cd-b3ac-baeaa559fe32", "symbol": "airThermalCapacitance" }
+                    {
+                        "kind": "state",
+                        "role": "source",
+                        "nodeId": 1,
+                        "stateId": 2,
+                        "symbol": "sourceTemperature"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 4,
+                        "stateId": 5,
+                        "symbol": "targetTemperature"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 9,
+                        "symbol": "heatTransferCoefficient"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 10,
+                        "symbol": "surfaceArea"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 11,
+                        "symbol": "airThermalCapacitance"
+                    }
                 ],
-                "mathJson": ["Divide", ["Multiply", "heatTransferCoefficient", "surfaceArea", ["Add", "sourceTemperature", ["Negate", "targetTemperature"]]], "airThermalCapacitance"]
+                "mathJson": [
+                    "Divide",
+                    [
+                        "Multiply",
+                        "heatTransferCoefficient",
+                        "surfaceArea",
+                        [
+                            "Add",
+                            "sourceTemperature",
+                            [
+                                "Negate",
+                                "targetTemperature"
+                            ]
+                        ]
+                    ],
+                    "airThermalCapacitance"
+                ]
             },
             "parameters": [
-                { "id": "b3279da6-5836-455e-8d7f-3a4f95eb4bc5", "name": "Convective heat transfer coefficient", "symbol": "heatTransferCoefficient", "value": 8, "unit": "W/(m²·K)", "mode": "constant" },
-                { "id": "2960ddac-3cc4-43b6-83eb-248c8298ac34", "name": "Exposed surface area", "symbol": "surfaceArea", "value": 1.5, "unit": "m²", "mode": "constant" },
-                { "id": "76c5bfc0-5c46-41cd-b3ac-baeaa559fe32", "name": "Air thermal capacitance", "symbol": "airThermalCapacitance", "value": 5025, "unit": "J/K", "mode": "constant" }
+                {
+                    "id": 9,
+                    "name": "Convective heat transfer coefficient",
+                    "symbol": "heatTransferCoefficient",
+                    "value": 8,
+                    "unit": "W/(m²·K)",
+                    "mode": "constant"
+                },
+                {
+                    "id": 10,
+                    "name": "Exposed surface area",
+                    "symbol": "surfaceArea",
+                    "value": 1.5,
+                    "unit": "m²",
+                    "mode": "constant"
+                },
+                {
+                    "id": 11,
+                    "name": "Air thermal capacitance",
+                    "symbol": "airThermalCapacitance",
+                    "value": 5025,
+                    "unit": "J/K",
+                    "mode": "constant"
+                }
             ],
-            "appearance": { "color": "#e6a15b", "offset": -0.11 }
+            "appearance": {
+                "color": "#e6a15b",
+                "offset": -0.11
+            }
         },
         {
-            "id": "1aa41864-eb91-4622-a872-077217888a3c",
+            "id": 12,
             "name": "Battery convection loss",
-            "source": { "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb" },
-            "target": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
+            "source": {
+                "nodeId": 4,
+                "stateId": 5
+            },
+            "target": {
+                "nodeId": 1,
+                "stateId": 2
+            },
             "directionality": "directed",
             "equation": "\\frac{\\mathrm{heatTransferCoefficient}\\cdot\\mathrm{surfaceArea}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{batteryThermalCapacitance}}",
             "equationModel": {
                 "latex": "\\frac{\\mathrm{heatTransferCoefficient}\\cdot\\mathrm{surfaceArea}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{batteryThermalCapacitance}}",
-                "output": { "role": "target", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
+                "output": {
+                    "role": "target",
+                    "stateId": 2
+                },
                 "bindings": [
-                    { "kind": "state", "role": "source", "nodeId": "31c24858-faf7-41a8-a8ee-a31027338e8e", "stateId": "a9a1552b-dd1a-4860-889b-300d1888a2cb", "symbol": "sourceTemperature" },
-                    { "kind": "state", "role": "target", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "symbol": "targetTemperature" },
-                    { "kind": "state", "role": "target", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "e588894c-80ef-42f1-a7b9-da21249177c6", "symbol": "targetStateOfCharge" },
-                    { "kind": "parameter", "parameterId": "f5a812bd-3397-44b9-a026-f2b6631f7901", "symbol": "heatTransferCoefficient" },
-                    { "kind": "parameter", "parameterId": "460058fa-003a-461e-95d4-51ce9abdb5b7", "symbol": "surfaceArea" },
-                    { "kind": "parameter", "parameterId": "1cfab2fb-fe2c-4d4c-93d6-3513238749ca", "symbol": "batteryThermalCapacitance" }
+                    {
+                        "kind": "state",
+                        "role": "source",
+                        "nodeId": 4,
+                        "stateId": 5,
+                        "symbol": "sourceTemperature"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 2,
+                        "symbol": "targetTemperature"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 3,
+                        "symbol": "targetStateOfCharge"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 13,
+                        "symbol": "heatTransferCoefficient"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 14,
+                        "symbol": "surfaceArea"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 15,
+                        "symbol": "batteryThermalCapacitance"
+                    }
                 ],
-                "mathJson": ["Divide", ["Multiply", "heatTransferCoefficient", "surfaceArea", ["Add", "sourceTemperature", ["Negate", "targetTemperature"]]], "batteryThermalCapacitance"]
+                "mathJson": [
+                    "Divide",
+                    [
+                        "Multiply",
+                        "heatTransferCoefficient",
+                        "surfaceArea",
+                        [
+                            "Add",
+                            "sourceTemperature",
+                            [
+                                "Negate",
+                                "targetTemperature"
+                            ]
+                        ]
+                    ],
+                    "batteryThermalCapacitance"
+                ]
             },
             "parameters": [
-                { "id": "f5a812bd-3397-44b9-a026-f2b6631f7901", "name": "Convective heat transfer coefficient", "symbol": "heatTransferCoefficient", "value": 8, "unit": "W/(m²·K)", "mode": "constant" },
-                { "id": "460058fa-003a-461e-95d4-51ce9abdb5b7", "name": "Exposed surface area", "symbol": "surfaceArea", "value": 1.5, "unit": "m²", "mode": "constant" },
-                { "id": "1cfab2fb-fe2c-4d4c-93d6-3513238749ca", "name": "Battery thermal capacitance", "symbol": "batteryThermalCapacitance", "value": 1000, "unit": "J/K", "mode": "constant" }
+                {
+                    "id": 13,
+                    "name": "Convective heat transfer coefficient",
+                    "symbol": "heatTransferCoefficient",
+                    "value": 8,
+                    "unit": "W/(m²·K)",
+                    "mode": "constant"
+                },
+                {
+                    "id": 14,
+                    "name": "Exposed surface area",
+                    "symbol": "surfaceArea",
+                    "value": 1.5,
+                    "unit": "m²",
+                    "mode": "constant"
+                },
+                {
+                    "id": 15,
+                    "name": "Battery thermal capacitance",
+                    "symbol": "batteryThermalCapacitance",
+                    "value": 1000,
+                    "unit": "J/K",
+                    "mode": "constant"
+                }
             ],
-            "appearance": { "color": "#b68bd5", "offset": 0.16 }
+            "appearance": {
+                "color": "#b68bd5",
+                "offset": 0.16
+            }
         },
         {
-            "id": "682b5fc2-5294-4ecc-8f08-5a91cb49388a",
+            "id": 16,
             "name": "Heat source",
-            "source": { "nodeId": "b93df980-1897-4778-8b6d-d321f6686bd6", "stateId": "46454e49-fb72-4769-ab33-07a795476015" },
-            "target": { "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
+            "source": {
+                "nodeId": 6,
+                "stateId": 7
+            },
+            "target": {
+                "nodeId": 1,
+                "stateId": 2
+            },
             "directionality": "directed",
             "equation": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{heatCapacity}}",
             "equationModel": {
                 "latex": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{heatCapacity}}",
-                "output": { "role": "target", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130" },
+                "output": {
+                    "role": "target",
+                    "stateId": 2
+                },
                 "bindings": [
-                    { "kind": "state", "role": "source", "nodeId": "b93df980-1897-4778-8b6d-d321f6686bd6", "stateId": "46454e49-fb72-4769-ab33-07a795476015", "symbol": "sourceQDot" },
-                    { "kind": "state", "role": "target", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "bdf343a3-54a2-4ab0-a1eb-1dd68507c130", "symbol": "targetTemperature" },
-                    { "kind": "state", "role": "target", "nodeId": "d916ad77-04cb-4c4b-8d77-63f4519d0d21", "stateId": "e588894c-80ef-42f1-a7b9-da21249177c6", "symbol": "targetStateOfCharge" },
-                    { "kind": "parameter", "parameterId": "f14d5df2-c506-4c4a-91ab-acde738b26c0", "symbol": "heatCapacity" }
+                    {
+                        "kind": "state",
+                        "role": "source",
+                        "nodeId": 6,
+                        "stateId": 7,
+                        "symbol": "sourceQDot"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 2,
+                        "symbol": "targetTemperature"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 3,
+                        "symbol": "targetStateOfCharge"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 17,
+                        "symbol": "heatCapacity"
+                    }
                 ],
-                "mathJson": ["Divide", "sourceQDot", "heatCapacity"]
+                "mathJson": [
+                    "Divide",
+                    "sourceQDot",
+                    "heatCapacity"
+                ]
             },
-            "parameters": [{ "id": "f14d5df2-c506-4c4a-91ab-acde738b26c0", "name": "Heat capacity", "symbol": "heatCapacity", "value": 1000, "unit": "J/K", "mode": "constant" }],
-            "appearance": { "color": "#c88be0", "offset": 0 }
+            "parameters": [
+                {
+                    "id": 17,
+                    "name": "Heat capacity",
+                    "symbol": "heatCapacity",
+                    "value": 1000,
+                    "unit": "J/K",
+                    "mode": "constant"
+                }
+            ],
+            "appearance": {
+                "color": "#c88be0",
+                "offset": 0
+            }
         }
     ]
 }

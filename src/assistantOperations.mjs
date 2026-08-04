@@ -46,6 +46,9 @@ function defaultPosition(nodeIndex) {
 
 function projectEntities(document) {
     const entities = new Map();
+    for (const configuration of document.runConfigurations ?? []) {
+        entities.set(configuration.id, { kind: 'runConfiguration', value: configuration });
+    }
     for (const node of document.nodes) {
         entities.set(node.id, { kind: 'node', value: node });
         for (const state of node.states ?? []) entities.set(state.id, { kind: 'state', value: state, parent: node });
@@ -82,7 +85,7 @@ export function validateAssistantProposal(proposal) {
     return true;
 }
 
-export function applyAssistantProposal(projectDocument, proposal, { uuidFactory = () => crypto.randomUUID() } = {}) {
+export function applyAssistantProposal(projectDocument, proposal, options = {}) {
     validateAssistantProposal(proposal);
     if (projectDocument?.format !== 'konjugate' || projectDocument.version !== 1 ||
         !Array.isArray(projectDocument.nodes) || !Array.isArray(projectDocument.edges)) {
@@ -91,12 +94,17 @@ export function applyAssistantProposal(projectDocument, proposal, { uuidFactory 
 
     const document = structuredClone(projectDocument);
     const entities = projectEntities(document);
+    let nextEntityId = Math.max(0, ...entities.keys()) + 1;
+    const idFactory = options.idFactory ?? (() => nextEntityId++);
     const temporaryReferences = new Map();
     const changes = [];
 
     const allocate = (operation, kind, value, parent, operationIndex) => {
-        const id = uuidFactory();
-        if (entities.has(id)) throw new AssistantProposalError('The UUID factory produced a duplicate identifier.', operationIndex);
+        const id = idFactory();
+        if (!Number.isSafeInteger(id) || id <= 0) {
+            throw new AssistantProposalError('The id factory must produce a positive safe integer.', operationIndex);
+        }
+        if (entities.has(id)) throw new AssistantProposalError('The id factory produced a duplicate identifier.', operationIndex);
         if (operation.ref) {
             if (temporaryReferences.has(operation.ref)) {
                 throw new AssistantProposalError(`Temporary reference “${operation.ref}” is already defined.`, operationIndex);

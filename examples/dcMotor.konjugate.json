@@ -2,94 +2,322 @@
     "format": "konjugate",
     "version": 1,
     "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
-    "metadata": { "units": "SI" },
+    "metadata": {
+        "units": "SI"
+    },
     "nodes": [
         {
-            "id": "30000000-0000-4000-8000-000000000001",
+            "id": 1,
             "name": "DC motor",
             "type": "Electromechanical actuator",
-            "position": [0, 0, 0],
-            "numerics": { "substepsPerGlobalStep": 5 },
+            "position": [
+                0,
+                0,
+                0
+            ],
+            "numerics": {
+                "substepsPerGlobalStep": 5
+            },
             "states": [
-                { "id": "30000000-0000-4000-8000-000000000011", "name": "Armature current", "symbol": "current", "initialValue": 0, "unit": "A" },
-                { "id": "30000000-0000-4000-8000-000000000012", "name": "Angular velocity", "symbol": "angularVelocity", "initialValue": 0, "unit": "rad/s" }
+                {
+                    "id": 2,
+                    "name": "Armature current",
+                    "symbol": "current",
+                    "initialValue": 0,
+                    "unit": "A"
+                },
+                {
+                    "id": 3,
+                    "name": "Angular velocity",
+                    "symbol": "angularVelocity",
+                    "initialValue": 0,
+                    "unit": "rad/s"
+                }
             ],
             "sourceTerms": [],
-            "appearance": { "type": "primitive", "shape": "cylinder", "color": "#397b86" }
+            "appearance": {
+                "type": "primitive",
+                "shape": "cylinder",
+                "color": "#397b86"
+            }
         },
         {
-            "id": "30000000-0000-4000-8000-000000000002",
+            "id": 4,
             "name": "DC supply",
             "type": "Voltage source",
-            "position": [-4, 1, 0],
-            "states": [{ "id": "30000000-0000-4000-8000-000000000013", "name": "Voltage", "symbol": "voltage", "initialValue": 24, "unit": "V" }],
+            "position": [
+                -4,
+                1,
+                0
+            ],
+            "states": [
+                {
+                    "id": 5,
+                    "name": "Voltage",
+                    "symbol": "voltage",
+                    "initialValue": 24,
+                    "unit": "V"
+                }
+            ],
             "sourceTerms": [],
-            "appearance": { "type": "primitive", "shape": "box", "color": "#4d6c85" }
+            "appearance": {
+                "type": "primitive",
+                "shape": "box",
+                "color": "#4d6c85"
+            }
         },
         {
-            "id": "30000000-0000-4000-8000-000000000003",
+            "id": 6,
             "name": "Mechanical load",
             "type": "Load torque",
-            "position": [4, -1, 0],
-            "states": [{ "id": "30000000-0000-4000-8000-000000000014", "name": "Load torque", "symbol": "torque", "initialValue": 0.1, "unit": "N·m" }],
+            "position": [
+                4,
+                -1,
+                0
+            ],
+            "states": [
+                {
+                    "id": 7,
+                    "name": "Load torque",
+                    "symbol": "torque",
+                    "initialValue": 0.1,
+                    "unit": "N·m"
+                }
+            ],
             "sourceTerms": [],
-            "appearance": { "type": "primitive", "shape": "sphere", "color": "#9a6c59" }
+            "appearance": {
+                "type": "primitive",
+                "shape": "sphere",
+                "color": "#9a6c59"
+            }
         }
     ],
     "edges": [
         {
-            "id": "30000000-0000-4000-8000-000000000101",
+            "id": 8,
             "name": "Armature dynamics",
-            "source": { "nodeId": "30000000-0000-4000-8000-000000000002", "stateId": "30000000-0000-4000-8000-000000000013" },
-            "target": { "nodeId": "30000000-0000-4000-8000-000000000001", "stateId": "30000000-0000-4000-8000-000000000011" },
+            "source": {
+                "nodeId": 4,
+                "stateId": 5
+            },
+            "target": {
+                "nodeId": 1,
+                "stateId": 2
+            },
             "directionality": "directed",
             "equation": "\\frac{\\mathrm{sourceVoltage}-\\mathrm{resistance}\\cdot\\mathrm{targetCurrent}-\\mathrm{backEmfConstant}\\cdot\\mathrm{targetAngularVelocity}}{\\mathrm{inductance}}",
             "equationModel": {
                 "latex": "\\frac{\\mathrm{sourceVoltage}-\\mathrm{resistance}\\cdot\\mathrm{targetCurrent}-\\mathrm{backEmfConstant}\\cdot\\mathrm{targetAngularVelocity}}{\\mathrm{inductance}}",
-                "output": { "role": "target", "stateId": "30000000-0000-4000-8000-000000000011" },
+                "output": {
+                    "role": "target",
+                    "stateId": 2
+                },
                 "bindings": [
-                    { "kind": "state", "role": "source", "nodeId": "30000000-0000-4000-8000-000000000002", "stateId": "30000000-0000-4000-8000-000000000013", "symbol": "sourceVoltage" },
-                    { "kind": "state", "role": "target", "nodeId": "30000000-0000-4000-8000-000000000001", "stateId": "30000000-0000-4000-8000-000000000011", "symbol": "targetCurrent" },
-                    { "kind": "state", "role": "target", "nodeId": "30000000-0000-4000-8000-000000000001", "stateId": "30000000-0000-4000-8000-000000000012", "symbol": "targetAngularVelocity" },
-                    { "kind": "parameter", "parameterId": "30000000-0000-4000-8000-000000000201", "symbol": "resistance" },
-                    { "kind": "parameter", "parameterId": "30000000-0000-4000-8000-000000000202", "symbol": "backEmfConstant" },
-                    { "kind": "parameter", "parameterId": "30000000-0000-4000-8000-000000000203", "symbol": "inductance" }
+                    {
+                        "kind": "state",
+                        "role": "source",
+                        "nodeId": 4,
+                        "stateId": 5,
+                        "symbol": "sourceVoltage"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 2,
+                        "symbol": "targetCurrent"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 3,
+                        "symbol": "targetAngularVelocity"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 9,
+                        "symbol": "resistance"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 10,
+                        "symbol": "backEmfConstant"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 11,
+                        "symbol": "inductance"
+                    }
                 ],
-                "mathJson": ["Divide", ["Add", "sourceVoltage", ["Negate", ["Multiply", "resistance", "targetCurrent"]], ["Negate", ["Multiply", "backEmfConstant", "targetAngularVelocity"]]], "inductance"]
+                "mathJson": [
+                    "Divide",
+                    [
+                        "Add",
+                        "sourceVoltage",
+                        [
+                            "Negate",
+                            [
+                                "Multiply",
+                                "resistance",
+                                "targetCurrent"
+                            ]
+                        ],
+                        [
+                            "Negate",
+                            [
+                                "Multiply",
+                                "backEmfConstant",
+                                "targetAngularVelocity"
+                            ]
+                        ]
+                    ],
+                    "inductance"
+                ]
             },
             "parameters": [
-                { "id": "30000000-0000-4000-8000-000000000201", "name": "Armature resistance", "symbol": "resistance", "value": 2, "unit": "Ω", "mode": "constant" },
-                { "id": "30000000-0000-4000-8000-000000000202", "name": "Back EMF constant", "symbol": "backEmfConstant", "value": 0.1, "unit": "V·s/rad", "mode": "constant" },
-                { "id": "30000000-0000-4000-8000-000000000203", "name": "Armature inductance", "symbol": "inductance", "value": 0.5, "unit": "H", "mode": "constant" }
+                {
+                    "id": 9,
+                    "name": "Armature resistance",
+                    "symbol": "resistance",
+                    "value": 2,
+                    "unit": "Ω",
+                    "mode": "constant"
+                },
+                {
+                    "id": 10,
+                    "name": "Back EMF constant",
+                    "symbol": "backEmfConstant",
+                    "value": 0.1,
+                    "unit": "V·s/rad",
+                    "mode": "constant"
+                },
+                {
+                    "id": 11,
+                    "name": "Armature inductance",
+                    "symbol": "inductance",
+                    "value": 0.5,
+                    "unit": "H",
+                    "mode": "constant"
+                }
             ],
-            "appearance": { "color": "#68a9cc", "offset": 0 }
+            "appearance": {
+                "color": "#68a9cc",
+                "offset": 0
+            }
         },
         {
-            "id": "30000000-0000-4000-8000-000000000102",
+            "id": 12,
             "name": "Shaft dynamics",
-            "source": { "nodeId": "30000000-0000-4000-8000-000000000003", "stateId": "30000000-0000-4000-8000-000000000014" },
-            "target": { "nodeId": "30000000-0000-4000-8000-000000000001", "stateId": "30000000-0000-4000-8000-000000000012" },
+            "source": {
+                "nodeId": 6,
+                "stateId": 7
+            },
+            "target": {
+                "nodeId": 1,
+                "stateId": 3
+            },
             "directionality": "directed",
             "equation": "\\frac{\\mathrm{torqueConstant}\\cdot\\mathrm{targetCurrent}-\\mathrm{viscousFriction}\\cdot\\mathrm{targetAngularVelocity}-\\mathrm{sourceTorque}}{\\mathrm{rotorInertia}}",
             "equationModel": {
                 "latex": "\\frac{\\mathrm{torqueConstant}\\cdot\\mathrm{targetCurrent}-\\mathrm{viscousFriction}\\cdot\\mathrm{targetAngularVelocity}-\\mathrm{sourceTorque}}{\\mathrm{rotorInertia}}",
-                "output": { "role": "target", "stateId": "30000000-0000-4000-8000-000000000012" },
+                "output": {
+                    "role": "target",
+                    "stateId": 3
+                },
                 "bindings": [
-                    { "kind": "state", "role": "source", "nodeId": "30000000-0000-4000-8000-000000000003", "stateId": "30000000-0000-4000-8000-000000000014", "symbol": "sourceTorque" },
-                    { "kind": "state", "role": "target", "nodeId": "30000000-0000-4000-8000-000000000001", "stateId": "30000000-0000-4000-8000-000000000011", "symbol": "targetCurrent" },
-                    { "kind": "state", "role": "target", "nodeId": "30000000-0000-4000-8000-000000000001", "stateId": "30000000-0000-4000-8000-000000000012", "symbol": "targetAngularVelocity" },
-                    { "kind": "parameter", "parameterId": "30000000-0000-4000-8000-000000000204", "symbol": "torqueConstant" },
-                    { "kind": "parameter", "parameterId": "30000000-0000-4000-8000-000000000205", "symbol": "viscousFriction" },
-                    { "kind": "parameter", "parameterId": "30000000-0000-4000-8000-000000000206", "symbol": "rotorInertia" }
+                    {
+                        "kind": "state",
+                        "role": "source",
+                        "nodeId": 6,
+                        "stateId": 7,
+                        "symbol": "sourceTorque"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 2,
+                        "symbol": "targetCurrent"
+                    },
+                    {
+                        "kind": "state",
+                        "role": "target",
+                        "nodeId": 1,
+                        "stateId": 3,
+                        "symbol": "targetAngularVelocity"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 13,
+                        "symbol": "torqueConstant"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 14,
+                        "symbol": "viscousFriction"
+                    },
+                    {
+                        "kind": "parameter",
+                        "parameterId": 15,
+                        "symbol": "rotorInertia"
+                    }
                 ],
-                "mathJson": ["Divide", ["Add", ["Multiply", "torqueConstant", "targetCurrent"], ["Negate", ["Multiply", "viscousFriction", "targetAngularVelocity"]], ["Negate", "sourceTorque"]], "rotorInertia"]
+                "mathJson": [
+                    "Divide",
+                    [
+                        "Add",
+                        [
+                            "Multiply",
+                            "torqueConstant",
+                            "targetCurrent"
+                        ],
+                        [
+                            "Negate",
+                            [
+                                "Multiply",
+                                "viscousFriction",
+                                "targetAngularVelocity"
+                            ]
+                        ],
+                        [
+                            "Negate",
+                            "sourceTorque"
+                        ]
+                    ],
+                    "rotorInertia"
+                ]
             },
             "parameters": [
-                { "id": "30000000-0000-4000-8000-000000000204", "name": "Torque constant", "symbol": "torqueConstant", "value": 0.1, "unit": "N·m/A", "mode": "constant" },
-                { "id": "30000000-0000-4000-8000-000000000205", "name": "Viscous friction", "symbol": "viscousFriction", "value": 0.02, "unit": "N·m·s/rad", "mode": "constant" },
-                { "id": "30000000-0000-4000-8000-000000000206", "name": "Rotor inertia", "symbol": "rotorInertia", "value": 0.01, "unit": "kg·m²", "mode": "constant" }
+                {
+                    "id": 13,
+                    "name": "Torque constant",
+                    "symbol": "torqueConstant",
+                    "value": 0.1,
+                    "unit": "N·m/A",
+                    "mode": "constant"
+                },
+                {
+                    "id": 14,
+                    "name": "Viscous friction",
+                    "symbol": "viscousFriction",
+                    "value": 0.02,
+                    "unit": "N·m·s/rad",
+                    "mode": "constant"
+                },
+                {
+                    "id": 15,
+                    "name": "Rotor inertia",
+                    "symbol": "rotorInertia",
+                    "value": 0.01,
+                    "unit": "kg·m²",
+                    "mode": "constant"
+                }
             ],
-            "appearance": { "color": "#c78dbf", "offset": 0 }
+            "appearance": {
+                "color": "#c78dbf",
+                "offset": 0
+            }
         }
     ]
 }

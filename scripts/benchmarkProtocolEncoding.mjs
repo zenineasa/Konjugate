@@ -1,7 +1,5 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { randomUUID } from 'node:crypto';
-
 const stateCount = Number(process.env.KONJUGATE_PROTOCOL_BENCHMARK_STATES ?? 100);
 const sampleCount = Number(process.env.KONJUGATE_PROTOCOL_BENCHMARK_SAMPLES ?? 1000);
 if (!Number.isInteger(stateCount) || stateCount < 1 || !Number.isInteger(sampleCount) || sampleCount < 1) {
@@ -17,7 +15,7 @@ const varintSize = (value) => {
     return size;
 };
 const lengthDelimitedSize = (payload) => 1 + varintSize(payload) + payload;
-const stateIds = Array.from({ length: stateCount }, () => randomUUID());
+const stateIds = Array.from({ length: stateCount }, (_unused, index) => index + 1);
 const values = Array.from({ length: stateCount }, (_unused, index) => index + 0.125);
 
 let jsonBytes = 0;
@@ -30,7 +28,7 @@ for (let sample = 0; sample < sampleCount; ++sample) {
 }
 
 const descriptorBytes = stateIds.reduce((total, stateId) => {
-    const identifier = lengthDelimitedSize(Buffer.byteLength(stateId));
+    const identifier = 1 + varintSize(stateId);
     return total + lengthDelimitedSize(identifier);
 }, 0);
 const stateTableEvent = 2 + lengthDelimitedSize(descriptorBytes);

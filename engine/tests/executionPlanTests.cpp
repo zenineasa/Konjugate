@@ -38,9 +38,9 @@ konjugate::CompiledExpression add(std::initializer_list<konjugate::CompiledExpre
 
 void deterministicReductionUsesTaskSequence() {
     std::vector<konjugate::EvaluatedContribution> completedOutOfOrder = {
-        {2, "state", 1},
-        {0, "state", 1e16},
-        {1, "state", -1e16}
+        {2, 1, 1},
+        {0, 1, 1e16},
+        {1, 1, -1e16}
     };
     const auto derivatives = konjugate::reduceContributions(std::move(completedOutOfOrder));
     require(derivatives.size() == 1, "Contributions for one state were not reduced together.");
@@ -49,24 +49,24 @@ void deterministicReductionUsesTaskSequence() {
 
 void evaluationSeparatesLocalSnapshotAndLiveParameterInputs() {
     konjugate::NodeExecutionPlan node;
-    node.nodeId = "targetNode";
+    node.nodeId = 1;
     konjugate::ContributionTask task;
     task.sequence = 0;
-    task.outputStateId = "output";
+    task.outputStateId = 5;
     task.bindings = {
-        {"local", konjugate::BindingSource::localState, "targetState"},
-        {"remote", konjugate::BindingSource::synchronizationSnapshot, "sourceState"},
-        {"gain", konjugate::BindingSource::parameter, "gainParameter"}
+        {"local", konjugate::BindingSource::localState, 2},
+        {"remote", konjugate::BindingSource::synchronizationSnapshot, 3},
+        {"gain", konjugate::BindingSource::parameter, 4}
     };
-    task.parameters = {{"gainParameter", 3, true}};
+    task.parameters = {{4, 3, true}};
     task.bindings[2].parameterIndex = 0;
     task.expression = add({symbol("local", 0), symbol("remote", 1), symbol("gain", 2)});
     require(task.expression.operationCount() == 4, "Static expression work was not counted recursively.");
     node.contributions.push_back(std::move(task));
 
-    const konjugate::StateValues local = {{"targetState", 2}, {"sourceState", 999}};
-    const konjugate::StateValues snapshot = {{"targetState", -1}, {"sourceState", 5}};
-    const konjugate::StateValues overrides = {{"gainParameter", 7}};
+    const konjugate::StateValues local = {{2, 2}, {3, 999}};
+    const konjugate::StateValues snapshot = {{2, -1}, {3, 5}};
+    const konjugate::StateValues overrides = {{4, 7}};
     const auto evaluated = konjugate::evaluateContributionTasks(node, local, snapshot, overrides);
     require(evaluated.size() == 1, "The contribution task was not evaluated.");
     require(std::abs(evaluated.front().value - 14) < 1e-12,
@@ -111,34 +111,34 @@ void dependencyGraphAggregatesParallelTasksAndPreservesDirection() {
     konjugate::ExecutionPlan plan;
     plan.nodes.resize(4);
     for (std::size_t index = 0; index < plan.nodes.size(); ++index) {
-        plan.nodes[index].nodeId = std::string(1, static_cast<char>('A' + index));
-        plan.nodes[index].stateIds = {std::string(1, static_cast<char>('a' + index))};
+        plan.nodes[index].nodeId = index + 1;
+        plan.nodes[index].stateIds = {index + 101};
         plan.stateNodes[plan.nodes[index].stateIds.front()] = plan.nodes[index].nodeId;
     }
-    plan.nodes[0].stateIds.push_back("a2");
-    plan.stateNodes["a2"] = "A";
+    plan.nodes[0].stateIds.push_back(105);
+    plan.stateNodes[105] = 1;
     plan.nodes[1].substeps = 2;
 
     konjugate::ContributionTask firstForward;
     firstForward.sequence = 0;
-    firstForward.outputStateId = "b";
+    firstForward.outputStateId = 102;
     firstForward.bindings = {
-        {"first", konjugate::BindingSource::synchronizationSnapshot, "a"},
-        {"second", konjugate::BindingSource::synchronizationSnapshot, "a2"}
+        {"first", konjugate::BindingSource::synchronizationSnapshot, 101},
+        {"second", konjugate::BindingSource::synchronizationSnapshot, 105}
     };
     firstForward.expression = add({symbol("first"), symbol("second")});
     konjugate::ContributionTask secondForward;
     secondForward.sequence = 1;
-    secondForward.outputStateId = "b";
-    secondForward.bindings = {{"first", konjugate::BindingSource::synchronizationSnapshot, "a"}};
+    secondForward.outputStateId = 102;
+    secondForward.bindings = {{"first", konjugate::BindingSource::synchronizationSnapshot, 101}};
     secondForward.expression = symbol("first");
     plan.nodes[1].contributions = {firstForward, secondForward};
     plan.nodes[1].estimatedOperationsPerSubstep = 4;
 
     konjugate::ContributionTask reverse;
     reverse.sequence = 0;
-    reverse.outputStateId = "a";
-    reverse.bindings = {{"remote", konjugate::BindingSource::synchronizationSnapshot, "b"}};
+    reverse.outputStateId = 101;
+    reverse.bindings = {{"remote", konjugate::BindingSource::synchronizationSnapshot, 102}};
     reverse.expression = symbol("remote");
     plan.nodes[0].contributions = {reverse};
     plan.nodes[0].estimatedOperationsPerSubstep = 1;
@@ -149,7 +149,7 @@ void dependencyGraphAggregatesParallelTasksAndPreservesDirection() {
     require(graph.nodes[0].component == graph.nodes[1].component && graph.nodes[2].component != graph.nodes[0].component,
         "Connected nodes were assigned to incorrect components.");
     const auto forward = std::find_if(graph.dependencies.begin(), graph.dependencies.end(), [](const auto& dependency) {
-        return dependency.sourceNodeId == "A" && dependency.targetNodeId == "B";
+        return dependency.sourceNodeId == 1 && dependency.targetNodeId == 2;
     });
     require(forward != graph.dependencies.end(), "The forward dependency is missing.");
     require(forward->contributionTaskCount == 2, "Parallel contribution tasks were not aggregated.");
@@ -158,17 +158,17 @@ void dependencyGraphAggregatesParallelTasksAndPreservesDirection() {
     require(forward->estimatedDependentOperationsPerSynchronization == 8 && forward->communicationWeight == 2,
         "Dependency weights are incorrect.");
     require(std::any_of(graph.dependencies.begin(), graph.dependencies.end(), [](const auto& dependency) {
-        return dependency.sourceNodeId == "B" && dependency.targetNodeId == "A";
+        return dependency.sourceNodeId == 2 && dependency.targetNodeId == 1;
     }), "Reverse data flow was not preserved as a separate directed dependency.");
 }
 
 void greedyPartitionerBalancesIndependentWork() {
     konjugate::DependencyGraph graph;
     graph.nodes = {
-        {"A", 1, 1, 8, 0},
-        {"B", 1, 1, 7, 1},
-        {"C", 1, 1, 6, 2},
-        {"D", 1, 1, 5, 3}
+        {1, 1, 1, 8, 0},
+        {2, 1, 1, 7, 1},
+        {3, 1, 1, 6, 2},
+        {4, 1, 1, 5, 3}
     };
     graph.componentCount = 4;
     const auto partitioned = konjugate::createGreedyPartitionPlan(graph, 2);
@@ -184,11 +184,11 @@ void greedyPartitionerBalancesIndependentWork() {
 void greedyPartitionerCanKeepExpensiveCommunicationLocal() {
     konjugate::DependencyGraph graph;
     graph.nodes = {
-        {"A", 1, 1, 1, 0},
-        {"B", 1, 1, 1, 0},
-        {"C", 1, 1, 1, 1}
+        {1, 1, 1, 1, 0},
+        {2, 1, 1, 1, 0},
+        {3, 1, 1, 1, 1}
     };
-    graph.dependencies = {{"A", "B", {"a"}, 1, 1, 1, 100}};
+    graph.dependencies = {{1, 2, {101}, 1, 1, 1, 100}};
     graph.componentCount = 2;
     const auto partitioned = konjugate::createGreedyPartitionPlan(graph, 2);
     require(partitioned.assignments[0].partition == partitioned.assignments[1].partition,
@@ -208,13 +208,13 @@ void greedyPartitionerCanKeepExpensiveCommunicationLocal() {
 void greedyPartitionerClustersACommunicationRing() {
     konjugate::DependencyGraph graph;
     for (std::size_t index = 0; index < 12; ++index) {
-        graph.nodes.push_back({"node" + std::to_string(index), 1, 1, 10, 0});
+        graph.nodes.push_back({index + 1, 1, 1, 10, 0});
     }
     for (std::size_t index = 0; index < graph.nodes.size(); ++index) {
         graph.dependencies.push_back({
             graph.nodes[index].nodeId,
             graph.nodes[(index + 1) % graph.nodes.size()].nodeId,
-            {"state" + std::to_string(index)}, 1, 1, 1, 1
+            {index + 101}, 1, 1, 1, 1
         });
     }
     graph.componentCount = 1;
@@ -228,12 +228,12 @@ void greedyPartitionerClustersACommunicationRing() {
 void partitionerSelectionUsesMetisWhenAvailable() {
     konjugate::DependencyGraph graph;
     for (std::size_t index = 0; index < 12; ++index) {
-        graph.nodes.push_back({"node" + std::to_string(index), 1, 1, 10, 0});
+        graph.nodes.push_back({index + 1, 1, 1, 10, 0});
     }
     for (std::size_t index = 0; index < graph.nodes.size(); ++index) {
         graph.dependencies.push_back({
             graph.nodes[index].nodeId, graph.nodes[(index + 1) % graph.nodes.size()].nodeId,
-            {"state" + std::to_string(index)}, 1, 1, 1, 1
+            {index + 101}, 1, 1, 1, 1
         });
     }
     const auto automatic = konjugate::createPartitionPlan(graph, 3);
@@ -260,15 +260,15 @@ void partitionerSelectionUsesMetisWhenAvailable() {
 
 konjugate::ExecutionPlan singleNodeRuntimePlan() {
     konjugate::ExecutionPlan plan;
-    plan.initialStates = {{"state", 1}};
-    plan.stateIds = {"state"};
-    plan.stateNodes = {{"state", "node"}};
+    plan.initialStates = {{2, 1}};
+    plan.stateIds = {2};
+    plan.stateNodes = {{2, 1}};
     konjugate::NodeExecutionPlan node;
-    node.nodeId = "node";
-    node.stateIds = {"state"};
+    node.nodeId = 1;
+    node.stateIds = {2};
     konjugate::ContributionTask contribution;
-    contribution.outputStateId = "state";
-    contribution.bindings = {{"state", konjugate::BindingSource::localState, "state"}};
+    contribution.outputStateId = 2;
+    contribution.bindings = {{"state", konjugate::BindingSource::localState, 2}};
     contribution.expression = symbol("state");
     node.contributions = {contribution};
     plan.nodes = {node};
@@ -281,9 +281,9 @@ void partitionTransportWaitsForDelayedMessagesAndRejectsDuplicates() {
         return transport.receive(2, 7, std::chrono::milliseconds(200));
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    transport.publish({1, 7, 2, {{"remoteState", 4}}});
+    transport.publish({1, 7, 2, {{3, 4}}});
     const auto received = delayed.get();
-    require(received.states.at("remoteState") == 4, "A delayed boundary message was not delivered intact.");
+    require(received.states.at(3) == 4, "A delayed boundary message was not delivered intact.");
 
     transport.publish({1, 8, 2, {}});
     bool duplicateRejected = false;
@@ -324,8 +324,8 @@ void partitionRuntimeReplaysDeterministicallyThroughMessages() {
     konjugate::InMemoryPartitionTransport transport;
     const auto execute = [&](std::size_t synchronizationIndex) {
         auto future = runtime.submit(transport, synchronizationIndex, {}, 0.1);
-        konjugate::PartitionBoundaryMessage message{1, synchronizationIndex, 0, {{"state", 1}}};
-        require(konjugate::partitionMessagePayloadBytes(message) == std::string("state").size() + sizeof(double),
+        konjugate::PartitionBoundaryMessage message{1, synchronizationIndex, 0, {{2, 1}}};
+        require(konjugate::partitionMessagePayloadBytes(message) == sizeof(konjugate::EntityId) + sizeof(double),
             "Boundary payload accounting is incorrect.");
         transport.publish(std::move(message));
         return future.get();
@@ -334,7 +334,7 @@ void partitionRuntimeReplaysDeterministicallyThroughMessages() {
     const auto replay = execute(3);
     require(first.nodes.size() == 1 && replay.nodes.size() == 1, "Partition execution omitted a node result.");
     require(first.nodes.front().states == replay.nodes.front().states &&
-            std::abs(first.nodes.front().states.at("state") - 1.1) < 1e-12,
+            std::abs(first.nodes.front().states.at(2) - 1.1) < 1e-12,
         "Partition replay was not deterministic.");
 }
 

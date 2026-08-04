@@ -6,20 +6,20 @@ import { nearestSampleIndex, nodeResultSeries, paddedRange, ResultPlot } from '.
 
 test('nodeResultSeries produces plot-independent state histories for one node', () => {
     const node = {
-        id: 'node-a',
+        id: 1,
         states: [
-            { id: 'temperature', label: 'Temperature', symbol: 'T', unit: 'K' },
-            { id: 'pressure', label: 'Pressure', symbol: 'p', unit: 'Pa' }
+            { id: 2, label: 'Temperature', symbol: 'T', unit: 'K' },
+            { id: 3, label: 'Pressure', symbol: 'p', unit: 'Pa' }
         ]
     };
     const result = { samples: [
-        { time: 0, states: [{ stateId: 'temperature', value: 300 }, { stateId: 'other', value: 4 }, { stateId: 'pressure', value: 100 }] },
-        { time: 1, states: [{ stateId: 'temperature', value: 310 }, { stateId: 'pressure', value: 120 }] }
+        { time: 0, states: [{ stateId: 2, value: 300 }, { stateId: 4, value: 4 }, { stateId: 3, value: 100 }] },
+        { time: 1, states: [{ stateId: 2, value: 310 }, { stateId: 3, value: 120 }] }
     ] };
 
     assert.deepEqual(nodeResultSeries(result, node), [
-        { nodeId: 'node-a', stateId: 'temperature', name: 'Temperature', symbol: 'T', unit: 'K', samples: [{ time: 0, value: 300 }, { time: 1, value: 310 }] },
-        { nodeId: 'node-a', stateId: 'pressure', name: 'Pressure', symbol: 'p', unit: 'Pa', samples: [{ time: 0, value: 100 }, { time: 1, value: 120 }] }
+        { nodeId: 1, stateId: 2, name: 'Temperature', symbol: 'T', unit: 'K', samples: [{ time: 0, value: 300 }, { time: 1, value: 310 }] },
+        { nodeId: 1, stateId: 3, name: 'Pressure', symbol: 'p', unit: 'Pa', samples: [{ time: 0, value: 100 }, { time: 1, value: 120 }] }
     ]);
 });
 

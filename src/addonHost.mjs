@@ -61,8 +61,8 @@ export function publicToolstripContributions(manifest) {
 
 export function createVisualizerSession({ sessionId, projectName, result, nodes, selectedNodeId, engineJobId = null, time = 0 }) {
     const signals = nodes.flatMap((node) => node.states.map((state) => ({
-        signalUuid: state.id,
-        entityUuid: node.id,
+        signalId: state.id,
+        entityId: node.id,
         entityName: node.title,
         name: state.label,
         symbol: state.symbol,
@@ -100,16 +100,16 @@ export function publicVisualizerContext(session) {
     };
 }
 
-export function readSignalSeries(session, signalUuids, { startTime = 0, endTime = Infinity, maxPoints = 4000 } = {}) {
-    const requested = new Set(signalUuids);
-    const metadata = session.signals.filter((signal) => requested.has(signal.signalUuid));
+export function readSignalSeries(session, signalIds, { startTime = 0, endTime = Infinity, maxPoints = 4000 } = {}) {
+    const requested = new Set(signalIds);
+    const metadata = session.signals.filter((signal) => requested.has(signal.signalId));
     const samples = session.samples.filter((sample) => sample.time >= startTime && sample.time <= endTime);
     const stride = Math.max(1, Math.ceil(samples.length / Math.max(2, maxPoints)));
     const selectedSamples = samples.filter((_sample, index) => index % stride === 0 || index === samples.length - 1);
     return metadata.map((signal) => ({
         ...signal,
         samples: selectedSamples.flatMap((sample) => {
-            const state = sample.states.find((candidate) => candidate.stateId === signal.signalUuid);
+            const state = sample.states.find((candidate) => candidate.stateId === signal.signalId);
             return state ? [{ time: Number(sample.time), value: Number(state.value) }] : [];
         })
     }));

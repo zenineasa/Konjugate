@@ -179,23 +179,23 @@ Each signal contains:
 
 ```text
 signal
-├── signalUuid     state UUID used for API references
-├── entityUuid     owning node UUID
+├── signalId       numeric state ID used for API references
+├── entityId       numeric owning-node ID
 ├── entityName     current display name of the node
 ├── name           display name of the state
 ├── symbol         model symbol of the state
 └── unit           unit string, possibly empty
 ```
 
-Names and symbols are presentation metadata. Store and request signals by `signalUuid`.
+Names and symbols are presentation metadata. Store and request signals by `signalId`.
 
-### `readSeries(signalUuids, options)`
+### `readSeries(signalIds, options)`
 
 Returns samples for the requested signals. It requires `results.read`.
 
 ```js
 const series = await window.konjugateVisualizer.readSeries(
-    selectedSignalUuids,
+    selectedSignalIds,
     {
         startTime: 0,
         endTime: context.run.targetTime,
@@ -240,11 +240,11 @@ The callback may run frequently during playback. Update cursors or layout increm
 
 ### `onSelectionChange(callback)`
 
-Subscribes to selected-node UUID changes. It requires `selection.read`. The value is `null` when no node is selected or when another entity type is selected.
+Subscribes to selected-node ID changes. It requires `selection.read`. The value is `null` when no node is selected or when another entity type is selected.
 
 ```js
-window.konjugateVisualizer.onSelectionChange((nodeUuid) => {
-    highlightEntity(nodeUuid);
+window.konjugateVisualizer.onSelectionChange((nodeId) => {
+    highlightEntity(nodeId);
 });
 ```
 
@@ -268,7 +268,7 @@ When the user explicitly closes results in Konjugate, the visualizer window is c
 
 ```js
 window.konjugateVisualizer.onSamplesAvailable(async () => {
-    const series = await window.konjugateVisualizer.readSeries(selectedSignalUuids);
+    const series = await window.konjugateVisualizer.readSeries(selectedSignalIds);
     updatePlot(series);
 });
 window.konjugateVisualizer.onRunStatusChange((run) => updateStatus(run.lifecycle));
@@ -318,7 +318,7 @@ async function loadSession() {
 
     signalSelect.replaceChildren(...signals.map((signal) => {
         const option = document.createElement('option');
-        option.value = signal.signalUuid;
+        option.value = signal.signalId;
         option.textContent = `${signal.entityName} · ${signal.name} (${signal.unit || 'unitless'})`;
         return option;
     }));
@@ -327,8 +327,8 @@ async function loadSession() {
 }
 
 signalSelect.addEventListener('change', async () => {
-    const signalUuids = [...signalSelect.selectedOptions].map((option) => option.value);
-    const series = await window.konjugateVisualizer.readSeries(signalUuids, { maxPoints: 1000 });
+    const signalIds = [...signalSelect.selectedOptions].map((option) => Number(option.value));
+    const series = await window.konjugateVisualizer.readSeries(signalIds, { maxPoints: 1000 });
     output.textContent = JSON.stringify(series, null, 2);
 });
 
@@ -350,7 +350,7 @@ Semantic quantity and coordinate-frame metadata are candidates for a later API v
 
 - Reject an unavailable `apiVersion`; do not guess compatible behavior.
 - Treat unknown fields returned by the host as additive and ignore them safely.
-- Use UUID fields for identity and display fields only for presentation.
+- Use numeric ID fields for identity and display fields only for presentation.
 - Expect result datasets to become larger than can be copied into one renderer.
 - Keep add-on state separate from the Konjugate model unless a future namespaced persistence API is explicitly provided.
 - Avoid depending on the bundled Results Analysis add-on or other Konjugate implementation files.

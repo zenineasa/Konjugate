@@ -83,7 +83,7 @@ The canonical contract is `schemas/assistantOperations.schema.json`. A proposal 
 }
 ```
 
-Temporary references are lower-camel-case identifiers used by later operations in the same proposal. References to existing entities use their UUIDs exactly. Operation ordering is significant.
+Temporary references are lower-camel-case identifiers used by later operations in the same proposal. References to existing entities use their numeric IDs exactly. Operation ordering is significant.
 
 Supported operation families include:
 

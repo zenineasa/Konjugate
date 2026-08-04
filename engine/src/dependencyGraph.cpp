@@ -12,7 +12,7 @@ namespace konjugate {
 namespace {
 
 struct DependencyAccumulator {
-    std::set<std::string> remoteStateIds;
+    std::set<EntityId> remoteStateIds;
     std::size_t contributionTaskCount = 0;
     std::size_t remoteBindingsPerSubstep = 0;
     std::size_t estimatedDependentOperationsPerSynchronization = 0;
@@ -47,7 +47,7 @@ private:
 
 DependencyGraph buildDependencyGraph(const ExecutionPlan& plan) {
     DependencyGraph graph;
-    std::unordered_map<std::string, std::size_t> nodeIndexes;
+    std::unordered_map<EntityId, std::size_t> nodeIndexes;
     graph.nodes.reserve(plan.nodes.size());
     for (std::size_t index = 0; index < plan.nodes.size(); ++index) {
         const auto& node = plan.nodes[index];
@@ -65,7 +65,7 @@ DependencyGraph buildDependencyGraph(const ExecutionPlan& plan) {
     for (std::size_t targetIndex = 0; targetIndex < plan.nodes.size(); ++targetIndex) {
         const auto& target = plan.nodes[targetIndex];
         for (const auto& task : target.contributions) {
-            std::map<std::size_t, std::vector<std::string>> taskRemoteStates;
+            std::map<std::size_t, std::vector<EntityId>> taskRemoteStates;
             for (const auto& binding : task.bindings) {
                 if (binding.source != BindingSource::synchronizationSnapshot) continue;
                 const auto stateNode = plan.stateNodes.find(binding.valueId);

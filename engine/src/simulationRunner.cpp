@@ -61,8 +61,14 @@ struct NodeRuntimeMetrics {
     std::uint64_t computeNanoseconds = 0;
 };
 
-std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
-    return tree.get<std::string>(key, "");
+EntityId entityIdValue(const boost::property_tree::ptree& tree, const std::string& key) {
+    const auto text = tree.get<std::string>(key, "");
+    std::size_t consumed = 0;
+    const auto result = std::stoull(text, &consumed);
+    if (!result || result > 9007199254740991ULL || consumed != text.size()) {
+        throw std::runtime_error("Model ids must be positive safe integers.");
+    }
+    return result;
 }
 
 PacingMode pacingModeFromString(const std::string& value) {
@@ -160,7 +166,12 @@ RunControl readRunControl(const std::filesystem::path& path, const RunControl& c
         if (const auto values = control.get_child_optional("parameterValues")) {
             for (const auto& item : *values) {
                 const auto parameterValue = item.second.get_value<double>();
-                if (std::isfinite(parameterValue)) parameterValues[item.first] = parameterValue;
+                std::size_t consumed = 0;
+                const auto parameterId = std::stoull(item.first, &consumed);
+                if (consumed == item.first.size() && parameterId > 0 &&
+                    parameterId <= 9007199254740991ULL && std::isfinite(parameterValue)) {
+                    parameterValues[parameterId] = parameterValue;
+                }
             }
         }
         return {pacingFromTree(control, current.pacing), executionState, std::move(parameterValues)};
@@ -260,7 +271,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     std::unique_ptr<TaskExecutor> taskExecutor;
     if (executionSettings.backend == ExecutionBackend::threadPool) taskExecutor = std::make_unique<TaskExecutor>(executionSettings.workerThreads);
     std::vector<std::vector<std::size_t>> partitionNodeIndexes;
-    std::vector<std::vector<std::string>> partitionSnapshotStateIds;
+    std::vector<std::vector<EntityId>> partitionSnapshotStateIds;
     std::vector<std::unique_ptr<PartitionRuntime>> partitionRuntimes;
     std::unique_ptr<InMemoryPartitionTransport> partitionTransport;
     const auto partitionReceiveTimeoutMilliseconds = configuration.get<std::size_t>(
@@ -272,8 +283,8 @@ void runSimulation(const boost::property_tree::ptree& document,
         partitionRuntimes.reserve(partitionPlan.effectivePartitions);
         partitionNodeIndexes.resize(partitionPlan.effectivePartitions);
         partitionSnapshotStateIds.resize(partitionPlan.effectivePartitions);
-        std::unordered_map<std::string, std::size_t> executionNodeIndexes;
-        std::unordered_map<std::string, std::size_t> nodePartitions;
+        std::unordered_map<EntityId, std::size_t> executionNodeIndexes;
+        std::unordered_map<EntityId, std::size_t> nodePartitions;
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
             executionNodeIndexes[executionPlan.nodes[index].nodeId] = index;
         }
@@ -282,7 +293,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             partitionNodeIndexes[assignment.partition].push_back(executionNodeIndexes.at(assignment.nodeId));
         }
         for (std::size_t partition = 0; partition < partitionNodeIndexes.size(); ++partition) {
-            std::set<std::string> snapshotStateIds;
+            std::set<EntityId> snapshotStateIds;
             for (const auto nodeIndex : partitionNodeIndexes[partition]) {
                 snapshotStateIds.insert(executionPlan.nodes[nodeIndex].stateIds.begin(), executionPlan.nodes[nodeIndex].stateIds.end());
             }
@@ -303,7 +314,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         ? partitionPlan.effectivePartitions : executionSettings.workerThreads;
     Values states = executionPlan.initialStates;
     const auto& stateNodes = executionPlan.stateNodes;
-    std::unordered_map<std::string, std::size_t> nodeSubsteps;
+    std::unordered_map<EntityId, std::size_t> nodeSubsteps;
     for (const auto& node : executionPlan.nodes) {
         nodeSubsteps[node.nodeId] = node.substeps;
     }
@@ -311,9 +322,9 @@ void runSimulation(const boost::property_tree::ptree& document,
     double startTime = 0;
     if (const auto checkpoint = configuration.get_child_optional("startCheckpoint")) {
         startTime = checkpoint->get<double>("time");
-        std::set<std::string> restored;
+        std::set<EntityId> restored;
         for (const auto& stateItem : checkpoint->get_child("states")) {
-            const auto stateId = value(stateItem.second, "stateId");
+            const auto stateId = entityIdValue(stateItem.second, "stateId");
             if (!states.contains(stateId) || !restored.insert(stateId).second) throw std::runtime_error("The restart checkpoint does not match the model state vector.");
             states[stateId] = stateItem.second.get<double>("value");
         }
@@ -322,7 +333,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     if (!(startTime >= 0) || !(targetTime > startTime)) throw std::runtime_error("targetTime must be later than the restart checkpoint.");
 
     const auto& stateIds = executionPlan.stateIds;
-    std::vector<std::string> nodeIds;
+    std::vector<EntityId> nodeIds;
     for (const auto& item : nodeSubsteps) nodeIds.push_back(item.first);
     std::sort(nodeIds.begin(), nodeIds.end());
 
@@ -343,7 +354,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         protocol::EngineEvent event;
         event.set_protocol_version(1);
         auto* table = event.mutable_state_table();
-        for (const auto& stateId : stateIds) table->add_states()->set_state_id(stateId);
+        for (const auto stateId : stateIds) table->add_states()->set_state_id(stateId);
         writeFramedEvent(*eventStream, event);
     }
     const auto appendStreamRecord = [&](const std::string& type, double time, const Values& recordStates, const std::string& uuid = {}) {
@@ -363,7 +374,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
             if (stateIndex) resultStream << ',';
             const auto& stateId = stateIds[stateIndex];
-            resultStream << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << recordStates.at(stateId) << '}';
+            resultStream << "{\"stateId\":" << stateId << ",\"value\":" << recordStates.at(stateId) << '}';
         }
         resultStream << "]}\n";
     };
@@ -410,7 +421,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             if (index) json << ',';
             const auto& node = executionPlan.nodes[index];
             const auto& metrics = nodeMetrics[index];
-            json << "{\"nodeId\":\"" << escape(node.nodeId) << "\",\"estimatedOperationsPerSubstep\":"
+            json << "{\"nodeId\":" << node.nodeId << ",\"estimatedOperationsPerSubstep\":"
                  << node.estimatedOperationsPerSubstep << ",\"invocations\":" << metrics.invocations
                  << ",\"executedSubsteps\":" << metrics.executedSubsteps << ",\"evaluatedContributions\":"
                  << metrics.evaluatedContributions << ",\"computeNanoseconds\":" << metrics.computeNanoseconds << '}';
@@ -420,7 +431,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (std::size_t index = 0; index < dependencyGraph.nodes.size(); ++index) {
             if (index) json << ',';
             const auto& node = dependencyGraph.nodes[index];
-            json << "{\"nodeId\":\"" << escape(node.nodeId) << "\",\"stateCount\":" << node.stateCount
+            json << "{\"nodeId\":" << node.nodeId << ",\"stateCount\":" << node.stateCount
                  << ",\"substeps\":" << node.substeps << ",\"estimatedOperationsPerSynchronization\":"
                  << node.estimatedOperationsPerSynchronization << ",\"component\":" << node.component << '}';
         }
@@ -428,11 +439,11 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (std::size_t index = 0; index < dependencyGraph.dependencies.size(); ++index) {
             if (index) json << ',';
             const auto& dependency = dependencyGraph.dependencies[index];
-            json << "{\"sourceNodeId\":\"" << escape(dependency.sourceNodeId) << "\",\"targetNodeId\":\""
-                 << escape(dependency.targetNodeId) << "\",\"remoteStateIds\":[";
+            json << "{\"sourceNodeId\":" << dependency.sourceNodeId << ",\"targetNodeId\":"
+                 << dependency.targetNodeId << ",\"remoteStateIds\":[";
             for (std::size_t stateIndex = 0; stateIndex < dependency.remoteStateIds.size(); ++stateIndex) {
                 if (stateIndex) json << ',';
-                json << '\"' << escape(dependency.remoteStateIds[stateIndex]) << '\"';
+                json << dependency.remoteStateIds[stateIndex];
             }
             json << "],\"contributionTaskCount\":" << dependency.contributionTaskCount << ",\"remoteBindingsPerSubstep\":"
                  << dependency.remoteBindingsPerSubstep << ",\"estimatedDependentOperationsPerSynchronization\":"
@@ -449,7 +460,7 @@ void runSimulation(const boost::property_tree::ptree& document,
              << partitionPlan.communicationBias << ",\"assignments\":[";
         for (std::size_t index = 0; index < partitionPlan.assignments.size(); ++index) {
             if (index) json << ',';
-            json << "{\"nodeId\":\"" << escape(partitionPlan.assignments[index].nodeId) << "\",\"partition\":"
+            json << "{\"nodeId\":" << partitionPlan.assignments[index].nodeId << ",\"partition\":"
                  << partitionPlan.assignments[index].partition << '}';
         }
         json << "],\"partitions\":[";
@@ -476,15 +487,15 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (std::size_t index = 0; index < nodeIds.size(); ++index) {
             if (index) json << ',';
             const auto& nodeId = nodeIds[index];
-            json << "{\"nodeId\":\"" << escape(nodeId) << "\",\"substepsPerGlobalStep\":" << nodeSubsteps.at(nodeId)
+            json << "{\"nodeId\":" << nodeId << ",\"substepsPerGlobalStep\":" << nodeSubsteps.at(nodeId)
                  << ",\"effectiveTimeStep\":" << globalTimeStep / static_cast<double>(nodeSubsteps.at(nodeId)) << '}';
         }
         json << "],\"states\":[";
         for (std::size_t index = 0; index < stateIds.size(); ++index) {
             if (index) json << ',';
             const auto& stateId = stateIds[index];
-            json << "{\"nodeId\":\"" << escape(stateNodes.at(stateId)) << "\",\"stateId\":\"" << escape(stateId)
-                 << "\",\"value\":" << states.at(stateId) << '}';
+            json << "{\"nodeId\":" << stateNodes.at(stateId) << ",\"stateId\":" << stateId
+                 << ",\"value\":" << states.at(stateId) << '}';
         }
         json << "],\"samples\":[";
         for (std::size_t sampleIndex = 0; completeSnapshot && sampleIndex < samples.size(); ++sampleIndex) {
@@ -493,7 +504,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
                 if (stateIndex) json << ',';
                 const auto& stateId = stateIds[stateIndex];
-                json << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << samples[sampleIndex].states.at(stateId) << '}';
+                json << "{\"stateId\":" << stateId << ",\"value\":" << samples[sampleIndex].states.at(stateId) << '}';
             }
             json << "]}";
         }
@@ -506,7 +517,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
                 if (stateIndex) json << ',';
                 const auto& stateId = stateIds[stateIndex];
-                json << "{\"stateId\":\"" << escape(stateId) << "\",\"value\":" << checkpoint.states.at(stateId) << '}';
+                json << "{\"stateId\":" << stateId << ",\"value\":" << checkpoint.states.at(stateId) << '}';
             }
             json << "]}";
         }

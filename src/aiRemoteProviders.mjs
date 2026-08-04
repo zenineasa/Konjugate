@@ -38,7 +38,7 @@ async function responseJson(fetchImpl, url, options = {}) {
 
 function proposalPrompt(operationSchema, context, request, repair) {
     const correction = repair ? `\n\nCORRECTION REQUIRED:\nYour previous proposal was rejected: ${repair.error}\nPrevious rejected proposal:\n${JSON.stringify(repair.proposal)}\nReturn a complete corrected proposal, not a patch or explanation.` : '';
-    return `Create a Konjugate model-operation proposal for the user's request. Return only JSON matching the supplied schema. Use existing UUIDs exactly. Use lower camel case for temporary refs and symbols. Do not invent existing entities. State engineering assumptions explicitly.\n\nOPERATION SCHEMA:\n${JSON.stringify(operationSchema)}\n\nMODEL CONTEXT:\n${JSON.stringify(context)}\n\nUSER REQUEST:\n${request}${correction}`;
+    return `Create a Konjugate model-operation proposal for the user's request. Return only JSON matching the supplied schema. Use existing numeric entity IDs exactly. Use lower camel case for temporary refs and symbols. Do not invent existing entities. State engineering assumptions explicitly.\n\nOPERATION SCHEMA:\n${JSON.stringify(operationSchema)}\n\nMODEL CONTEXT:\n${JSON.stringify(context)}\n\nUSER REQUEST:\n${request}${correction}`;
 }
 
 function parseProposal(text) {

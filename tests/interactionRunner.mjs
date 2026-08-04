@@ -13,7 +13,9 @@ async function waitFor(window, expression, message, timeout = 5000) {
         if (await evaluate(window, expression)) return;
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    throw new Error(message);
+    const visibleError = await evaluate(window, `document.querySelector('#assistantError:not([hidden])')?.textContent ?? ''`);
+    const assistantStatus = await evaluate(window, `document.querySelector('#assistantProposalStatus')?.textContent ?? ''`);
+    throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}`);
 }
 
 export async function runInteractionTests(window) {

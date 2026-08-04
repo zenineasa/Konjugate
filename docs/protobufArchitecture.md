@@ -19,8 +19,8 @@ serialized `EngineEvent`. stderr remains text diagnostics. Files remain responsi
 for durable results and recovery while the migration is incomplete.
 
 The engine publishes a stable state table once. Sample batches subsequently contain
-packed timestamps and packed double values in sample-major state-table order. UUIDs
-are therefore not repeated for every value. Checkpoints and the final `.kjr` remain
+packed timestamps and packed double values in sample-major state-table order. Numeric
+state IDs are therefore not repeated for every value. Checkpoints and the final `.kjr` remain
 JSON in this slice.
 
 Run `npm run benchmark:protocol` to compare the implemented live-sample wire shape
@@ -41,8 +41,8 @@ Closed native control values such as execution backend, backend-selection reason
 pacing mode and run state are parsed from current JSON strings once and represented
 as strong enums thereafter. Compiled expression symbols and parameter bindings use
 stable integer slots, so each contribution evaluates from a contiguous double vector
-without rebuilding symbol and parameter hash maps during every node substep. UUIDs
-remain the persistent identity and JSON output remains unchanged.
+without rebuilding symbol and parameter hash maps during every node substep. Persistent
+model identities are positive JSON-safe integers and state-table IDs use Protobuf `uint64`.
 
 ## Migration sequence
 
@@ -50,7 +50,7 @@ remain the persistent identity and JSON output remains unchanged.
 2. Move live pacing, parameter and lifecycle commands from polled JSON files to
    framed stdin messages.
 3. Define a binary `.kjr` result containing packed samples and checkpoints.
-4. Define the UUID-backed project and typed equation schemas, then introduce a
+4. Define the integer-ID-backed project and typed equation schemas, then introduce a
    Protobuf payload in the `.kjt` container.
 5. Remove Boost.PropertyTree model ingestion and obsolete JSON protocol code after
    numerical and cross-language regression coverage is complete.

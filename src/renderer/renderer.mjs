@@ -35,6 +35,9 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const defaultWorkerThreads = Math.max(1, Math.min(256, Number(navigator.hardwareConcurrency) || 1));
+let nextModelEntityId = 1;
+const validModelEntityId = (value) => Number.isSafeInteger(value) && value > 0;
+const allocateModelEntityId = () => nextModelEntityId++;
 const normalizeExecutionConfiguration = (execution = {}) => ({
     backend: ['automatic', 'serial', 'threadPool', 'partitioned'].includes(execution.backend) ? execution.backend : 'automatic',
     partitionAlgorithm: ['automatic', 'metisKway', 'communicationAwareGreedy'].includes(execution.partitionAlgorithm)
@@ -49,7 +52,7 @@ const normalizeExecutionConfiguration = (execution = {}) => ({
             ? Number(execution.automaticMaximumPartitionCutFraction) : 0.25))
 });
 const defaultRunConfiguration = () => ({
-    id: crypto.randomUUID(), name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1,
+    id: allocateModelEntityId(), name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1,
     execution: normalizeExecutionConfiguration()
 });
 
@@ -104,20 +107,19 @@ function hydrateProjectDocument(document) {
     const ids = new Set();
     const nodeIds = new Set();
     const stateIdsByNode = new Map();
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    nextModelEntityId = 1;
+    const registerId = (id, message) => {
+        if (!validModelEntityId(id) || ids.has(id)) throw new Error(message);
+        ids.add(id);
+        nextModelEntityId = Math.max(nextModelEntityId, id + 1);
+    };
     document.nodes.forEach((node) => {
-        if (!uuidPattern.test(node.id) || ids.has(node.id)) {
-            throw new Error('Every node must have a unique UUID id.');
-        }
-        ids.add(node.id);
+        registerId(node.id, 'Every node must have a unique positive integer id.');
         nodeIds.add(node.id);
         const stateIds = new Set();
         const stateSymbols = new Set();
         (node.states ?? []).forEach((state) => {
-            if (!uuidPattern.test(state.id) || ids.has(state.id)) {
-                throw new Error(`Every state in “${node.name ?? node.id}” must have a unique UUID id.`);
-            }
-            ids.add(state.id);
+            registerId(state.id, `Every state in “${node.name ?? node.id}” must have a unique positive integer id.`);
             stateIds.add(state.id);
             if (!modelSymbolPattern.test(state.symbol) || stateSymbols.has(state.symbol)) {
                 throw new Error(`State symbols in “${node.name ?? node.id}” must be unique lower camel case identifiers.`);
@@ -125,10 +127,7 @@ function hydrateProjectDocument(document) {
             stateSymbols.add(state.symbol);
         });
         (node.sourceTerms ?? []).forEach((term) => {
-            if (!uuidPattern.test(term.id) || ids.has(term.id)) {
-                throw new Error(`Every source term in “${node.name ?? node.id}” must have a unique UUID id.`);
-            }
-            ids.add(term.id);
+            registerId(term.id, `Every source term in “${node.name ?? node.id}” must have a unique positive integer id.`);
             if (!stateSymbols.has(term.state)) {
                 throw new Error(`A source term in “${node.name ?? node.id}” references a missing state symbol.`);
             }
@@ -136,10 +135,7 @@ function hydrateProjectDocument(document) {
         stateIdsByNode.set(node.id, stateIds);
     });
     document.edges.forEach((edge) => {
-        if (!uuidPattern.test(edge.id) || ids.has(edge.id)) {
-            throw new Error('Every edge must have a unique UUID id.');
-        }
-        ids.add(edge.id);
+        registerId(edge.id, 'Every edge must have a unique positive integer id.');
         if (!nodeIds.has(edge.source?.nodeId) || !nodeIds.has(edge.target?.nodeId)) {
             throw new Error(`Edge “${edge.name ?? edge.id}” references a missing node.`);
         }
@@ -151,10 +147,7 @@ function hydrateProjectDocument(document) {
         }
         const parameterSymbols = new Set();
         (edge.parameters ?? []).forEach((parameter) => {
-            if (!uuidPattern.test(parameter.id) || ids.has(parameter.id)) {
-                throw new Error(`Every parameter in “${edge.name ?? edge.id}” must have a unique UUID id.`);
-            }
-            ids.add(parameter.id);
+            registerId(parameter.id, `Every parameter in “${edge.name ?? edge.id}” must have a unique positive integer id.`);
             if (!modelSymbolPattern.test(parameter.symbol) || parameterSymbols.has(parameter.symbol)) {
                 throw new Error(`Parameter symbols in “${edge.name ?? edge.id}” must be unique lower camel case identifiers.`);
             }
@@ -170,6 +163,9 @@ function hydrateProjectDocument(document) {
             }
             parameterSymbols.add(parameter.symbol);
         });
+    });
+    (document.runConfigurations ?? []).forEach((configuration) => {
+        registerId(configuration.id, 'Every run configuration must have a unique positive integer id.');
     });
 
     const nodes = document.nodes.map((node) => {
@@ -221,7 +217,7 @@ function hydrateProjectDocument(document) {
     }));
     const runConfigurations = Array.isArray(document.runConfigurations) && document.runConfigurations.length
         ? document.runConfigurations.map((configuration) => ({
-            id: configuration.id ?? crypto.randomUUID(),
+            id: configuration.id ?? allocateModelEntityId(),
             name: configuration.name || 'Untitled',
             globalTimeStep: Number(configuration.globalTimeStep) || 0.01,
             outputInterval: Number(configuration.outputInterval) || 0.1,
@@ -1436,8 +1432,8 @@ function refreshEndpointOptions() {
     const previousTarget = target.value;
     source.replaceChildren(new Option('Choose a node…', ''), ...nodeOptions.map((option) => option.cloneNode(true)));
     target.replaceChildren(new Option('Choose a node…', ''), ...nodeOptions.map((option) => option.cloneNode(true)));
-    if (model.nodes.some((node) => node.id === previousSource)) source.value = previousSource;
-    if (model.nodes.some((node) => node.id === previousTarget)) target.value = previousTarget;
+    if (model.nodes.some((node) => node.id === Number(previousSource))) source.value = previousSource;
+    if (model.nodes.some((node) => node.id === Number(previousTarget))) target.value = previousTarget;
     refreshStateReferences();
 }
 
@@ -1465,7 +1461,7 @@ function finishEndpointPick() {
 
 function chooseEndpointNode(nodeId) {
     if (!activeEndpointPick) return;
-    const otherEndpoint = activeEndpointPick === 'source' ? $('#edgeTarget').value : $('#edgeSource').value;
+    const otherEndpoint = Number(activeEndpointPick === 'source' ? $('#edgeTarget').value : $('#edgeSource').value);
     if (nodeId === otherEndpoint) return;
     $(`#edge${activeEndpointPick[0].toUpperCase()}${activeEndpointPick.slice(1)}`).value = nodeId;
     refreshStateReferences();
@@ -1479,7 +1475,7 @@ function startEndpointPick(endpoint) {
     canvas.classList.add('pickingEndpoint');
     const button = $(`[data-pick-endpoint="${endpoint}"]`);
     button.classList.add('active');
-    const otherEndpoint = endpoint === 'source' ? $('#edgeTarget').value : $('#edgeSource').value;
+    const otherEndpoint = Number(endpoint === 'source' ? $('#edgeTarget').value : $('#edgeSource').value);
     const eligibleIds = new Set(eligibleEndpointIds(
         model.nodes,
         otherEndpoint,
@@ -1513,8 +1509,8 @@ function startEndpointPick(endpoint) {
 function refreshStateReferences() {
     const container = $('#stateReferenceChips');
     container.replaceChildren();
-    const sourceNode = model.nodes.find((node) => node.id === $('#edgeSource').value);
-    const targetNode = model.nodes.find((node) => node.id === $('#edgeTarget').value);
+    const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
+    const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
     const parameters = $$('.parameterRow').map((row, index) => ({
         id: `builderParameter${index}`,
         symbol: $('[data-field="symbol"]', row).value.trim()
@@ -1540,8 +1536,8 @@ function refreshStateReferences() {
 
 function renderBuilderEquationDiagnostics(bindings = null) {
     const availableBindings = bindings ?? (() => {
-        const sourceNode = model.nodes.find((node) => node.id === $('#edgeSource').value);
-        const targetNode = model.nodes.find((node) => node.id === $('#edgeTarget').value);
+        const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
+        const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
         const parameters = $$('.parameterRow').map((row, index) => ({
             id: `builderParameter${index}`,
             symbol: $('[data-field="symbol"]', row).value.trim()
@@ -1584,14 +1580,14 @@ function navigateToValidationIssue(item) {
     $('#validationPanel').hidden = true;
     $('#validationSummary').ariaExpanded = 'false';
     if (item.location.kind === 'node') {
-        const node = nodeObjects.get(item.location.entityId);
+        const node = nodeObjects.get(Number(item.location.entityId));
         if (!node) return;
         selectNode(node);
         openNodeEditor(node.userData.definition);
         const field = { name: '#editNodeName', states: '#nodeEditorStates input', sourceTerms: '#nodeEditorSourceTerms input' }[item.location.field];
         if (field) requestAnimationFrame(() => $(field)?.focus());
     } else if (item.location.kind === 'edge') {
-        const relationship = model.relationships.find((candidate) => candidate.id === item.location.entityId);
+        const relationship = model.relationships.find((candidate) => candidate.id === Number(item.location.entityId));
         if (!relationship) return;
         openRelationshipEditor(relationship);
         const field = { source: '#editEdgeSource', target: '#editEdgeTarget', equation: '#editEdgeMathField', output: '#editEquationOutput', parameters: '#edgeEditorParameters input' }[item.location.field];
@@ -1671,9 +1667,10 @@ function renderValidationStatus() {
 
     const severityByEntity = new Map();
     currentValidation.issues.forEach((item) => {
-        if (!item.location.entityId) return;
-        const previous = severityByEntity.get(item.location.entityId);
-        if (!previous || item.severity === 'error') severityByEntity.set(item.location.entityId, item.severity);
+        const entityId = Number(item.location.entityId);
+        if (!validModelEntityId(entityId)) return;
+        const previous = severityByEntity.get(entityId);
+        if (!previous || item.severity === 'error') severityByEntity.set(entityId, item.severity);
     });
     nodeObjects.forEach((node, id) => {
         const label = node.children.find((child) => child.isCSS2DObject)?.element;
@@ -2409,7 +2406,7 @@ function createRelationshipBundleOverlay(key) {
         const row = event.target.closest('.relationshipRow');
         const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
         const definition = row
-            ? model.relationships.find((relationship) => relationship.id === row.dataset.relationship)
+            ? model.relationships.find((relationship) => relationship.id === Number(row.dataset.relationship))
             : bundle?.relationships[0];
         if (definition) openRelationshipEditor(definition);
     });
@@ -2419,7 +2416,7 @@ function createRelationshipBundleOverlay(key) {
         const row = event.target.closest('.relationshipRow');
         const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
         const definition = row
-            ? model.relationships.find((relationship) => relationship.id === row.dataset.relationship)
+            ? model.relationships.find((relationship) => relationship.id === Number(row.dataset.relationship))
             : bundle?.relationships[0];
         if (definition) selectRelationship(definition);
     });
@@ -2507,7 +2504,7 @@ function serializeProjectDocument() {
                 numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep },
                 position: object.position.toArray(),
                 states: node.states.map((state) => ({
-                    id: state.id ?? crypto.randomUUID(),
+                    id: state.id ?? allocateModelEntityId(),
                     name: state.label,
                     symbol: state.symbol,
                     initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
@@ -3168,7 +3165,7 @@ $('#discardAssistantProposal').addEventListener('click', discardAssistantProposa
 $('#applyAssistantProposal').addEventListener('click', commitAssistantProposal);
 $('#assistantChanges').addEventListener('click', (event) => {
     const control = event.target.closest('[data-focus-entity]');
-    if (control) inspectAssistantEntity(control.dataset.focusEntity);
+    if (control) inspectAssistantEntity(Number(control.dataset.focusEntity));
 });
 $('#assistantPromptForm').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -3393,7 +3390,7 @@ $('#editAddState').addEventListener('click', () => {
     if (!selectedNode) return;
     changeNodeModel(selectedNode, (snapshot) => {
         snapshot.states.push({
-            id: crypto.randomUUID(),
+            id: allocateModelEntityId(),
             label: 'New state',
             symbol: `x${snapshot.states.length + 1}`,
             initialValue: 0,
@@ -3407,7 +3404,7 @@ $('#editAddSourceTerm').addEventListener('click', () => {
     if (!selectedNode?.userData.definition.states.length) return;
     changeNodeModel(selectedNode, (snapshot) => {
         snapshot.sourceTerms.push({
-            id: crypto.randomUUID(),
+            id: allocateModelEntityId(),
             state: snapshot.states[0].symbol,
             expression: '0'
         });
@@ -3503,7 +3500,7 @@ $('#editAddEdgeParameter').addEventListener('click', () => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.parameters.push({
-            id: crypto.randomUUID(),
+            id: allocateModelEntityId(),
             name: 'Parameter',
             symbol: `p${snapshot.parameters.length + 1}`,
             value: 0,
@@ -3903,7 +3900,7 @@ $('#createNode').addEventListener('click', () => {
         return;
     }
 
-    const id = crypto.randomUUID();
+    const id = allocateModelEntityId();
     const definition = {
         id,
         title: $('#newNodeName').value.trim() || 'Untitled node',
@@ -3914,7 +3911,7 @@ $('#createNode').addEventListener('click', () => {
         position: [0, -0.7, 0],
         color: 0x34727a,
         states: states.map((state) => ({
-            id: crypto.randomUUID(),
+            id: allocateModelEntityId(),
             label: state.name,
             symbol: state.symbol,
             initialValue: Number(state.value) || 0,
@@ -3922,7 +3919,7 @@ $('#createNode').addEventListener('click', () => {
             value: `${Number(state.value) || 0}${state.unit ? ` ${state.unit}` : ''}`
         })),
         sourceTerms: $$('.sourceTermRow').map((row) => ({
-            id: crypto.randomUUID(),
+            id: allocateModelEntityId(),
             state: $('.sourceState', row).value,
             expression: $('.sourceExpression', row).value.trim()
         })).filter((term) => term.state && term.expression),
@@ -3946,15 +3943,15 @@ $('#createNode').addEventListener('click', () => {
 
 $('#createEdge').addEventListener('click', () => {
     if (activeResult) return;
-    const source = $('#edgeSource').value;
-    const target = $('#edgeTarget').value;
+    const source = Number($('#edgeSource').value);
+    const target = Number($('#edgeTarget').value);
     if (!source || !target || source === target) {
         $('#edgeTarget').focus();
         return;
     }
 
     const parameters = $$('.parameterRow').map((row) => ({
-        id: crypto.randomUUID(),
+        id: allocateModelEntityId(),
         name: $('[data-field="name"]', row).value.trim(),
         symbol: $('[data-field="symbol"]', row).value.trim(),
         value: Number($('[data-field="value"]', row).value) || 0,
@@ -3978,7 +3975,7 @@ $('#createEdge').addEventListener('click', () => {
         return;
     }
     const definition = {
-        id: crypto.randomUUID(),
+        id: allocateModelEntityId(),
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
         source,
         target,
@@ -3993,7 +3990,7 @@ $('#createEdge').addEventListener('click', () => {
     definition.equationModel = normalizeEdgeEquationModel(definition);
     const [outputRole, outputStateId] = $('#edgeEquationOutput').value.split(':');
     if (outputRole && outputStateId) {
-        definition.equationModel.output = { role: outputRole, stateId: outputStateId };
+        definition.equationModel.output = { role: outputRole, stateId: Number(outputStateId) };
     }
     if (definition.equation && !definition.equationModel.mathJson) {
         renderBuilderEquationDiagnostics(definition.equationModel.bindings);

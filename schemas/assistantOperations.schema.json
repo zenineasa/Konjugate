@@ -32,7 +32,12 @@
     },
     "$defs": {
         "ref": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-        "entityRef": { "type": "string", "minLength": 1 },
+        "entityRef": {
+            "oneOf": [
+                { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+                { "$ref": "#/$defs/ref" }
+            ]
+        },
         "symbol": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "addNode": {
             "type": "object", "additionalProperties": false,

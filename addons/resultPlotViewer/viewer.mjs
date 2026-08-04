@@ -100,14 +100,14 @@ async function renderPlot() {
 
 function renderSignalBrowser(filter = '') {
     const normalizedFilter = filter.trim().toLowerCase();
-    const groups = Map.groupBy(signals.filter((signal) => `${signal.entityName} ${signal.name} ${signal.symbol} ${signal.unit}`.toLowerCase().includes(normalizedFilter)), (signal) => signal.entityUuid);
+    const groups = Map.groupBy(signals.filter((signal) => `${signal.entityName} ${signal.name} ${signal.symbol} ${signal.unit}`.toLowerCase().includes(normalizedFilter)), (signal) => signal.entityId);
     const container = $('#signalGroups');
     container.replaceChildren();
-    groups.forEach((items, entityUuid) => {
+    groups.forEach((items, entityId) => {
         const group = document.createElement('section');
         group.className = 'signalGroup';
-        group.dataset.entityUuid = entityUuid;
-        group.classList.toggle('selectedEntity', context.selectedNodeId === entityUuid);
+        group.dataset.entityId = entityId;
+        group.classList.toggle('selectedEntity', context.selectedNodeId === entityId);
         const heading = document.createElement('strong');
         heading.textContent = items[0].entityName;
         group.appendChild(heading);
@@ -116,10 +116,10 @@ function renderSignalBrowser(filter = '') {
             label.className = 'signalOption';
             const input = document.createElement('input');
             input.type = 'checkbox';
-            input.checked = selectedSignals.has(signal.signalUuid);
+            input.checked = selectedSignals.has(signal.signalId);
             input.addEventListener('change', () => {
-                if (input.checked) selectedSignals.add(signal.signalUuid);
-                else selectedSignals.delete(signal.signalUuid);
+                if (input.checked) selectedSignals.add(signal.signalId);
+                else selectedSignals.delete(signal.signalId);
                 renderPlot();
             });
             const identity = document.createElement('span');
@@ -142,7 +142,7 @@ async function loadSession() {
     if (!context) return;
     signals = await window.konjugateVisualizer.listSignals();
     selectedSignals.clear();
-    signals.filter((signal) => signal.entityUuid === context.selectedNodeId).forEach((signal) => selectedSignals.add(signal.signalUuid));
+    signals.filter((signal) => signal.entityId === context.selectedNodeId).forEach((signal) => selectedSignals.add(signal.signalId));
     $('#projectName').textContent = context.projectName;
     $('#runName').textContent = context.run.name;
     $('#timeline').max = String(context.run.targetTime);
@@ -178,7 +178,7 @@ window.konjugateVisualizer.onTimelineChange((time) => {
 window.konjugateVisualizer.onSelectionChange((nodeId) => {
     if (!context) return;
     context.selectedNodeId = nodeId;
-    document.querySelectorAll('.signalGroup').forEach((group) => group.classList.toggle('selectedEntity', group.dataset.entityUuid === nodeId));
+    document.querySelectorAll('.signalGroup').forEach((group) => group.classList.toggle('selectedEntity', Number(group.dataset.entityId) === nodeId));
 });
 window.konjugateVisualizer.onSamplesAvailable(({ availableResultTime }) => {
     if (!context) return;

@@ -346,9 +346,9 @@ ipcMain.handle('visualizerListSignals', (event) => {
     return structuredClone(visualizerSession.signals);
 });
 
-ipcMain.handle('visualizerReadSeries', (event, { signalUuids, options }) => {
+ipcMain.handle('visualizerReadSeries', (event, { signalIds, options }) => {
     if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return [];
-    return readSignalSeries(visualizerSession, signalUuids, options);
+    return readSignalSeries(visualizerSession, signalIds, options);
 });
 
 ipcMain.handle('visualizerTitlebarStylesheet', (event) => {

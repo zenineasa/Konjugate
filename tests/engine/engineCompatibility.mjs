@@ -45,8 +45,8 @@ const input = join(directory, 'model.kjt');
 const report = join(directory, 'validation.json');
 const project = JSON.stringify({
     format: 'konjugate', version: 1, nodes: [{
-        id: '11111111-1111-4111-8111-111111111111', name: 'Node', states: [{
-            id: '22222222-2222-4222-8222-222222222222', name: 'State', symbol: 'state', initialValue: 0, unit: ''
+        id: 1, name: 'Node', states: [{
+            id: 2, name: 'State', symbol: 'state', initialValue: 0, unit: ''
         }], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#34727a' }
     }], edges: []
 });
@@ -60,12 +60,12 @@ const sourceProject = JSON.parse(project);
 sourceProject.nodes[0].states[0].initialValue = 1;
 sourceProject.nodes[0].numerics = { substepsPerGlobalStep: 2 };
 sourceProject.nodes[0].sourceTerms.push({
-    id: '33333333-3333-4333-8333-333333333333', state: 'state', expression: 'state',
+    id: 3, state: 'state', expression: 'state',
     expressionModel: {
         latex: 'state', bindings: [{
-            kind: 'state', nodeId: '11111111-1111-4111-8111-111111111111',
-            stateId: '22222222-2222-4222-8222-222222222222', symbol: 'state'
-        }], output: { stateId: '22222222-2222-4222-8222-222222222222' }, mathJson: 'state'
+            kind: 'state', nodeId: 1,
+            stateId: 2, symbol: 'state'
+        }], output: { stateId: 2 }, mathJson: 'state'
     }
 });
 await writeFile(input, await encodeProjectFile(JSON.stringify(sourceProject)));
@@ -74,7 +74,7 @@ assert.equal(await run(executable, ['run', input, '--configuration', join(direct
 const sourceResult = JSON.parse(await readFile(join(directory, 'sourceResults.kjr'), 'utf8'));
 assert.ok(Math.abs(sourceResult.states[0].value - 1.1025) < 1e-12);
 assert.deepEqual(sourceResult.nodeTimesteps[0], {
-    nodeId: '11111111-1111-4111-8111-111111111111', substepsPerGlobalStep: 2, effectiveTimeStep: 0.05
+    nodeId: 1, substepsPerGlobalStep: 2, effectiveTimeStep: 0.05
 });
 assert.equal(sourceResult.execution.planVersion, 1);
 assert.equal(sourceResult.execution.nodeMetrics[0].invocations, 1);
@@ -136,8 +136,8 @@ assert.equal(simulation.samples.length, 11);
 assert.equal(simulation.states.length, 4);
 assert.ok(simulation.states.every((state) => Number.isFinite(state.value)));
 const exampleStates = new Map(simulation.states.map((state) => [state.stateId, state.value]));
-const batteryTemperature = exampleStates.get('bdf343a3-54a2-4ab0-a1eb-1dd68507c130');
-const airTemperature = exampleStates.get('a9a1552b-dd1a-4860-889b-300d1888a2cb');
+const batteryTemperature = exampleStates.get(2);
+const airTemperature = exampleStates.get(5);
 assert.ok(batteryTemperature < 353.2 && batteryTemperature > airTemperature);
 assert.ok(airTemperature > 293.15 && airTemperature < batteryTemperature);
 assert.ok(Math.abs(1000 * (batteryTemperature - 353.2) + 5025 * (airTemperature - 293.15) - 420) < 1e-8);

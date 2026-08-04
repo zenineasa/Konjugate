@@ -1,7 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,15 +24,17 @@ function expression(baseSymbol = 'state') {
 }
 
 function benchmarkDocument() {
+    let nextEntityId = 1;
+    const allocateEntityId = () => nextEntityId++;
     const nodes = Array.from({ length: nodeCount }, (_unused, index) => {
-        const nodeId = randomUUID();
-        const stateId = randomUUID();
+        const nodeId = allocateEntityId();
+        const stateId = allocateEntityId();
         return {
             id: nodeId,
             name: `Benchmark node ${index + 1}`,
             states: [{ id: stateId, name: 'State', symbol: 'state', initialValue: 1, unit: '' }],
             sourceTerms: [{
-                id: randomUUID(),
+                id: allocateEntityId(),
                 state: 'state',
                 expression: 'Synthetic arithmetic workload',
                 expressionModel: {
@@ -51,7 +52,7 @@ function benchmarkDocument() {
         const sourceState = sourceNode.states[0];
         const targetState = targetNode.states[0];
         return {
-            id: randomUUID(),
+            id: allocateEntityId(),
             name: `Ring dependency ${index + 1}`,
             source: { nodeId: sourceNode.id, stateId: sourceState.id },
             target: { nodeId: targetNode.id, stateId: targetState.id },

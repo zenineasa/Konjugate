@@ -10,7 +10,7 @@ message Capabilities {
 }
 
 message StateDescriptor {
-    string state_id = 1;
+    uint64 state_id = 1;
 }
 
 message StateTable {

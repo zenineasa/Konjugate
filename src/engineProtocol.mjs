@@ -61,8 +61,11 @@ export function decodeEngineEvent(buffer) {
             event.capabilities = capabilities;
         } else if (field.number === 3 && field.wireType === 2) {
             event.stateTable = fields(field.value).filter((item) => item.number === 1 && item.wireType === 2).map((item) => {
-                const identifier = fields(item.value).find((value) => value.number === 1 && value.wireType === 2);
-                return identifier?.value.toString('utf8') ?? '';
+                const identifier = fields(item.value).find((value) => value.number === 1 && value.wireType === 0);
+                if (!Number.isSafeInteger(identifier?.value) || identifier.value <= 0) {
+                    throw new Error('The engine returned an invalid state identifier.');
+                }
+                return identifier.value;
             });
         } else if (field.number === 4 && field.wireType === 2) {
             const batch = { times: [], stateCount: 0, values: [] };

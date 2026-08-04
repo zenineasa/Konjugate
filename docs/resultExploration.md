@@ -97,8 +97,8 @@ Each plotted signal is identified by a stable reference resembling:
 
 ```text
 SignalRef
-├── nodeUuid
-├── stateUuid
+├── nodeId
+├── stateId
 ├── displayName
 └── unit
 ```

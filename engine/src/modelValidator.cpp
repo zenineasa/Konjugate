@@ -11,7 +11,7 @@
 
 namespace konjugate {
 namespace {
-const std::regex uuidPattern("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$");
+const std::regex entityIdPattern("^[1-9][0-9]{0,15}$");
 const std::regex symbolPattern("^[a-z][A-Za-z0-9]*$");
 
 void add(ValidationResult& result, std::string code, std::string severity, std::string message,
@@ -129,8 +129,12 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     std::unordered_map<std::string, std::set<std::string>> stateSymbols;
     std::unordered_map<std::string, const boost::property_tree::ptree*> nodesById;
     auto registerId = [&](const std::string& id, const std::string& kind, const std::string& entityId, const std::string& label) {
-        if (!std::regex_match(id, uuidPattern)) add(result, "invalidUuid", "error", label + " does not have a valid UUID.", kind, entityId, "id");
-        else if (!allIds.insert(id).second) add(result, "duplicateUuid", "error", label + " reuses an existing UUID.", kind, entityId, "id");
+        bool validId = std::regex_match(id, entityIdPattern);
+        if (validId) {
+            try { validId = std::stoull(id) <= 9007199254740991ULL; } catch (...) { validId = false; }
+        }
+        if (!validId) add(result, "invalidId", "error", label + " does not have a valid positive integer id.", kind, entityId, "id");
+        else if (!allIds.insert(id).second) add(result, "duplicateId", "error", label + " reuses an existing id.", kind, entityId, "id");
     };
 
     std::set<std::string> runConfigurationIds;

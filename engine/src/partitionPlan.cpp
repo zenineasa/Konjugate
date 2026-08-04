@@ -34,7 +34,7 @@ PartitionComparison compareAssignment(const DependencyGraph& graph,
                                       std::size_t partitionCount) {
     PartitionComparison comparison;
     std::vector<std::size_t> loads(partitionCount, 0);
-    std::unordered_map<std::string, std::size_t> nodeIndexes;
+    std::unordered_map<EntityId, std::size_t> nodeIndexes;
     for (std::size_t index = 0; index < graph.nodes.size(); ++index) {
         nodeIndexes[graph.nodes[index].nodeId] = index;
         loads[assignment[index]] += weights[index];
@@ -61,7 +61,7 @@ void populatePlanMetrics(PartitionPlan& plan,
     for (std::size_t partition = 0; partition < plan.partitions.size(); ++partition) {
         plan.partitions[partition].partition = partition;
     }
-    std::unordered_map<std::string, std::size_t> nodeIndexes;
+    std::unordered_map<EntityId, std::size_t> nodeIndexes;
     for (std::size_t index = 0; index < graph.nodes.size(); ++index) {
         nodeIndexes[graph.nodes[index].nodeId] = index;
         plan.assignments.push_back({graph.nodes[index].nodeId, assignment[index]});
@@ -70,7 +70,7 @@ void populatePlanMetrics(PartitionPlan& plan,
         partition.computeWeight += weights[index];
         partition.localStateCount += graph.nodes[index].stateCount;
     }
-    std::vector<std::unordered_set<std::string>> boundaryStates(plan.effectivePartitions);
+    std::vector<std::unordered_set<EntityId>> boundaryStates(plan.effectivePartitions);
     for (const auto& dependency : graph.dependencies) {
         const auto sourcePartition = assignment[nodeIndexes.at(dependency.sourceNodeId)];
         const auto targetPartition = assignment[nodeIndexes.at(dependency.targetNodeId)];
@@ -111,7 +111,7 @@ PartitionPlan createGreedyPartitionPlan(const DependencyGraph& graph,
     const auto targetWeight = static_cast<double>(totalWeight) / static_cast<double>(plan.effectivePartitions);
     const auto totalCommunication = std::accumulate(graph.dependencies.begin(), graph.dependencies.end(), std::size_t{0},
         [](std::size_t total, const auto& dependency) { return total + dependency.communicationWeight; });
-    std::unordered_map<std::string, std::size_t> nodeIndexes;
+    std::unordered_map<EntityId, std::size_t> nodeIndexes;
     for (std::size_t index = 0; index < graph.nodes.size(); ++index) nodeIndexes[graph.nodes[index].nodeId] = index;
     std::vector<std::vector<std::pair<std::size_t, std::size_t>>> incidentDependencies(graph.nodes.size());
     for (const auto& dependency : graph.dependencies) {
@@ -220,7 +220,7 @@ PartitionPlan createMetisPartitionPlan(const DependencyGraph& graph,
         return plan;
     }
 
-    std::unordered_map<std::string, std::size_t> nodeIndexes;
+    std::unordered_map<EntityId, std::size_t> nodeIndexes;
     for (std::size_t index = 0; index < graph.nodes.size(); ++index) nodeIndexes[graph.nodes[index].nodeId] = index;
     std::map<std::pair<std::size_t, std::size_t>, std::size_t> undirectedEdges;
     for (const auto& dependency : graph.dependencies) {

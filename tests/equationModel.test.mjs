@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { latexForBinding, reconcileEquationBindings, validateEquationLatex } from '../src/equationModel.mjs';
 
-const source = { id: 'source-node', states: [{ id: 'source-state', symbol: 'temperature' }] };
-const target = { id: 'target-node', states: [{ id: 'target-state', symbol: 'temperature' }] };
-const parameter = { id: 'parameter', symbol: 'conductance' };
+const source = { id: 1, states: [{ id: 2, symbol: 'temperature' }] };
+const target = { id: 3, states: [{ id: 4, symbol: 'temperature' }] };
+const parameter = { id: 5, symbol: 'conductance' };
 
-test('creates UUID-backed state and parameter bindings', () => {
+test('creates stable-ID-backed state and parameter bindings', () => {
     const bindings = reconcileEquationBindings([], source, target, [parameter]);
     assert.deepEqual(bindings.map(({ symbol, kind }) => ({ symbol, kind })), [
         { symbol: 'sourceTemperature', kind: 'state' },
@@ -19,15 +19,15 @@ test('creates UUID-backed state and parameter bindings', () => {
 
 test('preserves equation symbols when a state is renamed', () => {
     const bindings = reconcileEquationBindings([], source, target, [parameter]);
-    const renamedSource = { ...source, states: [{ id: 'source-state', symbol: 'thermalState' }] };
+    const renamedSource = { ...source, states: [{ id: 2, symbol: 'thermalState' }] };
     const reconciled = reconcileEquationBindings(bindings, renamedSource, target, [parameter]);
     assert.equal(reconciled[0].symbol, 'sourceTemperature');
-    assert.equal(reconciled[0].stateId, 'source-state');
+    assert.equal(reconciled[0].stateId, 2);
 });
 
 test('uses the current parameter symbol after a parameter is renamed', () => {
-    const bindings = reconcileEquationBindings([], source, target, [{ id: 'parameter', symbol: 'p1' }]);
-    const reconciled = reconcileEquationBindings(bindings, source, target, [{ id: 'parameter', symbol: 'x' }]);
+    const bindings = reconcileEquationBindings([], source, target, [{ id: 5, symbol: 'p1' }]);
+    const reconciled = reconcileEquationBindings(bindings, source, target, [{ id: 5, symbol: 'x' }]);
     assert.equal(reconciled[2].symbol, 'x');
     assert.equal(validateEquationLatex('x+1', reconciled).valid, true);
 });

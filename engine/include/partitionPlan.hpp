@@ -10,7 +10,7 @@
 namespace konjugate {
 
 struct PartitionAssignment {
-    std::string nodeId;
+    EntityId nodeId = 0;
     std::size_t partition = 0;
 };
 

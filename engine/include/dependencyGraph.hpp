@@ -10,7 +10,7 @@
 namespace konjugate {
 
 struct DependencyNode {
-    std::string nodeId;
+    EntityId nodeId = 0;
     std::size_t stateCount = 0;
     std::size_t substeps = 1;
     std::size_t estimatedOperationsPerSynchronization = 0;
@@ -18,9 +18,9 @@ struct DependencyNode {
 };
 
 struct NodeDependency {
-    std::string sourceNodeId;
-    std::string targetNodeId;
-    std::vector<std::string> remoteStateIds;
+    EntityId sourceNodeId = 0;
+    EntityId targetNodeId = 0;
+    std::vector<EntityId> remoteStateIds;
     std::size_t contributionTaskCount = 0;
     std::size_t remoteBindingsPerSubstep = 0;
     std::size_t estimatedDependentOperationsPerSynchronization = 0;

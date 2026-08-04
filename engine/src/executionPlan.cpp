@@ -13,6 +13,16 @@ std::string value(const boost::property_tree::ptree& tree, const std::string& ke
     return tree.get<std::string>(key, "");
 }
 
+EntityId idValue(const boost::property_tree::ptree& tree, const std::string& key) {
+    const auto text = tree.get<std::string>(key, "");
+    std::size_t consumed = 0;
+    const auto result = std::stoull(text, &consumed);
+    if (!result || result > 9007199254740991ULL || consumed != text.size()) {
+        throw std::runtime_error("Model ids must be positive safe integers.");
+    }
+    return result;
+}
+
 double finiteNumber(const std::string& input) {
     std::size_t consumed = 0;
     const auto result = std::stod(input, &consumed);
@@ -59,7 +69,7 @@ CompiledExpression compileExpression(const boost::property_tree::ptree& tree) {
 }
 
 std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& bindings,
-                                             const std::string& outputNodeId,
+                                             EntityId outputNodeId,
                                              bool sourceTerm) {
     std::vector<CompiledBinding> result;
     for (const auto& bindingItem : bindings) {
@@ -68,10 +78,10 @@ std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& 
         compiled.symbol = value(binding, "symbol");
         if (value(binding, "kind") == "parameter") {
             compiled.source = BindingSource::parameter;
-            compiled.valueId = value(binding, "parameterId");
+            compiled.valueId = idValue(binding, "parameterId");
         } else {
-            compiled.valueId = value(binding, "stateId");
-            compiled.source = sourceTerm || value(binding, "nodeId") == outputNodeId
+            compiled.valueId = idValue(binding, "stateId");
+            compiled.source = sourceTerm || idValue(binding, "nodeId") == outputNodeId
                 ? BindingSource::localState : BindingSource::synchronizationSnapshot;
         }
         result.push_back(std::move(compiled));
@@ -151,17 +161,17 @@ std::size_t CompiledExpression::operationCount() const noexcept {
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     ExecutionPlan plan;
-    std::unordered_map<std::string, std::size_t> nodeIndexes;
+    std::unordered_map<EntityId, std::size_t> nodeIndexes;
     for (const auto& nodeItem : document.get_child("nodes")) {
         const auto& node = nodeItem.second;
         NodeExecutionPlan compiledNode;
-        compiledNode.nodeId = value(node, "id");
+        compiledNode.nodeId = idValue(node, "id");
         compiledNode.substeps = node.get<std::size_t>("numerics.substepsPerGlobalStep", 1);
         if (!compiledNode.substeps || compiledNode.substeps > 10000) {
             throw std::runtime_error("Node substepsPerGlobalStep must be an integer from 1 through 10000.");
         }
         for (const auto& stateItem : node.get_child("states")) {
-            const auto stateId = value(stateItem.second, "id");
+            const auto stateId = idValue(stateItem.second, "id");
             compiledNode.stateIds.push_back(stateId);
             plan.initialStates[stateId] = stateItem.second.get<double>("initialValue", 0);
             plan.stateNodes[stateId] = compiledNode.nodeId;
@@ -172,8 +182,8 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             const auto& term = termItem.second;
             ContributionTask task;
             task.sequence = sequence++;
-            task.sourceId = value(term, "id");
-            task.outputStateId = value(term, "expressionModel.output.stateId");
+            task.sourceId = idValue(term, "id");
+            task.outputStateId = idValue(term, "expressionModel.output.stateId");
             task.bindings = compileBindings(term.get_child("expressionModel.bindings"), compiledNode.nodeId, true);
             task.expression = compileExpression(term.get_child("expressionModel.mathJson"));
             bindTask(task);
@@ -186,17 +196,17 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
 
     for (const auto& edgeItem : document.get_child("edges")) {
         const auto& edge = edgeItem.second;
-        const auto outputStateId = value(edge, "equationModel.output.stateId");
+        const auto outputStateId = idValue(edge, "equationModel.output.stateId");
         const auto outputNodeId = plan.stateNodes.at(outputStateId);
         auto& node = plan.nodes.at(nodeIndexes.at(outputNodeId));
         ContributionTask task;
         task.sequence = node.contributions.size();
-        task.sourceId = value(edge, "id");
+        task.sourceId = idValue(edge, "id");
         task.outputStateId = outputStateId;
         task.bindings = compileBindings(edge.get_child("equationModel.bindings"), outputNodeId, false);
         for (const auto& parameterItem : edge.get_child("parameters")) {
             const auto& parameter = parameterItem.second;
-            task.parameters.push_back({value(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
+            task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
         }
         task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
         bindTask(task);
@@ -244,13 +254,13 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     return evaluated;
 }
 
-std::vector<std::pair<std::string, double>> reduceContributions(
+std::vector<std::pair<EntityId, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions) {
     std::stable_sort(contributions.begin(), contributions.end(), [](const auto& left, const auto& right) {
         return left.sequence < right.sequence;
     });
-    std::vector<std::pair<std::string, double>> derivatives;
-    std::unordered_map<std::string, std::size_t> derivativeIndexes;
+    std::vector<std::pair<EntityId, double>> derivatives;
+    std::unordered_map<EntityId, std::size_t> derivativeIndexes;
     for (const auto& contribution : contributions) {
         const auto found = derivativeIndexes.find(contribution.outputStateId);
         if (found == derivativeIndexes.end()) {

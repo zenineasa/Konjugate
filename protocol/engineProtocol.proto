@@ -1,6 +1,6 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
-syntax = "proto3";
+edition = "2024";
 
 package konjugate.protocol;
 
@@ -18,9 +18,9 @@ message StateTable {
 }
 
 message SampleBatch {
-    repeated double times = 1 [packed = true];
+    repeated double times = 1;
     uint32 state_count = 2;
-    repeated double values = 3 [packed = true];
+    repeated double values = 3;
 }
 
 enum PacingMode {
@@ -64,7 +64,7 @@ message EngineCommand {
 message ResultCheckpoint {
     string uuid = 1;
     double time = 2;
-    repeated double values = 3 [packed = true];
+    repeated double values = 3;
     string solver_kind = 4;
     uint32 solver_version = 5;
 }

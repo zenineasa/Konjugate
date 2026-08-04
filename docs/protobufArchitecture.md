@@ -6,10 +6,7 @@ Konjugate is migrating performance-sensitive native-engine boundaries from JSON
 to versioned Protobuf messages. JSON remains appropriate for infrequent human-facing
 configuration and external AI-provider APIs; it is not the live simulation transport.
 
-The first protocol version is defined in `protocol/engineProtocol.proto`. The C++
-engine uses generated Protobuf bindings. Electron uses a small schema-specific wire
-decoder during the initial vertical slice, avoiding a second runtime dependency;
-generated JavaScript bindings should replace it when more message types are added.
+The first protocol version is defined using Protobuf Edition 2024 in `protocol/engineProtocol.proto`. The C++ engine uses generated Protobuf bindings. Electron uses a small schema-specific wire decoder during the initial vertical slice, avoiding a second runtime dependency; generated JavaScript bindings should replace it when more message types are added. Edition 2024 requires a Protobuf toolchain that supports editions; the repository's pinned vcpkg dependency and development setup provide that toolchain.
 
 ## Live framing
 

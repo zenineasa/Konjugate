@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decodeEngineEvent, FramedEngineEventDecoder } from '../src/engineProtocol.mjs';
+import { decodeEngineEvent, decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from '../src/engineProtocol.mjs';
 
 function varint(value) {
     const bytes = [];
@@ -68,4 +68,20 @@ test('rejects unsupported versions and oversized frames', () => {
     const oversized = Buffer.alloc(4);
     oversized.writeUInt32BE(64 * 1024 * 1024 + 1);
     assert.throws(() => new FramedEngineEventDecoder().append(oversized), /too large/);
+});
+
+test('encodes ordered framed engine commands without JSON conversion', () => {
+    assert.equal(encodeEngineCommand(1, { type: 'setRunState', state: 'paused' }).toString('hex'),
+        '000000080801100122020802');
+    const parameter = encodeEngineCommand(2, { type: 'setParameterValue', parameterId: 11, value: 2 });
+    assert.equal(parameter.readUInt32BE(0), parameter.length - 4);
+    assert.equal(parameter.subarray(4).toString('hex'), '080110022a0b080b110000000000000040');
+    assert.throws(() => encodeEngineCommand(0, { type: 'setRunState', state: 'running' }), /sequences/);
+    assert.throws(() => encodeEngineCommand(1, { type: 'setParameterValue', parameterId: 0, value: 1 }), /identifier/);
+});
+
+test('rejects legacy JSON and truncated binary result containers', () => {
+    assert.throws(() => decodeResultFile(Buffer.from('{}')), /Unsupported KJR/);
+    const truncated = Buffer.from([0x4b, 0x4a, 0x52, 0x01, 0, 0, 0, 4, 8, 1]);
+    assert.throws(() => decodeResultFile(truncated), /payload length/);
 });

@@ -18,15 +18,24 @@ events to stdout as a four-byte unsigned big-endian payload length followed by o
 serialized `EngineEvent`. stderr remains text diagnostics. Files remain responsible
 for durable results and recovery while the migration is incomplete.
 
+Electron also requests `--control-stream protobuf` and writes length-prefixed
+`EngineCommand` messages to the engine's stdin. Commands carry protocol version 1,
+a strictly increasing sequence number and one of `SetPacing`, `SetRunState` or
+`SetParameterValue`. The engine rejects malformed, oversized, unsupported and
+out-of-order frames. It queues valid commands immediately, then applies them only at
+the existing synchronization-boundary control checks. Transport latency therefore
+improves without changing numerical timesteps or deterministic solver ordering.
+
 The engine publishes a stable state table once. Sample batches subsequently contain
 packed timestamps and packed double values in sample-major state-table order. Numeric
-state IDs are therefore not repeated for every value. Checkpoints and the final `.kjr` remain
-JSON in this slice.
+state IDs are therefore not repeated for every value. The durable `.kjr` container
+uses the same packed columnar representation for samples and checkpoint state vectors.
+See [Binary result format](resultFileFormat.md).
 
 Run `npm run benchmark:protocol` to compare the implemented live-sample wire shape
 with the previous newline-delimited JSON records. The benchmark reports bytes only;
-end-to-end CPU and memory measurements will be added when binary checkpoints and
-results remove the remaining JSON work.
+end-to-end CPU and memory measurements can now cover the binary checkpoint and result
+path as well as the live stream.
 
 Protocol messages carry an explicit protocol version, frames are size-limited and
 order-sensitive collections use repeated fields rather than maps. IEEE-754 doubles
@@ -48,10 +57,10 @@ integers and state-table IDs use Protobuf `uint64`.
 
 ## Migration sequence
 
-1. Measure and deploy framed live sample batches.
-2. Move live pacing, parameter and lifecycle commands from polled JSON files to
-   framed stdin messages.
-3. Define a binary `.kjr` result containing packed samples and checkpoints.
+1. Completed: measure and deploy framed live sample batches.
+2. Completed: move live pacing, parameter and lifecycle commands to framed stdin
+   messages.
+3. Completed: define a binary `.kjr` result containing packed samples and checkpoints.
 4. Define the integer-ID-backed project and typed equation schemas, then introduce a
    Protobuf payload in the `.kjt` container.
 5. Remove Boost.PropertyTree model ingestion and obsolete JSON protocol code after

@@ -8,7 +8,6 @@
 #include "partitionPlan.hpp"
 #include "partitionRuntime.hpp"
 #include "taskExecutor.hpp"
-#include <boost/property_tree/json_parser.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -17,6 +16,7 @@
 #include <iomanip>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <random>
 #include <set>
@@ -46,6 +46,11 @@ enum class PacingMode { fastest, realTime, limitedRatio };
 enum class RunState { running, paused, stopped };
 struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
 struct RunControl { Pacing pacing; RunState executionState = RunState::running; EntityValues parameterValues; };
+struct ControlInbox {
+    std::mutex mutex;
+    std::vector<protocol::EngineCommand> commands;
+    std::string error;
+};
 struct ExecutionSettings {
     ExecutionBackend requestedBackend = ExecutionBackend::automatic;
     ExecutionBackend backend = ExecutionBackend::serial;
@@ -85,22 +90,6 @@ std::string_view pacingModeName(PacingMode value) noexcept {
         case PacingMode::limitedRatio: return "limitedRatio";
     }
     return "fastest";
-}
-
-RunState runStateFromString(const std::string& value) {
-    if (value == "running") return RunState::running;
-    if (value == "paused") return RunState::paused;
-    if (value == "stopped") return RunState::stopped;
-    throw std::runtime_error("Run state must be running, paused or stopped.");
-}
-
-std::string_view runStateName(RunState value) noexcept {
-    switch (value) {
-        case RunState::running: return "running";
-        case RunState::paused: return "paused";
-        case RunState::stopped: return "stopped";
-    }
-    return "running";
 }
 
 std::string createUuid() {
@@ -155,29 +144,85 @@ Pacing pacingFromTree(const boost::property_tree::ptree& tree, const Pacing& fal
     return pacing;
 }
 
-RunControl readRunControl(const std::filesystem::path& path, const RunControl& current) {
-    if (path.empty() || !std::filesystem::exists(path)) return current;
-    try {
-        boost::property_tree::ptree control;
-        boost::property_tree::read_json(path.string(), control);
-        const auto executionState = runStateFromString(control.get<std::string>(
-            "executionState", std::string(runStateName(current.executionState))));
-        auto parameterValues = current.parameterValues;
-        if (const auto values = control.get_child_optional("parameterValues")) {
-            for (const auto& item : *values) {
-                const auto parameterValue = item.second.get_value<double>();
-                std::size_t consumed = 0;
-                const auto parameterId = std::stoull(item.first, &consumed);
-                if (consumed == item.first.size() && parameterId > 0 &&
-                    parameterId <= 9007199254740991ULL && std::isfinite(parameterValue)) {
-                    parameterValues[parameterId] = parameterValue;
-                }
+std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
+    auto inbox = std::make_shared<ControlInbox>();
+    if (!stream) return inbox;
+    std::thread([stream, inbox] {
+        std::uint64_t previousSequence = 0;
+        while (true) {
+            unsigned char header[4];
+            stream->read(reinterpret_cast<char*>(header), sizeof(header));
+            const auto headerBytes = stream->gcount();
+            if (!headerBytes && stream->eof()) return;
+            if (headerBytes != static_cast<std::streamsize>(sizeof(header))) {
+                std::lock_guard lock(inbox->mutex);
+                inbox->error = "The engine command stream ended inside a frame header.";
+                return;
             }
+            const auto size = (static_cast<std::uint32_t>(header[0]) << 24) |
+                (static_cast<std::uint32_t>(header[1]) << 16) |
+                (static_cast<std::uint32_t>(header[2]) << 8) | static_cast<std::uint32_t>(header[3]);
+            if (!size || size > 1024 * 1024) {
+                std::lock_guard lock(inbox->mutex);
+                inbox->error = "The engine command frame has an invalid size.";
+                return;
+            }
+            std::vector<char> payload(size);
+            stream->read(payload.data(), static_cast<std::streamsize>(payload.size()));
+            if (stream->gcount() != static_cast<std::streamsize>(payload.size())) {
+                std::lock_guard lock(inbox->mutex);
+                inbox->error = "The engine command stream ended inside a frame payload.";
+                return;
+            }
+            protocol::EngineCommand command;
+            if (!command.ParseFromArray(payload.data(), static_cast<int>(payload.size())) ||
+                command.protocol_version() != 1 || !command.sequence() || command.sequence() <= previousSequence ||
+                command.payload_case() == protocol::EngineCommand::PAYLOAD_NOT_SET) {
+                std::lock_guard lock(inbox->mutex);
+                inbox->error = "The engine received an invalid, unsupported or out-of-order command.";
+                return;
+            }
+            previousSequence = command.sequence();
+            std::lock_guard lock(inbox->mutex);
+            inbox->commands.push_back(std::move(command));
         }
-        return {pacingFromTree(control, current.pacing), executionState, std::move(parameterValues)};
-    } catch (...) {
-        return current;
+    }).detach();
+    return inbox;
+}
+
+RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunControl current) {
+    std::vector<protocol::EngineCommand> commands;
+    {
+        std::lock_guard lock(inbox->mutex);
+        if (!inbox->error.empty()) throw std::runtime_error(inbox->error);
+        commands.swap(inbox->commands);
     }
+    for (const auto& command : commands) {
+        if (command.has_set_pacing()) {
+            const auto& update = command.set_pacing();
+            if (update.mode() == protocol::PACING_MODE_FASTEST) current.pacing.mode = PacingMode::fastest;
+            else if (update.mode() == protocol::PACING_MODE_REAL_TIME) current.pacing.mode = PacingMode::realTime;
+            else if (update.mode() == protocol::PACING_MODE_LIMITED_RATIO) current.pacing.mode = PacingMode::limitedRatio;
+            else throw std::runtime_error("The engine received an unsupported pacing mode.");
+            current.pacing.ratio = current.pacing.mode == PacingMode::realTime ? 1 : update.simulation_seconds_per_wall_second();
+            if (!(current.pacing.ratio > 0) || !std::isfinite(current.pacing.ratio)) {
+                throw std::runtime_error("The engine received an invalid pacing ratio.");
+            }
+        } else if (command.has_set_run_state()) {
+            const auto state = command.set_run_state().state();
+            if (state == protocol::RUN_STATE_RUNNING) current.executionState = RunState::running;
+            else if (state == protocol::RUN_STATE_PAUSED) current.executionState = RunState::paused;
+            else if (state == protocol::RUN_STATE_STOPPED) current.executionState = RunState::stopped;
+            else throw std::runtime_error("The engine received an unsupported run state.");
+        } else if (command.has_set_parameter_value()) {
+            const auto& update = command.set_parameter_value();
+            if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL || !std::isfinite(update.value())) {
+                throw std::runtime_error("The engine received an invalid live parameter value.");
+            }
+            current.parameterValues[update.parameter_id()] = update.value();
+        }
+    }
+    return current;
 }
 
 ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& tree, const ExecutionPlan& plan) {
@@ -225,7 +270,7 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
 void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
                    const std::filesystem::path& outputPath,
-                   const std::filesystem::path& pacingControlPath,
+                   std::istream* controlStream,
                    std::ostream* eventStream) {
     const auto targetTime = configuration.get<double>("targetTime");
     const auto globalTimeStep = configuration.get<double>("globalTimeStep", configuration.get<double>("timeStep", 0.01));
@@ -233,6 +278,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto outputRatio = outputInterval / globalTimeStep;
     auto pacing = pacingFromTree(configuration);
     RunControl runControl{pacing, RunState::running, {}};
+    const auto controlInbox = startControlReader(controlStream);
     if (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
         !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
         throw std::runtime_error("A run requires a finite positive targetTime and numerical timestep values.");
@@ -350,9 +396,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     std::uint64_t partitionBoundaryWaitNanoseconds = 0;
     std::vector<Sample> samples = {{startTime, states}};
     std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states}};
-    const auto streamPath = std::filesystem::path(outputPath.string() + ".stream");
-    std::ofstream resultStream(streamPath, std::ios::binary | std::ios::trunc);
-    if (!resultStream) throw std::runtime_error("The live result stream could not be created.");
+    std::vector<Sample> pendingEventSamples;
     if (eventStream) {
         protocol::EngineEvent event;
         event.set_protocol_version(1);
@@ -360,27 +404,26 @@ void runSimulation(const boost::property_tree::ptree& document,
         for (const auto stateId : stateIds) table->add_states()->set_state_id(stateId);
         writeFramedEvent(*eventStream, event);
     }
+    const auto flushSampleEvents = [&]() {
+        if (!eventStream || pendingEventSamples.empty()) return;
+        protocol::EngineEvent event;
+        event.set_protocol_version(1);
+        auto* batch = event.mutable_sample_batch();
+        batch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
+        for (const auto& sample : pendingEventSamples) {
+            batch->add_times(sample.time);
+            for (const auto stateId : stateIds) {
+                batch->add_values(sample.states.at(executionPlan.stateIndexes.at(stateId)));
+            }
+        }
+        writeFramedEvent(*eventStream, event);
+        pendingEventSamples.clear();
+    };
     const auto appendStreamRecord = [&](const std::string& type, double time, const Values& recordStates, const std::string& uuid = {}) {
         if (eventStream && type == "sample") {
-            protocol::EngineEvent event;
-            event.set_protocol_version(1);
-            auto* batch = event.mutable_sample_batch();
-            batch->add_times(time);
-            batch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
-            for (const auto& stateId : stateIds) batch->add_values(recordStates.at(executionPlan.stateIndexes.at(stateId)));
-            writeFramedEvent(*eventStream, event);
-            return;
+            pendingEventSamples.push_back({time, recordStates});
         }
-        resultStream << std::setprecision(17) << "{\"type\":\"" << type << "\",\"time\":" << time;
-        if (!uuid.empty()) resultStream << ",\"uuid\":\"" << uuid << "\",\"solver\":{\"kind\":\"explicitEuler\",\"version\":1}";
-        resultStream << ",\"states\":[";
-        for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
-            if (stateIndex) resultStream << ',';
-            const auto& stateId = stateIds[stateIndex];
-            resultStream << "{\"stateId\":" << stateId << ",\"value\":"
-                         << recordStates.at(executionPlan.stateIndexes.at(stateId)) << '}';
-        }
-        resultStream << "]}\n";
+        static_cast<void>(uuid);
     };
     appendStreamRecord("sample", startTime, states);
     appendStreamRecord("checkpoint", startTime, states, checkpoints.front().uuid);
@@ -396,7 +439,7 @@ void runSimulation(const boost::property_tree::ptree& document,
         }
     };
     const auto writeResult = [&](const std::string& lifecycle, double simulationTime, bool completeSnapshot = false) {
-        resultStream.flush();
+        flushSampleEvents();
         std::ostringstream json;
         json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.2.0\",\"configurationName\":\""
              << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"snapshotMode\":\"" << (completeSnapshot ? "full" : "live")
@@ -501,34 +544,43 @@ void runSimulation(const boost::property_tree::ptree& document,
             json << "{\"nodeId\":" << stateNodes.at(stateId) << ",\"stateId\":" << stateId
                  << ",\"value\":" << states.at(executionPlan.stateIndexes.at(stateId)) << '}';
         }
-        json << "],\"samples\":[";
-        for (std::size_t sampleIndex = 0; completeSnapshot && sampleIndex < samples.size(); ++sampleIndex) {
-            if (sampleIndex) json << ',';
-            json << "{\"time\":" << samples[sampleIndex].time << ",\"states\":[";
-            for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
-                if (stateIndex) json << ',';
-                const auto& stateId = stateIds[stateIndex];
-                json << "{\"stateId\":" << stateId << ",\"value\":"
-                     << samples[sampleIndex].states.at(executionPlan.stateIndexes.at(stateId)) << '}';
-            }
-            json << "]}";
-        }
-        json << "],\"checkpoints\":[";
-        for (std::size_t checkpointIndex = 0; completeSnapshot && checkpointIndex < checkpoints.size(); ++checkpointIndex) {
-            if (checkpointIndex) json << ',';
-            const auto& checkpoint = checkpoints[checkpointIndex];
-            json << "{\"uuid\":\"" << checkpoint.uuid << "\",\"time\":" << checkpoint.time
-                 << ",\"solver\":{\"kind\":\"explicitEuler\",\"version\":1},\"states\":[";
-            for (std::size_t stateIndex = 0; stateIndex < stateIds.size(); ++stateIndex) {
-                if (stateIndex) json << ',';
-                const auto& stateId = stateIds[stateIndex];
-                json << "{\"stateId\":" << stateId << ",\"value\":"
-                     << checkpoint.states.at(executionPlan.stateIndexes.at(stateId)) << '}';
-            }
-            json << "]}";
-        }
         json << "]}";
-        atomicWrite(outputPath, json.str());
+        protocol::ResultFile result;
+        result.set_result_version(1);
+        result.set_metadata_json(json.str());
+        for (const auto stateId : stateIds) result.mutable_state_table()->add_states()->set_state_id(stateId);
+        auto* sampleBatch = result.mutable_samples();
+        sampleBatch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
+        if (completeSnapshot) {
+            for (const auto& sample : samples) {
+                sampleBatch->add_times(sample.time);
+                for (const auto stateId : stateIds) {
+                    sampleBatch->add_values(sample.states.at(executionPlan.stateIndexes.at(stateId)));
+                }
+            }
+            for (const auto& checkpoint : checkpoints) {
+                auto* encoded = result.add_checkpoints();
+                encoded->set_uuid(checkpoint.uuid);
+                encoded->set_time(checkpoint.time);
+                encoded->set_solver_kind("explicitEuler");
+                encoded->set_solver_version(1);
+                for (const auto stateId : stateIds) {
+                    encoded->add_values(checkpoint.states.at(executionPlan.stateIndexes.at(stateId)));
+                }
+            }
+        }
+        std::string payload;
+        if (!result.SerializeToString(&payload) || payload.size() > 0xffffffffu) {
+            throw std::runtime_error("The binary result is too large to serialize.");
+        }
+        std::string container("KJR\x01", 4);
+        const auto payloadSize = static_cast<std::uint32_t>(payload.size());
+        container.push_back(static_cast<char>((payloadSize >> 24) & 0xff));
+        container.push_back(static_cast<char>((payloadSize >> 16) & 0xff));
+        container.push_back(static_cast<char>((payloadSize >> 8) & 0xff));
+        container.push_back(static_cast<char>(payloadSize & 0xff));
+        container += payload;
+        atomicWrite(outputPath, container);
     };
     writeResult("running", startTime);
     auto lastPublishedAt = std::chrono::steady_clock::now();
@@ -536,7 +588,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto refreshRunControl = [&](bool force = false) {
         const auto now = std::chrono::steady_clock::now();
         if (force || now - lastControlReadAt >= std::chrono::milliseconds(10)) {
-            runControl = readRunControl(pacingControlPath, runControl);
+            runControl = drainRunControl(controlInbox, std::move(runControl));
             lastControlReadAt = now;
         }
     };
@@ -554,16 +606,12 @@ void runSimulation(const boost::property_tree::ptree& document,
             pacing = runControl.pacing;
             if (runControl.executionState == RunState::stopped) {
                 writeResult("stopped", currentTime, true);
-                resultStream.close();
-                std::filesystem::remove(streamPath);
                 return;
             }
             writeResult("running", currentTime);
         } else if (runControl.executionState == RunState::stopped) {
             captureBoundary();
             writeResult("stopped", currentTime, true);
-            resultStream.close();
-            std::filesystem::remove(streamPath);
             return;
         }
         const auto wallStepStarted = std::chrono::steady_clock::now();
@@ -669,8 +717,6 @@ void runSimulation(const boost::property_tree::ptree& document,
             }
         }
     }
-    resultStream.close();
-    std::filesystem::remove(streamPath);
 }
 
 }

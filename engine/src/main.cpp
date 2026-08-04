@@ -57,14 +57,13 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc < 3) {
-        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr --pacing-control pacing.json]\n";
+        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr --control-stream protobuf]\n";
         return 64;
     }
     const std::string command = argv[1];
     const auto report = optionPath(argc, argv, "--report");
     const auto configurationPath = optionPath(argc, argv, "--configuration");
     const auto outputPath = optionPath(argc, argv, "--output");
-    const auto pacingControlPath = optionPath(argc, argv, "--pacing-control");
     if ((command != "inspect" && command != "validate" && command != "run") ||
         ((command == "inspect" || command == "validate") && report.empty()) ||
         (command == "run" && (configurationPath.empty() || outputPath.empty()))) {
@@ -98,7 +97,13 @@ int main(int argc, char** argv) {
         boost::property_tree::ptree configuration;
         boost::property_tree::read_json(configurationPath.string(), configuration);
         const auto protobufEvents = optionPath(argc, argv, "--event-stream").string() == "protobuf";
-        konjugate::runSimulation(document, configuration, outputPath, pacingControlPath, protobufEvents ? &std::cout : nullptr);
+        const auto controlStream = optionPath(argc, argv, "--control-stream").string();
+        if (!controlStream.empty() && controlStream != "protobuf") {
+            throw std::runtime_error("The requested engine control protocol is unsupported.");
+        }
+        const auto protobufControls = controlStream == "protobuf";
+        konjugate::runSimulation(document, configuration, outputPath, protobufControls ? &std::cin : nullptr,
+            protobufEvents ? &std::cout : nullptr);
         return 0;
     } catch (const konjugate::ContainerError& error) {
         std::cerr << error.code << ": " << error.what() << '\n';

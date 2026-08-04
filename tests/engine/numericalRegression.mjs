@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
+import { decodeResultFile } from '../../src/engineProtocol.mjs';
 
 function execute(executable, args) {
     return new Promise((resolve, reject) => {
@@ -39,7 +40,7 @@ try {
         await writeFile(configurationPath, JSON.stringify({ name: testCase.example, ...testCase.configuration }, null, 4));
         assert.equal(await execute(executable, ['validate', inputPath, '--report', validationPath]), 0, `${testCase.example} must validate`);
         assert.equal(await execute(executable, ['run', inputPath, '--configuration', configurationPath, '--output', outputPath]), 0, `${testCase.example} must run`);
-        const result = JSON.parse(await readFile(outputPath, 'utf8'));
+        const result = decodeResultFile(await readFile(outputPath));
         for (const expectedSample of testCase.samples) {
             const actualSample = result.samples.find((sample) => Math.abs(sample.time - expectedSample.time) < 1e-12);
             assert.ok(actualSample, `${testCase.example} did not emit its ${expectedSample.time} s sample`);

@@ -23,6 +23,60 @@ message SampleBatch {
     repeated double values = 3 [packed = true];
 }
 
+enum PacingMode {
+    PACING_MODE_UNSPECIFIED = 0;
+    PACING_MODE_FASTEST = 1;
+    PACING_MODE_REAL_TIME = 2;
+    PACING_MODE_LIMITED_RATIO = 3;
+}
+
+enum RunState {
+    RUN_STATE_UNSPECIFIED = 0;
+    RUN_STATE_RUNNING = 1;
+    RUN_STATE_PAUSED = 2;
+    RUN_STATE_STOPPED = 3;
+}
+
+message SetPacing {
+    PacingMode mode = 1;
+    double simulation_seconds_per_wall_second = 2;
+}
+
+message SetRunState {
+    RunState state = 1;
+}
+
+message SetParameterValue {
+    uint64 parameter_id = 1;
+    double value = 2;
+}
+
+message EngineCommand {
+    uint32 protocol_version = 1;
+    uint64 sequence = 2;
+    oneof payload {
+        SetPacing set_pacing = 3;
+        SetRunState set_run_state = 4;
+        SetParameterValue set_parameter_value = 5;
+    }
+}
+
+message ResultCheckpoint {
+    string uuid = 1;
+    double time = 2;
+    repeated double values = 3 [packed = true];
+    string solver_kind = 4;
+    uint32 solver_version = 5;
+}
+
+message ResultFile {
+    uint32 result_version = 1;
+    bytes metadata_json = 2;
+    StateTable state_table = 3;
+    SampleBatch samples = 4;
+    repeated ResultCheckpoint checkpoints = 5;
+}
+
 message EngineEvent {
     uint32 protocol_version = 1;
     oneof payload {

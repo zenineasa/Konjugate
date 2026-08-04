@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
+import { decodeResultFile } from '../../src/engineProtocol.mjs';
 
 const executable = process.argv[2] ?? join(import.meta.dirname, '..', '..', 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
 const nodeCount = Number(process.env.KONJUGATE_BENCHMARK_NODES ?? 64);
@@ -115,7 +116,7 @@ try {
             const startedAt = performance.now();
             await runEngine(['run', inputPath, '--configuration', configurationPath, '--output', outputPath]);
             durations.push(performance.now() - startedAt);
-            result = JSON.parse(await readFile(outputPath, 'utf8'));
+            result = decodeResultFile(await readFile(outputPath));
         }
         measurements[backend] = {
             medianMilliseconds: Number(median(durations).toFixed(3)),

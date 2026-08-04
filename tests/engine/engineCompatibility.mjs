@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
 import { normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
-import { FramedEngineEventDecoder } from '../../src/engineProtocol.mjs';
+import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from '../../src/engineProtocol.mjs';
 
 function run(executable, args, environment = {}) {
     return new Promise((resolve, reject) => {
@@ -25,6 +25,18 @@ function readProtocolEvents(executable, args) {
         child.stdout.on('data', (chunk) => events.push(...decoder.append(chunk)));
         child.once('error', reject);
         child.once('exit', (code) => code === 0 ? resolve(events) : reject(new Error(`Engine exited with code ${code}.`)));
+    });
+}
+
+function runWithCommandInput(executable, args, frames) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(executable, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+        let diagnostics = '';
+        child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+        child.once('error', reject);
+        child.once('exit', (code) => resolve({ code, diagnostics }));
+        frames.forEach((frame) => child.stdin.write(frame));
+        child.stdin.end();
     });
 }
 
@@ -71,7 +83,7 @@ sourceProject.nodes[0].sourceTerms.push({
 await writeFile(input, await encodeProjectFile(JSON.stringify(sourceProject)));
 await writeFile(join(directory, 'sourceRun.json'), JSON.stringify({ name: 'Subcycling', targetTime: 0.1, globalTimeStep: 0.1, outputInterval: 0.1 }));
 assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'sourceRun.json'), '--output', join(directory, 'sourceResults.kjr')]), 0);
-const sourceResult = JSON.parse(await readFile(join(directory, 'sourceResults.kjr'), 'utf8'));
+const sourceResult = decodeResultFile(await readFile(join(directory, 'sourceResults.kjr')));
 assert.ok(Math.abs(sourceResult.states[0].value - 1.1025) < 1e-12);
 assert.deepEqual(sourceResult.nodeTimesteps[0], {
     nodeId: 1, substepsPerGlobalStep: 2, effectiveTimeStep: 0.05
@@ -91,14 +103,34 @@ const example = await readFile(new URL('../../examples/thermalManagement.konjuga
 await writeFile(exampleInput, await encodeProjectFile(example));
 assert.equal(await run(executable, ['validate', exampleInput, '--report', exampleReport]), 0);
 assert.equal(JSON.parse(await readFile(exampleReport, 'utf8')).valid, true);
+const invalidControlConfiguration = join(directory, 'invalidControlConfiguration.json');
+await writeFile(invalidControlConfiguration, JSON.stringify({
+    name: 'Invalid command ordering', targetTime: 10, globalTimeStep: 0.01, outputInterval: 1,
+    pacing: { mode: 'limitedRatio', simulationSecondsPerWallSecond: 1 }
+}));
+const invalidControl = await runWithCommandInput(executable, [
+    'run', exampleInput, '--configuration', invalidControlConfiguration,
+    '--output', join(directory, 'invalidControlResults.kjr'), '--control-stream', 'protobuf'
+], [
+    encodeEngineCommand(1, { type: 'setRunState', state: 'running' }),
+    encodeEngineCommand(1, { type: 'setRunState', state: 'paused' })
+]);
+assert.equal(invalidControl.code, 5);
+assert.match(invalidControl.diagnostics, /out-of-order command/);
 const runConfiguration = join(directory, 'runConfiguration.json');
 const simulationOutput = join(directory, 'simulationResults.kjr');
 await writeFile(runConfiguration, JSON.stringify({
     name: 'Compatibility', targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1,
     execution: { partitionCount: 2 }
 }));
+const batchedEvents = await readProtocolEvents(executable, [
+    'run', exampleInput, '--configuration', runConfiguration,
+    '--output', join(directory, 'batchedSimulationResults.kjr'), '--event-stream', 'protobuf'
+]);
+assert.ok(batchedEvents.some((event) => event.sampleBatch?.times.length > 1),
+    'The engine must aggregate multiple available samples into one live Protobuf batch.');
 assert.equal(await run(executable, ['run', exampleInput, '--configuration', runConfiguration, '--output', simulationOutput]), 0);
-const simulation = JSON.parse(await readFile(simulationOutput, 'utf8'));
+const simulation = decodeResultFile(await readFile(simulationOutput));
 assert.equal(simulation.resultVersion, 1);
 assert.equal(simulation.execution.requestedBackend, 'automatic');
 assert.equal(simulation.execution.backend, 'serial');
@@ -149,7 +181,7 @@ await writeFile(serialConfiguration, JSON.stringify({
     execution: { backend: 'serial', workerThreads: 1 }
 }));
 assert.equal(await run(executable, ['run', exampleInput, '--configuration', serialConfiguration, '--output', serialOutput]), 0);
-const serialSimulation = JSON.parse(await readFile(serialOutput, 'utf8'));
+const serialSimulation = decodeResultFile(await readFile(serialOutput));
 assert.equal(serialSimulation.execution.backend, 'serial');
 assert.equal(serialSimulation.execution.workerThreads, 1);
 assert.deepEqual(serialSimulation.states, simulation.states);
@@ -164,7 +196,7 @@ for (const backend of ['threadPool', 'partitioned']) {
         execution: { backend, workerThreads: 2, partitionCount: backend === 'partitioned' ? 3 : 2 }
     }));
     assert.equal(await run(executable, ['run', exampleInput, '--configuration', configurationPath, '--output', outputPath]), 0);
-    const result = JSON.parse(await readFile(outputPath, 'utf8'));
+    const result = decodeResultFile(await readFile(outputPath));
     assert.equal(result.execution.backend, backend);
     assert.equal(result.execution.workerThreads, 2);
     if (backend === 'partitioned') {
@@ -337,7 +369,7 @@ await writeFile(join(directory, 'restartRun.json'), JSON.stringify({
 }));
 await writeFile(input, await encodeProjectFile(JSON.stringify(sourceProject)));
 assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'restartRun.json'), '--output', join(directory, 'restartResults.kjr')]), 0);
-const restartResult = JSON.parse(await readFile(join(directory, 'restartResults.kjr'), 'utf8'));
+const restartResult = decodeResultFile(await readFile(join(directory, 'restartResults.kjr')));
 assert.deepEqual(restartResult.samples.map((sample) => sample.time), [0.1, 0.2]);
 
 const unsupportedInput = join(directory, 'project.unsupported');

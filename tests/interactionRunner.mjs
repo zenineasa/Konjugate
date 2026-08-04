@@ -198,6 +198,9 @@ export async function runInteractionTests(window) {
         const finalValue = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
         assert.notEqual(finalValue, before);
         assert.ok(Number(await evaluate(window, `document.querySelector('#resultTimeline').max`)) > 0);
+        assert.equal(await evaluate(window, `Number(document.querySelector('#resultTimeline').value)`), 1.5);
+        assert.equal(await evaluate(window, `Number(document.querySelector('#resultTimeline').max)`), 1.5);
+        assert.equal(await evaluate(window, `document.querySelector('#resultPlaybackRate').value`), '1');
         await evaluate(window, `(() => { const timeline = document.querySelector('#resultTimeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         assert.equal(await evaluate(window, `document.querySelector('#resultCurrentTime').value`), '0 s');
         assert.notEqual(await evaluate(window, `document.querySelector('.node-label-container dd').textContent`), finalValue);

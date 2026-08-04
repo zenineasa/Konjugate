@@ -410,7 +410,13 @@ void runSimulation(const boost::property_tree::ptree& document,
         event.set_protocol_version(1);
         auto* batch = event.mutable_sample_batch();
         batch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
-        for (const auto& sample : pendingEventSamples) {
+        constexpr std::size_t maximumLiveBatchSamples = 256;
+        const auto transmittedSamples = std::min(pendingEventSamples.size(), maximumLiveBatchSamples);
+        for (std::size_t outputIndex = 0; outputIndex < transmittedSamples; ++outputIndex) {
+            const auto sampleIndex = transmittedSamples == 1 ? std::size_t{0} : static_cast<std::size_t>(std::llround(
+                static_cast<double>(outputIndex) * static_cast<double>(pendingEventSamples.size() - 1) /
+                static_cast<double>(transmittedSamples - 1)));
+            const auto& sample = pendingEventSamples[sampleIndex];
             batch->add_times(sample.time);
             for (const auto stateId : stateIds) {
                 batch->add_values(sample.states.at(executionPlan.stateIndexes.at(stateId)));

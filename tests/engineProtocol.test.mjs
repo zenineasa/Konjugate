@@ -48,6 +48,16 @@ test('decodes stable state tables and packed sample values', () => {
     });
 });
 
+test('decodes packed numerical arrays beyond the JavaScript argument limit', () => {
+    const times = Array.from({ length: 70000 }, (_value, index) => index * 0.1);
+    const values = times.flatMap((time) => [time, time * 2]);
+    const decoded = decodeEngineEvent(sampleBatch(times, values, 2)).sampleBatch;
+    assert.equal(decoded.times.length, times.length);
+    assert.equal(decoded.values.length, values.length);
+    assert.equal(decoded.times.at(-1), times.at(-1));
+    assert.equal(decoded.values.at(-1), values.at(-1));
+});
+
 test('decodes fragmented and combined length-prefixed frames', () => {
     const messages = [stateTable([11]), sampleBatch([0], [42], 1)];
     const framed = Buffer.concat(messages.map((message) => {

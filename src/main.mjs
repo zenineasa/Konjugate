@@ -17,6 +17,7 @@ import {
 import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
+import { nearestResultSample, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -33,6 +34,7 @@ let visualizerManifest = null;
 let visualizerSession = null;
 const addonRegistry = new Map();
 const activeEngineJobs = new Map();
+const completedEngineResults = new Map();
 const activeAIRequests = new Map();
 const activeAIOperations = new Set();
 const activeValidationOperations = new Set();
@@ -231,7 +233,8 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
     analysisAddonId = manifest.addonId;
     visualizerManifest = manifest;
     const liveResult = activeEngineJobs.get(payload.engineJobId)?.latestResult;
-    visualizerSession = createVisualizerSession({ ...payload, result: liveResult ?? payload.result, sessionId: randomUUID() });
+    const completedResult = completedEngineResults.get(payload.engineJobId);
+    visualizerSession = createVisualizerSession({ ...payload, result: liveResult ?? completedResult ?? payload.result, sessionId: randomUUID() });
     if (analysisWindow && !analysisWindow.isDestroyed()) {
         analysisWindow.setTitle(`${visualizerSession.projectName} — Results`);
         analysisWindow.webContents.send('visualizerSessionChange');
@@ -646,8 +649,12 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         if (updateTimer) clearTimeout(updateTimer);
         updateTimer = null;
         latestUpdate = null;
+        completedEngineResults.set(execution.jobId, result);
         updateVisualizerResult(execution.jobId, result);
-        if (!owner.isDestroyed()) owner.send('engineRunComplete', { jobId: execution.jobId, result });
+        if (!owner.isDestroyed()) owner.send('engineRunComplete', {
+            jobId: execution.jobId,
+            result: rendererResultProjection(result)
+        });
     }).catch((error) => {
         if (updateTimer) clearTimeout(updateTimer);
         if (!owner.isDestroyed()) owner.send('engineRunError', { jobId: execution.jobId, message: error.message });
@@ -678,6 +685,23 @@ ipcMain.handle('engineCancel', async (event, jobId) => {
     if (!job || job.owner !== event.sender) return false;
     await job.cancel();
     return true;
+});
+
+ipcMain.handle('engineReadResultSeries', (event, jobId, signalIds, options) => {
+    if (!senderIs(mainWindow, event)) return [];
+    const result = completedEngineResults.get(jobId);
+    if (!result) return [];
+    return resultSignalSeries(result, signalIds, options);
+});
+
+ipcMain.handle('engineReadResultSample', (event, jobId, time) => {
+    if (!senderIs(mainWindow, event)) return null;
+    return structuredClone(nearestResultSample(completedEngineResults.get(jobId), Number(time)));
+});
+
+ipcMain.handle('engineReleaseResult', (event, jobId) => {
+    if (!senderIs(mainWindow, event)) return false;
+    return completedEngineResults.delete(jobId);
 });
 
 app.whenReady().then(async () => {

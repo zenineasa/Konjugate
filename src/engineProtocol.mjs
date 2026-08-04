@@ -132,9 +132,9 @@ function decodedStateTable(buffer) {
 function decodedSampleBatch(buffer) {
     const batch = { times: [], stateCount: 0, values: [] };
     for (const item of fields(buffer)) {
-        if (item.number === 1 && item.wireType === 2) batch.times.push(...packedDoubles(item.value));
+        if (item.number === 1 && item.wireType === 2) batch.times = batch.times.concat(packedDoubles(item.value));
         else if (item.number === 2 && item.wireType === 0) batch.stateCount = item.value;
-        else if (item.number === 3 && item.wireType === 2) batch.values.push(...packedDoubles(item.value));
+        else if (item.number === 3 && item.wireType === 2) batch.values = batch.values.concat(packedDoubles(item.value));
     }
     return batch;
 }
@@ -160,7 +160,7 @@ export function decodeResultFile(buffer) {
             for (const item of fields(field.value)) {
                 if (item.number === 1 && item.wireType === 2) checkpoint.uuid = item.value.toString('utf8');
                 else if (item.number === 2 && item.wireType === 1) checkpoint.time = item.value.readDoubleLE();
-                else if (item.number === 3 && item.wireType === 2) checkpoint.values.push(...packedDoubles(item.value));
+                else if (item.number === 3 && item.wireType === 2) checkpoint.values = checkpoint.values.concat(packedDoubles(item.value));
                 else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = item.value.toString('utf8');
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
             }
@@ -212,17 +212,36 @@ export function decodeEngineEvent(buffer) {
 }
 
 export class FramedEngineEventDecoder {
-    #buffer = Buffer.alloc(0);
+    #header = Buffer.alloc(4);
+    #headerOffset = 0;
+    #payload = null;
+    #payloadOffset = 0;
 
     append(chunk) {
-        this.#buffer = Buffer.concat([this.#buffer, chunk]);
         const events = [];
-        while (this.#buffer.length >= 4) {
-            const length = this.#buffer.readUInt32BE(0);
-            if (length > 64 * 1024 * 1024) throw new Error('The engine protocol frame is too large.');
-            if (this.#buffer.length < length + 4) break;
-            events.push(decodeEngineEvent(this.#buffer.subarray(4, length + 4)));
-            this.#buffer = this.#buffer.subarray(length + 4);
+        let offset = 0;
+        while (offset < chunk.length) {
+            if (!this.#payload) {
+                const headerBytes = Math.min(4 - this.#headerOffset, chunk.length - offset);
+                chunk.copy(this.#header, this.#headerOffset, offset, offset + headerBytes);
+                this.#headerOffset += headerBytes;
+                offset += headerBytes;
+                if (this.#headerOffset < 4) break;
+                const length = this.#header.readUInt32BE(0);
+                if (length > 64 * 1024 * 1024) throw new Error('The engine protocol frame is too large.');
+                this.#payload = Buffer.allocUnsafe(length);
+                this.#payloadOffset = 0;
+            }
+            const payloadBytes = Math.min(this.#payload.length - this.#payloadOffset, chunk.length - offset);
+            chunk.copy(this.#payload, this.#payloadOffset, offset, offset + payloadBytes);
+            this.#payloadOffset += payloadBytes;
+            offset += payloadBytes;
+            if (this.#payloadOffset === this.#payload.length) {
+                events.push(decodeEngineEvent(this.#payload));
+                this.#headerOffset = 0;
+                this.#payload = null;
+                this.#payloadOffset = 0;
+            }
         }
         return events;
     }

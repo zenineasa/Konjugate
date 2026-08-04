@@ -106,9 +106,10 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         '--event-stream', 'protobuf'
     ], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
     let diagnostics = '';
+    let lastSnapshotError = null;
     let lastSnapshotKey = '';
     let polling = false;
-    let accumulatedSamples = [];
+    let latestSamples = [];
     let protocolStateIds = [];
     let childExited = false;
     let shutdownPromise = null;
@@ -125,15 +126,13 @@ export async function startEngineRun(content, configuration, options, { onUpdate
                     if (stateCount !== protocolStateIds.length || values.length !== times.length * stateCount) {
                         throw new Error('The engine returned an inconsistent Protobuf sample batch.');
                     }
-                    for (let sampleIndex = 0; sampleIndex < times.length; ++sampleIndex) {
-                        accumulatedSamples.push({
-                            time: times[sampleIndex],
-                            states: protocolStateIds.map((stateId, stateIndex) => ({
-                                stateId,
-                                value: values[sampleIndex * stateCount + stateIndex]
-                            }))
-                        });
-                    }
+                    latestSamples = times.map((time, sampleIndex) => ({
+                        time,
+                        states: protocolStateIds.map((stateId, stateIndex) => ({
+                            stateId,
+                            value: values[sampleIndex * stateCount + stateIndex]
+                        }))
+                    }));
                 }
             }
         } catch (error) {
@@ -147,18 +146,18 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         polling = true;
         try {
             let snapshot = decodeResultFile(await readFile(outputPath));
+            lastSnapshotError = null;
             if (snapshot.snapshotMode === 'live') {
-                snapshot = { ...snapshot, samples: accumulatedSamples };
-            } else {
-                accumulatedSamples = snapshot.samples ?? [];
+                snapshot = { ...snapshot, samples: latestSamples };
             }
-            const key = `${snapshot.lifecycle}:${snapshot.samples?.length}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
+            const key = `${snapshot.lifecycle}:${snapshot.samples?.at(-1)?.time ?? snapshot.availableResultTime}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
             if (key !== lastSnapshotKey) {
                 lastSnapshotKey = key;
                 onUpdate?.(structuredClone(snapshot));
             }
             return snapshot;
-        } catch {
+        } catch (error) {
+            lastSnapshotError = error;
             return null;
         } finally {
             polling = false;
@@ -180,7 +179,9 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             try {
                 if (failure) throw failure;
                 if (code !== 0) throw new Error(diagnostics.trim() || `The simulation engine exited with code ${code}.`);
-                if (!result) throw new Error('The simulation engine did not produce a result.');
+                if (!result) throw new Error(lastSnapshotError
+                    ? `The simulation engine result could not be read: ${lastSnapshotError.message}`
+                    : 'The simulation engine did not produce a result.');
             } catch (error) {
                 failure = error;
             }

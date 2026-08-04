@@ -17,6 +17,7 @@ import { validateProjectPassword } from './passwordValidation.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
+import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
 import {
     CSS2DObject,
@@ -310,6 +311,9 @@ let pendingRestart = null;
 let activeResultSampleIndex = 0;
 let resultPlaybackTimer = null;
 let resultPlaying = false;
+let resultPlaybackStartedAt = 0;
+let resultPlaybackStartedFrom = 0;
+const preferredPlaybackFrameMilliseconds = 100;
 let nodeDetailsBeforeResult = null;
 let toolBeforeResult = null;
 let addonToolstripContributions = [];
@@ -1009,7 +1013,24 @@ function renderNodeEditorModel(node) {
 
 async function renderNodeResults(node) {
     const panel = $('.nodeResultsPanel');
-    const series = nodeResultSeries(activeResult, node.userData.definition);
+    let series = nodeResultSeries(activeResult, node.userData.definition);
+    if (activeEngineJobId && activeResult?.sampleCount > activeResult.samples.length) {
+        const signalIds = node.userData.definition.states.map((state) => state.id);
+        const storedSeries = await window.engine.readResultSeries(activeEngineJobId, signalIds, {
+            startTime: 0,
+            endTime: activeResult.availableResultTime,
+            maxPoints: 4000
+        });
+        const bySignal = new Map(storedSeries.map((item) => [item.signalId, item.samples]));
+        series = node.userData.definition.states.map((state) => ({
+            nodeId: node.userData.definition.id,
+            stateId: state.id,
+            name: state.label,
+            symbol: state.symbol,
+            unit: state.unit ?? '',
+            samples: bySignal.get(state.id) ?? []
+        })).filter((item) => item.samples.length);
+    }
     panel.classList.toggle('hasResults', Boolean(series.length));
     if (!series.length) {
         nodeResultPlot.clear();
@@ -1711,10 +1732,9 @@ function updateResultExtent() {
     if (!activeResult) return;
     const targetTime = Number(activeResult.targetTime);
     const availableTime = Number(activeResult.availableResultTime);
-    const plannedIntervals = Math.max(1, Math.ceil(targetTime / Number(activeResult.outputInterval)));
-    const availableIntervals = Math.max(0, activeResult.samples.length - 1);
-    $('#resultTimeline').max = String(Math.max(plannedIntervals, availableIntervals));
-    $('#resultTimeline').style.setProperty('--available-progress', `${100 * availableIntervals / Math.max(plannedIntervals, availableIntervals)}%`);
+    const extent = Math.max(targetTime, availableTime, activeResult.samples.at(-1)?.time ?? 0, Number.EPSILON);
+    $('#resultTimeline').max = String(extent);
+    $('#resultTimeline').style.setProperty('--available-progress', `${100 * Math.min(availableTime, extent) / extent}%`);
     $('#resultExtent').value = `available ${formatResultTime(availableTime)} · target ${formatResultTime(targetTime)}`;
     $('#simulationProgress').value = `${formatResultTime(availableTime)} / ${formatResultTime(targetTime)}`;
 }
@@ -1732,9 +1752,13 @@ function updateDisplayedState(stateId, numericValue) {
 function projectResultSample(index) {
     if (!activeResult?.samples.length) return;
     activeResultSampleIndex = Math.max(0, Math.min(index, activeResult.samples.length - 1));
-    const sample = activeResult.samples[activeResultSampleIndex];
+    projectResultSampleValue(activeResult.samples[activeResultSampleIndex]);
+}
+
+function projectResultSampleValue(sample) {
+    if (!sample) return;
     sample.states.forEach((state) => updateDisplayedState(state.stateId, state.value));
-    $('#resultTimeline').value = String(activeResultSampleIndex);
+    $('#resultTimeline').value = String(sample.time);
     $('#resultCurrentTime').value = formatResultTime(sample.time);
     $('#statusText').textContent = `Result · ${formatResultTime(sample.time)}`;
     nodeResultPlot.setCursor(sample.time);
@@ -1751,17 +1775,38 @@ function stopResultPlayback() {
 
 function scheduleResultPlayback() {
     if (!resultPlaying || !activeResult) return;
-    if (activeResultSampleIndex >= activeResult.samples.length - 1) {
-        stopResultPlayback();
-        return;
-    }
-    const current = activeResult.samples[activeResultSampleIndex];
-    const next = activeResult.samples[activeResultSampleIndex + 1];
     const rate = Number($('#resultPlaybackRate').value) || 1;
-    resultPlaybackTimer = setTimeout(() => {
-        projectResultSample(activeResultSampleIndex + 1);
-        scheduleResultPlayback();
-    }, Math.max(40, (next.time - current.time) * 1000 / rate));
+    const finalTime = Number(activeResult.samples.at(-1).time);
+    resultPlaybackTimer = setTimeout(async () => {
+        const elapsed = (performance.now() - resultPlaybackStartedAt) / 1000;
+        const targetTime = Math.min(finalTime, resultPlaybackStartedFrom + elapsed * rate);
+        const reachedEnd = targetTime >= finalTime;
+        const projectedIndex = nearestSampleIndex(activeResult.samples, targetTime);
+        activeResultSampleIndex = projectedIndex;
+        const fullResolutionSample = activeEngineJobId && activeResult.sampleCount > activeResult.samples.length
+            ? await window.engine.readResultSample(activeEngineJobId, targetTime) : null;
+        if (!resultPlaying) return;
+        projectResultSampleValue(fullResolutionSample ?? activeResult.samples[projectedIndex]);
+        if (reachedEnd) stopResultPlayback();
+        else scheduleResultPlayback();
+    }, preferredPlaybackFrameMilliseconds);
+}
+
+function selectSuggestedPlaybackRate() {
+    const selector = $('#resultPlaybackRate');
+    selector.querySelector('[data-suggested]')?.remove();
+    const samples = activeResult?.samples ?? [];
+    const duration = samples.length > 1 ? Number(samples.at(-1).time) - Number(samples[0].time) : 0;
+    const rate = suggestedPlaybackRate(duration);
+    let option = [...selector.options].find((candidate) => Number(candidate.value) === rate);
+    if (!option) {
+        option = document.createElement('option');
+        option.value = String(rate);
+        option.dataset.suggested = '';
+        option.textContent = `${rate.toLocaleString()}× · fit`;
+        selector.appendChild(option);
+    }
+    selector.value = option.value;
 }
 
 function applyInspectorReadOnly() {
@@ -2019,6 +2064,7 @@ async function clearResultPlayback() {
     if (!activeResult) return;
     if (simulationRunning) return;
     stopResultPlayback();
+    if (activeEngineJobId) await window.engine.releaseResult(activeEngineJobId);
     window.addons.closeContext('resultSession');
     activeResult = null;
     activeEngineJobId = null;
@@ -2038,7 +2084,7 @@ async function clearResultPlayback() {
 
 $('#resultTimeline').addEventListener('input', (event) => {
     stopResultPlayback();
-    projectResultSample(Number(event.target.value));
+    projectResultSample(nearestSampleIndex(activeResult.samples, Number(event.target.value)));
     updateLiveResultControls();
 });
 $('#resultStart').addEventListener('click', () => { stopResultPlayback(); projectResultSample(0); });
@@ -2052,12 +2098,19 @@ $('#resultPlayPause').addEventListener('click', () => {
     }
     if (activeResultSampleIndex >= activeResult.samples.length - 1) projectResultSample(0);
     resultPlaying = true;
+    resultPlaybackStartedAt = performance.now();
+    resultPlaybackStartedFrom = Number(activeResult.samples[activeResultSampleIndex].time);
     $('#resultPlayPause').textContent = '❚❚';
     $('#resultPlayPause').ariaLabel = 'Pause results';
     scheduleResultPlayback();
 });
 $('#resultPlaybackRate').addEventListener('change', () => {
-    if (resultPlaying) { clearTimeout(resultPlaybackTimer); scheduleResultPlayback(); }
+    if (resultPlaying) {
+        clearTimeout(resultPlaybackTimer);
+        resultPlaybackStartedAt = performance.now();
+        resultPlaybackStartedFrom = Number(activeResult.samples[activeResultSampleIndex].time);
+        scheduleResultPlayback();
+    }
 });
 $('#simulationPacing').addEventListener('change', async (event) => {
     if (!activeEngineJobId) return;
@@ -2267,6 +2320,7 @@ window.engine.onComplete(({ jobId, result }) => {
     if (jobId !== activeEngineJobId) return;
     applyLiveResult(jobId, result);
     simulationRunning = false;
+    selectSuggestedPlaybackRate();
     updateLiveResultControls();
     $('#statusText').textContent = result.lifecycle === 'stopped' ? 'Simulation stopped · partial results retained' : 'Simulation complete';
 });

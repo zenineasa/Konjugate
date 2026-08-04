@@ -12,12 +12,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ZLIB REQUIRED)
-set(OPENSSL_USE_STATIC_LIBS TRUE)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
 
 option(KONJUGATE_ENABLE_METIS "Enable METIS graph partitioning when the library is available" ON)
+option(KONJUGATE_REQUIRE_METIS "Fail configuration when METIS is unavailable" OFF)
+if(KONJUGATE_REQUIRE_METIS AND NOT KONJUGATE_ENABLE_METIS)
+    message(FATAL_ERROR "KONJUGATE_REQUIRE_METIS cannot be enabled when KONJUGATE_ENABLE_METIS is disabled")
+endif()
 if(KONJUGATE_ENABLE_METIS)
     find_path(METIS_INCLUDE_DIR metis.h)
     find_library(METIS_LIBRARY NAMES metis)
@@ -28,6 +31,9 @@ if(METIS_INCLUDE_DIR AND METIS_LIBRARY)
     message(STATUS "METIS partitioning enabled: ${METIS_LIBRARY}")
 else()
     set(KONJUGATE_HAS_METIS 0)
+    if(KONJUGATE_REQUIRE_METIS)
+        message(FATAL_ERROR "METIS is required by this build. Use the development-no-metis preset to test the fallback path.")
+    endif()
     message(STATUS "METIS was not found; the built-in greedy partitioner remains available")
 endif()
 
@@ -82,12 +88,37 @@ add_executable(konjugateEngine
     src/taskExecutor.cpp
     src/validationReport.cpp
 )
+set_target_properties(konjugateEngine PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    INSTALL_RPATH "$ORIGIN"
+)
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR})
 target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto Threads::Threads)
 target_compile_definitions(konjugateEngine PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
 if(KONJUGATE_HAS_METIS)
     target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
     target_link_libraries(konjugateEngine PRIVATE ${KONJUGATE_METIS_LINK_LIBRARY})
+endif()
+
+install(TARGETS konjugateEngine RUNTIME DESTINATION .)
+if(KONJUGATE_HAS_METIS AND APPLE AND METIS_BUNDLED_LIBRARY)
+    install(FILES "${METIS_BUNDLED_LIBRARY}" DESTINATION .)
+elseif(KONJUGATE_HAS_METIS AND UNIX AND METIS_LIBRARY MATCHES "\\.so(\\.[0-9.]+)?$")
+    install(FILES "${METIS_LIBRARY}" DESTINATION .)
+endif()
+if(WIN32)
+    install(DIRECTORY "${CMAKE_BINARY_DIR}/" DESTINATION . FILES_MATCHING PATTERN "*.dll")
+endif()
+if(KONJUGATE_HAS_METIS)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md" DESTINATION .)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/apache2.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/metis.txt"
+        DESTINATION thirdPartyLicenses
+    )
 endif()
 
 include(CTest)
@@ -100,6 +131,12 @@ if(BUILD_TESTING)
         src/partitionPlan.cpp
         src/partitionRuntime.cpp
         src/taskExecutor.cpp
+    )
+    set_target_properties(executionPlanTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
     )
     target_include_directories(executionPlanTests PRIVATE include ${BOOST_INCLUDE_DIR})
     target_link_libraries(executionPlanTests PRIVATE Threads::Threads)

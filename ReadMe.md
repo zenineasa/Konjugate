@@ -86,16 +86,15 @@ This project is currently in the early stages of development.
 
 ## Development
 
-Konjugate currently requires Node.js 22.12 or newer. Start the Electron
-application with:
+Konjugate supports development on macOS, Windows and Linux. Install the short platform toolchain listed in [the development setup guide](docs/developmentSetup.md), then run the same procedure on every platform:
 
 ```bash
-npm install
-npm start
+npm ci
+npm run setup
+npm run dev
 ```
 
-The application uses explicit `.mjs` modules for the Electron main, preload,
-and renderer processes.
+Setup uses a pinned vcpkg dependency set for Zlib, OpenSSL, Boost.PropertyTree and METIS. Normal development requires METIS and fails clearly when it cannot be configured; the built-in fallback has a separate explicit test preset.
 
 ## Building
 
@@ -111,21 +110,15 @@ or:
 make build
 ```
 
-The build installs missing dependencies, generates application and web icons,
-packages Electron and writes the shareable artifact to `out/release/`.
+The build installs missing dependencies, generates application and web icons, packages Electron and writes the shareable artifact to `out/release/`.
 
 - macOS produces a DMG.
 - Windows produces a portable ZIP containing the executable.
 - Linux produces an AppImage and requires `appimagetool`.
 
-Generated application bundles are stored in `out/package/`. Run `make clean`
-to remove dependencies, the lockfile, generated icons, caches and all build
-outputs.
+Generated application bundles are stored in `out/package/`. Run `make clean` to remove dependencies, the lockfile, generated icons, caches and all build outputs.
 
-Every packaged application includes `thirdPartyNotices.md` and the applicable
-license texts under `thirdPartyLicenses/`. Packaging fails if these compliance
-files are missing. Native engine builds that include METIS receive the same
-files in their build directory.
+Every packaged application includes `thirdPartyNotices.md` and the applicable license texts under `thirdPartyLicenses/`. Packaging fails if these compliance files are missing. Native engine builds that include METIS receive the same files in their build directory. See [release packaging](docs/releasePackaging.md) for the host tools and packaged-runtime checks.
 
 ---
 
@@ -159,8 +152,7 @@ Ideas, discussions and contributions are welcome.
 
 ## License
 
-This project is licensed under the Mozilla Public License 2.0.
-See [LICENSE](LICENSE) for details.
+This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE) for details.
 
 ---
 

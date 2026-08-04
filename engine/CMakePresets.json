@@ -1,0 +1,61 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "development",
+            "displayName": "Konjugate development with METIS",
+            "binaryDir": "${sourceDir}/../out/engine",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/../.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_MANIFEST_DIR": "${sourceDir}/..",
+                "KONJUGATE_REQUIRE_METIS": "ON"
+            }
+        },
+        {
+            "name": "development-no-metis",
+            "displayName": "Konjugate dependency-free partitioner development",
+            "inherits": "development",
+            "binaryDir": "${sourceDir}/../out/engine-no-metis",
+            "cacheVariables": {
+                "KONJUGATE_ENABLE_METIS": "OFF",
+                "KONJUGATE_REQUIRE_METIS": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "development",
+            "configurePreset": "development",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "development-no-metis",
+            "configurePreset": "development-no-metis",
+            "configuration": "RelWithDebInfo"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "development",
+            "configurePreset": "development",
+            "configuration": "RelWithDebInfo",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "development-no-metis",
+            "configurePreset": "development-no-metis",
+            "configuration": "RelWithDebInfo",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

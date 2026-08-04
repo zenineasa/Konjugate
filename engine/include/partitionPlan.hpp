@@ -45,6 +45,7 @@ struct PartitionPlan {
 };
 
 bool metisPartitionerAvailable() noexcept;
+std::string metisPartitionerVersion();
 
 PartitionPlan createPartitionPlan(const DependencyGraph& graph,
                                   std::size_t requestedPartitions,

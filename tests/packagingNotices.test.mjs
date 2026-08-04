@@ -31,6 +31,14 @@ test('every Electron package target includes and verifies third-party notices', 
         const recipe = makefile.slice(start, nextTarget === -1 ? undefined : nextTarget);
         assert.match(recipe, /--extra-resource=thirdPartyNotices\.md/);
         assert.match(recipe, /--extra-resource=thirdPartyLicenses/);
+        assert.match(recipe, /--extra-resource=\$\(enginePackageDir\)/);
         assert.match(recipe, /verifyPackagingNotices\.mjs/);
     }
+});
+
+test('packaging verifies the installed engine and its effective METIS runtime', async () => {
+    const verifier = await readFile(join(rootDirectory, 'scripts', 'verifyPackagingNotices.mjs'), 'utf8');
+    assert.match(verifier, /\['capabilities'\]/);
+    assert.match(verifier, /capabilities\.metis\?\.available !== true/);
+    assert.match(verifier, /packaged METIS notice is incomplete/);
 });

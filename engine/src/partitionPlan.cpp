@@ -166,6 +166,15 @@ bool metisPartitionerAvailable() noexcept {
     return KONJUGATE_HAS_METIS != 0;
 }
 
+std::string metisPartitionerVersion() {
+#if KONJUGATE_HAS_METIS
+    return std::to_string(METIS_VER_MAJOR) + "." + std::to_string(METIS_VER_MINOR) + "." +
+        std::to_string(METIS_VER_SUBMINOR);
+#else
+    return {};
+#endif
+}
+
 #if KONJUGATE_HAS_METIS
 namespace {
 
@@ -195,8 +204,7 @@ PartitionPlan createMetisPartitionPlan(const DependencyGraph& graph,
     }
     PartitionPlan plan;
     plan.algorithm = "metisKway";
-    plan.algorithmVersion = std::to_string(METIS_VER_MAJOR) + "." + std::to_string(METIS_VER_MINOR) + "." +
-        std::to_string(METIS_VER_SUBMINOR);
+    plan.algorithmVersion = metisPartitionerVersion();
     plan.requestedPartitions = requestedPartitions;
     plan.effectivePartitions = std::min(requestedPartitions, std::max<std::size_t>(1, graph.nodes.size()));
     plan.communicationBias = communicationBias;

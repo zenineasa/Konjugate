@@ -1,0 +1,48 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
+name: Cross-platform verification
+
+on:
+    push:
+    pull_request:
+
+jobs:
+    verify:
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, ubuntu-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        env:
+            VCPKG_DISABLE_METRICS: 1
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22.12.0
+                  cache: npm
+            - uses: ilammy/msvc-dev-cmd@v1
+              if: runner.os == 'Windows'
+            - name: Install Linux Electron prerequisites
+              if: runner.os == 'Linux'
+              run: sudo apt-get update && sudo apt-get install -y libgtk-3-0 libnss3 libasound2t64
+            - run: npm ci
+            - run: npm run setup
+            - run: npm test
+            - run: npm run test:engine
+            - name: Install package engine layout
+              run: cmake --install out/engine --config RelWithDebInfo --prefix out/packageResources/engine
+            - run: cmake -E copy thirdPartyNotices.md out/packageResources
+            - run: cmake -E copy_directory thirdPartyLicenses out/packageResources/thirdPartyLicenses
+            - name: Verify installed METIS runtime and notices
+              run: node scripts/verifyPackagingNotices.mjs out/packageResources
+            - name: Run Electron interaction tests
+              if: runner.os != 'Linux'
+              run: npm run test:interaction
+            - name: Run Electron interaction tests with a virtual display
+              if: runner.os == 'Linux'
+              run: xvfb-run -a npm run test:interaction
+            - run: npm run build:engine:no-metis
+            - name: Test dependency-free partitioner
+              working-directory: engine
+              run: ctest --preset development-no-metis

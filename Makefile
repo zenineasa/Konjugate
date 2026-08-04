@@ -3,7 +3,6 @@
 svgIcon := assets/icon.svg
 iconDir := assets/icons
 pngDir := $(iconDir)/png
-iconsetDir := $(iconDir)/app.iconset
 pngSizes := 16 24 32 48 64 128 256 512 1024
 pngIcons := $(addprefix $(pngDir)/,$(addsuffix .png,$(pngSizes)))
 appName := Konjugate
@@ -12,6 +11,7 @@ appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
 engineBuildDir := out/engine
+enginePackageDir := out/packageResources/engine
 hostSystem := $(shell uname -s)
 hostMachine := $(shell uname -m)
 macSignIdentity ?=
@@ -88,21 +88,10 @@ $(iconDir)/app.ico: $(pngIcons) scripts/pngToIco.py
 
 iconsMacos: $(iconDir)/app.icns
 
-$(iconDir)/app.icns: $(pngIcons)
-	@command -v iconutil >/dev/null 2>&1 || { echo "iconutil is required to create app.icns (run this target on macOS)."; exit 1; }
-	@mkdir -p $(iconsetDir)
-	cp $(pngDir)/16.png $(iconsetDir)/icon_16x16.png
-	cp $(pngDir)/32.png $(iconsetDir)/icon_16x16@2x.png
-	cp $(pngDir)/32.png $(iconsetDir)/icon_32x32.png
-	cp $(pngDir)/64.png $(iconsetDir)/icon_32x32@2x.png
-	cp $(pngDir)/128.png $(iconsetDir)/icon_128x128.png
-	cp $(pngDir)/256.png $(iconsetDir)/icon_128x128@2x.png
-	cp $(pngDir)/256.png $(iconsetDir)/icon_256x256.png
-	cp $(pngDir)/512.png $(iconsetDir)/icon_256x256@2x.png
-	cp $(pngDir)/512.png $(iconsetDir)/icon_512x512.png
-	cp $(pngDir)/1024.png $(iconsetDir)/icon_512x512@2x.png
-	iconutil --convert icns --output $@ $(iconsetDir)
-	rm -rf $(iconsetDir)
+$(iconDir)/app.icns: $(pngIcons) scripts/pngToIcns.mjs
+	node scripts/pngToIcns.mjs \
+		--icons=$(pngDir) \
+		--output=$@
 
 iconsWeb: $(iconDir)/favicon.ico $(iconDir)/favicon16.png $(iconDir)/favicon32.png $(iconDir)/appleTouchIcon.png
 
@@ -133,9 +122,11 @@ installDependencies:
 checkPackaging: installDependencies
 	@test -x node_modules/.bin/electron-packager || { echo "Electron Packager installation failed."; exit 1; }
 
-engine:
-	cmake -S engine -B $(engineBuildDir)
-	cmake --build $(engineBuildDir) --config Release
+engine: installDependencies
+	node scripts/setupDevelopment.mjs
+	node scripts/buildEngine.mjs
+	cmake -E remove_directory $(enginePackageDir)
+	cmake --install $(engineBuildDir) --config RelWithDebInfo --prefix $(enginePackageDir)
 
 packageApp:
 ifeq ($(hostPlatform),darwin)
@@ -156,7 +147,7 @@ packageMacos: checkPackaging iconsMacos engine
 		--app-bundle-id=$(appId) \
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.icns \
-		--extra-resource=$(engineBuildDir) \
+		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
 		--out=$(packageDir) \
@@ -171,7 +162,7 @@ packageWindows: checkPackaging iconsWindows engine
 		--arch=$(hostArch) \
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.ico \
-		--extra-resource=$(engineBuildDir) \
+		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
 		--out=$(packageDir) \
@@ -186,7 +177,7 @@ packageLinux: checkPackaging iconsPng engine
 		--arch=$(hostArch) \
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.png \
-		--extra-resource=$(engineBuildDir) \
+		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
 		--out=$(packageDir) \

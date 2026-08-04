@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "modelValidator.hpp"
+#include "partitionPlan.hpp"
 #include "projectContainer.hpp"
 #include "simulationRunner.hpp"
 #include "validationReport.hpp"
@@ -27,8 +28,14 @@ bool hasKjtExtension(const std::filesystem::path& path) {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "capabilities") {
+        std::cout << "{\"metis\":{\"available\":"
+                  << (konjugate::metisPartitionerAvailable() ? "true" : "false")
+                  << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}}\n";
+        return 0;
+    }
     if (argc < 3) {
-        std::cerr << "Usage: konjugateEngine <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr --pacing-control pacing.json]\n";
+        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr --pacing-control pacing.json]\n";
         return 64;
     }
     const std::string command = argv[1];

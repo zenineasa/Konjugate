@@ -101,6 +101,7 @@
                 <label><span>Worker limit</span><input id="runWorkerThreads" type="number" min="1" max="256" step="1" required></label>
                 <details id="runExecutionAdvanced" class="executionAdvanced">
                     <summary>Advanced execution</summary>
+                    <label><span>Partitioner</span><select id="runPartitionAlgorithm"><option value="automatic">Automatic (prefer METIS)</option><option value="metisKway">METIS k-way</option><option value="communicationAwareGreedy">Built-in greedy</option></select></label>
                     <label><span>Partition count</span><input id="runPartitionCount" type="number" min="1" max="256" step="1" required></label>
                     <label><span>Communication bias</span><input id="runPartitionCommunicationBias" type="number" min="0" step="any" required></label>
                     <label><span>Parallel work threshold</span><input id="runAutomaticParallelThreshold" type="number" min="1" max="1000000" step="1" required></label>

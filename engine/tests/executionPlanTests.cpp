@@ -223,6 +223,39 @@ void greedyPartitionerClustersACommunicationRing() {
         "Communication-aware placement did not improve on round robin for a ring.");
 }
 
+void partitionerSelectionUsesMetisWhenAvailable() {
+    konjugate::DependencyGraph graph;
+    for (std::size_t index = 0; index < 12; ++index) {
+        graph.nodes.push_back({"node" + std::to_string(index), 1, 1, 10, 0});
+    }
+    for (std::size_t index = 0; index < graph.nodes.size(); ++index) {
+        graph.dependencies.push_back({
+            graph.nodes[index].nodeId, graph.nodes[(index + 1) % graph.nodes.size()].nodeId,
+            {"state" + std::to_string(index)}, 1, 1, 1, 1
+        });
+    }
+    const auto automatic = konjugate::createPartitionPlan(graph, 3);
+    require(automatic.requestedAlgorithm == "automatic", "The requested partition algorithm was not recorded.");
+    require(automatic.assignments.size() == graph.nodes.size(), "The selected partitioner omitted graph nodes.");
+    require(automatic.selected.computeImbalance >= 1, "The selected partition metrics were not reported.");
+    if (konjugate::metisPartitionerAvailable()) {
+        require(automatic.algorithm == "metisKway", "Automatic partitioning did not prefer an available METIS build.");
+        const auto explicitMetis = konjugate::createPartitionPlan(graph, 3, 4, "metisKway");
+        require(explicitMetis.algorithm == "metisKway" && explicitMetis.fallbackReason.empty(),
+            "Explicit METIS partitioning unexpectedly fell back.");
+    } else {
+        require(automatic.algorithm == "communicationAwareGreedy" && automatic.fallbackReason == "metisUnavailable",
+            "Automatic partitioning did not report its METIS fallback.");
+        bool unavailableRejected = false;
+        try {
+            static_cast<void>(konjugate::createPartitionPlan(graph, 3, 4, "metisKway"));
+        } catch (const std::runtime_error&) {
+            unavailableRejected = true;
+        }
+        require(unavailableRejected, "An explicit METIS request was accepted by a build without METIS.");
+    }
+}
+
 konjugate::ExecutionPlan singleNodeRuntimePlan() {
     konjugate::ExecutionPlan plan;
     plan.initialStates = {{"state", 1}};
@@ -333,6 +366,7 @@ int main() {
         greedyPartitionerBalancesIndependentWork();
         greedyPartitionerCanKeepExpensiveCommunicationLocal();
         greedyPartitionerClustersACommunicationRing();
+        partitionerSelectionUsesMetisWhenAvailable();
         partitionTransportWaitsForDelayedMessagesAndRejectsDuplicates();
         partitionTransportReportsMissingMessagesAndWorkerFailures();
         partitionRuntimeReplaysDeterministicallyThroughMessages();

@@ -122,6 +122,11 @@ Generated application bundles are stored in `out/package/`. Run `make clean`
 to remove dependencies, the lockfile, generated icons, caches and all build
 outputs.
 
+Every packaged application includes `thirdPartyNotices.md` and the applicable
+license texts under `thirdPartyLicenses/`. Packaging fails if these compliance
+files are missing. Native engine builds that include METIS receive the same
+files in their build directory.
+
 ---
 
 ## Vision and Roadmap

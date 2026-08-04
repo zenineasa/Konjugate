@@ -99,12 +99,15 @@ assert.deepEqual(dependencyDirections.toSorted(), [
     'Electrical losses -> Battery module',
     'Enclosed air -> Battery module'
 ]);
-assert.equal(simulation.partitionPlan.algorithm, 'communicationAwareGreedy');
+assert.ok(['metisKway', 'communicationAwareGreedy'].includes(simulation.partitionPlan.algorithm));
+assert.match(simulation.partitionPlan.algorithmVersion, /^\d+(?:\.\d+){0,2}$/);
+assert.equal(simulation.partitionPlan.requestedAlgorithm, 'automatic');
+if (simulation.partitionPlan.algorithm === 'metisKway') assert.equal(simulation.partitionPlan.metisAvailable, true);
 assert.equal(simulation.partitionPlan.requestedPartitions, 2);
 assert.equal(simulation.partitionPlan.effectivePartitions, 2);
 assert.equal(simulation.partitionPlan.assignments.length, 3);
 assert.equal(simulation.partitionPlan.partitions.reduce((total, partition) => total + partition.nodeCount, 0), 3);
-assert.ok(simulation.partitionPlan.greedy.computeImbalance >= 1);
+assert.ok(simulation.partitionPlan.selected.computeImbalance >= 1);
 assert.equal(simulation.targetTime, 1);
 assert.equal(simulation.globalSteps, 100);
 assert.equal(simulation.samples.length, 11);

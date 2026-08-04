@@ -43,7 +43,7 @@ Thread-pool execution is useful when node workloads are large enough to run conc
 
 ### Partitioned
 
-The engine groups nodes using a communication-aware greedy partitioner. It attempts to balance estimated computation while keeping strongly communicating nodes together. Each partition has a persistent worker and receives an immutable, versioned boundary message for each global synchronization step.
+The engine groups nodes using METIS k-way partitioning or the built-in communication-aware greedy partitioner. METIS uses estimated node computation as vertex weights and aggregated state-dependency traffic as edge weights. The built-in algorithm balances estimated computation while keeping strongly communicating nodes together. Each partition has a persistent worker and receives an immutable, versioned boundary message for each global synchronization step.
 
 Partitioned execution currently runs inside one C++ engine process and uses an in-memory transport. It is not multi-process, distributed or multi-machine execution yet. The transport abstraction and explicit message boundary provide a foundation for those later implementations.
 
@@ -70,6 +70,7 @@ The `execution` object is stored in a run configuration:
     "execution": {
         "backend": "automatic",
         "workerThreads": 8,
+        "partitionAlgorithm": "automatic",
         "partitionCount": 8,
         "partitionCommunicationBias": 4,
         "automaticParallelThreshold": 128,
@@ -82,6 +83,7 @@ The `execution` object is stored in a run configuration:
 | --- | --- | --- | --- |
 | `backend` | Requested execution strategy | `automatic`, `serial`, `threadPool`, `partitioned` | `automatic` |
 | `workerThreads` | Maximum workers available to a parallel backend | Integer from 1 through 256 | Logical processor count reported by the system |
+| `partitionAlgorithm` | Requested graph partitioner | `automatic`, `metisKway`, `communicationAwareGreedy` | `automatic` |
 | `partitionCount` | Requested number of graph partitions | Integer from 1 through 256 | Logical processor count reported by the system |
 | `partitionCommunicationBias` | Strength of the preference to keep communicating nodes together | Finite number greater than or equal to 0 | `4` |
 | `automaticParallelThreshold` | Estimated operations per node required before automatic mode considers parallel execution | Integer from 1 through 1,000,000 | `128` |
@@ -125,9 +127,19 @@ Selection reasons recorded in results are:
 
 The dependency graph is derived from compiled equation bindings, not from visual proximity. It records node compute weights, remote state dependencies and estimated communication weights.
 
+`automatic` partitioner selection prefers `metisKway` when the engine was compiled with METIS. If METIS is unavailable or cannot partition a particular graph, it records a fallback reason and uses `communicationAwareGreedy`. An explicit `metisKway` request fails rather than silently falling back, making reproducible CLI and benchmark runs possible.
+
+`metisKway` converts the directed dependency graph into METIS weighted compressed sparse row form. Opposing or parallel dependencies between a pair of nodes are aggregated into one undirected edge. Estimated operations per synchronization become vertex weights, communication weights become edge weights and a fixed seed makes planning repeatable. METIS then balances vertex weight while minimizing the weighted edge cut. `partitionCommunicationBias` does not affect METIS because scaling every edge weight equally would not change its optimization problem.
+
 The `communicationAwareGreedy` partitioner assigns nodes while considering both load balance and cut communication. Increasing `partitionCommunicationBias` more strongly favors colocating connected nodes. A value of zero emphasizes computation balance alone. Excessively high values may preserve locality at the expense of worker balance, so the default should be changed only after inspecting measurements.
 
-The result includes both greedy and round-robin partition metrics. Round robin is a comparison baseline; it is not used to execute the run.
+The result identifies the requested and effective algorithms, effective algorithm version, METIS availability and any fallback reason. It includes metrics for the selected assignment, the built-in greedy baseline and round-robin placement. The baselines are diagnostic and are not used to execute a METIS plan.
+
+### Building with METIS
+
+CMake discovers an installed METIS library automatically. On macOS it can be installed with `brew install metis`; common Linux distributions provide a `libmetis-dev` or equivalent development package. Configure with `-DKONJUGATE_ENABLE_METIS=OFF` to exercise the dependency-free fallback build.
+
+macOS builds copy the METIS runtime library and its license into the engine output directory, rewrite the runtime reference to `@loader_path/libmetis.dylib` and therefore remain self-contained when that directory is packaged. Other packaging targets must likewise ship the applicable METIS shared library or build without METIS.
 
 ## Execution summary and result telemetry
 
@@ -136,8 +148,8 @@ The execution summary presents the most useful fields from the result:
 - effective backend, worker count and automatic-selection reason
 - planning time and synchronization time
 - accumulated node computation time
-- compute imbalance between partitions
-- greedy and round-robin communication cuts
+- effective partitioning algorithm and compute imbalance
+- selected and round-robin communication cuts
 - boundary-message count and payload size
 - message preparation, publish and boundary-wait time
 
@@ -167,6 +179,6 @@ Set `KONJUGATE_BENCHMARK_TOPOLOGY=ring` to exercise a communicating graph; the d
 
 ## Reliability and current limits
 
-The engine rejects invalid backend names, worker and partition counts, thresholds, cut fractions and receive timeouts. The partition transport rejects duplicate messages, associates messages with a synchronization index and fails a run when a required message does not arrive before its timeout. Tests cover delayed, missing and duplicate messages, partition-worker failures, deterministic reduction, partition quality and numerical agreement across backends.
+The engine rejects invalid backend and partitioner names, worker and partition counts, thresholds, cut fractions and receive timeouts. The partition transport rejects duplicate messages, associates messages with a synchronization index and fails a run when a required message does not arrive before its timeout. Tests cover METIS-enabled and dependency-free builds, explicit and automatic partitioner selection, delayed, missing and duplicate messages, partition-worker failures, deterministic reduction, partition quality and numerical agreement across backends.
 
 Current parallelism is node-grained. A single computationally expensive node is not divided among workers. Partition transport serialization time is reported as zero because the in-memory implementation passes native values. Process isolation, network transport, accelerator execution, dynamic repartitioning and a programming interface for compiled equation kernels remain future work.

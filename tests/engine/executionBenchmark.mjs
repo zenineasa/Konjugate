@@ -125,9 +125,10 @@ try {
             workerThreads: result.execution.workerThreads,
             synchronizationComputeMilliseconds: Number((result.execution.synchronizationComputeNanoseconds / 1e6).toFixed(3)),
             partitionPlan: {
+                algorithm: result.partitionPlan.algorithm,
                 partitions: result.partitionPlan.effectivePartitions,
-                computeImbalance: Number(result.partitionPlan.greedy.computeImbalance.toFixed(3)),
-                communicationCutWeight: result.partitionPlan.greedy.communicationCutWeight
+                computeImbalance: Number(result.partitionPlan.selected.computeImbalance.toFixed(3)),
+                communicationCutWeight: result.partitionPlan.selected.communicationCutWeight
             },
             partitionCommunication: result.execution.partitionCommunication
         };

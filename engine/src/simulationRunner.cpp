@@ -201,7 +201,8 @@ void runSimulation(const boost::property_tree::ptree& document,
         executionSettings.requestedBackend == "automatic"
         ? std::min(requestedPartitions, executionSettings.workerThreads) : requestedPartitions;
     const auto communicationBias = configuration.get<double>("execution.partitionCommunicationBias", 4);
-    auto partitionPlan = createGreedyPartitionPlan(dependencyGraph, executablePartitions, communicationBias);
+    const auto partitionAlgorithm = configuration.get<std::string>("execution.partitionAlgorithm", "automatic");
+    auto partitionPlan = createPartitionPlan(dependencyGraph, executablePartitions, communicationBias, partitionAlgorithm);
     partitionPlan.requestedPartitions = requestedPartitions;
     const auto totalCommunicationWeight = std::accumulate(
         dependencyGraph.dependencies.begin(), dependencyGraph.dependencies.end(), std::size_t{0},
@@ -210,7 +211,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto backendDecision = selectExecutionBackend(
         executionSettings.requestedBackend, executionPlan.nodes.size(),
         executionSettings.estimatedOperationsPerSynchronization, executionSettings.automaticParallelThreshold,
-        partitionPlan.greedy.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
+        partitionPlan.selected.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
     executionSettings.backend = backendDecision.backend;
     if (executionSettings.backend == "serial") executionSettings.workerThreads = 1;
     const auto planningNanoseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -381,7 +382,11 @@ void runSimulation(const boost::property_tree::ptree& document,
                  << dependency.communicationWeight << '}';
         }
         json << "]},\"partitionPlan\":{\"version\":" << partitionPlan.version << ",\"algorithm\":\""
-             << partitionPlan.algorithm << "\",\"requestedPartitions\":" << partitionPlan.requestedPartitions
+             << partitionPlan.algorithm << "\",\"algorithmVersion\":\"" << partitionPlan.algorithmVersion
+             << "\",\"requestedAlgorithm\":\"" << partitionPlan.requestedAlgorithm
+             << "\",\"fallbackReason\":\"" << escape(partitionPlan.fallbackReason)
+             << "\",\"metisAvailable\":" << (metisPartitionerAvailable() ? "true" : "false")
+             << ",\"requestedPartitions\":" << partitionPlan.requestedPartitions
              << ",\"effectivePartitions\":" << partitionPlan.effectivePartitions << ",\"communicationBias\":"
              << partitionPlan.communicationBias << ",\"assignments\":[";
         for (std::size_t index = 0; index < partitionPlan.assignments.size(); ++index) {
@@ -402,7 +407,9 @@ void runSimulation(const boost::property_tree::ptree& document,
                  << ",\"cutDependencyCount\":" << comparison.cutDependencyCount
                  << ",\"computeImbalance\":" << comparison.computeImbalance << '}';
         };
-        json << "],\"greedy\":";
+        json << "],\"selected\":";
+        appendComparison(partitionPlan.selected);
+        json << ",\"greedy\":";
         appendComparison(partitionPlan.greedy);
         json << ",\"roundRobin\":";
         appendComparison(partitionPlan.roundRobin);

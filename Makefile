@@ -157,9 +157,13 @@ packageMacos: checkPackaging iconsMacos engine
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.icns \
 		--extra-resource=$(engineBuildDir) \
+		--extra-resource=thirdPartyNotices.md \
+		--extra-resource=thirdPartyLicenses \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
+	node scripts/verifyPackagingNotices.mjs \
+		$(packageDir)/$(appName)-darwin-$(hostArch)/$(appName).app/Contents/Resources
 
 packageWindows: checkPackaging iconsWindows engine
 	node_modules/.bin/electron-packager . $(appName) \
@@ -168,9 +172,13 @@ packageWindows: checkPackaging iconsWindows engine
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.ico \
 		--extra-resource=$(engineBuildDir) \
+		--extra-resource=thirdPartyNotices.md \
+		--extra-resource=thirdPartyLicenses \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
+	node scripts/verifyPackagingNotices.mjs \
+		$(packageDir)/$(appName)-win32-$(hostArch)/resources
 
 packageLinux: checkPackaging iconsPng engine
 	node_modules/.bin/electron-packager . $(appName) \
@@ -179,9 +187,13 @@ packageLinux: checkPackaging iconsPng engine
 		--app-version=$(appVersion) \
 		--icon=$(iconDir)/app.png \
 		--extra-resource=$(engineBuildDir) \
+		--extra-resource=thirdPartyNotices.md \
+		--extra-resource=thirdPartyLicenses \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
+	node scripts/verifyPackagingNotices.mjs \
+		$(packageDir)/$(appName)-linux-$(hostArch)/resources
 
 distributable:
 ifeq ($(hostPlatform),darwin)

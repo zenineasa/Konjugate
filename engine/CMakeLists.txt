@@ -17,6 +17,58 @@ find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
 
+option(KONJUGATE_ENABLE_METIS "Enable METIS graph partitioning when the library is available" ON)
+if(KONJUGATE_ENABLE_METIS)
+    find_path(METIS_INCLUDE_DIR metis.h)
+    find_library(METIS_LIBRARY NAMES metis)
+endif()
+
+if(METIS_INCLUDE_DIR AND METIS_LIBRARY)
+    set(KONJUGATE_HAS_METIS 1)
+    message(STATUS "METIS partitioning enabled: ${METIS_LIBRARY}")
+else()
+    set(KONJUGATE_HAS_METIS 0)
+    message(STATUS "METIS was not found; the built-in greedy partitioner remains available")
+endif()
+
+set(KONJUGATE_METIS_LINK_LIBRARY ${METIS_LIBRARY})
+if(KONJUGATE_HAS_METIS AND APPLE AND METIS_LIBRARY MATCHES "\\.dylib$")
+    file(REAL_PATH "${METIS_LIBRARY}" METIS_REAL_LIBRARY)
+    set(METIS_BUNDLED_LIBRARY "${CMAKE_BINARY_DIR}/libmetis.dylib")
+    set(METIS_PREPARED_LIBRARY "${CMAKE_BINARY_DIR}/libmetis.prepared.dylib")
+    configure_file("${METIS_REAL_LIBRARY}" "${METIS_PREPARED_LIBRARY}" COPYONLY)
+    file(CHMOD "${METIS_PREPARED_LIBRARY}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    execute_process(
+        COMMAND install_name_tool -id "@loader_path/libmetis.dylib" "${METIS_PREPARED_LIBRARY}"
+        RESULT_VARIABLE METIS_INSTALL_NAME_RESULT
+    )
+    if(NOT METIS_INSTALL_NAME_RESULT EQUAL 0)
+        message(FATAL_ERROR "Could not prepare the METIS runtime library for application packaging")
+    endif()
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${METIS_PREPARED_LIBRARY}" "${METIS_BUNDLED_LIBRARY}")
+    file(REMOVE "${METIS_PREPARED_LIBRARY}")
+    set(KONJUGATE_METIS_LINK_LIBRARY "${METIS_BUNDLED_LIBRARY}")
+endif()
+
+if(KONJUGATE_HAS_METIS)
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/thirdPartyLicenses")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md"
+        "${CMAKE_BINARY_DIR}/thirdPartyNotices.md"
+        COPYONLY
+    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/apache2.txt"
+        "${CMAKE_BINARY_DIR}/thirdPartyLicenses/apache2.txt"
+        COPYONLY
+    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/metis.txt"
+        "${CMAKE_BINARY_DIR}/thirdPartyLicenses/metis.txt"
+        COPYONLY
+    )
+endif()
+
 add_executable(konjugateEngine
     src/dependencyGraph.cpp
     src/executionBackend.cpp
@@ -32,6 +84,11 @@ add_executable(konjugateEngine
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR})
 target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto Threads::Threads)
+target_compile_definitions(konjugateEngine PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
+if(KONJUGATE_HAS_METIS)
+    target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
+    target_link_libraries(konjugateEngine PRIVATE ${KONJUGATE_METIS_LINK_LIBRARY})
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -46,6 +103,11 @@ if(BUILD_TESTING)
     )
     target_include_directories(executionPlanTests PRIVATE include ${BOOST_INCLUDE_DIR})
     target_link_libraries(executionPlanTests PRIVATE Threads::Threads)
+    target_compile_definitions(executionPlanTests PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
+    if(KONJUGATE_HAS_METIS)
+        target_include_directories(executionPlanTests PRIVATE ${METIS_INCLUDE_DIR})
+        target_link_libraries(executionPlanTests PRIVATE ${KONJUGATE_METIS_LINK_LIBRARY})
+    endif()
     add_test(NAME executionPlanTests COMMAND executionPlanTests)
 endif()
 

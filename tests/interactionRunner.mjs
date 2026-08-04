@@ -145,11 +145,13 @@ export async function runInteractionTests(window) {
             document.querySelector('#runGlobalTimeStep').value = '0.02';
             document.querySelector('#runOutputInterval').value = '0.1';
             document.querySelector('#runWorkerThreads').value = '2';
+            document.querySelector('#runPartitionAlgorithm').value = 'automatic';
             document.querySelector('#runPartitionCount').value = '2';
             document.querySelector('#runPartitionCommunicationBias').value = '4';
             document.querySelector('#applyRunConfiguration').click();
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#runConfigurationDialog').open`), false);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#runPartitionAlgorithm option').length`), 3);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="numerics"]').click()`);
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeSubsteps'); input.value = '2'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeSubsteps').value`), '2');
@@ -187,7 +189,7 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `!document.querySelector('#executionSummaryCard').classList.contains('hidden')`), true);
         assert.match(await evaluate(window, `document.querySelector('#executionSummaryTitle').textContent`), /(Serial|Thread pool|Partitioned) · \d+ workers?/);
         assert.ok(await evaluate(window, `document.querySelectorAll('#executionSummaryMetrics dt').length`) >= 8);
-        assert.match(await evaluate(window, `document.querySelector('#executionSummaryMetrics').textContent`), /Communication cut/);
+        assert.match(await evaluate(window, `document.querySelector('#executionSummaryMetrics').textContent`), /Partitioner.*Communication cut/);
         await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('showNodesDetails')`), true);

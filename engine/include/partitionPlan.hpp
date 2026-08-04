@@ -31,14 +31,25 @@ struct PartitionComparison {
 struct PartitionPlan {
     std::size_t version = 1;
     std::string algorithm = "communicationAwareGreedy";
+    std::string algorithmVersion = "1";
+    std::string requestedAlgorithm = "automatic";
+    std::string fallbackReason;
     std::size_t requestedPartitions = 1;
     std::size_t effectivePartitions = 1;
     double communicationBias = 1;
     std::vector<PartitionAssignment> assignments;
     std::vector<PartitionMetrics> partitions;
+    PartitionComparison selected;
     PartitionComparison greedy;
     PartitionComparison roundRobin;
 };
+
+bool metisPartitionerAvailable() noexcept;
+
+PartitionPlan createPartitionPlan(const DependencyGraph& graph,
+                                  std::size_t requestedPartitions,
+                                  double communicationBias = 4,
+                                  const std::string& requestedAlgorithm = "automatic");
 
 PartitionPlan createGreedyPartitionPlan(const DependencyGraph& graph,
                                         std::size_t requestedPartitions,

@@ -37,6 +37,8 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const defaultWorkerThreads = Math.max(1, Math.min(256, Number(navigator.hardwareConcurrency) || 1));
 const normalizeExecutionConfiguration = (execution = {}) => ({
     backend: ['automatic', 'serial', 'threadPool', 'partitioned'].includes(execution.backend) ? execution.backend : 'automatic',
+    partitionAlgorithm: ['automatic', 'metisKway', 'communicationAwareGreedy'].includes(execution.partitionAlgorithm)
+        ? execution.partitionAlgorithm : 'automatic',
     workerThreads: Math.max(1, Math.min(256, Math.round(Number(execution.workerThreads) || defaultWorkerThreads))),
     partitionCount: Math.max(1, Math.min(256, Math.round(Number(execution.partitionCount) || defaultWorkerThreads))),
     partitionCommunicationBias: Math.max(0, Number.isFinite(Number(execution.partitionCommunicationBias))
@@ -1853,15 +1855,19 @@ function renderExecutionSummary() {
     $('#executionSummaryTitle').textContent = `${backendName} · ${execution.workerThreads} worker${execution.workerThreads === 1 ? '' : 's'}`;
     $('#executionSummaryReason').textContent = reasonDescriptions[execution.selectionReason] ?? 'The engine selected this execution strategy for the current model.';
     const communication = execution.partitionCommunication ?? {};
-    const greedy = partitionPlan.greedy ?? {};
+    const selected = partitionPlan.selected ?? partitionPlan.greedy ?? {};
+    const algorithmNames = { metisKway: 'METIS k-way', communicationAwareGreedy: 'Built-in greedy' };
+    const fallbackNames = { metisUnavailable: 'METIS unavailable', metisPartitioningFailed: 'METIS planning failed' };
     const roundRobin = partitionPlan.roundRobin ?? {};
     const nodeComputeNanoseconds = (execution.nodeMetrics ?? []).reduce((total, item) => total + Number(item.computeNanoseconds || 0), 0);
     const metrics = [
         ['Planning', formatExecutionDuration(execution.planningNanoseconds)],
         ['Node computation', formatExecutionDuration(nodeComputeNanoseconds)],
         ['Synchronization', formatExecutionDuration(execution.synchronizationComputeNanoseconds)],
-        ['Compute imbalance', `${Number(greedy.computeImbalance || 1).toFixed(2)}×`],
-        ['Communication cut', `${greedy.communicationCutWeight ?? 0} · round robin ${roundRobin.communicationCutWeight ?? 0}`],
+        ['Partitioner', `${algorithmNames[partitionPlan.algorithm] ?? partitionPlan.algorithm}${partitionPlan.fallbackReason
+            ? ` · ${fallbackNames[partitionPlan.fallbackReason] ?? partitionPlan.fallbackReason}` : ''}`],
+        ['Compute imbalance', `${Number(selected.computeImbalance || 1).toFixed(2)}×`],
+        ['Communication cut', `${selected.communicationCutWeight ?? 0} · round robin ${roundRobin.communicationCutWeight ?? 0}`],
         ['Boundary messages', Number(communication.boundaryMessages || 0).toLocaleString()],
         ['Boundary payload', formatExecutionBytes(communication.boundaryPayloadBytes)],
         ['Message preparation', formatExecutionDuration(communication.messagePreparationNanoseconds)],
@@ -2290,8 +2296,9 @@ function updateExecutionConfigurationFields() {
     const backend = $('#runExecutionBackend').value;
     $('#runWorkerThreads').disabled = backend === 'serial';
     const partitionControlsEnabled = backend === 'automatic' || backend === 'partitioned';
+    $('#runPartitionAlgorithm').disabled = !partitionControlsEnabled;
     $('#runPartitionCount').disabled = !partitionControlsEnabled;
-    $('#runPartitionCommunicationBias').disabled = !partitionControlsEnabled;
+    $('#runPartitionCommunicationBias').disabled = !partitionControlsEnabled || $('#runPartitionAlgorithm').value === 'metisKway';
     $('#runAutomaticParallelThreshold').disabled = backend !== 'automatic';
     $('#runAutomaticMaximumPartitionCutFraction').disabled = backend !== 'automatic';
 }
@@ -2305,6 +2312,7 @@ $('#runConfigurationButton').addEventListener('click', () => {
     const execution = normalizeExecutionConfiguration(configuration.execution);
     $('#runExecutionBackend').value = execution.backend;
     $('#runWorkerThreads').value = execution.workerThreads;
+    $('#runPartitionAlgorithm').value = execution.partitionAlgorithm;
     $('#runPartitionCount').value = execution.partitionCount;
     $('#runPartitionCommunicationBias').value = execution.partitionCommunicationBias;
     $('#runAutomaticParallelThreshold').value = execution.automaticParallelThreshold;
@@ -2314,6 +2322,7 @@ $('#runConfigurationButton').addEventListener('click', () => {
     $('#runConfigurationDialog').showModal();
 });
 $('#runExecutionBackend').addEventListener('change', updateExecutionConfigurationFields);
+$('#runPartitionAlgorithm').addEventListener('change', updateExecutionConfigurationFields);
 $('#runConfigurationCancel').addEventListener('click', () => $('#runConfigurationDialog').close());
 $('#runConfigurationDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -2326,6 +2335,7 @@ $('#runConfigurationDialog form').addEventListener('submit', (event) => {
         outputInterval: Number($('#runOutputInterval').value),
         execution: {
             backend: $('#runExecutionBackend').value,
+            partitionAlgorithm: $('#runPartitionAlgorithm').value,
             workerThreads: Number($('#runWorkerThreads').value),
             partitionCount: Number($('#runPartitionCount').value),
             partitionCommunicationBias: Number($('#runPartitionCommunicationBias').value),

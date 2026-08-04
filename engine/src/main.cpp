@@ -5,6 +5,7 @@
 #include "projectContainer.hpp"
 #include "simulationRunner.hpp"
 #include "validationReport.hpp"
+#include "engineProtocol.pb.h"
 #include <boost/property_tree/json_parser.hpp>
 #include <filesystem>
 #include <cstdlib>
@@ -13,6 +14,18 @@
 #include <algorithm>
 
 namespace {
+void writeFramedMessage(std::ostream& output, const google::protobuf::MessageLite& message) {
+    const auto size = message.ByteSizeLong();
+    if (size > 0xffffffffu) throw std::runtime_error("The protocol message is too large.");
+    const unsigned char header[4] = {
+        static_cast<unsigned char>((size >> 24) & 0xff), static_cast<unsigned char>((size >> 16) & 0xff),
+        static_cast<unsigned char>((size >> 8) & 0xff), static_cast<unsigned char>(size & 0xff)
+    };
+    output.write(reinterpret_cast<const char*>(header), sizeof(header));
+    if (!message.SerializeToOstream(&output)) throw std::runtime_error("Could not serialize the protocol message.");
+    output.flush();
+}
+
 std::filesystem::path optionPath(int argc, char** argv, const std::string& option) {
     for (int index = 3; index + 1 < argc; ++index) if (std::string(argv[index]) == option) return argv[index + 1];
     return {};
@@ -28,6 +41,15 @@ bool hasKjtExtension(const std::filesystem::path& path) {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 3 && std::string(argv[1]) == "capabilities" && std::string(argv[2]) == "--protobuf") {
+        konjugate::protocol::EngineEvent event;
+        event.set_protocol_version(1);
+        auto* capabilities = event.mutable_capabilities();
+        capabilities->set_metis_available(konjugate::metisPartitionerAvailable());
+        capabilities->set_metis_version(konjugate::metisPartitionerVersion());
+        writeFramedMessage(std::cout, event);
+        return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "capabilities") {
         std::cout << "{\"metis\":{\"available\":"
                   << (konjugate::metisPartitionerAvailable() ? "true" : "false")
@@ -75,7 +97,8 @@ int main(int argc, char** argv) {
         }
         boost::property_tree::ptree configuration;
         boost::property_tree::read_json(configurationPath.string(), configuration);
-        konjugate::runSimulation(document, configuration, outputPath, pacingControlPath);
+        const auto protobufEvents = optionPath(argc, argv, "--event-stream").string() == "protobuf";
+        konjugate::runSimulation(document, configuration, outputPath, pacingControlPath, protobufEvents ? &std::cout : nullptr);
         return 0;
     } catch (const konjugate::ContainerError& error) {
         std::cerr << error.code << ": " << error.what() << '\n';

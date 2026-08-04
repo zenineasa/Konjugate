@@ -6,6 +6,7 @@ import { access, mkdtemp, open as openFile, readFile, rename, rm, unlink, writeF
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
+import { FramedEngineEventDecoder } from './engineProtocol.mjs';
 
 function engineFileName() {
     return process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine';
@@ -107,8 +108,9 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         'run', inputPath,
         '--configuration', configurationPath,
         '--output', outputPath,
-        '--pacing-control', pacingControlPath
-    ], { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+        '--pacing-control', pacingControlPath,
+        '--event-stream', 'protobuf'
+    ], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let diagnostics = '';
     let lastSnapshotKey = '';
     let polling = false;
@@ -116,9 +118,36 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     let streamRemainder = '';
     let accumulatedSamples = [];
     let accumulatedCheckpoints = [];
+    let protocolStateIds = [];
     let childExited = false;
     let shutdownPromise = null;
     child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+    const eventDecoder = new FramedEngineEventDecoder();
+    child.stdout.on('data', (chunk) => {
+        try {
+            for (const event of eventDecoder.append(chunk)) {
+                if (event.stateTable) protocolStateIds = event.stateTable;
+                if (event.sampleBatch) {
+                    const { times, stateCount, values } = event.sampleBatch;
+                    if (stateCount !== protocolStateIds.length || values.length !== times.length * stateCount) {
+                        throw new Error('The engine returned an inconsistent Protobuf sample batch.');
+                    }
+                    for (let sampleIndex = 0; sampleIndex < times.length; ++sampleIndex) {
+                        accumulatedSamples.push({
+                            time: times[sampleIndex],
+                            states: protocolStateIds.map((stateId, stateIndex) => ({
+                                stateId,
+                                value: values[sampleIndex * stateCount + stateIndex]
+                            }))
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            diagnostics += `\nENGINE_PROTOCOL_FAILURE: ${error.message}`;
+            child.kill('SIGTERM');
+        }
+    });
 
     const readStream = async () => {
         const handle = await openFile(streamPath, 'r');

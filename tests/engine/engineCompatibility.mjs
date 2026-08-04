@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
 import { normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
+import { FramedEngineEventDecoder } from '../../src/engineProtocol.mjs';
 
 function run(executable, args, environment = {}) {
     return new Promise((resolve, reject) => {
@@ -16,8 +17,29 @@ function run(executable, args, environment = {}) {
     });
 }
 
+function readProtocolEvents(executable, args) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'inherit'] });
+        const decoder = new FramedEngineEventDecoder();
+        const events = [];
+        child.stdout.on('data', (chunk) => events.push(...decoder.append(chunk)));
+        child.once('error', reject);
+        child.once('exit', (code) => code === 0 ? resolve(events) : reject(new Error(`Engine exited with code ${code}.`)));
+    });
+}
+
+function doubleBits(value) {
+    const bytes = new ArrayBuffer(8);
+    new DataView(bytes).setFloat64(0, value, false);
+    return new DataView(bytes).getBigUint64(0, false);
+}
+
 const executable = process.argv[2];
 if (!executable) throw new Error('Pass the konjugateEngine executable path.');
+const capabilityEvents = await readProtocolEvents(executable, ['capabilities', '--protobuf']);
+assert.equal(capabilityEvents.length, 1);
+assert.equal(capabilityEvents[0].capabilities.metisAvailable, true);
+assert.match(capabilityEvents[0].capabilities.metisVersion, /^\d+\.\d+\.\d+$/);
 const directory = await mkdtemp(join(tmpdir(), 'konjugateEngineTest-'));
 const input = join(directory, 'model.kjt');
 const report = join(directory, 'validation.json');
@@ -225,6 +247,20 @@ assert.equal(liveResult.lifecycle, 'completed');
 assert.equal(liveResult.availableResultTime, 0.5);
 assert.ok(liveResult.samples.length > liveResult.checkpoints.length);
 assert.deepEqual(liveResult.checkpoints.map((checkpoint) => checkpoint.time), [0, 0.5]);
+const mostCompleteLiveUpdate = liveUpdates.filter((result) => result.lifecycle === 'running')
+    .toSorted((left, right) => right.samples.length - left.samples.length)[0];
+assert.ok(mostCompleteLiveUpdate.samples.length > 1, 'The live Protobuf stream must deliver multiple samples.');
+const durableSamplesByTime = new Map(liveResult.samples.map((sample) => [sample.time, new Map(
+    sample.states.map((state) => [state.stateId, state.value])
+)]));
+for (const liveSample of mostCompleteLiveUpdate.samples) {
+    const durableStates = durableSamplesByTime.get(liveSample.time);
+    assert.ok(durableStates, `The durable result is missing the ${liveSample.time} s Protobuf sample.`);
+    for (const state of liveSample.states) {
+        assert.equal(doubleBits(state.value), doubleBits(durableStates.get(state.stateId)),
+            `Protobuf changed the IEEE-754 value for state ${state.stateId} at ${liveSample.time} s.`);
+    }
+}
 
 const controlledUpdates = [];
 const liveParameterProject = JSON.parse(example);

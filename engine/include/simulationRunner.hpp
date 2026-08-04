@@ -4,12 +4,14 @@
 
 #include <boost/property_tree/ptree.hpp>
 #include <filesystem>
+#include <ostream>
 
 namespace konjugate {
 
 void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
                    const std::filesystem::path& outputPath,
-                   const std::filesystem::path& pacingControlPath = {});
+                   const std::filesystem::path& pacingControlPath = {},
+                   std::ostream* eventStream = nullptr);
 
 }

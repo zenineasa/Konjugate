@@ -35,6 +35,7 @@
         "build:engine:no-metis": "node scripts/buildEngine.mjs --no-metis",
         "test:engine": "node scripts/testEngine.mjs",
         "benchmark:engine": "npm run build:engine && node tests/engine/executionBenchmark.mjs",
+        "benchmark:protocol": "node scripts/benchmarkProtocolEncoding.mjs",
         "start": "npm run build:engine && electron .",
         "dev": "npm start",
         "build": "make build",

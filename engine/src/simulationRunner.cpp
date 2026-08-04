@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "simulationRunner.hpp"
+#include "engineProtocol.pb.h"
 #include "dependencyGraph.hpp"
 #include "executionBackend.hpp"
 #include "executionPlan.hpp"
@@ -27,6 +28,17 @@
 
 namespace konjugate {
 namespace {
+void writeFramedEvent(std::ostream& output, const protocol::EngineEvent& event) {
+    const auto size = event.ByteSizeLong();
+    if (size > 0xffffffffu) throw std::runtime_error("The protocol event is too large.");
+    const unsigned char header[4] = {
+        static_cast<unsigned char>((size >> 24) & 0xff), static_cast<unsigned char>((size >> 16) & 0xff),
+        static_cast<unsigned char>((size >> 8) & 0xff), static_cast<unsigned char>(size & 0xff)
+    };
+    output.write(reinterpret_cast<const char*>(header), sizeof(header));
+    if (!event.SerializeToOstream(&output)) throw std::runtime_error("Could not serialize the protocol event.");
+    output.flush();
+}
 using Values = StateValues;
 struct Sample { double time; Values states; };
 struct Checkpoint { std::string uuid; double time; Values states; };
@@ -174,7 +186,8 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
 void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
                    const std::filesystem::path& outputPath,
-                   const std::filesystem::path& pacingControlPath) {
+                   const std::filesystem::path& pacingControlPath,
+                   std::ostream* eventStream) {
     const auto targetTime = configuration.get<double>("targetTime");
     const auto globalTimeStep = configuration.get<double>("globalTimeStep", configuration.get<double>("timeStep", 0.01));
     const auto outputInterval = configuration.get<double>("outputInterval", globalTimeStep);
@@ -298,7 +311,24 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto streamPath = std::filesystem::path(outputPath.string() + ".stream");
     std::ofstream resultStream(streamPath, std::ios::binary | std::ios::trunc);
     if (!resultStream) throw std::runtime_error("The live result stream could not be created.");
+    if (eventStream) {
+        protocol::EngineEvent event;
+        event.set_protocol_version(1);
+        auto* table = event.mutable_state_table();
+        for (const auto& stateId : stateIds) table->add_states()->set_state_id(stateId);
+        writeFramedEvent(*eventStream, event);
+    }
     const auto appendStreamRecord = [&](const std::string& type, double time, const Values& recordStates, const std::string& uuid = {}) {
+        if (eventStream && type == "sample") {
+            protocol::EngineEvent event;
+            event.set_protocol_version(1);
+            auto* batch = event.mutable_sample_batch();
+            batch->add_times(time);
+            batch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
+            for (const auto& stateId : stateIds) batch->add_values(recordStates.at(stateId));
+            writeFramedEvent(*eventStream, event);
+            return;
+        }
         resultStream << std::setprecision(17) << "{\"type\":\"" << type << "\",\"time\":" << time;
         if (!uuid.empty()) resultStream << ",\"uuid\":\"" << uuid << "\",\"solver\":{\"kind\":\"explicitEuler\",\"version\":1}";
         resultStream << ",\"states\":[";

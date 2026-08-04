@@ -11,7 +11,7 @@ const rootDirectory = join(import.meta.dirname, '..');
 test('development dependencies and bootstrap use the same pinned vcpkg baseline', async () => {
     const manifest = JSON.parse(await readFile(join(rootDirectory, 'vcpkg.json'), 'utf8'));
     assert.equal(manifest['builtin-baseline'], vcpkgCommit);
-    assert.deepEqual(manifest.dependencies.toSorted(), ['boost-property-tree', 'metis', 'openssl', 'zlib']);
+    assert.deepEqual(manifest.dependencies.toSorted(), ['boost-property-tree', 'metis', 'openssl', 'protobuf', 'zlib']);
 });
 
 test('normal development requires METIS while the fallback preset disables it explicitly', async () => {

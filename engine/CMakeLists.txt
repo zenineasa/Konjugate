@@ -13,8 +13,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(Protobuf REQUIRED)
 find_package(Threads REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
+
+protobuf_generate_cpp(PROTOCOL_SOURCES PROTOCOL_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/engineProtocol.proto")
 
 option(KONJUGATE_ENABLE_METIS "Enable METIS graph partitioning when the library is available" ON)
 option(KONJUGATE_REQUIRE_METIS "Fail configuration when METIS is unavailable" OFF)
@@ -76,6 +79,8 @@ if(KONJUGATE_HAS_METIS)
 endif()
 
 add_executable(konjugateEngine
+    ${PROTOCOL_SOURCES}
+    ${PROTOCOL_HEADERS}
     src/dependencyGraph.cpp
     src/executionBackend.cpp
     src/executionPlan.cpp
@@ -95,8 +100,8 @@ set_target_properties(konjugateEngine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
     INSTALL_RPATH "$ORIGIN"
 )
-target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR})
-target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto Threads::Threads)
+target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads)
 target_compile_definitions(konjugateEngine PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
 if(KONJUGATE_HAS_METIS)
     target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
@@ -158,4 +163,8 @@ else()
     if(BUILD_TESTING)
         target_compile_options(executionPlanTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+endif()
+
+if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(konjugateEngine PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
 endif()

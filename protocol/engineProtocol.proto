@@ -1,0 +1,33 @@
+// Copyright © 2026 Zenin Easa Panthakkalakath
+
+syntax = "proto3";
+
+package konjugate.protocol;
+
+message Capabilities {
+    bool metis_available = 1;
+    string metis_version = 2;
+}
+
+message StateDescriptor {
+    string state_id = 1;
+}
+
+message StateTable {
+    repeated StateDescriptor states = 1;
+}
+
+message SampleBatch {
+    repeated double times = 1 [packed = true];
+    uint32 state_count = 2;
+    repeated double values = 3 [packed = true];
+}
+
+message EngineEvent {
+    uint32 protocol_version = 1;
+    oneof payload {
+        Capabilities capabilities = 2;
+        StateTable state_table = 3;
+        SampleBatch sample_batch = 4;
+    }
+}

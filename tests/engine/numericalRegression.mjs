@@ -34,7 +34,7 @@ try {
         const content = await readFile(new URL(`../../examples/${testCase.example}.konjugate.json`, import.meta.url), 'utf8');
         const inputPath = join(directory, `${testCase.example}.kjt`);
         const configurationPath = join(directory, `${testCase.example}Configuration.json`);
-        const outputPath = join(directory, `${testCase.example}Results.kjr`);
+        const outputPath = join(directory, `${testCase.example}Result.bin`);
         const validationPath = join(directory, `${testCase.example}Validation.json`);
         await writeFile(inputPath, await encodeProjectFile(content));
         await writeFile(configurationPath, JSON.stringify({ name: testCase.example, ...testCase.configuration }, null, 4));

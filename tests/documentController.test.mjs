@@ -35,3 +35,12 @@ test('invalidates a saved branch when recording after undo', () => {
     assert.equal(document.dirty, true);
     assert.equal(value, 3);
 });
+
+test('tracks saved non-model project content independently from undo history', () => {
+    const controller = new DocumentController();
+    controller.setSupplementalDirty(true);
+    assert.equal(controller.dirty, true);
+    assert.equal(controller.canUndo, false);
+    controller.markSaved();
+    assert.equal(controller.dirty, false);
+});

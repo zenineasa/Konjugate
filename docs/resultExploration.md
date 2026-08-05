@@ -304,7 +304,7 @@ does not undermine the canvas-first modelling direction.
 
 ### Phase 4: checkpoints, interventions, and branches
 
-- Extend `.kjr` with resumable engine checkpoints.
+- Extend embedded result storage with resumable engine checkpoints.
 - Add immutable result branches and a branch tree.
 - Add parameter intervention tracks.
 - Resume C++ execution from a synchronization boundary.
@@ -318,8 +318,7 @@ does not undermine the canvas-first modelling direction.
 
 ## Open questions
 
-- Whether result sessions remain separate `.kjr` files or can optionally be
-  embedded or referenced by a project.
+- How multiple immutable result sessions should be represented inside one project.
 - How many samples and branches remain resident before results are paged from
   disk.
 - Whether hover sparklines show every state or only primary and pinned states.
@@ -333,8 +332,8 @@ does not undermine the canvas-first modelling direction.
 
 ## Immediate next implementation
 
-The recommended first vertical slice is Phase 1: retain the sampled `.kjr`
-result, add a bottom transport with playback and scrubbing, and project the
+The recommended first vertical slice is Phase 1: retain the sampled result,
+add a bottom transport with playback and scrubbing, and project the
 selected sample onto node labels. This establishes the result session and time
 cursor required by every later plotting, branching, comparison, and pacing
 feature without prematurely implementing the entire vision.

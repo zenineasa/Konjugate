@@ -149,10 +149,21 @@ ProjectPayload readProject(const std::filesystem::path& path, const std::string&
         throw ContainerError("UNSUPPORTED_COMPRESSION", "The project does not use gzip compression.");
     }
     if (parsed.flags & encryptedFlag) {
-        const auto compressed = decrypt(parsed, password);
-        return {inflateGzip(compressed.data(), compressed.size()), "kjt", parsed.version, true};
+        const auto plaintext = decrypt(parsed, password);
+        const auto modelPayloadLength = parsed.metadata.get<std::size_t>("modelPayloadLength", plaintext.size());
+        const auto resultPayloadLength = parsed.metadata.get<std::size_t>("resultPayloadLength", 0);
+        if (modelPayloadLength == 0 || modelPayloadLength + resultPayloadLength != plaintext.size()) {
+            throw ContainerError("CORRUPT_PAYLOAD", "The project payload sections are damaged.");
+        }
+        return {inflateGzip(plaintext.data(), modelPayloadLength), "kjt", parsed.version, true};
     }
-    return {inflateGzip(parsed.bytes.data() + parsed.payloadStart, parsed.bytes.size() - parsed.payloadStart), "kjt", parsed.version, false};
+    const auto payloadLength = parsed.bytes.size() - parsed.payloadStart;
+    const auto modelPayloadLength = parsed.metadata.get<std::size_t>("modelPayloadLength", payloadLength);
+    const auto resultPayloadLength = parsed.metadata.get<std::size_t>("resultPayloadLength", 0);
+    if (modelPayloadLength == 0 || modelPayloadLength + resultPayloadLength != payloadLength) {
+        throw ContainerError("CORRUPT_PAYLOAD", "The project payload sections are damaged.");
+    }
+    return {inflateGzip(parsed.bytes.data() + parsed.payloadStart, modelPayloadLength), "kjt", parsed.version, false};
 }
 
 }

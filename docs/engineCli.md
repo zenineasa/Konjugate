@@ -7,7 +7,7 @@ The installed command will be `konjugate`; the development binary is `konjugateE
 ```text
 konjugate inspect model.kjt --report report.json
 konjugate validate model.kjt --report validation.json
-konjugate run model.kjt --configuration runConfiguration.json --output simulationResults.kjr
+konjugate run model.kjt --configuration runConfiguration.json --output simulationResult.bin
 ```
 
 Reports are written atomically. Machine consumers should always provide `--report`; concise human output may be added later.
@@ -27,4 +27,4 @@ Passwords must never be supplied as command-line arguments. The initial non-inte
 
 The version 1 CLI run request contains a name plus finite positive `targetTime`, `globalTimeStep`, and `outputInterval` numbers; timestep and output interval cannot exceed the target time, and output interval is an integer multiple of the global timestep. It may also select automatic, serial, thread-pool or partitioned execution. See [Parallel execution](parallelExecution.md) for the configuration, selection rules and result telemetry.
 
-The engine uses deterministic snapshot-coupled, node-local explicit Euler subcycling. A binary `.kjr` result contains engine and run metadata, global step count, each node's substep count and effective timestep, final state values, packed sampled states, complete checkpoints and execution diagnostics. See [Binary result format](resultFileFormat.md).
+The engine uses deterministic snapshot-coupled, node-local explicit Euler subcycling. The low-level `run` command writes an internal binary result segment for its Electron caller; it is not a user-facing project format. The segment contains engine and run metadata, global step count, each node's substep count and effective timestep, final state values, packed sampled states, complete checkpoints and execution diagnostics. Konjugate embeds this segment in `.kjt` when the user saves a model with results. See [Embedded binary result storage](resultFileFormat.md).

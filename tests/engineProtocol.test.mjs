@@ -92,6 +92,6 @@ test('encodes ordered framed engine commands without JSON conversion', () => {
 
 test('rejects legacy JSON and truncated binary result containers', () => {
     assert.throws(() => decodeResultFile(Buffer.from('{}')), /Unsupported KJR/);
-    const truncated = Buffer.from([0x4b, 0x4a, 0x52, 0x01, 0, 0, 0, 4, 8, 1]);
-    assert.throws(() => decodeResultFile(truncated), /payload length/);
+    const truncated = Buffer.from([0x4b, 0x4a, 0x52, 0x02, 0, 0, 0, 4, 8, 2]);
+    assert.throws(() => decodeResultFile(truncated), /footer|format/);
 });

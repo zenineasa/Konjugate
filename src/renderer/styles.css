@@ -109,6 +109,11 @@ input, select { user-select: text; }
 .passwordDialog p { margin: 0 0 14px; color: #667b86; font-size: 8px; line-height: 1.5; }
 .passwordDialog label { display: grid; gap: 5px; margin-top: 9px; color: #718691; font-size: 8px; }
 .passwordDialog label[hidden] { display: none; }
+.passwordDialog .saveContentOption { grid-template-columns: auto 1fr; align-items: start; padding: 8px; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; cursor: pointer; }
+.passwordDialog .saveContentOption input { width: 14px; height: 14px; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
+.passwordDialog .saveContentOption span { display: grid; gap: 3px; }
+.passwordDialog .saveContentOption b { color: #c8d6dc; font-size: 9px; }
+.passwordDialog .saveContentOption small { color: #667b86; font-size: 7px; line-height: 1.4; }
 .passwordDialog :is(input, select) { height: 30px; padding: 0 8px; color: #d4e0e5; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; outline: 0; }
 .passwordDialog :is(input, select):focus { border-color: #478177; }
 .passwordError { min-height: 16px; padding-top: 6px; color: #d48288; font-size: 8px; }

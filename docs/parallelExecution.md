@@ -153,7 +153,7 @@ The execution summary presents the most useful fields from the result:
 - boundary-message count and payload size
 - message preparation, publish and boundary-wait time
 
-The full `.kjr` execution record also contains per-node invocation, substep, contribution and compute measurements, the dependency graph and complete partition assignments. Times are diagnostic wall-clock measurements in nanoseconds. They vary with hardware and system load and must not be treated as model outputs.
+The full execution record embedded in a project also contains per-node invocation, substep, contribution and compute measurements, the dependency graph and complete partition assignments. Times are diagnostic wall-clock measurements in nanoseconds. They vary with hardware and system load and must not be treated as model outputs.
 
 Accumulated node computation can exceed elapsed wall time because work performed concurrently by several workers is added together. Likewise, synchronization time includes orchestration and waiting around concurrent work; the displayed categories are not intended to sum into a single exclusive profile.
 

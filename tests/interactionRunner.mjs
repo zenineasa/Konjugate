@@ -187,6 +187,7 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('.resultMode b').textContent`), 'Results');
         assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#simulationProgress')).display === 'none'`), true);
         assert.equal(await evaluate(window, `document.querySelector('#executionSummaryButton').hidden`), false);
+        assert.equal(await evaluate(window, `!document.querySelector('#saveResults').hidden && getComputedStyle(document.querySelector('#saveResults')).display !== 'none'`), true);
         await evaluate(window, `document.querySelector('#executionSummaryButton').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#executionSummaryCard').classList.contains('hidden')`), true);
         assert.match(await evaluate(window, `document.querySelector('#executionSummaryTitle').textContent`), /(Serial|Thread pool|Partitioned) · \d+ workers?/);
@@ -243,6 +244,9 @@ export async function runInteractionTests(window) {
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeName'); input.value = 'Changed during results'; input.dispatchEvent(new Event('change', { bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module'))`), true);
         await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        assert.match(await evaluate(window, `document.querySelector('#closeResultsMessage').textContent`), /save the project with simulation results.*removed from this session/i);
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
         for (let attempt = 0; attempt < 100 && !analysisWindow.isDestroyed(); attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 25));
         }

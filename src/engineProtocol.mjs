@@ -139,22 +139,79 @@ function decodedSampleBatch(buffer) {
     return batch;
 }
 
-export function decodeResultFile(buffer) {
-    if (buffer.length < 8 || !buffer.subarray(0, 4).equals(Buffer.from([0x4b, 0x4a, 0x52, 0x01]))) {
+export function decodeResultIndexPayload(buffer) {
+    const index = { resultVersion: 0, sampleCount: 0, batches: [] };
+    for (const field of fields(buffer)) {
+        if (field.number === 1 && field.wireType === 0) index.resultVersion = field.value;
+        else if (field.number === 2 && field.wireType === 0) index.sampleCount = field.value;
+        else if (field.number === 3 && field.wireType === 2) {
+            const entry = { startTime: 0, endTime: 0, offset: 0, length: 0, sampleCount: 0 };
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 1) entry.startTime = item.value.readDoubleLE();
+                else if (item.number === 2 && item.wireType === 1) entry.endTime = item.value.readDoubleLE();
+                else if (item.number === 3 && item.wireType === 0) entry.offset = item.value;
+                else if (item.number === 4 && item.wireType === 0) entry.length = item.value;
+                else if (item.number === 5 && item.wireType === 0) entry.sampleCount = item.value;
+            }
+            index.batches.push(entry);
+        }
+    }
+    return index;
+}
+
+export function decodeResultHeaderPayload(buffer) {
+    const header = { resultVersion: 0, metadata: null, stateIds: [], checkpoints: [] };
+    for (const field of fields(buffer)) {
+        if (field.number === 1 && field.wireType === 0) header.resultVersion = field.value;
+        else if (field.number === 2 && field.wireType === 2) header.metadata = JSON.parse(field.value.toString('utf8'));
+        else if (field.number === 3 && field.wireType === 2) header.stateIds = decodedStateTable(field.value);
+        else if (field.number === 5 && field.wireType === 2) {
+            const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 } };
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 2) checkpoint.uuid = item.value.toString('utf8');
+                else if (item.number === 2 && item.wireType === 1) checkpoint.time = item.value.readDoubleLE();
+                else if (item.number === 3 && item.wireType === 2) checkpoint.values = checkpoint.values.concat(packedDoubles(item.value));
+                else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = item.value.toString('utf8');
+                else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
+            }
+            header.checkpoints.push(checkpoint);
+        }
+    }
+    return header;
+}
+
+export function decodeSampleBatchPayload(buffer, stateIds) {
+    const batch = decodedSampleBatch(buffer);
+    if (batch.stateCount !== stateIds.length || batch.values.length !== batch.times.length * stateIds.length) {
+        throw new Error('A KJR sample batch has inconsistent dimensions.');
+    }
+    return batch.times.map((time, sampleIndex) => ({
+        time,
+        states: stateIds.map((stateId, stateIndex) => ({
+            stateId,
+            value: batch.values[sampleIndex * stateIds.length + stateIndex]
+        }))
+    }));
+}
+
+export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infinity, maximumSamples = Infinity, nearestTime = null } = {}) {
+    if (buffer.length < 16 || !buffer.subarray(0, 4).equals(Buffer.from([0x4b, 0x4a, 0x52, 0x02]))) {
         throw new Error('Unsupported KJR result format.');
     }
-    const payloadLength = buffer.readUInt32BE(4);
-    if (payloadLength !== buffer.length - 8) throw new Error('The KJR result payload length is invalid.');
+    if (!buffer.subarray(-4).equals(Buffer.from('KJIX'))) throw new Error('The KJR result index footer is missing.');
+    const headerLength = buffer.readUInt32BE(4);
+    const headerEnd = 8 + headerLength;
+    const indexLength = buffer.readUInt32BE(buffer.length - 8);
+    const indexStart = buffer.length - 8 - indexLength;
+    if (headerEnd > indexStart) throw new Error('The KJR result section lengths are invalid.');
     let resultVersion = 0;
     let metadata = null;
     let stateIds = [];
-    let samples = { times: [], stateCount: 0, values: [] };
     const checkpoints = [];
-    for (const field of fields(buffer.subarray(8))) {
+    for (const field of fields(buffer.subarray(8, headerEnd))) {
         if (field.number === 1 && field.wireType === 0) resultVersion = field.value;
         else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(field.value.toString('utf8'));
         else if (field.number === 3 && field.wireType === 2) stateIds = decodedStateTable(field.value);
-        else if (field.number === 4 && field.wireType === 2) samples = decodedSampleBatch(field.value);
         else if (field.number === 5 && field.wireType === 2) {
             const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 } };
             for (const item of fields(field.value)) {
@@ -167,17 +224,76 @@ export function decodeResultFile(buffer) {
             checkpoints.push(checkpoint);
         }
     }
-    if (resultVersion !== 1 || metadata?.resultVersion !== 1) throw new Error(`Unsupported KJR result version ${resultVersion}.`);
-    if (samples.stateCount !== stateIds.length || samples.values.length !== samples.times.length * stateIds.length) {
-        throw new Error('The KJR sample columns are inconsistent with its state table.');
+    let indexVersion = 0;
+    let sampleCount = 0;
+    const batches = [];
+    for (const field of fields(buffer.subarray(indexStart, buffer.length - 8))) {
+        if (field.number === 1 && field.wireType === 0) indexVersion = field.value;
+        else if (field.number === 2 && field.wireType === 0) sampleCount = field.value;
+        else if (field.number === 3 && field.wireType === 2) {
+            const entry = { startTime: 0, endTime: 0, offset: 0, length: 0, sampleCount: 0 };
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 1) entry.startTime = item.value.readDoubleLE();
+                else if (item.number === 2 && item.wireType === 1) entry.endTime = item.value.readDoubleLE();
+                else if (item.number === 3 && item.wireType === 0) entry.offset = item.value;
+                else if (item.number === 4 && item.wireType === 0) entry.length = item.value;
+                else if (item.number === 5 && item.wireType === 0) entry.sampleCount = item.value;
+            }
+            batches.push(entry);
+        }
+    }
+    if (resultVersion !== 2 || indexVersion !== 2 || metadata?.resultVersion !== 2) {
+        throw new Error(`Unsupported KJR result version ${resultVersion}.`);
+    }
+    let expectedOffset = headerEnd;
+    for (const entry of batches) {
+        if (entry.offset !== expectedOffset || entry.offset + 4 + entry.length > indexStart ||
+            buffer.readUInt32BE(entry.offset) !== entry.length) throw new Error('The KJR result batch index is invalid.');
+        expectedOffset = entry.offset + 4 + entry.length;
+    }
+    if (expectedOffset !== indexStart || batches.reduce((total, entry) => total + entry.sampleCount, 0) !== sampleCount) {
+        throw new Error('The KJR result sample index is incomplete.');
+    }
+    let selectedBatches = batches.filter((entry) => entry.endTime >= startTime && entry.startTime <= endTime);
+    if (Number.isFinite(nearestTime) && batches.length) {
+        selectedBatches = [batches.reduce((closest, entry) => {
+            const distance = nearestTime < entry.startTime ? entry.startTime - nearestTime
+                : nearestTime > entry.endTime ? nearestTime - entry.endTime : 0;
+            const closestDistance = nearestTime < closest.startTime ? closest.startTime - nearestTime
+                : nearestTime > closest.endTime ? nearestTime - closest.endTime : 0;
+            return distance < closestDistance ? entry : closest;
+        })];
+    }
+    const selectedCount = selectedBatches.reduce((total, entry) => total + entry.sampleCount, 0);
+    const stride = Number.isFinite(maximumSamples) && maximumSamples > 0
+        ? Math.max(1, Math.ceil(selectedCount / maximumSamples)) : 1;
+    const samples = [];
+    let selectedIndex = 0;
+    for (const entry of selectedBatches) {
+        const batch = decodedSampleBatch(buffer.subarray(entry.offset + 4, entry.offset + 4 + entry.length));
+        if (batch.stateCount !== stateIds.length || batch.times.length !== entry.sampleCount ||
+            batch.values.length !== batch.times.length * stateIds.length ||
+            batch.times[0] !== entry.startTime || batch.times.at(-1) !== entry.endTime) {
+            throw new Error('A KJR sample batch is inconsistent with its index.');
+        }
+        batch.times.forEach((time, sampleIndex) => {
+            const inRange = Number.isFinite(nearestTime) || (time >= startTime && time <= endTime);
+            const retain = selectedIndex % stride === 0 || selectedIndex === selectedCount - 1;
+            if (inRange && retain) samples.push({
+                time,
+                states: stateIds.map((stateId, stateIndex) => ({
+                    stateId,
+                    value: batch.values[sampleIndex * stateIds.length + stateIndex]
+                }))
+            });
+            selectedIndex += 1;
+        });
     }
     const materializeStates = (values, offset = 0) => stateIds.map((stateId, index) => ({ stateId, value: values[offset + index] }));
     return {
         ...metadata,
-        samples: samples.times.map((time, index) => ({
-            time,
-            states: materializeStates(samples.values, index * stateIds.length)
-        })),
+        sampleCount,
+        samples,
         checkpoints: checkpoints.map((checkpoint) => {
             if (checkpoint.values.length !== stateIds.length) throw new Error('A KJR checkpoint has an inconsistent state vector.');
             return {

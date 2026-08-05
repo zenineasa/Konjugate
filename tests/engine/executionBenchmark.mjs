@@ -105,7 +105,7 @@ try {
         let result;
         for (let trial = 0; trial < trials; ++trial) {
             const configurationPath = join(directory, `${backend}Configuration.json`);
-            const outputPath = join(directory, `${backend}Result.kjr`);
+            const outputPath = join(directory, `${backend}Result.bin`);
             await writeFile(configurationPath, `${JSON.stringify({
                 name: `${backend} benchmark`,
                 targetTime: globalSteps,

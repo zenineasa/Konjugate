@@ -25,9 +25,9 @@ improves without changing numerical timesteps or deterministic solver ordering.
 
 The engine publishes a stable state table once. Sample batches subsequently contain
 packed timestamps and packed double values in sample-major state-table order. Numeric
-state IDs are therefore not repeated for every value. The durable `.kjr` container
-uses the same packed columnar representation for samples and checkpoint state vectors.
-See [Binary result format](resultFileFormat.md).
+state IDs are therefore not repeated for every value. The binary result segment
+embedded in `.kjt` uses the same packed columnar representation for samples and
+checkpoint state vectors. See [Embedded binary result storage](resultFileFormat.md).
 
 Run `npm run benchmark:protocol` to compare the implemented live-sample wire shape
 with the previous newline-delimited JSON records. The benchmark reports bytes only;
@@ -57,7 +57,7 @@ integers and state-table IDs use Protobuf `uint64`.
 1. Completed: measure and deploy framed live sample batches.
 2. Completed: move live pacing, parameter and lifecycle commands to framed stdin
    messages.
-3. Completed: define a binary `.kjr` result containing packed samples and checkpoints.
+3. Completed: define an embedded binary result segment containing packed samples and checkpoints.
 4. Define the integer-ID-backed project and typed equation schemas, then introduce a
    Protobuf payload in the `.kjt` container.
 5. Remove Boost.PropertyTree model ingestion and obsolete JSON protocol code after

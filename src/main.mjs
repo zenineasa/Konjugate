@@ -2,10 +2,11 @@
 
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
+import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import {
     createVisualizerSession,
@@ -17,7 +18,8 @@ import {
 import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
-import { nearestResultSample, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
+import { openIndexedResult } from './indexedResultReader.mjs';
+import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -192,10 +194,53 @@ async function shutdownEngineJobs(owner = null) {
     await Promise.allSettled(jobs.map((job) => job.shutdown()));
 }
 
+async function closeCompletedEngineResults() {
+    const results = [...completedEngineResults.values()];
+    completedEngineResults.clear();
+    await Promise.allSettled(results.map(async ({ reader, cleanup }) => {
+        await reader.close();
+        await cleanup();
+    }));
+}
+
+async function createEmbeddedResultSession(resultBytes) {
+    if (!resultBytes) return null;
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateEmbeddedResult-'));
+    const path = join(directory, 'result.bin');
+    try {
+        await writeFile(path, resultBytes);
+        const reader = await openIndexedResult(path);
+        const result = rendererResultProjection({
+            ...reader.metadata,
+            samples: await reader.readSamples({ maximumSamples: defaultPlaybackSampleLimit })
+        });
+        const sessionId = randomUUID();
+        completedEngineResults.set(sessionId, {
+            result,
+            reader,
+            path,
+            cleanup: () => rm(directory, { recursive: true, force: true })
+        });
+        return { sessionId, result };
+    } catch (error) {
+        await rm(directory, { recursive: true, force: true });
+        throw error;
+    }
+}
+
+async function decodeProjectForRenderer(bytes, options = {}) {
+    const bundle = await decodeProjectBundle(bytes, options);
+    JSON.parse(bundle.content);
+    return { content: bundle.content, embeddedResult: await createEmbeddedResultSession(bundle.result) };
+}
+
 function beginApplicationShutdown() {
     if (applicationShutdownPromise) return applicationShutdownPromise;
     abortAIOperations();
-    applicationShutdownPromise = Promise.all([shutdownEngineJobs(), shutdownValidationOperations()]);
+    applicationShutdownPromise = (async () => {
+        await Promise.all([shutdownEngineJobs(), shutdownValidationOperations()]);
+        await closeCompletedEngineResults();
+    })();
     return applicationShutdownPromise;
 }
 
@@ -233,7 +278,7 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
     analysisAddonId = manifest.addonId;
     visualizerManifest = manifest;
     const liveResult = activeEngineJobs.get(payload.engineJobId)?.latestResult;
-    const completedResult = completedEngineResults.get(payload.engineJobId);
+    const completedResult = completedEngineResults.get(payload.engineJobId)?.result;
     visualizerSession = createVisualizerSession({ ...payload, result: liveResult ?? completedResult ?? payload.result, sessionId: randomUUID() });
     if (analysisWindow && !analysisWindow.isDestroyed()) {
         analysisWindow.setTitle(`${visualizerSession.projectName} — Results`);
@@ -445,17 +490,17 @@ ipcMain.handle('projectOpen', async (event) => {
         pendingEncryptedPaths.add(path);
         return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
     }
-    return { path, fileName: basename(path), encrypted: false, content: await decodeProjectFile(bytes) };
+    return { path, fileName: basename(path), encrypted: false, ...await decodeProjectForRenderer(bytes) };
 });
 
 ipcMain.handle('projectUnlock', async (_event, { path, password }) => {
     if (!pendingEncryptedPaths.has(path)) throw new Error('Select the encrypted project again.');
-    const content = await decodeProjectFile(await readFile(path), { password });
+    const project = await decodeProjectForRenderer(await readFile(path), { password });
     pendingEncryptedPaths.delete(path);
-    return { path, fileName: basename(path), encrypted: true, content };
+    return { path, fileName: basename(path), encrypted: true, ...project };
 });
 
-ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename, password }) => {
+ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename, password, resultSessionId }) => {
     const targetWindow = getWindowFromEvent(event);
     let path = existingPath;
     if (!path) {
@@ -469,9 +514,14 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         path = result.filePath;
     }
     if (!path.toLowerCase().endsWith('.kjt')) path = path.replace(/(?:\.konjugate)?\.json$/i, '') + '.kjt';
-    const bytes = await encodeProjectFile(content, { password });
-    const verification = await decodeProjectFile(bytes, { password });
-    if (verification !== content) throw new Error('The saved project could not be verified.');
+    const storedResult = resultSessionId ? completedEngineResults.get(resultSessionId) : null;
+    if (resultSessionId && !storedResult?.path) throw new Error('The simulation results are no longer available.');
+    const resultBytes = storedResult ? await readFile(storedResult.path) : null;
+    const bytes = await encodeProjectFile(content, { password, result: resultBytes });
+    const verification = await decodeProjectBundle(bytes, { password });
+    if (verification.content !== content || Boolean(verification.result) !== Boolean(resultBytes)) {
+        throw new Error('The saved project could not be verified.');
+    }
     const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
     try {
         await writeFile(temporaryPath, bytes);
@@ -486,7 +536,7 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         await unlink(temporaryPath).catch(() => {});
         throw error;
     }
-    return { path, fileName: basename(path), encrypted: Boolean(password) };
+    return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resultBytes) };
 });
 
 ipcMain.handle('projectConfirmDiscard', async (event) => {
@@ -494,7 +544,7 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
         type: 'warning',
         title: 'Unsaved changes',
         message: 'Discard unsaved changes?',
-        detail: 'Your changes have not been saved and cannot be recovered after closing or opening another project.',
+        detail: 'Unsaved model changes or simulation results cannot be recovered after closing or opening another project.',
         buttons: ['Cancel', 'Discard changes'],
         defaultId: 0,
         cancelId: 0
@@ -635,6 +685,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         checkpoints: []
     });
     execution = await startEngineRun(content, configuration, engineOptions(), {
+        retainResult: true,
         onUpdate: (result) => {
             const job = activeEngineJobs.get(execution.jobId);
             if (job) job.latestResult = result;
@@ -645,11 +696,12 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
     });
     if (!execution.available) return { available: false };
     activeEngineJobs.set(execution.jobId, { owner, latestResult: null, ...execution });
-    execution.completion.then((result) => {
+    execution.completion.then(async (result) => {
         if (updateTimer) clearTimeout(updateTimer);
         updateTimer = null;
         latestUpdate = null;
-        completedEngineResults.set(execution.jobId, result);
+        const reader = await openIndexedResult(execution.resultPath);
+        completedEngineResults.set(execution.jobId, { result, reader, cleanup: execution.cleanup, path: execution.resultPath });
         updateVisualizerResult(execution.jobId, result);
         if (!owner.isDestroyed()) owner.send('engineRunComplete', {
             jobId: execution.jobId,
@@ -657,6 +709,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         });
     }).catch((error) => {
         if (updateTimer) clearTimeout(updateTimer);
+        execution.cleanup().catch(() => {});
         if (!owner.isDestroyed()) owner.send('engineRunError', { jobId: execution.jobId, message: error.message });
     }).finally(() => activeEngineJobs.delete(execution.jobId));
     return { available: true, jobId: execution.jobId };
@@ -687,21 +740,36 @@ ipcMain.handle('engineCancel', async (event, jobId) => {
     return true;
 });
 
-ipcMain.handle('engineReadResultSeries', (event, jobId, signalIds, options) => {
+ipcMain.handle('engineReadResultSeries', async (event, jobId, signalIds, options) => {
     if (!senderIs(mainWindow, event)) return [];
-    const result = completedEngineResults.get(jobId);
-    if (!result) return [];
+    const stored = completedEngineResults.get(jobId);
+    if (!stored) return [];
+    const result = {
+        ...stored.reader.metadata,
+        samples: await stored.reader.readSamples({
+            startTime: options?.startTime,
+            endTime: options?.endTime,
+            maximumSamples: options?.maxPoints
+        })
+    };
     return resultSignalSeries(result, signalIds, options);
 });
 
-ipcMain.handle('engineReadResultSample', (event, jobId, time) => {
+ipcMain.handle('engineReadResultSample', async (event, jobId, time) => {
     if (!senderIs(mainWindow, event)) return null;
-    return structuredClone(nearestResultSample(completedEngineResults.get(jobId), Number(time)));
+    const stored = completedEngineResults.get(jobId);
+    if (!stored) return null;
+    return structuredClone(await stored.reader.readNearestSample(Number(time)));
 });
 
-ipcMain.handle('engineReleaseResult', (event, jobId) => {
+ipcMain.handle('engineReleaseResult', async (event, jobId) => {
     if (!senderIs(mainWindow, event)) return false;
-    return completedEngineResults.delete(jobId);
+    const stored = completedEngineResults.get(jobId);
+    if (!stored) return false;
+    completedEngineResults.delete(jobId);
+    await stored.reader.close();
+    await stored.cleanup();
+    return true;
 });
 
 app.whenReady().then(async () => {

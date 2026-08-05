@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc < 3) {
-        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output results.kjr --control-stream protobuf]\n";
+        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n";
         return 64;
     }
     const std::string command = argv[1];

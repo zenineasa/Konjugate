@@ -447,7 +447,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto writeResult = [&](const std::string& lifecycle, double simulationTime, bool completeSnapshot = false) {
         flushSampleEvents();
         std::ostringstream json;
-        json << std::setprecision(17) << "{\"resultVersion\":1,\"engineVersion\":\"0.2.0\",\"configurationName\":\""
+        json << std::setprecision(17) << "{\"resultVersion\":2,\"engineVersion\":\"0.2.0\",\"configurationName\":\""
              << escape(configuration.get<std::string>("name", "Untitled")) << "\",\"snapshotMode\":\"" << (completeSnapshot ? "full" : "live")
              << "\",\"lifecycle\":\"" << lifecycle
              << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time
@@ -552,18 +552,10 @@ void runSimulation(const boost::property_tree::ptree& document,
         }
         json << "]}";
         protocol::ResultFile result;
-        result.set_result_version(1);
+        result.set_result_version(2);
         result.set_metadata_json(json.str());
         for (const auto stateId : stateIds) result.mutable_state_table()->add_states()->set_state_id(stateId);
-        auto* sampleBatch = result.mutable_samples();
-        sampleBatch->set_state_count(static_cast<std::uint32_t>(stateIds.size()));
         if (completeSnapshot) {
-            for (const auto& sample : samples) {
-                sampleBatch->add_times(sample.time);
-                for (const auto stateId : stateIds) {
-                    sampleBatch->add_values(sample.states.at(executionPlan.stateIndexes.at(stateId)));
-                }
-            }
             for (const auto& checkpoint : checkpoints) {
                 auto* encoded = result.add_checkpoints();
                 encoded->set_uuid(checkpoint.uuid);
@@ -575,17 +567,52 @@ void runSimulation(const boost::property_tree::ptree& document,
                 }
             }
         }
-        std::string payload;
-        if (!result.SerializeToString(&payload) || payload.size() > 0xffffffffu) {
-            throw std::runtime_error("The binary result is too large to serialize.");
+        const auto appendLength = [](std::string& target, std::size_t size) {
+            if (size > 0xffffffffu) throw std::runtime_error("A binary result section is too large to serialize.");
+            const auto length = static_cast<std::uint32_t>(size);
+            target.push_back(static_cast<char>((length >> 24) & 0xff));
+            target.push_back(static_cast<char>((length >> 16) & 0xff));
+            target.push_back(static_cast<char>((length >> 8) & 0xff));
+            target.push_back(static_cast<char>(length & 0xff));
+        };
+        std::string header;
+        if (!result.SerializeToString(&header)) throw std::runtime_error("The binary result header could not be serialized.");
+        std::string container("KJR\x02", 4);
+        appendLength(container, header.size());
+        container += header;
+        protocol::ResultIndex index;
+        index.set_result_version(2);
+        index.set_sample_count(completeSnapshot ? samples.size() : 0);
+        constexpr std::size_t samplesPerResultBatch = 4096;
+        if (completeSnapshot) {
+            for (std::size_t start = 0; start < samples.size(); start += samplesPerResultBatch) {
+                const auto end = std::min(samples.size(), start + samplesPerResultBatch);
+                protocol::SampleBatch batch;
+                batch.set_state_count(static_cast<std::uint32_t>(stateIds.size()));
+                for (std::size_t sampleIndex = start; sampleIndex < end; ++sampleIndex) {
+                    const auto& sample = samples[sampleIndex];
+                    batch.add_times(sample.time);
+                    for (const auto stateId : stateIds) {
+                        batch.add_values(sample.states.at(executionPlan.stateIndexes.at(stateId)));
+                    }
+                }
+                std::string payload;
+                if (!batch.SerializeToString(&payload)) throw std::runtime_error("A result sample batch could not be serialized.");
+                auto* entry = index.add_batches();
+                entry->set_start_time(samples[start].time);
+                entry->set_end_time(samples[end - 1].time);
+                entry->set_offset(container.size());
+                entry->set_length(static_cast<std::uint32_t>(payload.size()));
+                entry->set_sample_count(static_cast<std::uint32_t>(end - start));
+                appendLength(container, payload.size());
+                container += payload;
+            }
         }
-        std::string container("KJR\x01", 4);
-        const auto payloadSize = static_cast<std::uint32_t>(payload.size());
-        container.push_back(static_cast<char>((payloadSize >> 24) & 0xff));
-        container.push_back(static_cast<char>((payloadSize >> 16) & 0xff));
-        container.push_back(static_cast<char>((payloadSize >> 8) & 0xff));
-        container.push_back(static_cast<char>(payloadSize & 0xff));
-        container += payload;
+        std::string indexPayload;
+        if (!index.SerializeToString(&indexPayload)) throw std::runtime_error("The binary result index could not be serialized.");
+        container += indexPayload;
+        appendLength(container, indexPayload.size());
+        container += "KJIX";
         atomicWrite(outputPath, container);
     };
     writeResult("running", startTime);

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decodeProjectFile, encodeProjectFile, inspectProjectFile } from '../src/projectFile.mjs';
+import { decodeProjectBundle, decodeProjectFile, encodeProjectFile, inspectProjectFile } from '../src/projectFile.mjs';
 
 const content = JSON.stringify({ format: 'konjugate', version: 1, nodes: [], edges: [] });
 const testCost = 2 ** 14;
@@ -11,6 +11,27 @@ test('compresses and restores a project', async () => {
     const encoded = await encodeProjectFile(content);
     assert.deepEqual(inspectProjectFile(encoded), { format: 'kjt', encrypted: false, version: 1 });
     assert.equal(await decodeProjectFile(encoded), content);
+});
+
+test('embeds an optional binary result without converting it to JSON', async () => {
+    const result = Buffer.from([0x4b, 0x4a, 0x52, 0x02, 0, 1, 2, 255]);
+    const encoded = await encodeProjectFile(content, { result });
+    const decoded = await decodeProjectBundle(encoded);
+    assert.equal(decoded.content, content);
+    assert.deepEqual(decoded.result, result);
+});
+
+test('encrypts the embedded result together with the model', async () => {
+    const result = Buffer.from('private result bytes');
+    const encoded = await encodeProjectFile(content, {
+        result,
+        password: 'correct horse battery staple',
+        scryptCost: testCost
+    });
+    const decoded = await decodeProjectBundle(encoded, { password: 'correct horse battery staple' });
+    assert.equal(decoded.content, content);
+    assert.deepEqual(decoded.result, result);
+    assert.equal(encoded.includes(result), false);
 });
 
 test('encrypts and restores a project with AES-256-GCM', async () => {

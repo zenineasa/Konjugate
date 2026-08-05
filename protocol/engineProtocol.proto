@@ -73,8 +73,22 @@ message ResultFile {
     uint32 result_version = 1;
     bytes metadata_json = 2;
     StateTable state_table = 3;
-    SampleBatch samples = 4;
+    reserved 4;
     repeated ResultCheckpoint checkpoints = 5;
+}
+
+message ResultBatchIndex {
+    double start_time = 1;
+    double end_time = 2;
+    uint64 offset = 3;
+    uint32 length = 4;
+    uint32 sample_count = 5;
+}
+
+message ResultIndex {
+    uint32 result_version = 1;
+    uint64 sample_count = 2;
+    repeated ResultBatchIndex batches = 3;
 }
 
 message EngineEvent {

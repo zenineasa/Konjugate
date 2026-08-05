@@ -71,11 +71,16 @@ export function inspectProjectFile(buffer) {
     return { format: 'kjt', encrypted: Boolean(flags & encryptedFlag), version };
 }
 
-export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17 } = {}) {
+export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null } = {}) {
     const compressed = await gzipAsync(Buffer.from(content, 'utf8'), { level: 9 });
+    const resultBytes = result ? (Buffer.isBuffer(result) ? result : Buffer.from(result)) : Buffer.alloc(0);
     let flags = gzipFlag;
-    let payload = compressed;
-    const metadata = { compression: 'gzip' };
+    let payload = Buffer.concat([compressed, resultBytes]);
+    const metadata = {
+        compression: 'gzip',
+        modelPayloadLength: compressed.length,
+        resultPayloadLength: resultBytes.length
+    };
 
     if (password) {
         flags |= encryptedFlag;
@@ -84,7 +89,7 @@ export async function encodeProjectFile(content, { password = null, scryptCost =
         const kdf = { name: 'scrypt', salt: salt.toString('base64'), cost: scryptCost, blockSize: 8, parallelization: 1 };
         const key = await keyFromPassword(password, kdf);
         const cipher = createCipheriv('aes-256-gcm', key, iv);
-        payload = Buffer.concat([cipher.update(compressed), cipher.final()]);
+        payload = Buffer.concat([cipher.update(payload), cipher.final()]);
         metadata.kdf = kdf;
         metadata.cipher = { name: 'aes-256-gcm', iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') };
         key.fill(0);
@@ -99,10 +104,10 @@ export async function encodeProjectFile(content, { password = null, scryptCost =
     return Buffer.concat([prefix, header, payload]);
 }
 
-export async function decodeProjectFile(buffer, { password = null } = {}) {
+export async function decodeProjectBundle(buffer, { password = null } = {}) {
     const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
     const { flags, metadata, payload } = parseHeader(bytes);
-    let compressed = payload;
+    let plaintext = payload;
 
     if (flags & encryptedFlag) {
         const key = await keyFromPassword(password, metadata.kdf);
@@ -113,7 +118,7 @@ export async function decodeProjectFile(buffer, { password = null } = {}) {
             if (iv.length !== 12 || tag.length !== 16) throw new Error('Invalid cipher metadata');
             const decipher = createDecipheriv('aes-256-gcm', key, iv);
             decipher.setAuthTag(tag);
-            compressed = Buffer.concat([decipher.update(payload), decipher.final()]);
+            plaintext = Buffer.concat([decipher.update(payload), decipher.final()]);
         } catch {
             throw new ProjectFileError('The password is incorrect or the project has been modified.', 'DECRYPTION_FAILED');
         } finally {
@@ -124,9 +129,25 @@ export async function decodeProjectFile(buffer, { password = null } = {}) {
     if (!(flags & gzipFlag) || metadata.compression !== 'gzip') {
         throw new ProjectFileError('The project uses an unsupported compression method.', 'UNSUPPORTED_COMPRESSION');
     }
+    const modelPayloadLength = metadata.modelPayloadLength === undefined
+        ? plaintext.length : Number(metadata.modelPayloadLength);
+    const resultPayloadLength = metadata.resultPayloadLength === undefined
+        ? 0 : Number(metadata.resultPayloadLength);
+    if (!Number.isSafeInteger(modelPayloadLength) || modelPayloadLength <= 0 ||
+        !Number.isSafeInteger(resultPayloadLength) || resultPayloadLength < 0 ||
+        modelPayloadLength + resultPayloadLength !== plaintext.length) {
+        throw new ProjectFileError('The project payload sections are damaged.', 'CORRUPT_PAYLOAD');
+    }
     try {
-        return (await gunzipAsync(compressed, { maxOutputLength })).toString('utf8');
+        return {
+            content: (await gunzipAsync(plaintext.subarray(0, modelPayloadLength), { maxOutputLength })).toString('utf8'),
+            result: resultPayloadLength ? Buffer.from(plaintext.subarray(modelPayloadLength)) : null
+        };
     } catch {
         throw new ProjectFileError('The project payload is damaged.', 'CORRUPT_PAYLOAD');
     }
+}
+
+export async function decodeProjectFile(buffer, options = {}) {
+    return (await decodeProjectBundle(buffer, options)).content;
 }

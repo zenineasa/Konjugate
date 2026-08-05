@@ -4,11 +4,12 @@ export class DocumentController {
     #commands = [];
     #cursor = 0;
     #savedCursor = 0;
+    #supplementalDirty = false;
     #listeners = new Set();
 
     get canUndo() { return this.#cursor > 0; }
     get canRedo() { return this.#cursor < this.#commands.length; }
-    get dirty() { return this.#cursor !== this.#savedCursor; }
+    get dirty() { return this.#cursor !== this.#savedCursor || this.#supplementalDirty; }
 
     subscribe(listener) {
         this.#listeners.add(listener);
@@ -48,11 +49,18 @@ export class DocumentController {
         this.#commands.length = 0;
         this.#cursor = 0;
         this.#savedCursor = saved ? 0 : -1;
+        this.#supplementalDirty = false;
+        this.#notify();
+    }
+
+    setSupplementalDirty(dirty) {
+        this.#supplementalDirty = Boolean(dirty);
         this.#notify();
     }
 
     markSaved() {
         this.#savedCursor = this.#cursor;
+        this.#supplementalDirty = false;
         this.#notify();
     }
 

@@ -85,13 +85,13 @@ function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function startEngineRun(content, configuration, options, { onUpdate } = {}) {
+export async function startEngineRun(content, configuration, options, { onUpdate, retainResult = false } = {}) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };
     const directory = await mkdtemp(join(tmpdir(), 'konjugateRun-'));
     const inputPath = join(directory, 'input.kjt');
     const configurationPath = join(directory, 'runConfiguration.json');
-    const outputPath = join(directory, 'simulationResults.kjr');
+    const outputPath = join(directory, 'simulationResult.bin');
     const jobId = randomUUID();
     const initialPacing = normalizePacing(configuration.pacing);
     await writeFile(inputPath, await encodeProjectFile(content));
@@ -115,6 +115,12 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     let shutdownPromise = null;
     let commandSequence = 0;
     let commandWrite = Promise.resolve();
+    let cleaned = false;
+    const cleanup = async () => {
+        if (cleaned) return;
+        cleaned = true;
+        await rm(directory, { recursive: true, force: true });
+    };
     child.stderr.on('data', (chunk) => { diagnostics += chunk; });
     const eventDecoder = new FramedEngineEventDecoder();
     child.stdout.on('data', (chunk) => {
@@ -145,7 +151,8 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         if (polling) return null;
         polling = true;
         try {
-            let snapshot = decodeResultFile(await readFile(outputPath));
+            const bytes = await readFile(outputPath);
+            let snapshot = decodeResultFile(bytes, onUpdate ? { maximumSamples: 4000 } : undefined);
             lastSnapshotError = null;
             if (snapshot.snapshotMode === 'live') {
                 snapshot = { ...snapshot, samples: latestSamples };
@@ -185,10 +192,12 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             } catch (error) {
                 failure = error;
             }
-            try {
-                await rm(directory, { recursive: true, force: true });
-            } catch (error) {
-                failure ??= error;
+            if (failure || !retainResult) {
+                try {
+                    await cleanup();
+                } catch (error) {
+                    failure ??= error;
+                }
             }
             if (failure) reject(failure);
             else resolve(result);
@@ -262,6 +271,8 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         available: true,
         jobId,
         completion,
+        resultPath: outputPath,
+        cleanup,
         setPacing: async (pacing) => {
             const normalized = normalizePacing(pacing);
             await sendCommand({ type: 'setPacing', pacing: normalized });

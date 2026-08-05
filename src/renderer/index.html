@@ -87,6 +87,26 @@
         </form>
     </dialog>
 
+    <dialog id="saveContentDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Save project</span>
+            <strong>Choose saved content</strong>
+            <p>This project has simulation results. Choose whether this copy should include them.</p>
+            <label class="saveContentOption"><input name="saveContent" type="radio" value="model"><span><b>Model only</b><small>Save the editable model without simulation data.</small></span></label>
+            <label class="saveContentOption"><input name="saveContent" type="radio" value="modelAndResults" checked><span><b>Model and results</b><small>Include the current playback data and restart checkpoint.</small></span></label>
+            <footer><button id="saveContentCancel" type="button">Cancel</button><button id="saveContentContinue" class="doneButton" type="submit">Continue</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="closeResultsDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Simulation results</span>
+            <strong>Close and remove results?</strong>
+            <p id="closeResultsMessage">If you want to load these results again later, save the project with simulation results before closing. Once the results panel is closed, the results will be removed from this session and cannot be reopened unless they were saved.</p>
+            <footer><button id="closeResultsCancel" type="button">Cancel</button><button id="confirmCloseResults" class="doneButton" type="submit">Close and remove results</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="runConfigurationDialog" class="passwordDialog runConfigurationDialog">
         <form method="dialog">
             <span class="contextKicker">Simulation</span>
@@ -371,7 +391,8 @@
             <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
             <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
             <button id="executionSummaryButton" class="executionButton" type="button" aria-label="Show execution summary" aria-expanded="false" hidden><span aria-hidden="true">⌁</span> <span id="executionSummaryBackend">Execution</span></button>
-            <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close results and edit model"><span aria-hidden="true">×</span>Close results and edit</button>
+            <button id="saveResults" class="executionButton reviewControl" type="button" aria-label="Save project with simulation results"><span aria-hidden="true">↓</span> Save project</button>
+            <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close and remove results"><span aria-hidden="true">×</span>Close and edit</button>
         </section>
         <section id="executionSummaryCard" class="contextCard executionSummaryCard hidden" aria-label="Execution summary">
             <header><span><small>Execution summary</small><strong id="executionSummaryTitle">Automatic</strong></span><button id="closeExecutionSummary" type="button" aria-label="Close execution summary">×</button></header>

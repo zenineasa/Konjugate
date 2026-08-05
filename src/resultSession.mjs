@@ -29,7 +29,7 @@ export function rendererResultProjection(result, maximumSamples = defaultPlaybac
     const samples = downsampleSamples(result.samples, Math.min(maximumSamples, valueBoundedLimit));
     return {
         ...result,
-        sampleCount: result.samples?.length ?? 0,
+        sampleCount: result.sampleCount ?? result.samples?.length ?? 0,
         samples,
         checkpoints: result.checkpoints?.length ? [result.checkpoints.at(-1)] : []
     };

@@ -300,6 +300,7 @@ let equationEditSession = null;
 let simulationRunning = false;
 let activeResult = null;
 let activeEngineJobId = null;
+let activeResultPersistedInProject = false;
 let liveParameterValues = new Map();
 const liveParameterUpdateTimers = new Map();
 let runLaunchSettings = {
@@ -382,7 +383,8 @@ function initializeWindowControls() {
     $('#maximizeButton').dataset.tooltip = isMac ? 'Enter full screen' : 'Maximize';
     $('#maximizeButton').addEventListener('click', () => window.windowControls.toggleMaximize());
     $('#closeButton').addEventListener('click', async () => {
-        if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) &&
+            !await window.projectFiles.confirmDiscard()) return;
         window.windowControls.close();
     });
     window.windowControls.onMaximizedChange((maximized) => {
@@ -1956,7 +1958,7 @@ function updateLiveResultControls() {
         $('#liveParameterPanel').hidden = true;
         $('#liveParameterButton').ariaExpanded = 'false';
     }
-    $('#closeResults').lastChild.textContent = 'Close results and edit';
+    $('#closeResults').lastChild.textContent = 'Close and edit';
     if (activeResult?.pacing) {
         const { mode, simulationSecondsPerWallSecond: ratio } = activeResult.pacing;
         const value = mode === 'limitedRatio' ? `limitedRatio:${ratio}` : mode;
@@ -2060,7 +2062,7 @@ function applyLiveResult(jobId, result) {
     }
 }
 
-async function clearResultPlayback() {
+async function discardResultPlayback({ markProjectChanged = false } = {}) {
     if (!activeResult) return;
     if (simulationRunning) return;
     stopResultPlayback();
@@ -2068,6 +2070,7 @@ async function clearResultPlayback() {
     window.addons.closeContext('resultSession');
     activeResult = null;
     activeEngineJobId = null;
+    activeResultPersistedInProject = false;
     simulationRunning = false;
     $('#liveParameterPanel').hidden = true;
     $('#executionSummaryCard').classList.add('hidden');
@@ -2079,7 +2082,39 @@ async function clearResultPlayback() {
     model.nodes.forEach((node) => node.states.forEach((state) => updateDisplayedState(state.id, state.initialValue)));
     if (nodeDetailsBeforeResult !== null) setLabelDetail('nodes', nodeDetailsBeforeResult);
     nodeDetailsBeforeResult = null;
+    if (markProjectChanged) documentController.setSupplementalDirty(true);
     renderValidationStatus();
+}
+
+function requestCloseResultsConfirmation() {
+    const dialog = $('#closeResultsDialog');
+    const form = $('form', dialog);
+    const cancel = $('#closeResultsCancel');
+    $('#closeResultsMessage').textContent = activeResultPersistedInProject
+        ? 'Closing the results panel will remove these results from the current session. You can load them again by reopening the saved project.'
+        : 'If you want to load these results again later, save the project with simulation results before closing. Once the results panel is closed, the results will be removed from this session and cannot be reopened unless they were saved.';
+    return new Promise((resolve) => {
+        const finish = (confirmed) => {
+            form.removeEventListener('submit', onSubmit);
+            dialog.removeEventListener('cancel', onCancel);
+            cancel.removeEventListener('click', onCancelClick);
+            dialog.close();
+            resolve(confirmed);
+        };
+        const onSubmit = (event) => { event.preventDefault(); finish(true); };
+        const onCancel = (event) => { event.preventDefault(); finish(false); };
+        const onCancelClick = () => finish(false);
+        form.addEventListener('submit', onSubmit);
+        dialog.addEventListener('cancel', onCancel);
+        cancel.addEventListener('click', onCancelClick);
+        dialog.showModal();
+    });
+}
+
+async function closeResultPlayback() {
+    if (!activeResult || simulationRunning || !await requestCloseResultsConfirmation()) return;
+    await discardResultPlayback({ markProjectChanged: activeResultPersistedInProject });
+    $('#statusText').textContent = 'Results removed · model editing enabled';
 }
 
 $('#resultTimeline').addEventListener('input', (event) => {
@@ -2157,7 +2192,8 @@ $('#continueRun').addEventListener('click', () => {
     updateRunModeFields();
     $('#runLaunchDialog').showModal();
 });
-$('#closeResults').addEventListener('click', clearResultPlayback);
+$('#closeResults').addEventListener('click', closeResultPlayback);
+$('#saveResults').addEventListener('click', () => saveProject());
 window.addons.onRequest('timeline.seek', (time) => {
     if (!activeResult) return;
     stopResultPlayback();
@@ -2246,6 +2282,7 @@ async function startSimulation() {
     $('#runButton').disabled = true;
     $('#runButton').title = 'Simulation is running';
     $('#statusText').textContent = 'Running simulation…';
+    const previousResultSessionId = activeEngineJobId;
     try {
         const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
         const execution = await window.engine.start(JSON.stringify(serializeProjectDocument()), {
@@ -2256,6 +2293,11 @@ async function startSimulation() {
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
         activeEngineJobId = execution.jobId;
+        if (previousResultSessionId && previousResultSessionId !== execution.jobId) {
+            window.engine.releaseResult(previousResultSessionId).catch((error) => {
+                console.error('Previous result session could not be released.', error);
+            });
+        }
     } catch (error) {
         console.error('C++ simulation failed.', error);
         $('#statusText').textContent = 'Simulation failed';
@@ -2320,6 +2362,8 @@ window.engine.onComplete(({ jobId, result }) => {
     if (jobId !== activeEngineJobId) return;
     applyLiveResult(jobId, result);
     simulationRunning = false;
+    activeResultPersistedInProject = false;
+    documentController.setSupplementalDirty(true);
     selectSuggestedPlaybackRate();
     updateLiveResultControls();
     $('#statusText').textContent = result.lifecycle === 'stopped' ? 'Simulation stopped · partial results retained' : 'Simulation complete';
@@ -2645,13 +2689,14 @@ function clearRenderedModel() {
     nodePickTargets.length = 0;
 }
 
-function loadProjectDocument(document, {
+async function loadProjectDocument(document, {
     path = null,
     fileName = 'untitled.kjt',
     saved = true,
-    password = null
+    password = null,
+    embeddedResult = null
 } = {}) {
-    clearResultPlayback();
+    await discardResultPlayback();
     discardAssistantProposal();
     hideAssistantPanel();
     const nextModel = hydrateProjectDocument(document);
@@ -2673,6 +2718,12 @@ function loadProjectDocument(document, {
     updateDocumentTitle();
     updateEncryptionControls();
     setCameraView('orbit');
+    if (embeddedResult) {
+        activeEngineJobId = embeddedResult.sessionId;
+        activeResultPersistedInProject = true;
+        activateResult(embeddedResult.result);
+        selectSuggestedPlaybackRate();
+    }
 }
 
 function replaceModelContents(document) {
@@ -3612,10 +3663,12 @@ $('#addButton').addEventListener('click', (event) => {
 });
 
 async function openProject() {
+    if (simulationRunning) return;
     try {
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) &&
+            !await window.projectFiles.confirmDiscard()) return;
         let file = await window.projectFiles.open();
         if (!file) return;
-        if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
         let password = null;
         let passwordError = '';
         while (file.requiresPassword) {
@@ -3631,28 +3684,60 @@ async function openProject() {
                 passwordError = 'Incorrect password, or this project has been modified.';
             }
         }
-        loadProjectDocument(JSON.parse(file.content), {
+        await loadProjectDocument(JSON.parse(file.content), {
             path: file.path,
             fileName: file.fileName,
-            password: file.encrypted ? password : null
+            password: file.encrypted ? password : null,
+            embeddedResult: file.embeddedResult
         });
         activeExampleId = null;
         $('#exampleGuideButton').hidden = true;
-        $('#statusText').textContent = 'Project loaded';
+        $('#statusText').textContent = file.embeddedResult ? 'Project and simulation results loaded' : 'Project loaded';
     } catch (error) {
         console.error(error);
         $('#statusText').textContent = `Load failed · ${error.message}`;
     }
 }
 
+function requestSaveContentChoice() {
+    const dialog = $('#saveContentDialog');
+    const form = $('form', dialog);
+    const cancel = $('#saveContentCancel');
+    $('input[name="saveContent"][value="modelAndResults"]', form).checked = true;
+    return new Promise((resolve) => {
+        const finish = (choice) => {
+            form.removeEventListener('submit', onSubmit);
+            dialog.removeEventListener('cancel', onCancel);
+            cancel.removeEventListener('click', onCancelClick);
+            dialog.close();
+            resolve(choice);
+        };
+        const onSubmit = (event) => {
+            event.preventDefault();
+            finish($('input[name="saveContent"]:checked', form).value);
+        };
+        const onCancel = (event) => { event.preventDefault(); finish(null); };
+        const onCancelClick = () => finish(null);
+        form.addEventListener('submit', onSubmit);
+        dialog.addEventListener('cancel', onCancel);
+        cancel.addEventListener('click', onCancelClick);
+        dialog.showModal();
+    });
+}
+
 async function saveProject(saveAs = false, password = currentProjectPassword) {
     try {
+        const hasEmbeddableResult = Boolean(activeResult && activeEngineJobId && !simulationRunning);
+        const contentChoice = hasEmbeddableResult ? await requestSaveContentChoice() : 'model';
+        if (!contentChoice) return false;
+        const includeResults = contentChoice === 'modelAndResults';
         const content = `${JSON.stringify(serializeProjectDocument(), null, 4)}\n`;
         const result = await window.projectFiles.save(
             saveAs ? null : currentProjectPath,
             content,
             currentProjectFilename,
-            password
+            password,
+            includeResults ? activeEngineJobId : null
         );
         if (!result) return false;
         currentProjectPath = result.path;
@@ -3660,8 +3745,9 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         currentProjectPassword = result.encrypted ? password : null;
         updateDocumentTitle();
         updateEncryptionControls();
+        activeResultPersistedInProject = result.includesResults;
         documentController.markSaved();
-        $('#statusText').textContent = result.encrypted ? 'Encrypted project saved' : 'Project saved';
+        $('#statusText').textContent = `${result.encrypted ? 'Encrypted project' : 'Project'} saved${result.includesResults ? ' with simulation results' : ' · model only'}`;
         return true;
     } catch (error) {
         console.error(error);
@@ -3671,8 +3757,9 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
 }
 
 async function newProject() {
-    if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
-    loadProjectDocument(emptyProjectDocument);
+    if (simulationRunning) return;
+    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
+    await loadProjectDocument(emptyProjectDocument);
     activeExampleId = null;
     $('#exampleGuideButton').hidden = true;
     $('#statusText').textContent = 'New project';
@@ -3681,9 +3768,10 @@ async function newProject() {
 async function loadExample(id) {
     if (!id) return;
     try {
-        if (documentController.dirty && !await window.projectFiles.confirmDiscard()) return;
+        if (simulationRunning) return;
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
         const example = await window.projectFiles.loadExample(id);
-        loadProjectDocument(JSON.parse(example.content), {
+        await loadProjectDocument(JSON.parse(example.content), {
             fileName: example.suggestedFilename,
             saved: false
         });

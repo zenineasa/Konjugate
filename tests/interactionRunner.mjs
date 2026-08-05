@@ -323,6 +323,23 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
     });
 
+    await run('selected nodes become a navigable undoable subsystem', async () => {
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
+        assert.equal(await evaluate(window, `document.querySelector('#createSubsystem').disabled`), false);
+        await evaluate(window, `document.querySelector('#createSubsystem').click()`);
+        await waitFor(window, `document.querySelector('#subsystemDialog').open`, 'Subsystem dialog did not open.');
+        await evaluate(window, `(() => { document.querySelector('#subsystemName').value = 'Thermal enclosure'; document.querySelector('#subsystemCreate').click(); })()`);
+        await waitFor(window, `[...document.querySelectorAll('.subsystemLabel')].some((label) => label.textContent.includes('Thermal enclosure'))`, 'Subsystem proxy did not appear.');
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => /Battery module|Enclosed air/.test(label.textContent) && !label.textContent.includes('copy')).every((label) => getComputedStyle(label).display === 'none')`, 'Wrapped nodes remained visible outside the subsystem.');
+        await clickElement(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Thermal enclosure'))`);
+        await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden`, 'Subsystem navigation did not enter the subsystem.');
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => /Battery module|Enclosed air/.test(label.textContent) && !label.textContent.includes('copy')).every((label) => getComputedStyle(label).display !== 'none')`, 'Subsystem members did not appear after entering.');
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').hidden`, 'Subsystem navigation did not return to the model.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length === 3`, 'Undo did not unwrap the subsystem.');
+    });
+
     await run('icon-only toolstrip controls expose custom accessible tooltips', async () => {
         const controls = await evaluate(window, `[...document.querySelectorAll('.toolstrip .squareTool')].map((button) => ({
             label: button.getAttribute('aria-label'),

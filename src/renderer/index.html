@@ -107,6 +107,16 @@
         </form>
     </dialog>
 
+    <dialog id="subsystemDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Selected nodes</span>
+            <strong>Create subsystem</strong>
+            <p>The selected graph will become a navigable subsystem. Relationships crossing its boundary become explicit ports.</p>
+            <label><span>Name</span><input id="subsystemName" autocomplete="off" required maxlength="120"></label>
+            <footer><button id="subsystemCancel" type="button">Cancel</button><button id="subsystemCreate" class="doneButton" type="submit">Create subsystem</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="runConfigurationDialog" class="passwordDialog runConfigurationDialog">
         <form method="dialog">
             <span class="contextKicker">Simulation</span>
@@ -188,6 +198,7 @@
             <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
         </div>
         <div class="toolGroup" role="group" aria-label="Selection actions">
+            <button id="createSubsystem" class="squareTool" type="button" aria-label="Create subsystem from selected nodes" data-tooltip="Create subsystem" disabled>▤</button>
             <button id="copySelection" class="squareTool clipboardTool" type="button" aria-label="Copy selected nodes" data-tooltip="Copy selected" disabled>⧉</button>
             <button id="pasteSelection" class="squareTool clipboardTool" type="button" aria-label="Paste copied nodes" data-tooltip="Paste" disabled>▣</button>
             <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
@@ -209,6 +220,7 @@
         <div id="webglContainer" class="webglContainer"></div>
         <div id="css2dContainer" class="css2dContainer"></div>
         <div id="selectionRectangle" class="selectionRectangle" aria-hidden="true" hidden></div>
+        <nav id="subsystemBreadcrumb" class="subsystemBreadcrumb" aria-label="Subsystem location" hidden></nav>
         <div id="endpointPickBanner" class="endpointPickBanner" role="status" aria-live="polite" hidden>
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>

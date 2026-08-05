@@ -19,6 +19,7 @@ import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
+import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
 import {
     CSS2DObject,
@@ -169,6 +170,7 @@ function hydrateProjectDocument(document) {
     (document.runConfigurations ?? []).forEach((configuration) => {
         registerId(configuration.id, 'Every run configuration must have a unique positive integer id.');
     });
+    const subsystems = hydrateSubsystems(document, registerId);
 
     const nodes = document.nodes.map((node) => {
         const appearance = node.appearance ?? {};
@@ -185,6 +187,8 @@ function hydrateProjectDocument(document) {
             importedGeometry,
             geometryFileName: appearance.fileName ?? null,
             badgeClass: '',
+            subsystemId: node.subsystemId ?? null,
+            deleted: false,
             substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
             sourceTerms: node.sourceTerms ?? [],
             states: (node.states ?? []).map((state) => ({
@@ -215,7 +219,8 @@ function hydrateProjectDocument(document) {
         },
         parameters: edge.parameters ?? [],
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
-        offset: Number(edge.appearance?.offset) || 0
+        offset: Number(edge.appearance?.offset) || 0,
+        deleted: false
     }));
     const runConfigurations = Array.isArray(document.runConfigurations) && document.runConfigurations.length
         ? document.runConfigurations.map((configuration) => ({
@@ -232,7 +237,8 @@ function hydrateProjectDocument(document) {
         activeRunConfigurationId: runConfigurations.some((item) => item.id === document.activeRunConfigurationId)
             ? document.activeRunConfigurationId : runConfigurations[0].id,
         nodes,
-        relationships
+        relationships,
+        subsystems
     };
 }
 
@@ -243,7 +249,8 @@ const emptyProjectDocument = {
     metadata: { units: 'SI' },
     runConfigurations: [],
     nodes: [],
-    edges: []
+    edges: [],
+    subsystems: []
 };
 const model = hydrateProjectDocument(emptyProjectDocument);
 let currentProjectPath = null;
@@ -282,11 +289,13 @@ updateEncryptionControls();
 
 const nodeObjects = new Map();
 const relationshipObjects = new Map();
+const subsystemObjects = new Map();
 const nodePickTargets = [];
 const relationshipPickTargets = [];
 let selectedNode = null;
 const selectedNodeIds = new Set();
 let selectedRelationship = null;
+let activeSubsystemId = null;
 let currentTool = 'select';
 let currentView = 'orbit';
 let activeEndpointPick = null;
@@ -349,6 +358,7 @@ function updateHistoryControls() {
 function updateSelectionActionControls() {
     const locked = Boolean(activeResult);
     $('#copySelection').disabled = locked || !selectedNodeIds.size;
+    $('#createSubsystem').disabled = locked || !selectedNodeIds.size;
     $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship);
     let canPaste = false;
     if (!locked) {
@@ -607,13 +617,86 @@ function createNode(definition) {
     nodePickTargets.push(mesh);
 }
 
+function createSubsystemObject(definition) {
+    const object = new THREE.Mesh(
+        new THREE.BoxGeometry(2.7, 1.7, 2.1),
+        new THREE.MeshStandardMaterial({ color: 0x195b60, roughness: 0.58, metalness: 0.08 })
+    );
+    object.position.fromArray(definition.position);
+    object.userData = { kind: 'subsystem', id: definition.id, definition };
+    const wrapper = document.createElement('div');
+    wrapper.className = 'subsystem-label';
+    wrapper.innerHTML = `<button class="subsystemLabel" type="button"><strong>${escapeHtml(definition.name)}</strong><small>${definition.ports.length} boundary ${definition.ports.length === 1 ? 'port' : 'ports'} · Open subsystem</small></button>`;
+    $('.subsystemLabel', wrapper).addEventListener('click', (event) => {
+        event.stopPropagation();
+        enterSubsystem(definition.id);
+    });
+    const label = new CSS2DObject(wrapper);
+    label.renderOrder = 20;
+    label.position.set(0, 0.35, 0);
+    object.add(label);
+    scene.add(object);
+    subsystemObjects.set(definition.id, object);
+}
+
+function subsystemForNodeInView(node) {
+    let subsystem = model.subsystems.find((item) => item.id === node.subsystemId && !item.deleted);
+    while (subsystem && subsystem.parentSubsystemId !== activeSubsystemId) {
+        subsystem = model.subsystems.find((item) => item.id === subsystem.parentSubsystemId && !item.deleted);
+    }
+    return subsystem?.parentSubsystemId === activeSubsystemId ? subsystem : null;
+}
+
+function displayObjectForNode(nodeId) {
+    const definition = model.nodes.find((node) => node.id === nodeId);
+    if (!definition || definition.deleted) return null;
+    if (definition.subsystemId === activeSubsystemId) return nodeObjects.get(nodeId);
+    const subsystem = subsystemForNodeInView(definition);
+    return subsystem ? subsystemObjects.get(subsystem.id) : null;
+}
+
+function refreshSubsystemView() {
+    clearSelection();
+    nodeObjects.forEach((object, id) => {
+        const definition = object.userData.definition;
+        object.visible = !definition.deleted && definition.subsystemId === activeSubsystemId;
+    });
+    subsystemObjects.forEach((object) => {
+        const definition = object.userData.definition;
+        object.visible = !definition.deleted && definition.parentSubsystemId === activeSubsystemId;
+    });
+    relationshipObjects.forEach((relationship) => {
+        const source = displayObjectForNode(relationship.definition.source);
+        const target = displayObjectForNode(relationship.definition.target);
+        const visible = !relationship.definition.deleted && source && target && source !== target;
+        relationship.line.visible = Boolean(visible);
+        if (relationship.marker) relationship.marker.visible = Boolean(visible);
+    });
+    const breadcrumb = $('#subsystemBreadcrumb');
+    breadcrumb.hidden = activeSubsystemId === null;
+    if (activeSubsystemId !== null) {
+        const current = model.subsystems.find((item) => item.id === activeSubsystemId);
+        breadcrumb.innerHTML = `<button type="button" data-subsystem-parent>← ${current?.parentSubsystemId === null ? 'Model' : 'Parent'}</button><span>/</span><button type="button" disabled>${escapeHtml(current?.name ?? 'Subsystem')}</button>`;
+        $('[data-subsystem-parent]', breadcrumb).addEventListener('click', () => enterSubsystem(current?.parentSubsystemId ?? null));
+    }
+    updateRelationships();
+    updateModelStatus();
+}
+
+function enterSubsystem(id) {
+    activeSubsystemId = id;
+    hideCards();
+    refreshSubsystemView();
+}
+
 model.nodes.forEach(createNode);
+model.subsystems.forEach(createSubsystemObject);
 
 const selectionOutlines = new Map();
 
 function relationshipPoints(definition) {
-    const source = nodeObjects.get(definition.source).position;
-    const target = nodeObjects.get(definition.target).position;
+    const source = displayObjectForNode(definition.source)?.position ?? nodeObjects.get(definition.source).position;
+    const target = displayObjectForNode(definition.target)?.position ?? nodeObjects.get(definition.target).position;
     const midpoint = source.clone().lerp(target, 0.5);
     const lateral = new THREE.Vector3()
         .subVectors(target, source)
@@ -688,9 +771,8 @@ function createRelationship(definition) {
 function setRelationshipVisibility(id, visible) {
     const relationship = relationshipObjects.get(id);
     if (!relationship) return;
-    relationship.line.visible = visible;
-    if (relationship.marker) relationship.marker.visible = visible;
-    updateModelStatus();
+    relationship.definition.deleted = !visible;
+    refreshSubsystemView();
 }
 
 function setRelationshipDirectionality(definition, directionality) {
@@ -713,8 +795,8 @@ function setRelationshipDirectionality(definition, directionality) {
 function setNodeVisibility(id, visible) {
     const node = nodeObjects.get(id);
     if (!node) return;
-    node.visible = visible;
-    updateModelStatus();
+    node.userData.definition.deleted = !visible;
+    refreshSubsystemView();
 }
 
 function captureNodeAppearance(definition) {
@@ -1667,10 +1749,8 @@ function insertBuilderEquationBinding(binding) {
 
 function updateModelStatus() {
     const status = $$('.modelStatus span');
-    const visibleNodes = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible !== false).length;
-    const visibleRelationships = model.relationships.filter(
-        (relationship) => relationshipObjects.get(relationship.id)?.line.visible !== false
-    ).length;
+    const visibleNodes = model.nodes.filter((node) => !node.deleted).length;
+    const visibleRelationships = model.relationships.filter((relationship) => !relationship.deleted).length;
     status[0].textContent = `${visibleNodes} nodes`;
     status[1].textContent = `${visibleRelationships} relationships`;
     status[2].textContent = `${model.metadata.units} units`;
@@ -1707,7 +1787,7 @@ function scheduleEngineValidation(projectDocument = null) {
     renderValidationPending();
     engineValidationTimer = setTimeout(async () => {
         try {
-            const result = await window.engine.validate(JSON.stringify(projectDocument ?? serializeProjectDocument()));
+            const result = await window.engine.validate(JSON.stringify(executionProjectDocument(projectDocument ?? serializeProjectDocument())));
             if (revision !== validationRevision) return;
             if (!result.available) {
                 renderValidationFailure('The C++ validation engine is unavailable. Build the engine before editing or running models.');
@@ -2364,7 +2444,7 @@ async function startSimulation() {
     const previousResultSessionId = activeEngineJobId;
     try {
         const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
-        const execution = await window.engine.start(JSON.stringify(serializeProjectDocument()), {
+        const execution = await window.engine.start(JSON.stringify(executionProjectDocument(serializeProjectDocument())), {
             ...configuration,
             targetTime: runLaunchSettings.targetTime,
             pacing: runLaunchSettings.pacing,
@@ -2664,7 +2744,7 @@ function serializeGeometry(geometry) {
 }
 
 function serializeProjectDocument() {
-    const visibleNodes = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
+    const visibleNodes = model.nodes.filter((node) => !node.deleted);
     const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
     return {
         format: 'konjugate',
@@ -2679,6 +2759,7 @@ function serializeProjectDocument() {
                 id: node.id,
                 name: node.title,
                 type: node.type,
+                ...(node.subsystemId === null ? {} : { subsystemId: node.subsystemId }),
                 numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep },
                 position: object.position.toArray(),
                 states: node.states.map((state) => ({
@@ -2719,7 +2800,7 @@ function serializeProjectDocument() {
         }),
         edges: model.relationships
             .filter((edge) => (
-                relationshipObjects.get(edge.id)?.line.visible === true &&
+                !edge.deleted &&
                 visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
             ))
             .map((edge) => ({
@@ -2735,7 +2816,14 @@ function serializeProjectDocument() {
                     color: `#${edge.color.toString(16).padStart(6, '0')}`,
                     offset: edge.offset
                 }
-            }))
+            })),
+        subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => ({
+            id: subsystem.id,
+            name: subsystem.name,
+            parentSubsystemId: subsystem.parentSubsystemId,
+            position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
+            ports: structuredClone(subsystem.ports)
+        }))
     };
 }
 
@@ -2763,8 +2851,15 @@ function clearRenderedModel() {
         node.material.dispose();
         node.userData.definition.importedGeometry?.dispose();
     });
+    subsystemObjects.forEach((object) => {
+        object.traverse((child) => child.element?.remove());
+        scene.remove(object);
+        object.geometry.dispose();
+        object.material.dispose();
+    });
     relationshipObjects.clear();
     nodeObjects.clear();
+    subsystemObjects.clear();
     relationshipPickTargets.length = 0;
     nodePickTargets.length = 0;
 }
@@ -2786,8 +2881,12 @@ async function loadProjectDocument(document, {
     model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
+    model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
     model.nodes.forEach(createNode);
+    model.subsystems.forEach(createSubsystemObject);
     model.relationships.forEach(createRelationship);
+    activeSubsystemId = null;
+    refreshSubsystemView();
     invalidateRelationshipBundles();
     updateRelationships();
     updateModelStatus();
@@ -2814,8 +2913,12 @@ function replaceModelContents(document) {
     model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
+    model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
     model.nodes.forEach(createNode);
+    model.subsystems.forEach(createSubsystemObject);
     model.relationships.forEach(createRelationship);
+    activeSubsystemId = null;
+    refreshSubsystemView();
     invalidateRelationshipBundles();
     updateRelationships();
     updateModelStatus();
@@ -3547,6 +3650,12 @@ window.addEventListener('pointerup', (event) => {
 renderer.domElement.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || transformControls.dragging) return;
     setPointerFromEvent(event);
+    const subsystemHit = firstIntersection([...subsystemObjects.values()].filter((object) => object.visible));
+    if (subsystemHit) {
+        nodePointerDown = null;
+        enterSubsystem(subsystemHit.object.userData.id);
+        return;
+    }
     const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
 
     if (node) {
@@ -4206,6 +4315,8 @@ $('#createNode').addEventListener('click', () => {
         importedGeometry: pendingImportedGeometry?.clone() ?? null,
         geometryFileName: pendingGeometryFileName || null,
         position: [0, -0.7, 0],
+        subsystemId: activeSubsystemId,
+        deleted: false,
         color: 0x34727a,
         states: states.map((state) => ({
             id: allocateModelEntityId(),
@@ -4514,7 +4625,7 @@ function deleteSelected() {
             if (nodeIds.has(definition.source) || nodeIds.has(definition.target)) {
                 affectedRelationships.push({
                     id: definition.id,
-                    visible: relationship.line.visible
+                    visible: !definition.deleted
                 });
             }
         });
@@ -4564,6 +4675,8 @@ function hydrateFragmentNode(node) {
         importedGeometry,
         geometryFileName: appearance.fileName ?? null,
         badgeClass: '',
+        subsystemId: activeSubsystemId,
+        deleted: false,
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
         sourceTerms: node.sourceTerms ?? [],
         states: (node.states ?? []).map((state) => ({
@@ -4631,6 +4744,51 @@ function pasteGraph() {
         return false;
     }
 }
+
+function createSubsystemFromSelection(name) {
+    if (activeResult || !selectedNodeIds.size) return false;
+    const nodeIds = [...selectedNodeIds];
+    const id = allocateModelEntityId();
+    const center = nodeIds.reduce((sum, nodeId) => sum.add(nodeObjects.get(nodeId).position), new THREE.Vector3())
+        .multiplyScalar(1 / nodeIds.length);
+    const serialized = serializeProjectDocument();
+    const subsystem = {
+        id,
+        name: name.trim() || `Subsystem ${model.subsystems.filter((item) => !item.deleted).length + 1}`,
+        parentSubsystemId: activeSubsystemId,
+        position: center.toArray(),
+        ports: deriveSubsystemPorts({ subsystemId: id, nodeIds, edges: serialized.edges, allocateId: allocateModelEntityId }),
+        deleted: false
+    };
+    const previousMembership = new Map(nodeIds.map((nodeId) => [nodeId,
+        model.nodes.find((node) => node.id === nodeId).subsystemId]));
+    model.subsystems.push(subsystem);
+    createSubsystemObject(subsystem);
+    const apply = (created) => {
+        subsystem.deleted = !created;
+        nodeIds.forEach((nodeId) => {
+            const node = model.nodes.find((item) => item.id === nodeId);
+            node.subsystemId = created ? id : previousMembership.get(nodeId);
+        });
+        refreshSubsystemView();
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    $('#statusText').textContent = `${subsystem.name} created with ${nodeIds.length} node${nodeIds.length === 1 ? '' : 's'} and ${subsystem.ports.length} boundary ${subsystem.ports.length === 1 ? 'port' : 'ports'}`;
+    return true;
+}
+
+$('#createSubsystem').addEventListener('click', () => {
+    if (activeResult || !selectedNodeIds.size) return;
+    $('#subsystemName').value = `Subsystem ${model.subsystems.filter((item) => !item.deleted).length + 1}`;
+    $('#subsystemDialog').showModal();
+    $('#subsystemName').select();
+});
+$('#subsystemCancel').addEventListener('click', () => $('#subsystemDialog').close());
+$('#subsystemDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (createSubsystemFromSelection($('#subsystemName').value)) $('#subsystemDialog').close();
+});
 
 $('#copySelection').addEventListener('click', copySelectedGraph);
 $('#pasteSelection').addEventListener('click', pasteGraph);

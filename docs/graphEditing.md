@@ -8,7 +8,7 @@ The rectangle-selection tool in the toolstrip selects every visible node whose p
 
 Deleting selected nodes is also one undoable action. Every relationship connected to any deleted node is hidden with it, including relationships to nodes outside the selection. Undo restores each relationship only if it was visible before deletion.
 
-Copy writes a versioned Konjugate graph fragment to an application-specific operating-system clipboard format. A fragment contains the selected nodes and every visible relationship whose two endpoints are selected. Relationships crossing the selection boundary are intentionally excluded, so paste never creates dangling endpoints.
+Copy and Paste are available in the toolstrip's selection-actions group and through the platform keyboard shortcuts. Copy writes a versioned Konjugate graph fragment to an application-specific operating-system clipboard format. A fragment contains the selected nodes and every visible relationship whose two endpoints are selected. Relationships crossing the selection boundary are intentionally excluded, so paste never creates dangling endpoints. The controls remain disabled when their operation has no valid input.
 
 Paste allocates new IDs for every node, state, source term, relationship and parameter. Endpoint references, equation bindings and equation outputs are remapped to those new IDs before the fragment is applied. Relative node layout is retained with a visible position offset. One paste is one undoable action, and malformed or incomplete clipboard fragments are rejected without changing the model.
 

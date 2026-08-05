@@ -284,10 +284,10 @@ export async function runInteractionTests(window) {
         window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1, modifiers: ['shift'] });
         window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1, modifiers: ['shift'] });
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
-        await evaluate(window, `(() => {
-            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, ctrlKey: true, bubbles: true }));
-            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true }));
-        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#copySelection').disabled`), false);
+        await evaluate(window, `document.querySelector('#copySelection').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#pasteSelection').disabled`), false);
+        await evaluate(window, `document.querySelector('#pasteSelection').click()`);
         await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module copy')) && [...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Enclosed air copy'))`, 'The copied graph fragment was not pasted.');
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length`), before.nodes + 2);
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), before.relationships);
@@ -331,6 +331,9 @@ export async function runInteractionTests(window) {
         }))`);
         assert.ok(controls.length >= 5);
         assert.ok(controls.every((control) => control.label && control.tooltip && control.nativeTitle === null));
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.toolstrip .toolGroup')].map((group) => group.getAttribute('aria-label'))`), [
+            'Create', 'History', 'Selection tools', 'Selection actions'
+        ]);
     });
 
     await run('canvas help reflects left-click inspection controls', async () => {

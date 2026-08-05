@@ -343,6 +343,22 @@ function updateHistoryControls() {
     $('#redoButton').disabled = Boolean(activeResult) || !documentController.canRedo;
     $('#saveButton').disabled = !documentController.dirty && currentProjectPath !== null;
     $('.windowTitle i').style.visibility = documentController.dirty ? 'visible' : 'hidden';
+    updateSelectionActionControls();
+}
+
+function updateSelectionActionControls() {
+    const locked = Boolean(activeResult);
+    $('#copySelection').disabled = locked || !selectedNodeIds.size;
+    $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship);
+    let canPaste = false;
+    if (!locked) {
+        try {
+            canPaste = validateGraphFragment(window.modelClipboard.read());
+        } catch {
+            canPaste = false;
+        }
+    }
+    $('#pasteSelection').disabled = !canPaste;
 }
 
 function recordHistory(action) {
@@ -850,6 +866,7 @@ function updateSelectionOutline() {
         }
         outline.setFromObject(node);
     });
+    updateSelectionActionControls();
 }
 
 function selectNode(node, { additive = false } = {}) {
@@ -4524,6 +4541,7 @@ function copySelectedGraph() {
     const fragment = createGraphFragment(serializeProjectDocument(), selectedNodeIds);
     if (!fragment) return false;
     window.modelClipboard.write(fragment);
+    updateSelectionActionControls();
     $('#statusText').textContent = `${fragment.nodes.length} node${fragment.nodes.length === 1 ? '' : 's'} copied`;
     return true;
 }
@@ -4609,12 +4627,18 @@ function pasteGraph() {
     }
 }
 
+$('#copySelection').addEventListener('click', copySelectedGraph);
+$('#pasteSelection').addEventListener('click', pasteGraph);
+window.addEventListener('focus', updateSelectionActionControls);
+
 $('#newButton').dataset.tooltip = `New project (${isMac ? '⌘N' : 'Ctrl+N'})`;
 $('#loadButton').dataset.tooltip = `Open project (${isMac ? '⌘O' : 'Ctrl+O'})`;
 $('#saveButton').dataset.tooltip = `Save project (${isMac ? '⌘S' : 'Ctrl+S'})`;
 updateEncryptionControls();
 $('#undoButton').dataset.tooltip = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
 $('#redoButton').dataset.tooltip = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
+$('#copySelection').dataset.tooltip = `Copy selected (${isMac ? '⌘C' : 'Ctrl+C'})`;
+$('#pasteSelection').dataset.tooltip = `Paste (${isMac ? '⌘V' : 'Ctrl+V'})`;
 $('#undoButton').addEventListener('click', undo);
 $('#redoButton').addEventListener('click', redo);
 updateHistoryControls();

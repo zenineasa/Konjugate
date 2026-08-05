@@ -175,15 +175,23 @@
     </dialog>
 
     <nav class="toolstrip" aria-label="Model tools">
-        <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
-        <span class="divider"></span>
-        <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
-        <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↷</button>
-        <span class="divider"></span>
-        <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
-        <button class="squareTool rectangleSelectTool" data-tool="rectangleSelect" type="button" aria-label="Select nodes in a rectangle" data-tooltip="Rectangle select">▱</button>
-        <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
-        <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected">⌫</button>
+        <div class="toolGroup createToolGroup" role="group" aria-label="Create">
+            <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
+        </div>
+        <div class="toolGroup" role="group" aria-label="History">
+            <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
+            <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↷</button>
+        </div>
+        <div class="toolGroup" role="group" aria-label="Selection tools">
+            <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
+            <button class="squareTool rectangleSelectTool" data-tool="rectangleSelect" type="button" aria-label="Select nodes in a rectangle" data-tooltip="Rectangle select">▱</button>
+            <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
+        </div>
+        <div class="toolGroup" role="group" aria-label="Selection actions">
+            <button id="copySelection" class="squareTool clipboardTool" type="button" aria-label="Copy selected nodes" data-tooltip="Copy selected" disabled>⧉</button>
+            <button id="pasteSelection" class="squareTool clipboardTool" type="button" aria-label="Paste copied nodes" data-tooltip="Paste" disabled>▣</button>
+            <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
+        </div>
         <span id="addonToolstripSeparator" class="divider" hidden></span>
         <span id="addonToolstripContributions" class="addonToolstripContributions"></span>
         <div class="toolSpacer"></div>

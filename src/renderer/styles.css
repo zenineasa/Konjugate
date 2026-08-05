@@ -191,11 +191,14 @@ input, select { user-select: text; }
     display: flex; height: 31px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px;
     color: #9cafba; background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 11px;
 }
+.toolGroup { display: flex; align-items: center; gap: 2px; padding: 2px; background: rgb(7 15 21 / 28%); border: 1px solid rgb(43 59 70 / 62%); border-radius: 7px; }
+.createToolGroup { padding: 0; background: transparent; border-color: transparent; }
 .squareTool { width: 31px; padding: 0; font-size: 17px; }
 .toolButton:hover, .squareTool:hover { color: #e4eef2; background: #1c2b35; border-color: #30424e; }
 .toolButton.active, .squareTool.active { color: var(--accent-bright); background: rgb(66 201 188 / 12%); border-color: rgb(66 201 188 / 38%); }
 .squareTool:disabled { color: #344852; background: transparent; border-color: transparent; cursor: default; opacity: .55; }
 .historyTool { font-size: 14px; }
+.clipboardTool { font-size: 15px; }
 .addonToolstripContributions { display: contents; }
 .toolstrip #addonToolstripSeparator[hidden] { display: none; }
 .addonTool[hidden] { display: none; }

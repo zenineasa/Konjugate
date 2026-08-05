@@ -100,8 +100,9 @@ assert.ok(sourceResult.checkpoints.every((checkpoint) => checkpoint.solver.kind 
 
 const exampleInput = join(directory, 'thermalManagement.kjt');
 const exampleReport = join(directory, 'thermalValidation.json');
-const example = await readFile(new URL('../../examples/thermalManagement.konjugate.json', import.meta.url), 'utf8');
-await writeFile(exampleInput, await encodeProjectFile(example));
+const exampleBytes = await readFile(new URL('../../examples/thermalManagement.kjt', import.meta.url));
+const example = (await decodeProjectBundle(exampleBytes)).content;
+await writeFile(exampleInput, exampleBytes);
 assert.equal(await run(executable, ['validate', exampleInput, '--report', exampleReport]), 0);
 assert.equal(JSON.parse(await readFile(exampleReport, 'utf8')).valid, true);
 const invalidControlConfiguration = join(directory, 'invalidControlConfiguration.json');

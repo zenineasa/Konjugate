@@ -5,7 +5,6 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { encodeProjectFile } from '../../src/projectFile.mjs';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
 
 function execute(executable, args) {
@@ -31,12 +30,12 @@ const directory = await mkdtemp(join(tmpdir(), 'konjugateNumericalRegression-'))
 
 try {
     for (const testCase of expectations.cases) {
-        const content = await readFile(new URL(`../../examples/${testCase.example}.konjugate.json`, import.meta.url), 'utf8');
+        const content = await readFile(new URL(`../../examples/${testCase.example}.kjt`, import.meta.url));
         const inputPath = join(directory, `${testCase.example}.kjt`);
         const configurationPath = join(directory, `${testCase.example}Configuration.json`);
         const outputPath = join(directory, `${testCase.example}Result.bin`);
         const validationPath = join(directory, `${testCase.example}Validation.json`);
-        await writeFile(inputPath, await encodeProjectFile(content));
+        await writeFile(inputPath, content);
         await writeFile(configurationPath, JSON.stringify({ name: testCase.example, ...testCase.configuration }, null, 4));
         assert.equal(await execute(executable, ['validate', inputPath, '--report', validationPath]), 0, `${testCase.example} must validate`);
         assert.equal(await execute(executable, ['run', inputPath, '--configuration', configurationPath, '--output', outputPath]), 0, `${testCase.example} must run`);

@@ -110,7 +110,7 @@ function createWindow() {
 
 async function openExampleGuide(id) {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
-    const guideName = id.replace(/\.konjugate\.json$/, '.md');
+    const guideName = id.replace(/\.kjt$/, '.md');
     const markdown = await readFile(join(examplesDir, guideName), 'utf8');
     const payload = { id, title: exampleLabel(id), markdown };
     if (!exampleGuideWindow || exampleGuideWindow.isDestroyed()) {
@@ -448,23 +448,23 @@ ipcMain.on('windowClose', (event) => {
 const examplesDir = join(currentDir, '..', 'examples');
 
 async function exampleFiles() {
-    return (await readdir(examplesDir)).filter((name) => name.endsWith('.konjugate.json'));
+    return (await readdir(examplesDir)).filter((name) => name.endsWith('.kjt'));
 }
 
 function exampleLabel(fileName) {
-    const stem = fileName.replace(/\.konjugate\.json$/, '');
+    const stem = fileName.replace(/\.kjt$/, '');
     return `${stem.charAt(0).toUpperCase()}${stem.slice(1)}`.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 }
 
 ipcMain.handle('projectListExamples', async () => (await exampleFiles()).map((fileName) => ({
     id: fileName,
     label: exampleLabel(fileName),
-    suggestedFilename: fileName.replace(/\.konjugate\.json$/, '.kjt')
+    suggestedFilename: fileName
 })));
 
 ipcMain.handle('projectLoadExample', async (_event, id) => {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
-    return { content: await readFile(join(examplesDir, id), 'utf8'), suggestedFilename: id };
+    return { ...await decodeProjectForRenderer(await readFile(join(examplesDir, id))), suggestedFilename: id };
 });
 
 ipcMain.handle('projectOpenExampleGuide', async (event, id) => {
@@ -504,7 +504,7 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
     const targetWindow = getWindowFromEvent(event);
     let path = existingPath;
     if (!path) {
-        const defaultName = (suggestedFilename || 'untitled.kjt').replace(/(?:\.konjugate)?\.json$/i, '.kjt');
+        const defaultName = suggestedFilename || 'untitled.kjt';
         const result = await dialog.showSaveDialog(targetWindow, {
             title: 'Save Konjugate project',
             defaultPath: defaultName,
@@ -513,7 +513,7 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         if (result.canceled) return null;
         path = result.filePath;
     }
-    if (!path.toLowerCase().endsWith('.kjt')) path = path.replace(/(?:\.konjugate)?\.json$/i, '') + '.kjt';
+    if (!path.toLowerCase().endsWith('.kjt')) path += '.kjt';
     const storedResult = resultSessionId ? completedEngineResults.get(resultSessionId) : null;
     if (resultSessionId && !storedResult?.path) throw new Error('The simulation results are no longer available.');
     const resultBytes = storedResult ? await readFile(storedResult.path) : null;

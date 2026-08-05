@@ -259,11 +259,11 @@ let currentProjectPassword = null;
 let activeExampleId = null;
 
 function filenameStem(fileName) {
-    return fileName.replace(/\.kjt$/i, '').replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '');
+    return fileName.replace(/\.kjt$/i, '');
 }
 
 function camelCaseFilename(value) {
-    const words = value.trim().replace(/\.konjugate\.json$/i, '').replace(/\.json$/i, '')
+    const words = value.trim().replace(/\.kjt$/i, '')
         .split(/[^A-Za-z0-9]+|(?=[A-Z])/).filter(Boolean);
     if (!words.length) return 'untitled.kjt';
     const stem = words.map((word, index) => {
@@ -4037,7 +4037,8 @@ async function loadExample(id) {
         const example = await window.projectFiles.loadExample(id);
         await loadProjectDocument(JSON.parse(example.content), {
             fileName: example.suggestedFilename,
-            saved: false
+            saved: false,
+            embeddedResult: example.embeddedResult
         });
         activeExampleId = id;
         $('#exampleGuideButton').hidden = false;

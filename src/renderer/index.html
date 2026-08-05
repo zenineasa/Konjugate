@@ -181,6 +181,7 @@
         <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↷</button>
         <span class="divider"></span>
         <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
+        <button class="squareTool rectangleSelectTool" data-tool="rectangleSelect" type="button" aria-label="Select nodes in a rectangle" data-tooltip="Rectangle select">▱</button>
         <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
         <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected">⌫</button>
         <span id="addonToolstripSeparator" class="divider" hidden></span>
@@ -199,6 +200,7 @@
     <main id="canvas" class="canvas" data-tool="select">
         <div id="webglContainer" class="webglContainer"></div>
         <div id="css2dContainer" class="css2dContainer"></div>
+        <div id="selectionRectangle" class="selectionRectangle" aria-hidden="true" hidden></div>
         <div id="endpointPickBanner" class="endpointPickBanner" role="status" aria-live="polite" hidden>
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>

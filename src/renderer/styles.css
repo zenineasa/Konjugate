@@ -288,10 +288,15 @@ input, select { user-select: text; }
 .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .css2dContainer { right: 460px; }
 .webglSurface,
 .css2dSurface { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.webglSurface:focus { outline: none; }
 .css2dSurface { pointer-events: none; }
+.canvas[data-tool="rectangleSelect"] .webglSurface { cursor: crosshair; }
+.selectionRectangle { position: absolute; z-index: 8; pointer-events: none; background: rgb(66 201 188 / 10%); border: 1px solid #62e1d5; box-shadow: 0 0 0 1px rgb(3 13 17 / 45%); }
+.selectionRectangle[hidden] { display: none; }
 .node-label-container { pointer-events: none; }
-.objectLabel { position: relative; width: auto; min-width: 112px; padding: 7px 9px; background: rgb(15 27 36 / 91%); border: 1px solid #2c414d; border-radius: 6px; box-shadow: 0 8px 18px rgb(0 0 0 / 24%); backdrop-filter: blur(8px); transition: width .16s, padding .16s, border-color .16s; pointer-events: auto; }
+.objectLabel { position: relative; width: auto; min-width: 112px; padding: 7px 9px; user-select: none; background: rgb(15 27 36 / 91%); border: 1px solid #2c414d; border-radius: 6px; box-shadow: 0 8px 18px rgb(0 0 0 / 24%); backdrop-filter: blur(8px); transition: width .16s, padding .16s, border-color .16s; pointer-events: auto; }
 .objectLabel::before { position: absolute; top: 50%; right: 100%; width: 12px; height: 1px; background: #3d5663; content: ""; }
+.node-label-container.selected .objectLabel { border-color: #62e1d5; box-shadow: 0 0 0 1px rgb(98 225 213 / 24%), 0 8px 18px rgb(0 0 0 / 24%); }
 .objectLabel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .objectLabel strong { color: #d5e2e8; font-size: 11px; font-weight: 650; }
 .typeBadge { display: none; padding: 2px 5px; color: #70d8cf; background: rgb(66 201 188 / 10%); border-radius: 3px; font-size: 7px; }

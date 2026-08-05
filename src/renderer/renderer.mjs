@@ -18,6 +18,7 @@ import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs'
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
+import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
 import {
     CSS2DObject,
@@ -284,6 +285,7 @@ const relationshipObjects = new Map();
 const nodePickTargets = [];
 const relationshipPickTargets = [];
 let selectedNode = null;
+const selectedNodeIds = new Set();
 let selectedRelationship = null;
 let currentTool = 'select';
 let currentView = 'orbit';
@@ -441,32 +443,44 @@ transformControls.addEventListener('dragging-changed', (event) => {
     orbitControls.enabled = !event.value;
 });
 transformControls.addEventListener('objectChange', () => {
+    const object = transformControls.object;
+    if (object && transformLastPosition && selectedNodeIds.size > 1) {
+        const delta = object.position.clone().sub(transformLastPosition);
+        selectedNodeIds.forEach((id) => {
+            if (id !== object.userData.id) nodeObjects.get(id)?.position.add(delta);
+        });
+        transformLastPosition.copy(object.position);
+    }
     updateRelationships();
     updateSelectionOutline();
 });
-let transformStartPosition = null;
+let transformStartPositions = null;
+let transformLastPosition = null;
 transformControls.addEventListener('mouseDown', () => {
-    transformStartPosition = transformControls.object?.position.clone() ?? null;
+    const object = transformControls.object;
+    transformStartPositions = object ? new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()])) : null;
+    transformLastPosition = object?.position.clone() ?? null;
 });
 transformControls.addEventListener('mouseUp', () => {
     const object = transformControls.object;
-    if (!object || !transformStartPosition || object.position.equals(transformStartPosition)) {
-        transformStartPosition = null;
+    if (!object || !transformStartPositions || object.position.equals(transformStartPositions.get(object.userData.id))) {
+        transformStartPositions = null;
+        transformLastPosition = null;
         return;
     }
-    const from = transformStartPosition.clone();
-    const to = object.position.clone();
+    const from = new Map([...transformStartPositions].map(([id, position]) => [id, position.clone()]));
+    const to = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
+    const applyPositions = (positions) => {
+        positions.forEach((position, id) => nodeObjects.get(id)?.position.copy(position));
+        updateRelationships();
+        updateSelectionOutline();
+    };
     recordHistory({
-        undo: () => {
-            object.position.copy(from);
-            updateRelationships();
-        },
-        redo: () => {
-            object.position.copy(to);
-            updateRelationships();
-        }
+        undo: () => applyPositions(from),
+        redo: () => applyPositions(to)
     });
-    transformStartPosition = null;
+    transformStartPositions = null;
+    transformLastPosition = null;
 });
 
 scene.add(new THREE.HemisphereLight(0xbfe4f2, 0x16212a, 2.25));
@@ -536,6 +550,10 @@ function createNodeLabel(definition, geometry) {
 
     wrapper.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
+        if (event.button === 0 && event.shiftKey && !activeEndpointPick) {
+            event.preventDefault();
+            selectNode(nodeObjects.get(definition.id), { additive: true });
+        }
     });
     wrapper.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -543,6 +561,7 @@ function createNodeLabel(definition, geometry) {
             chooseEndpointNode(definition.id);
             return;
         }
+        if (event.shiftKey) return;
         selectNode(nodeObjects.get(definition.id));
         openNodeEditor(definition);
     });
@@ -574,13 +593,7 @@ function createNode(definition) {
 
 model.nodes.forEach(createNode);
 
-const selectionOutline = new THREE.BoxHelper(undefined, 0x62e1d5);
-selectionOutline.material.depthTest = false;
-selectionOutline.material.transparent = true;
-selectionOutline.material.opacity = 0.9;
-selectionOutline.renderOrder = 20;
-selectionOutline.visible = false;
-scene.add(selectionOutline);
+const selectionOutlines = new Map();
 
 function relationshipPoints(definition) {
     const source = nodeObjects.get(definition.source).position;
@@ -752,34 +765,42 @@ const dragControls = new DragControls(
     renderer.domElement
 );
 dragControls.recursive = false;
-let dragStartPosition = null;
+let dragStartPositions = null;
+let dragLastPosition = null;
 dragControls.addEventListener('dragstart', (event) => {
     orbitControls.enabled = false;
-    dragStartPosition = event.object.position.clone();
-    selectNode(event.object);
+    if (!selectedNodeIds.has(event.object.userData.id)) selectNode(event.object);
+    dragStartPositions = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
+    dragLastPosition = event.object.position.clone();
 });
-dragControls.addEventListener('drag', () => {
+dragControls.addEventListener('drag', (event) => {
+    if (dragLastPosition && selectedNodeIds.size > 1) {
+        const delta = event.object.position.clone().sub(dragLastPosition);
+        selectedNodeIds.forEach((id) => {
+            if (id !== event.object.userData.id) nodeObjects.get(id)?.position.add(delta);
+        });
+        dragLastPosition.copy(event.object.position);
+    }
     updateRelationships();
     updateSelectionOutline();
 });
 dragControls.addEventListener('dragend', (event) => {
     orbitControls.enabled = true;
-    if (dragStartPosition && !event.object.position.equals(dragStartPosition)) {
-        const object = event.object;
-        const from = dragStartPosition.clone();
-        const to = object.position.clone();
+    if (dragStartPositions && !event.object.position.equals(dragStartPositions.get(event.object.userData.id))) {
+        const from = new Map([...dragStartPositions].map(([id, position]) => [id, position.clone()]));
+        const to = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
+        const applyPositions = (positions) => {
+            positions.forEach((position, id) => nodeObjects.get(id)?.position.copy(position));
+            updateRelationships();
+            updateSelectionOutline();
+        };
         recordHistory({
-            undo: () => {
-                object.position.copy(from);
-                updateRelationships();
-            },
-            redo: () => {
-                object.position.copy(to);
-                updateRelationships();
-            }
+            undo: () => applyPositions(from),
+            redo: () => applyPositions(to)
         });
     }
-    dragStartPosition = null;
+    dragStartPositions = null;
+    dragLastPosition = null;
 });
 
 const raycaster = new THREE.Raycaster();
@@ -804,34 +825,75 @@ function rootNodeFromIntersection(intersection) {
 }
 
 function updateSelectionOutline() {
-    if (!selectedNode || !selectedNode.visible) {
-        selectionOutline.visible = false;
-        return;
-    }
-    selectionOutline.setFromObject(selectedNode);
-    selectionOutline.visible = true;
+    $$('.node-label-container').forEach((label) => {
+        label.classList.toggle('selected', selectedNodeIds.has(Number(label.dataset.node)));
+    });
+    selectionOutlines.forEach((outline, id) => {
+        if (selectedNodeIds.has(id) && nodeObjects.get(id)?.visible) return;
+        scene.remove(outline);
+        outline.geometry.dispose();
+        outline.material.dispose();
+        selectionOutlines.delete(id);
+    });
+    selectedNodeIds.forEach((id) => {
+        const node = nodeObjects.get(id);
+        if (!node?.visible) return;
+        let outline = selectionOutlines.get(id);
+        if (!outline) {
+            outline = new THREE.BoxHelper(node, 0x62e1d5);
+            outline.material.depthTest = false;
+            outline.material.transparent = true;
+            outline.material.opacity = 0.9;
+            outline.renderOrder = 20;
+            selectionOutlines.set(id, outline);
+            scene.add(outline);
+        }
+        outline.setFromObject(node);
+    });
 }
 
-function selectNode(node) {
-    selectedNode = node;
+function selectNode(node, { additive = false } = {}) {
+    if (!node?.visible) return;
+    if (additive) {
+        if (selectedNodeIds.has(node.userData.id)) {
+            selectedNodeIds.delete(node.userData.id);
+            selectedNode = [...selectedNodeIds].map((id) => nodeObjects.get(id)).filter(Boolean).at(-1) ?? null;
+        } else {
+            selectedNodeIds.add(node.userData.id);
+            selectedNode = node;
+        }
+    } else {
+        selectedNodeIds.clear();
+        selectedNodeIds.add(node.userData.id);
+        selectedNode = node;
+    }
     selectedRelationship = null;
     updateRelationshipSelection();
     updateSelectionOutline();
-    if (activeResult) window.addons.publishEvent('selection.change', node.userData.id);
+    if (additive && selectedNodeIds.size !== 1) hideCards();
+    if (!activeResult && currentTool === 'move' && transformControls.object &&
+        !selectedNodeIds.has(transformControls.object.userData.id)) {
+        if (selectedNode) transformControls.attach(selectedNode);
+        else transformControls.detach();
+    }
+    if (!activeResult && selectedNodeIds.size > 1) $('#statusText').textContent = `${selectedNodeIds.size} nodes selected`;
+    if (activeResult) window.addons.publishEvent('selection.change', selectedNodeIds.size === 1 ? selectedNode?.userData.id : null);
 }
 
 function selectRelationship(relationship) {
     selectedNode = null;
+    selectedNodeIds.clear();
     selectedRelationship = relationship;
-    selectionOutline.visible = false;
+    updateSelectionOutline();
     updateRelationshipSelection();
     if (activeResult) window.addons.publishEvent('selection.change', null);
 }
 
 function clearSelection() {
     selectedNode = null;
+    selectedNodeIds.clear();
     selectedRelationship = null;
-    selectionOutline.visible = false;
+    updateSelectionOutline();
     updateRelationshipSelection();
     transformControls.detach();
     if (activeResult) window.addons.publishEvent('selection.change', null);
@@ -1835,12 +1897,12 @@ function setResultModeLocked(locked) {
     if (locked) {
         discardAssistantProposal();
         hideAssistantPanel();
-        $$('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === 'select'));
+        $$('.toolstrip [data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === 'select'));
         setTool('select');
     } else if (toolBeforeResult) {
         const restoredTool = toolBeforeResult;
         toolBeforeResult = null;
-        $$('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === restoredTool));
+        $$('.toolstrip [data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === restoredTool));
         setTool(restoredTool);
     }
     $('#nodeModelActions').hidden = locked || !$('[data-node-tab="model"]').classList.contains('active');
@@ -2501,6 +2563,7 @@ function createRelationshipBundleOverlay(key) {
     scene.add(anchor);
     element.addEventListener('pointerdown', (event) => event.stopPropagation());
     element.addEventListener('click', (event) => {
+        if (event.shiftKey) return;
         const row = event.target.closest('.relationshipRow');
         const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
         const definition = row
@@ -3395,26 +3458,96 @@ function openEdgeBuilder(clientX, clientY) {
 
 let nodePointerDown = null;
 
+function captureAdditiveNodeSelection(event) {
+    if (event.button !== 0 || !event.shiftKey || activeEndpointPick || currentTool === 'rectangleSelect') return;
+    const label = event.target.closest?.('.node-label-container');
+    let node = label ? nodeObjects.get(Number(label.dataset.node)) : null;
+    if (!node && event.currentTarget === renderer.domElement) {
+        setPointerFromEvent(event);
+        node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
+    }
+    if (!node) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    selectNode(node, { additive: true });
+}
+
+renderer.domElement.addEventListener('pointerdown', captureAdditiveNodeSelection, { capture: true });
+css2dContainer.addEventListener('pointerdown', captureAdditiveNodeSelection, { capture: true });
+
+let rectangleSelection = null;
+
+function updateSelectionRectangle(clientX, clientY) {
+    if (!rectangleSelection) return;
+    const canvasBounds = canvas.getBoundingClientRect();
+    const left = Math.min(rectangleSelection.startX, clientX);
+    const top = Math.min(rectangleSelection.startY, clientY);
+    const rectangle = $('#selectionRectangle');
+    rectangle.style.left = `${left - canvasBounds.left}px`;
+    rectangle.style.top = `${top - canvasBounds.top}px`;
+    rectangle.style.width = `${Math.abs(clientX - rectangleSelection.startX)}px`;
+    rectangle.style.height = `${Math.abs(clientY - rectangleSelection.startY)}px`;
+}
+
+renderer.domElement.addEventListener('pointerdown', (event) => {
+    if (currentTool !== 'rectangleSelect' || event.button !== 0 || activeResult) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    rectangleSelection = { startX: event.clientX, startY: event.clientY, additive: event.shiftKey };
+    const rectangle = $('#selectionRectangle');
+    rectangle.hidden = false;
+    updateSelectionRectangle(event.clientX, event.clientY);
+}, { capture: true });
+
+window.addEventListener('pointermove', (event) => {
+    if (rectangleSelection) updateSelectionRectangle(event.clientX, event.clientY);
+});
+
+window.addEventListener('pointerup', (event) => {
+    if (!rectangleSelection || event.button !== 0) return;
+    const selection = rectangleSelection;
+    rectangleSelection = null;
+    $('#selectionRectangle').hidden = true;
+    const left = Math.min(selection.startX, event.clientX);
+    const right = Math.max(selection.startX, event.clientX);
+    const top = Math.min(selection.startY, event.clientY);
+    const bottom = Math.max(selection.startY, event.clientY);
+    const rendererBounds = renderer.domElement.getBoundingClientRect();
+    const hits = [...nodeObjects.values()].filter((node) => {
+        if (!node.visible) return false;
+        const projected = node.position.clone().project(camera);
+        const x = rendererBounds.left + (projected.x + 1) * rendererBounds.width / 2;
+        const y = rendererBounds.top + (1 - projected.y) * rendererBounds.height / 2;
+        return x >= left && x <= right && y >= top && y <= bottom;
+    });
+    if (!selection.additive) clearSelection();
+    hits.forEach((node) => {
+        if (!selectedNodeIds.has(node.userData.id)) selectNode(node, { additive: true });
+    });
+    if (hits.length) $('#statusText').textContent = `${selectedNodeIds.size} node${selectedNodeIds.size === 1 ? '' : 's'} selected`;
+});
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || transformControls.dragging) return;
     setPointerFromEvent(event);
     const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
 
     if (node) {
-        selectNode(node);
+        selectNode(node, { additive: event.shiftKey });
         if (activeEndpointPick) {
             nodePointerDown = null;
             chooseEndpointNode(node.userData.id);
             return;
         }
         nodePointerDown = { id: node.userData.id, x: event.clientX, y: event.clientY };
-        if (!activeResult && currentTool === 'move') transformControls.attach(node);
+        if (!activeResult && currentTool === 'move' && selectedNodeIds.has(node.userData.id)) transformControls.attach(node);
         return;
     }
 
     nodePointerDown = null;
 
     if (activeEndpointPick) return;
+    if (event.shiftKey) return;
 
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
@@ -3440,7 +3573,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     );
     const node = nodeObjects.get(nodePointerDown.id);
     nodePointerDown = null;
-    if (pointerTravel <= 4 && node?.visible) openNodeEditor(node.userData.definition);
+    if (pointerTravel <= 4 && node?.visible && !event.shiftKey && selectedNodeIds.size === 1) openNodeEditor(node.userData.definition);
 });
 
 renderer.domElement.addEventListener('contextmenu', (event) => {
@@ -4177,18 +4310,21 @@ $('#closeValidationPanel').addEventListener('click', () => {
 
 function setTool(tool) {
     if (activeResult && tool !== 'select') return;
+    $$('.toolstrip [data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
+    canvas.dataset.tool = tool;
+    rectangleSelection = null;
+    $('#selectionRectangle').hidden = true;
     currentTool = tool;
     dragControls.enabled = !activeResult && tool === 'select';
     transformControls.enabled = !activeResult && tool === 'move';
+    orbitControls.enabled = tool !== 'rectangleSelect';
 
     if (tool !== 'move') transformControls.detach();
     if (tool === 'move' && selectedNode) transformControls.attach(selectedNode);
 }
 
-$$('[data-tool]').forEach((button) => {
+$$('.toolstrip [data-tool]').forEach((button) => {
     button.addEventListener('click', () => {
-        $$('[data-tool]').forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
         setTool(button.dataset.tool);
     });
 });
@@ -4348,15 +4484,12 @@ function updateViewCube() {
 function deleteSelected() {
     if (activeResult) return;
     finishEquationEdit();
-    if (selectedNode) {
-        const node = selectedNode;
+    if (selectedNodeIds.size) {
+        const nodeIds = new Set(selectedNodeIds);
         const affectedRelationships = [];
         relationshipObjects.forEach((relationship) => {
             const definition = relationship.definition;
-            if (
-                definition.source === node.userData.id ||
-                definition.target === node.userData.id
-            ) {
+            if (nodeIds.has(definition.source) || nodeIds.has(definition.target)) {
                 affectedRelationships.push({
                     id: definition.id,
                     visible: relationship.line.visible
@@ -4364,7 +4497,7 @@ function deleteSelected() {
             }
         });
         const applyDeleted = (deleted) => {
-            setNodeVisibility(node.userData.id, !deleted);
+            nodeIds.forEach((id) => setNodeVisibility(id, !deleted));
             affectedRelationships.forEach((relationship) => {
                 setRelationshipVisibility(
                     relationship.id,
@@ -4383,6 +4516,96 @@ function deleteSelected() {
             redo: () => setRelationshipVisibility(id, false)
         });
         selectedRelationship = null;
+    }
+}
+
+function copySelectedGraph() {
+    if (activeResult || !selectedNodeIds.size) return false;
+    const fragment = createGraphFragment(serializeProjectDocument(), selectedNodeIds);
+    if (!fragment) return false;
+    window.modelClipboard.write(fragment);
+    $('#statusText').textContent = `${fragment.nodes.length} node${fragment.nodes.length === 1 ? '' : 's'} copied`;
+    return true;
+}
+
+function hydrateFragmentNode(node) {
+    const appearance = node.appearance ?? {};
+    const importedGeometry = appearance.type === 'mesh' ? geometryFromDocument(appearance.mesh) : null;
+    return {
+        id: node.id,
+        title: node.name || 'Untitled node',
+        type: node.type || 'Custom node',
+        shape: importedGeometry ? 'imported' : appearance.shape || 'box',
+        position: node.position?.length === 3 ? node.position : [0, 0, 0],
+        color: Number.parseInt(String(appearance.color ?? '#34727a').replace('#', ''), 16),
+        importedGeometry,
+        geometryFileName: appearance.fileName ?? null,
+        badgeClass: '',
+        substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
+        sourceTerms: node.sourceTerms ?? [],
+        states: (node.states ?? []).map((state) => ({
+            id: state.id,
+            label: state.name,
+            symbol: state.symbol,
+            initialValue: state.initialValue,
+            unit: state.unit ?? '',
+            value: `${state.initialValue}${state.unit ? ` ${state.unit}` : ''}`,
+            className: ''
+        }))
+    };
+}
+
+function hydrateFragmentRelationship(edge) {
+    return {
+        id: edge.id,
+        title: edge.name || 'Untitled relationship',
+        source: edge.source.nodeId,
+        sourceStateId: edge.source.stateId ?? null,
+        target: edge.target.nodeId,
+        targetStateId: edge.target.stateId ?? null,
+        directionality: edge.directionality ?? 'directed',
+        equation: edge.equation ?? '',
+        equationModel: edge.equationModel,
+        parameters: edge.parameters ?? [],
+        color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
+        offset: Number(edge.appearance?.offset) || 0
+    };
+}
+
+function pasteGraph() {
+    if (activeResult) return false;
+    const fragment = window.modelClipboard.read();
+    if (!validateGraphFragment(fragment)) return false;
+    try {
+        const remapped = remapGraphFragment(fragment, nextModelEntityId);
+        nextModelEntityId = remapped.nextId;
+        const nodes = remapped.nodes.map(hydrateFragmentNode);
+        const relationships = remapped.edges.map(hydrateFragmentRelationship);
+        model.nodes.push(...nodes);
+        nodes.forEach(createNode);
+        model.relationships.push(...relationships);
+        relationships.forEach(createRelationship);
+        const nodeIds = nodes.map((node) => node.id);
+        const relationshipIds = relationships.map((relationship) => relationship.id);
+        const applyVisible = (visible) => {
+            nodeIds.forEach((id) => setNodeVisibility(id, visible));
+            relationshipIds.forEach((id) => setRelationshipVisibility(id, visible));
+            updateRelationships();
+            updateModelStatus();
+        };
+        clearSelection();
+        nodeIds.forEach((id) => selectNode(nodeObjects.get(id), { additive: selectedNodeIds.size > 0 }));
+        if (currentTool === 'move' && selectedNode) transformControls.attach(selectedNode);
+        recordHistory({ undo: () => applyVisible(false), redo: () => applyVisible(true) });
+        updateRelationships();
+        updateModelStatus();
+        updateValidationStatus();
+        $('#statusText').textContent = `${nodes.length} node${nodes.length === 1 ? '' : 's'} pasted`;
+        return true;
+    } catch (error) {
+        console.error('Copied graph could not be pasted.', error);
+        $('#statusText').textContent = error.message;
+        return false;
     }
 }
 
@@ -4494,6 +4717,16 @@ window.addEventListener('keydown', (event) => {
     if (!isEditing && commandKey && event.key.toLowerCase() === 's') {
         event.preventDefault();
         saveProject(event.shiftKey);
+        return;
+    }
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'c' && selectedNodeIds.size) {
+        event.preventDefault();
+        copySelectedGraph();
+        return;
+    }
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'v') {
+        event.preventDefault();
+        pasteGraph();
         return;
     }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'z') {

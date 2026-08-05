@@ -18,6 +18,17 @@ async function waitFor(window, expression, message, timeout = 5000) {
     throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}`);
 }
 
+async function clickElement(window, expression, modifiers = []) {
+    const point = await evaluate(window, `(() => {
+        const element = ${expression};
+        const bounds = element.getBoundingClientRect();
+        return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
+    })()`);
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...point, modifiers });
+    window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1, modifiers });
+    window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1, modifiers });
+}
+
 export async function runInteractionTests(window) {
     let passed = 0;
     const run = async (name, task) => {
@@ -256,6 +267,60 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || document.querySelector('#nodeModelActions').hidden`), false);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), false);
         assert.equal(await evaluate(window, `document.querySelector('#addonToolstripSeparator').hidden`), true);
+    });
+
+    await run('multi-selection copies, pastes and deletes a connected graph fragment transactionally', async () => {
+        const before = await evaluate(window, `({
+            nodes: [...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length,
+            relationships: document.querySelectorAll('.modelStatus span')[1].textContent
+        })`);
+        await clickElement(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module'))`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await clickElement(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air'))`, ['shift']);
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Real Shift-click did not add the second node.');
+        await clickElement(window, `document.querySelector('.bundleLabel')`, ['shift']);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
+        const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1, modifiers: ['shift'] });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1, modifiers: ['shift'] });
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
+        await evaluate(window, `(() => {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, ctrlKey: true, bubbles: true }));
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true }));
+        })()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module copy')) && [...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Enclosed air copy'))`, 'The copied graph fragment was not pasted.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length`), before.nodes + 2);
+        assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), before.relationships);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length === ${before.nodes}`, 'Deleting the pasted multi-selection did not hide every copied node.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length === ${before.nodes + 2}`, 'Undo did not restore the pasted multi-selection.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length === ${before.nodes}`, 'Undoing paste did not remove the copied graph fragment.');
+    });
+
+    await run('rectangle tool selects visible nodes without opening an inspector', async () => {
+        await evaluate(window, `document.querySelector('[data-tool="rectangleSelect"]').click()`);
+        const bounds = await evaluate(window, `(() => {
+            const labels = [...document.querySelectorAll('.node-label-container')];
+            const battery = labels.find((label) => label.textContent.includes('Battery module')).getBoundingClientRect();
+            const air = labels.find((label) => label.textContent.includes('Enclosed air')).getBoundingClientRect();
+            return {
+                start: { x: Math.round(Math.min(battery.left, air.left) - 220), y: Math.round(Math.min(battery.top, air.top) - 100) },
+                end: { x: Math.round(Math.max(battery.right, air.right) + 20), y: Math.round(Math.max(battery.bottom, air.bottom) + 100) }
+            };
+        })()`);
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...bounds.start });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...bounds.start, button: 'left', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...bounds.end });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...bounds.end, button: 'left', clickCount: 1 });
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Rectangle selection did not select the two enclosed nodes.');
+        const selected = await evaluate(window, `[...document.querySelectorAll('.node-label-container.selected')].map((label) => label.textContent)`);
+        assert.ok(selected.some((label) => label.includes('Battery module')));
+        assert.ok(selected.some((label) => label.includes('Enclosed air')));
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('[data-tool="rectangleSelect"]').classList.contains('active')`), true);
+        await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
     });
 
     await run('icon-only toolstrip controls expose custom accessible tooltips', async () => {

@@ -3550,13 +3550,14 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
 
     if (node) {
-        selectNode(node, { additive: event.shiftKey });
+        const wasSelected = selectedNodeIds.has(node.userData.id);
+        if (!wasSelected) selectNode(node);
         if (activeEndpointPick) {
             nodePointerDown = null;
             chooseEndpointNode(node.userData.id);
             return;
         }
-        nodePointerDown = { id: node.userData.id, x: event.clientX, y: event.clientY };
+        nodePointerDown = { id: node.userData.id, x: event.clientX, y: event.clientY, wasSelected };
         if (!activeResult && currentTool === 'move' && selectedNodeIds.has(node.userData.id)) transformControls.attach(node);
         return;
     }
@@ -3589,8 +3590,12 @@ renderer.domElement.addEventListener('pointerup', (event) => {
         event.clientY - nodePointerDown.y
     );
     const node = nodeObjects.get(nodePointerDown.id);
+    const { wasSelected } = nodePointerDown;
     nodePointerDown = null;
-    if (pointerTravel <= 4 && node?.visible && !event.shiftKey && selectedNodeIds.size === 1) openNodeEditor(node.userData.definition);
+    if (pointerTravel <= 4 && node?.visible && !event.shiftKey) {
+        if (wasSelected && selectedNodeIds.size > 1) selectNode(node);
+        openNodeEditor(node.userData.definition);
+    }
 });
 
 renderer.domElement.addEventListener('contextmenu', (event) => {

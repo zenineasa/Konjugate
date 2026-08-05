@@ -20,6 +20,7 @@ import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
+import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -118,12 +119,12 @@ async function openExampleGuide(id) {
             width: 720,
             height: 760,
             ...exampleGuideBounds,
+            ...auxiliaryWindowPresentation(mainWindow),
             minWidth: 480,
             minHeight: 420,
             frame: false,
             backgroundColor: '#09131b',
             title: `${payload.title} · Example Guide`,
-            parent: mainWindow,
             webPreferences: {
                 preload: join(currentDir, 'exampleGuide', 'preload.cjs'),
                 contextIsolation: true,
@@ -441,7 +442,7 @@ ipcMain.on('windowMinimize', (event) => {
 ipcMain.on('windowClose', (event) => {
     const targetWindow = getWindowFromEvent(event);
     if (!targetWindow) return;
-    if (targetWindow === mainWindow) app.quit();
+    if (senderOwnsWindow(event.sender, mainWindow)) app.quit();
     else targetWindow.close();
 });
 

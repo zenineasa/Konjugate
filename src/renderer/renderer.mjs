@@ -310,6 +310,7 @@ let currentValidation = { valid: false, issues: [], executableModel: null };
 let validationRevision = 0;
 let engineValidationTimer = null;
 let equationEditSession = null;
+let providerEditTarget = null;
 let simulationRunning = false;
 let activeResult = null;
 let activeEngineJobId = null;
@@ -1438,6 +1439,7 @@ function renderEdgeEditor(definition) {
         latexSource.hidden = true;
         output.value = `${definition.implementation.output?.role ?? 'target'}:${definition.implementation.output?.stateId ?? ''}`;
         $('#editEdgeProviderSource').value = definition.implementation.source ?? '';
+        $('#editInsertProviderTemplate').hidden = !definition.implementation.source?.trim();
         $('#editProviderOutputKey').value = definition.implementation.output?.key ?? '';
         renderProviderBindingRows(definition);
     }
@@ -3692,6 +3694,7 @@ function openEdgeBuilder(clientX, clientY) {
     $('#edgeReferencePicker').hidden = false;
     $('#edgeProviderSection').hidden = true;
     $('#edgeProviderSource').value = '';
+    $('#insertProviderTemplate').hidden = true;
     $('#providerOutputKey').value = '';
     $('#providerBindingRows').replaceChildren();
     $$('[data-builder-equation-mode]').forEach((button) => {
@@ -3947,6 +3950,7 @@ function previewProviderSource(source) {
         equationEditSession = { relationshipId: definition.id, definition, before: captureEdgeModel(definition) };
     }
     definition.implementation = { ...definition.implementation, source };
+    $('#editInsertProviderTemplate').hidden = !source.trim();
     updateValidationStatus();
 }
 
@@ -4031,6 +4035,28 @@ $('#editInsertProviderTemplate').addEventListener('click', () => {
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title);
     });
+});
+$('#editOpenProviderEditor').addEventListener('click', () => {
+    if (!selectedRelationship?.implementation) return;
+    providerEditTarget = { type: 'editor', relationshipId: selectedRelationship.id };
+    window.providerEditor.openWindow({
+        source: $('#editEdgeProviderSource').value,
+        kind: selectedRelationship.implementation.kind,
+        title: selectedRelationship.title
+    });
+});
+window.providerEditor.onApplied(({ source }) => {
+    if (!providerEditTarget) return;
+    if (providerEditTarget.type === 'editor') {
+        const relationship = model.relationships.find((candidate) => candidate.id === providerEditTarget.relationshipId);
+        if (!relationship?.implementation) return;
+        changeEdgeModel(relationship, (snapshot) => {
+            snapshot.implementation.source = source;
+        });
+    } else if (providerEditTarget.type === 'builder' && !$('#edgeBuilder').classList.contains('hidden')) {
+        $('#edgeProviderSource').value = source;
+        $('#insertProviderTemplate').hidden = !source.trim();
+    }
 });
 $('#editEdgeProviderSource').addEventListener('input', (event) => {
     previewProviderSource(event.target.value);
@@ -4461,12 +4487,25 @@ $('#edgeImplementationKind').addEventListener('change', (event) => {
         $('#edgeProviderSource').value = defaultProviderSource(
             kind, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
     }
+    $('#insertProviderTemplate').hidden = !$('#edgeProviderSource').value.trim();
 });
 $('#insertProviderTemplate').addEventListener('click', () => {
     if ($('#edgeProviderSource').value.trim() &&
         !window.confirm('Replace the current provider source with a freshly generated template?')) return;
     $('#edgeProviderSource').value = defaultProviderSource(
         $('#edgeImplementationKind').value, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
+    $('#insertProviderTemplate').hidden = !$('#edgeProviderSource').value.trim();
+});
+$('#edgeProviderSource').addEventListener('input', (event) => {
+    $('#insertProviderTemplate').hidden = !event.target.value.trim();
+});
+$('#openProviderEditor').addEventListener('click', () => {
+    providerEditTarget = { type: 'builder' };
+    window.providerEditor.openWindow({
+        source: $('#edgeProviderSource').value,
+        kind: $('#edgeImplementationKind').value,
+        title: $('#newEdgeName').value
+    });
 });
 $('#addProviderBinding').addEventListener('click', () => addProviderBindingRow());
 $('#newNodeShape').addEventListener('change', (event) => {

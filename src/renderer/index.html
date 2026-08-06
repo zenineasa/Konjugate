@@ -338,7 +338,10 @@
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
                 <div id="editEdgeReferencePicker" class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
                 <div id="editEdgeProviderSection" hidden>
-                    <div class="equationHeading"><h3>Provider source</h3><button id="editInsertProviderTemplate" class="templateButton" type="button">Insert template</button></div>
+                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                        <button id="editOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
+                        <button id="editInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                    </div></div>
                     <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
                     <textarea id="editEdgeProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
                     <h3>Bindings <button id="editAddProviderBinding" type="button">＋</button></h3>
@@ -398,7 +401,10 @@
                 <div id="builderEquationDiagnostics" class="equationDiagnostics" role="status"></div>
                 <div id="edgeReferencePicker" class="referencePicker"><span>Available references</span><div id="stateReferenceChips"></div></div>
                 <div id="edgeProviderSection" hidden>
-                    <div class="equationHeading"><h3>Provider source</h3><button id="insertProviderTemplate" class="templateButton" type="button">Insert template</button></div>
+                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                        <button id="openProviderEditor" class="templateButton" type="button">Open code editor</button>
+                        <button id="insertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                    </div></div>
                     <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
                     <textarea id="edgeProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
                     <h3>Bindings <button id="addProviderBinding" type="button">＋</button></h3>

@@ -434,10 +434,12 @@ input, select { user-select: text; }
 .editorField select, .editorField input { width: 100%; height: 29px; padding: 0 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .editorCard textarea { width: 100%; padding: 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.45; }
 .equationHeading { display: flex; align-items: center; justify-content: space-between; }
+.equationHeading[hidden] { display: none; }
 .equationHeading h3 { margin-bottom: 0 !important; }
 .equationModes { display: flex; padding: 2px; background: #09141b; border: 1px solid #293b46; border-radius: 4px; }
 .equationModes button { height: 21px; padding: 0 7px; color: #627783; background: transparent; border: 0; border-radius: 3px; font-size: 7px; }
 .equationModes button.active { color: #80d9d1; background: rgb(66 201 188 / 12%); }
+.templateButtonGroup { display: flex; gap: 6px; }
 .templateButton { height: 21px; padding: 0 8px; color: #80d9d1; background: rgb(66 201 188 / 8%); border: 1px solid #31525a; border-radius: 4px; font-size: 7px; }
 .templateButton:hover { background: rgb(66 201 188 / 14%); }
 .equationMathField { display: block; width: 100%; min-height: 47px; margin-top: 3px; padding: 8px 9px; color: #d4e1e6; background: #09141b; border: 1px solid #2b3d48; border-radius: 5px; font-size: 17px; --caret-color: var(--accent); --selection-background-color: rgb(66 201 188 / 22%); }

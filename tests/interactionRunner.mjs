@@ -7,6 +7,14 @@ async function evaluate(window, expression) {
     return window.webContents.executeJavaScript(expression, true);
 }
 
+// Checks the rendered computed style rather than the `hidden` IDL property: a `hidden`
+// element can still render if some other CSS rule sets `display` with equal or higher
+// specificity than the UA stylesheet's `[hidden] { display: none }`, which the property
+// alone would never reveal.
+async function isRenderedVisible(window, selector) {
+    return evaluate(window, `getComputedStyle(document.querySelector('${selector}')).display !== 'none'`);
+}
+
 async function waitFor(window, expression, message, timeout = 5000) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeout) {
@@ -404,9 +412,9 @@ export async function runInteractionTests(window) {
             select.value = 'cpp';
             select.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection').hidden`), false);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeEquationHeading').hidden`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeMathField').hidden`), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), false);
+        assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), false);
         assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), /#include <konjugate\/relationshipProvider\.hpp>/);
 
         const source = 'int main() {}';
@@ -450,9 +458,65 @@ export async function runInteractionTests(window) {
             select.value = 'equation';
             select.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeEquationHeading').hidden`), false);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeMathField').hidden`), false);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection').hidden`), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), false);
+    });
+
+    await run('provider editor window syntax-highlights, validates and applies C++ source', async () => {
+        const kindSelect = `document.querySelector('#editEdgeImplementationKind')`;
+        await evaluate(window, `(() => {
+            const select = ${kindSelect};
+            select.value = 'cpp';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        const validCpp = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
+
+        const startedAt = Date.now();
+        let editorWindow = null;
+        while (Date.now() - startedAt < 5000 && !editorWindow) {
+            editorWindow = BrowserWindow.getAllWindows().find((candidate) => candidate !== window && candidate.getTitle().includes('Provider source'));
+            if (!editorWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(editorWindow, 'The provider editor window did not open.');
+        await waitFor(editorWindow, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the provider editor window.');
+        assert.equal(await evaluate(editorWindow, `document.querySelector('#editorKindLabel').textContent`), 'C++');
+
+        await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('valid')`,
+            'The starter template was not reported valid by the C++ syntax check.');
+
+        await evaluate(editorWindow, `(() => {
+            const view = window.__providerEditorView;
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'this is not valid c plus plus' } });
+        })()`);
+        await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('invalid')`,
+            'Invalid C++ source was not flagged by the syntax check.');
+
+        await evaluate(editorWindow, `(() => {
+            const view = window.__providerEditorView;
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(validCpp)} } });
+        })()`);
+        await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('valid')`,
+            'Restoring valid C++ source did not clear the invalid status.');
+
+        await evaluate(editorWindow, `document.querySelector('#applyButton').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(validCpp)}`,
+            'Applying from the provider editor window did not update the relationship editor.');
+
+        await evaluate(editorWindow, `document.querySelector('#close').click()`);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.ok(!BrowserWindow.getAllWindows().includes(editorWindow), 'The provider editor window did not close.');
+
+        // Switch back to Equation so the following equation-editor tests see their expected state.
+        await evaluate(window, `(() => {
+            const select = ${kindSelect};
+            select.value = 'equation';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), true);
+        assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), false);
     });
 
     await run('C++ validation rejects unknown equation symbols while typing', async () => {
@@ -565,8 +629,8 @@ export async function runInteractionTests(window) {
             kind.value = 'python';
             kind.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeProviderSection').hidden`), false);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationHeading').hidden`), true);
+        assert.equal(await isRenderedVisible(window, '#edgeProviderSection'), true);
+        assert.equal(await isRenderedVisible(window, '#edgeEquationHeading'), false);
         assert.match(await evaluate(window, `document.querySelector('#edgeProviderSource').value`), /from konjugate import/);
         await evaluate(window, `(() => {
             document.querySelector('#addProviderBinding').click();

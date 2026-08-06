@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -32,6 +33,9 @@ let mainWindow = null;
 let analysisWindow = null;
 let exampleGuideWindow = null;
 let exampleGuideBounds = null;
+let providerEditorWindow = null;
+let providerEditorBounds = null;
+let providerEditorOwner = null;
 let analysisAddonId = null;
 let visualizerManifest = null;
 let visualizerSession = null;
@@ -144,6 +148,38 @@ async function openExampleGuide(id) {
         exampleGuideWindow.focus();
     }
     return true;
+}
+
+function openProviderEditorWindow(ownerWebContents, payload) {
+    providerEditorOwner = ownerWebContents;
+    if (!providerEditorWindow || providerEditorWindow.isDestroyed()) {
+        providerEditorWindow = new BrowserWindow({
+            width: 820,
+            height: 640,
+            ...providerEditorBounds,
+            ...auxiliaryWindowPresentation(mainWindow),
+            minWidth: 480,
+            minHeight: 360,
+            frame: false,
+            backgroundColor: '#09131b',
+            title: 'Provider source',
+            webPreferences: {
+                preload: join(currentDir, 'providerEditor', 'preload.cjs'),
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: false
+            }
+        });
+        installCustomWindowState(providerEditorWindow);
+        providerEditorWindow.on('close', () => { providerEditorBounds = providerEditorWindow?.getBounds() ?? providerEditorBounds; });
+        providerEditorWindow.on('closed', () => { providerEditorWindow = null; providerEditorOwner = null; });
+        providerEditorWindow.webContents.once('did-finish-load', () => providerEditorWindow?.webContents.send('providerEditorContent', payload));
+        providerEditorWindow.loadFile(join(currentDir, 'providerEditor', 'index.html'));
+    } else {
+        providerEditorWindow.webContents.send('providerEditorContent', payload);
+        providerEditorWindow.show();
+        providerEditorWindow.focus();
+    }
 }
 
 function senderIs(window, event) {
@@ -551,6 +587,108 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
         cancelId: 0
     });
     return result.response === 1;
+});
+
+function runProcess(command, args, { input } = {}) {
+    return new Promise((resolve) => {
+        let child;
+        try {
+            child = spawn(command, args);
+        } catch (error) {
+            resolve({ code: -1, stdout: '', stderr: error.message });
+            return;
+        }
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (chunk) => { stdout += chunk; });
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.on('error', (error) => resolve({ code: -1, stdout: '', stderr: error.message }));
+        child.on('close', (code) => resolve({ code, stdout, stderr }));
+        if (input !== undefined) child.stdin.write(input);
+        child.stdin.end();
+    });
+}
+
+async function resolveCppCompiler() {
+    if (process.platform === 'darwin') {
+        const result = await runProcess('xcrun', ['-find', 'clang++']);
+        if (result.code === 0 && result.stdout.trim()) return result.stdout.trim();
+    }
+    return 'c++';
+}
+
+async function resolveAppleSdkSysroot() {
+    const result = await runProcess('xcrun', ['--show-sdk-path']);
+    return result.code === 0 ? result.stdout.trim() : '';
+}
+
+function parseClangDiagnostics(stderr, filePath) {
+    const pattern = /^(.*):(\d+):(\d+):\s+(error|warning|note):\s+(.*)$/;
+    const severityByClangLevel = { error: 'error', warning: 'warning', note: 'info' };
+    const diagnostics = [];
+    for (const rawLine of stderr.split('\n')) {
+        const match = rawLine.match(pattern);
+        if (!match || match[1] !== filePath) continue;
+        diagnostics.push({
+            line: Number(match[2]),
+            column: Number(match[3]),
+            severity: severityByClangLevel[match[4]] ?? 'error',
+            message: match[5]
+        });
+    }
+    return diagnostics;
+}
+
+// Runs `-fsyntax-only`, a parse/type-check pass that never produces or runs a binary, so
+// live validation cannot execute anything the user has typed.
+async function validateCppSource(source) {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateProviderCheck-'));
+    try {
+        const filePath = join(directory, 'relationship.cpp');
+        await writeFile(filePath, source ?? '', 'utf8');
+        const compiler = await resolveCppCompiler();
+        const args = ['-std=c++20', '-fsyntax-only', '-I' + join(app.getAppPath(), 'engine', 'include')];
+        if (process.platform === 'darwin') {
+            const sysroot = await resolveAppleSdkSysroot();
+            if (sysroot) args.push('-isysroot', sysroot);
+        }
+        args.push(filePath);
+        const result = await runProcess(compiler, args);
+        return { valid: result.code === 0, diagnostics: parseClangDiagnostics(result.stderr, filePath) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}
+
+// Pure ast.parse — a syntax check only. It never imports or executes the source, which
+// matters because this runs automatically as the user types.
+const PYTHON_SYNTAX_CHECK_SCRIPT = 'import ast, sys\n'
+    + 'try:\n'
+    + '    ast.parse(sys.stdin.read())\n'
+    + 'except SyntaxError as error:\n'
+    + '    print(f"{error.lineno or 1}:{error.offset or 1}: {error.msg}", file=sys.stderr)\n'
+    + '    sys.exit(1)\n';
+
+async function validatePythonSource(source) {
+    const result = await runProcess('python3', ['-c', PYTHON_SYNTAX_CHECK_SCRIPT], { input: source ?? '' });
+    if (result.code === 0) return { valid: true, diagnostics: [] };
+    const match = result.stderr.trim().match(/^(\d+):(\d+):\s*(.*)$/);
+    if (!match) {
+        return { valid: false, diagnostics: [{ line: 1, column: 1, severity: 'error', message: result.stderr.trim() || 'Python syntax check failed.' }] };
+    }
+    return { valid: false, diagnostics: [{ line: Number(match[1]), column: Number(match[2]), severity: 'error', message: match[3] }] };
+}
+
+ipcMain.handle('providerEditorOpenWindow', (event, payload) => {
+    openProviderEditorWindow(event.sender, payload);
+});
+
+ipcMain.handle('providerEditorValidate', async (_event, { source, kind }) => (
+    kind === 'python' ? validatePythonSource(source) : validateCppSource(source)
+));
+
+ipcMain.handle('providerEditorApply', (_event, { source }) => {
+    providerEditorOwner?.send('providerEditorApplied', { source });
 });
 
 ipcMain.handle('aiListConfigurations', async (event) => {

@@ -41,6 +41,11 @@ contextBridge.exposeInMainWorld('projectFiles', {
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });
 
+contextBridge.exposeInMainWorld('providerEditor', {
+    openWindow: (payload) => ipcRenderer.invoke('providerEditorOpenWindow', payload),
+    onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload))
+});
+
 const graphClipboardFormat = 'application/x-konjugate-graph-fragment';
 contextBridge.exposeInMainWorld('modelClipboard', {
     write: (fragment) => clipboard.writeBuffer(graphClipboardFormat, Buffer.from(JSON.stringify(fragment))),

@@ -3,6 +3,7 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -626,9 +627,28 @@ function runProcess(command, args, { input } = {}) {
 async function resolveCppCompiler() {
     if (process.platform === 'darwin') {
         const result = await runProcess('xcrun', ['-find', 'clang++']);
-        if (result.code === 0 && result.stdout.trim()) return result.stdout.trim();
+        if (result.code === 0 && result.stdout.trim()) return { compiler: result.stdout.trim(), flavor: 'clang' };
     }
-    return 'c++';
+    if (process.platform === 'win32') {
+        const msvcBin = 'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64';
+        if (existsSync(msvcBin) && !process.env.PATH.includes(msvcBin)) {
+            process.env.PATH = msvcBin + ';' + process.env.PATH;
+        }
+        const candidateCls = [
+            'cl.exe',
+            'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\cl.exe',
+            'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.40.33807\\bin\\Hostx64\\x64\\cl.exe'
+        ];
+        for (const candidate of candidateCls) {
+            const clResult = await runProcess(candidate, ['/?']);
+            if (clResult.code === 0 || clResult.stderr.includes('Microsoft') || clResult.stdout.includes('Microsoft')) {
+                return { compiler: candidate, flavor: 'msvc' };
+            }
+        }
+        const clangResult = await runProcess('clang++', ['--version']);
+        if (clangResult.code === 0) return { compiler: 'clang++', flavor: 'clang' };
+    }
+    return { compiler: 'c++', flavor: 'clang' };
 }
 
 async function resolveAppleSdkSysroot() {
@@ -636,39 +656,67 @@ async function resolveAppleSdkSysroot() {
     return result.code === 0 ? result.stdout.trim() : '';
 }
 
-function parseClangDiagnostics(stderr, filePath) {
-    const pattern = /^(.*):(\d+):(\d+):\s+(error|warning|note):\s+(.*)$/;
-    const severityByClangLevel = { error: 'error', warning: 'warning', note: 'info' };
+function parseCompilerDiagnostics(output, filePath) {
+    const clangPattern = /^(.*):(\d+):(\d+):\s+(error|warning|note):\s+(.*)$/;
+    const msvcPattern = /^(.*)\((\d+)(?:,(\d+))?\):\s+(error|warning)\s+([A-Z0-9]+):\s+(.*)$/;
+    const severityByLevel = { error: 'error', warning: 'warning', note: 'info' };
     const diagnostics = [];
-    for (const rawLine of stderr.split('\n')) {
-        const match = rawLine.match(pattern);
-        if (!match || match[1] !== filePath) continue;
-        diagnostics.push({
-            line: Number(match[2]),
-            column: Number(match[3]),
-            severity: severityByClangLevel[match[4]] ?? 'error',
-            message: match[5]
-        });
+    for (const rawLine of output.split('\n')) {
+        const trimmed = rawLine.trim();
+        const clangMatch = trimmed.match(clangPattern);
+        if (clangMatch && (clangMatch[1] === filePath || clangMatch[1].endsWith('relationship.cpp'))) {
+            diagnostics.push({
+                line: Number(clangMatch[2]),
+                column: Number(clangMatch[3]),
+                severity: severityByLevel[clangMatch[4]] ?? 'error',
+                message: clangMatch[5]
+            });
+            continue;
+        }
+        const msvcMatch = trimmed.match(msvcPattern);
+        if (msvcMatch && (msvcMatch[1] === filePath || msvcMatch[1].endsWith('relationship.cpp'))) {
+            diagnostics.push({
+                line: Number(msvcMatch[2]),
+                column: Number(msvcMatch[3] ?? 1),
+                severity: severityByLevel[msvcMatch[4]] ?? 'error',
+                message: `${msvcMatch[5]}: ${msvcMatch[6]}`
+            });
+        }
     }
     return diagnostics;
 }
 
-// Runs `-fsyntax-only`, a parse/type-check pass that never produces or runs a binary, so
-// live validation cannot execute anything the user has typed.
+// Runs syntax checking (-fsyntax-only on Clang/GCC, /zs on MSVC), a parse/type-check pass that never produces or runs a binary.
 async function validateCppSource(source) {
     const directory = await mkdtemp(join(tmpdir(), 'konjugateProviderCheck-'));
     try {
         const filePath = join(directory, 'relationship.cpp');
         await writeFile(filePath, source ?? '', 'utf8');
-        const compiler = await resolveCppCompiler();
-        const args = ['-std=c++20', '-fsyntax-only', '-I' + join(app.getAppPath(), 'engine', 'include')];
-        if (process.platform === 'darwin') {
-            const sysroot = await resolveAppleSdkSysroot();
-            if (sysroot) args.push('-isysroot', sysroot);
+        const { compiler, flavor } = await resolveCppCompiler();
+        const includePath = join(app.getAppPath(), 'engine', 'include');
+        let args;
+        if (flavor === 'msvc') {
+            if (!process.env.INCLUDE) {
+                const defaultIncludeDirs = [
+                    'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\include',
+                    'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt',
+                    'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um',
+                    'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared'
+                ];
+                process.env.INCLUDE = defaultIncludeDirs.filter(existsSync).join(';');
+            }
+            args = ['/std:c++20', '/EHsc', '/Zs', '/nologo', '/I' + includePath, filePath];
+        } else {
+            args = ['-std=c++20', '-fsyntax-only', '-I' + includePath];
+            if (process.platform === 'darwin') {
+                const sysroot = await resolveAppleSdkSysroot();
+                if (sysroot) args.push('-isysroot', sysroot);
+            }
+            args.push(filePath);
         }
-        args.push(filePath);
         const result = await runProcess(compiler, args);
-        return { valid: result.code === 0, diagnostics: parseClangDiagnostics(result.stderr, filePath) };
+        const output = (result.stderr + '\n' + result.stdout).trim();
+        return { valid: result.code === 0, diagnostics: parseCompilerDiagnostics(output, filePath) };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

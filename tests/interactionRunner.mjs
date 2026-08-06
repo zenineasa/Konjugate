@@ -59,7 +59,12 @@ export async function runInteractionTests(window) {
     });
 
     await run('example selection opens its companion guide', async () => {
-        const guideWindow = BrowserWindow.getAllWindows().find((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide'));
+        const initialStartedAt = Date.now();
+        let guideWindow = null;
+        while (Date.now() - initialStartedAt < 5000 && !guideWindow) {
+            guideWindow = BrowserWindow.getAllWindows().find((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide'));
+            if (!guideWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
         assert.ok(guideWindow, 'Example guide window did not open.');
         await waitFor(guideWindow, `document.querySelector('#guideTitle').textContent.includes('Thermal Management')`, 'Example guide content did not render.');
         assert.match(await evaluate(guideWindow, `document.querySelector('#content').textContent`), /enclosed-air volume/i);

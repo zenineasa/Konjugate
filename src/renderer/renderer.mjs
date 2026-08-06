@@ -2376,6 +2376,7 @@ function setResultModeLocked(locked) {
     $('[data-tool="move"]').disabled = locked;
     $('#runConfigurationButton').disabled = locked;
     $('#runButton').disabled = locked || simulationRunning || !currentValidation.valid;
+    $('#exportCsvButton').disabled = !locked;
     transformControls.detach();
     if (locked) {
         discardAssistantProposal();
@@ -2631,6 +2632,42 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
     renderValidationStatus();
 }
 
+function csvField(value) {
+    const text = String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+async function exportResultsCsv() {
+    if (!activeResult || !activeEngineJobId) return;
+    const signals = model.nodes.filter((node) => !node.deleted).flatMap((node) => node.states.map((state) => ({
+        signalId: state.id,
+        header: `${node.title} — ${state.label}${state.unit ? ` (${state.unit})` : ''}`
+    })));
+    if (!signals.length) return;
+    $('#exportCsvButton').disabled = true;
+    try {
+        const series = await window.engine.readResultSeries(activeEngineJobId, signals.map((signal) => signal.signalId), {
+            startTime: 0,
+            endTime: activeResult.availableResultTime ?? Infinity,
+            maxPoints: Infinity
+        });
+        const sampleCount = Math.max(0, ...series.map((item) => item.samples.length));
+        const rows = Array.from({ length: sampleCount }, (_, index) => [
+            series.find((item) => item.samples.length)?.samples[index]?.time ?? '',
+            ...series.map((item) => item.samples[index]?.value ?? '')
+        ]);
+        const csv = [['time (s)', ...signals.map((signal) => signal.header)], ...rows]
+            .map((row) => row.map(csvField).join(',')).join('\n');
+        const outcome = await window.projectFiles.exportResultsCsv(`${filenameStem(currentProjectFilename)}.csv`, csv);
+        if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
+    } catch (error) {
+        console.error('Results could not be exported as CSV.', error);
+        $('#statusText').textContent = 'CSV export failed';
+    } finally {
+        $('#exportCsvButton').disabled = !activeResult;
+    }
+}
+
 function requestCloseResultsConfirmation() {
     const dialog = $('#closeResultsDialog');
     const form = $('form', dialog);
@@ -2739,6 +2776,7 @@ $('#continueRun').addEventListener('click', () => {
 });
 $('#closeResults').addEventListener('click', closeResultPlayback);
 $('#saveResults').addEventListener('click', () => saveProject());
+$('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
 window.addons.onRequest('timeline.seek', (time) => {
     if (!activeResult) return;
     stopResultPlayback();

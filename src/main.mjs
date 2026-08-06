@@ -576,6 +576,20 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
     return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resultBytes) };
 });
 
+ipcMain.handle('projectExportResultsCsv', async (event, { suggestedFilename, csv }) => {
+    const targetWindow = getWindowFromEvent(event);
+    const result = await dialog.showSaveDialog(targetWindow, {
+        title: 'Export results as CSV',
+        defaultPath: suggestedFilename || 'results.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }]
+    });
+    if (result.canceled) return null;
+    let path = result.filePath;
+    if (!path.toLowerCase().endsWith('.csv')) path += '.csv';
+    await writeFile(path, csv, 'utf8');
+    return { path, fileName: basename(path) };
+});
+
 ipcMain.handle('projectConfirmDiscard', async (event) => {
     const result = await dialog.showMessageBox(getWindowFromEvent(event), {
         type: 'warning',

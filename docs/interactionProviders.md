@@ -4,20 +4,44 @@
 
 ## Status
 
-This document is a pre-implementation architecture proposal. It records a direction for discussion and does not define a stable project schema, plugin ABI or engine protocol. The central proposal is that a relationship, and eventually a computational node, may delegate behavior to an execution provider supplied inline or by an engine plugin. Existing equations remain the simplest built-in provider.
+This document originated as a pre-implementation architecture proposal. The initial vertical slice it scoped — stateless C++ and Python providers, evaluated inline with equation semantics — is now implemented, tested and in active use, and is described below as built rather than proposed. The broader architecture (reusable plugins, computational-node providers, FMU/live/remote providers, the public API, packaging) remains a direction for discussion and does not yet define a stable plugin ABI or engine protocol beyond the relationship/source-term provider contract described here. The central proposal is that a relationship, a node's own source term, and eventually a computational node, may delegate behavior to an execution provider supplied inline or by an engine plugin. Existing equations remain the simplest built-in provider.
+
+See [Implementation status](#implementation-status) for a concrete summary of what exists today versus what remains a proposal.
 
 ## Initial implementation scope
 
-The first vertical slice is deliberately narrower than the complete architecture. It adds two programmable relationship kinds:
+The first vertical slice is deliberately narrower than the complete architecture. It adds two programmable implementation kinds, available on both relationships (edges) and a node's own source terms:
 
-- A relationship implemented by C++ source compiled into a native provider executable
-- A relationship implemented by Python source run with a selected interpreter
+- Implemented by C++ source compiled into a native provider executable
+- Implemented by Python source run with a selected interpreter
 
-Both are managed local child processes using the same engine-owned protocol and lifecycle. The user writes the relationship calculation, while a Konjugate-provided language wrapper handles protocol framing, binding tables and process startup. Provider source and binding metadata are stored with the project. The selected compiler or interpreter path remains a machine-local preference.
+Both are managed local child processes using the same engine-owned protocol and lifecycle. The user writes the calculation, while a Konjugate-provided language wrapper handles protocol framing, binding tables and process startup. Provider source and binding metadata are stored with the project. The selected compiler or interpreter path remains a machine-local preference.
 
-The initial providers are stateless, accept bound scalar states and parameters, and return one derivative contribution to an explicitly selected endpoint state. They are evaluated with the same simulation-time semantics as an equation. Persistent provider state, computational-node providers, algebraic outputs, events and commands are deferred until checkpoint and solver interactions have been designed.
+The initial providers are stateless, accept bound scalar states (and, for relationships, parameters), and return one derivative contribution to an explicitly selected output state. They are evaluated with the same simulation-time semantics as an equation. Persistent provider state, computational-node providers, algebraic outputs, events and commands are deferred until checkpoint and solver interactions have been designed.
 
 The initial implementation does not integrate FMUs, Simulink, Modelica, hardware, remote services or arbitrary third-party applications. Those systems will generally require a dedicated plugin and protocol adapter. The generalized manifest, binding and lifecycle design should avoid preventing such plugins later, but no external-software integration is required to validate the first C++ and Python relationship providers.
+
+## Implementation status
+
+This section is the concrete, current-state counterpart to the rest of this document, which mostly still reads as architectural discussion. Update it alongside any change to the provider engine, SDKs or editor UI.
+
+### Built and tested
+
+- **Protocol**: `protocol/relationshipProvider.proto` — a versioned Protobuf handshake/initialize/evaluateBatch/shutdown exchange over framed stdin/stdout, matching [External-process protocol](#external-process-protocol).
+- **C++ SDK**: `engine/include/konjugate/relationshipProvider.hpp` (the public, engine-independent header a provider author includes) plus `engine/src/providerWorker.cpp` (the worker `main()` Konjugate supplies, linked together with the author's implementation into one executable). The wire codec on this side is hand-rolled rather than linked against libprotobuf, so a provider build never needs protobuf installed — see [Author-facing provider classes](#author-facing-provider-classes) for the actual shipped interface, which is a simplified single-`inputs`-list version of the sketch below.
+- **Python SDK**: `engine/sdk/python/konjugate/__init__.py` (author-facing classes) and `__main__.py` (the worker, `python -m konjugate <source>`), with the same hand-rolled wire codec for the same reason.
+- **C++ build pipeline**: `ProviderRuntime` compiles inline C++ source together with the SDK header and worker wrapper on first use, using a discovered compiler (`xcrun -find clang++` plus SDK sysroot on macOS, falling back to `c++`) and caching the built executable by a hash of the source text. No compiler/interpreter *selection* UI exists yet — see [Local toolchains and runtimes](#local-toolchains-and-runtimes).
+- **Engine integration**: `executionPlan.cpp` compiles a programmable edge or source term into the same `ContributionTask`/`ProviderEvaluator` abstraction an equation uses, so provider and equation contributions share evaluation cadence, ordering and reduction. `modelValidator.cpp` validates provider structure (API version, source non-empty, binding key format/uniqueness, output reference) before a run starts.
+- **Concurrency safety**: one child process serves every relationship or source term instance sharing the same inline source (or plugin artifact, in the future), per [Own one worker per plugin artifact](#3-own-one-worker-per-plugin-artifact). Calls into a given `ProviderProcess` are mutex-serialized, since the engine's thread-pool/partitioned execution backends evaluate different nodes concurrently and a raw pipe round-trip is not reentrant. Task-to-instance routing uses each edge/source term's stable numeric ID, not a per-node local index, so two contributions on different nodes never collide.
+- **Source terms as a first-class provider location**: a node's own source term now supports the same Equation/C++/Python choice as a relationship, with no source/target duality — bindings and the output always reference the owning node's own states only. See [Source terms](#source-terms) below; this was not in the original scope of this document and is documented here as an adopted extension of it.
+- **Validation stance on bindings**: neither a relationship nor a source term is required to declare any input binding — a provider may legitimately compute from parameters, time, or nothing at all. The one exception is a soft warning (not an error) when a provider has zero bindings *and* its source still contains the generated template's unedited `TODO: read` marker, since that combination signals the author has not started implementing it. Writing any real source clears the warning regardless of whether bindings are ever added.
+- **Editor UI**: both the relationship editor/builder and a new dedicated source-term editor/builder offer an Implementation selector (Equation / C++ program / Python program), a bindings list, an output-key field, starter-template generation (`src/providerTemplate.mjs`, regenerable via "Reset template"), and an "Open code editor" button that opens a dedicated syntax-highlighted, live-validated editor window — see [User experience](#user-experience).
+
+### Not yet built
+
+- A settings surface for choosing among discovered compilers/interpreters (compiler/interpreter discovery beyond the single hard-coded macOS `xcrun` default and `python3`/`pythonInterpreter` config field).
+- Recording compiler identity, build configuration and artifact hash in the project or results, and packaging providers for portability across machines (see [Reproducibility and results](#reproducibility-and-results), [Packaging and portability](#packaging-and-portability)).
+- Everything scoped as a non-goal below: reusable plugin packaging, stateful/computational-node providers, algebraic outputs, events and commands, FMU/live/remote providers, the public engine API, and multi-output relationships.
 
 ## Add-ons and plugins
 
@@ -104,6 +128,19 @@ This distinction preserves the graph-native model without forbidding realistic p
 | Stateful black box whose internals cannot be exposed | Node provider with declared opaque state |
 | External program supervising several relationships | Explicit supervisory node or subsystem |
 
+## Source terms
+
+**Implemented.** A node's own source term — a contribution to one of that node's own states, with no other endpoint — is structurally the same kind of stateless, edge-boundary-free contribution described above, and the engine already represents it identically: both a relationship and a source term compile into the same `ContributionTask`, share `ProviderRuntime`, and are evaluated with the same substep-synchronous cadence. This document did not originally scope source terms as a programmable location; the implementation extended the relationship-provider work to cover them once it became clear the underlying engine contract required no changes to do so.
+
+The one real difference from a relationship provider is the absence of source/target duality:
+
+- A source term has exactly one owning node. Bindings only ever reference that node's own states — there is no "which endpoint" choice, and no node-level parameter concept to bind against (parameters belong to relationships, not nodes).
+- The output is `{key, stateId}` with no `role` field, since there is only one node it could belong to.
+- A binding is declared as `{key, kind: "state", stateId}`, again with no `nodeId`/`role` disambiguation needed.
+- Zero declared bindings is legitimate (a source term may be a constant or purely time-based contribution); see [Recommended decisions before implementation](#recommended-decisions-before-implementation) for the shared warning-not-error stance this and relationships now take on that.
+
+Everything else — the C++/Python SDK, the build/interpreter pipeline, the validator's provider-structure checks, the editor's Implementation selector, template generation and the dedicated code-editor window — is shared verbatim between relationships and source terms.
+
 ## Provider kinds
 
 The architecture should eventually allow several provider adapters behind one conceptual contract. The initial implementation supports Equation, C++ program and Python program only. Supporting a future kind does not imply that it is trusted or suitable for every execution mode.
@@ -181,101 +218,95 @@ Add-ons remain outside this interface. A result visualizer continues to receive 
 
 ## Author-facing provider classes
 
-Konjugate should ship a small, versioned C++ SDK header such as `konjugate/relationshipProvider.hpp`. It defines an abstract relationship-provider class and SDK-owned context, description, input-view and output-collector types. A C++ author implements that class rather than writing a `main` function or handling the worker protocol.
+**Implemented**, as `engine/include/konjugate/relationshipProvider.hpp`. It defines the `konjugate::sdk::v1::RelationshipProvider` abstract class and SDK-owned description, port, input-view and output-collector types. A C++ author implements that class rather than writing a `main` function or handling the worker protocol.
 
-The following interface is conceptual; exact type names and convenience functions may change during implementation:
+The shipped interface is a deliberate simplification of this document's original sketch: `describe()` returns one flat `inputs` list (states and parameters are not distinguished at the SDK level — both are just named scalar ports) and one scalar `output`, rather than separate `inputs`/`parameters`/`outputs` collections. Exact type names may still evolve, but this is the real, versioned interface providers are written against today:
 
 ```cpp
-namespace konjugate {
+namespace konjugate::sdk::v1 {
 
-class RelationshipProvider
-{
+struct ScalarPort {
+    std::string key;
+    std::string name;
+    std::string unit;
+};
+
+struct RelationshipDescription {
+    std::string providerId;
+    std::string name;
+    std::vector<ScalarPort> inputs;
+    ScalarPort output;
+};
+
+struct InitializationContext {
+    std::uint64_t instanceId = 0;
+};
+
+class InputView {
+public:
+    double at(std::size_t index) const;
+    double at(std::string_view key) const;
+};
+
+struct EvaluationContext {
+    double simulationTime = 0;
+    double stepSize = 0;
+    InputView inputs;
+};
+
+class OutputCollector {
+public:
+    void addGradient(double value) noexcept;
+};
+
+class RelationshipProvider {
 public:
     virtual ~RelationshipProvider() = default;
-
-    virtual ProviderDescription describe() const = 0;
-
-    virtual void initialize(
-        const InitializationContext& context
-    ) = 0;
-
-    virtual void evaluate(
-        const EvaluationContext& context,
-        const InputValues& inputs,
-        GradientContributions& outputs
-    ) = 0;
-
-    virtual void shutdown() noexcept = 0;
+    virtual RelationshipDescription describe() const = 0;
+    virtual void initialize(const InitializationContext&) {}
+    virtual void evaluate(const EvaluationContext&, OutputCollector&) = 0;
+    virtual void shutdown() noexcept {}
 };
 
 }
+
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider();
 ```
 
-An implementation could resemble:
+An implementation resembles:
 
 ```cpp
 #include <konjugate/relationshipProvider.hpp>
 
-class ThermalConduction final
-    : public konjugate::RelationshipProvider
-{
+class ThermalConduction final : public konjugate::sdk::v1::RelationshipProvider {
 public:
-    konjugate::ProviderDescription describe() const override
-    {
+    konjugate::sdk::v1::RelationshipDescription describe() const override {
         return {
-            .inputs = {
-                konjugate::stateInput("sourceTemperature", "K"),
-                konjugate::stateInput("targetTemperature", "K")
+            "thermalConduction", "Thermal conduction",
+            {
+                {"sourceTemperature", "Source temperature", "K"},
+                {"targetTemperature", "Target temperature", "K"},
+                {"conductance", "Conductance", "W/K"}
             },
-            .parameters = {
-                konjugate::parameter("conductance", "W/K")
-            },
-            .outputs = {
-                konjugate::gradientOutput("targetTemperature", "K/s")
-            }
+            {"targetTemperatureGradient", "Target temperature gradient", "K/s"}
         };
     }
 
-    void initialize(
-        const konjugate::InitializationContext& context
-    ) override
-    {
-        // Validate resolved configuration or prepare non-model caches.
-    }
-
-    void evaluate(
-        const konjugate::EvaluationContext& context,
-        const konjugate::InputValues& inputs,
-        konjugate::GradientContributions& outputs
-    ) override
-    {
-        const double difference =
-            inputs["sourceTemperature"] -
-            inputs["targetTemperature"];
-
-        outputs.add(
-            "targetTemperature",
-            inputs["conductance"] * difference
-        );
-    }
-
-    void shutdown() noexcept override
-    {
+    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
+                  konjugate::sdk::v1::OutputCollector& output) override {
+        const double difference = context.inputs.at("sourceTemperature") - context.inputs.at("targetTemperature");
+        output.addGradient(context.inputs.at("conductance") * difference);
     }
 };
-```
 
-The provider exposes a known factory that returns the implementation through the SDK interface:
-
-```cpp
-std::unique_ptr<konjugate::RelationshipProvider>
-createRelationshipProvider()
-{
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider() {
     return std::make_unique<ThermalConduction>();
 }
 ```
 
-Konjugate supplies the worker wrapper containing `main`. The provider build combines the public SDK header, user implementation and version-matched wrapper into one native executable. The wrapper calls the factory, handles Protobuf framing, resolves instance bindings, constructs SDK views, batches evaluation calls, converts exceptions into structured failures and guarantees shutdown.
+`initialize()` and `shutdown()` default to no-ops and only need overriding when a provider allocates non-model caches. Note that `describe()` collapses the doc's separate "states/parameters" and "gradient outputs" concepts into one `inputs` list and one `output` port — a stateless provider does not need to know at the SDK level whether a bound value came from a state or a parameter; the engine resolves that distinction when it builds the binding table. The default-generated starter template (`src/providerTemplate.mjs`, surfaced via "Reset template" in the editor) always produces exactly this shape, with one `ScalarPort` per declared binding.
+
+Konjugate supplies the worker wrapper containing `main` (`engine/src/providerWorker.cpp`). The provider build combines the public SDK header, user implementation and version-matched wrapper into one native executable. The wrapper calls the factory, handles the wire protocol, resolves instance bindings, constructs SDK views, converts exceptions into structured failures and guarantees shutdown. `ProviderRuntime` (`engine/src/providerRuntime.cpp`) performs this build automatically the first time a given inline source is used in a run, caching the result by a hash of the source text.
 
 ```text
 Public SDK header
@@ -287,13 +318,15 @@ Public SDK header
                                   Konjugate engine
 ```
 
-The abstract C++ interface never crosses the process boundary. The user implementation and worker wrapper are compiled together, so the engine does not share C++ object layout, exception ABI or standard-library containers with the provider. Only the versioned Protobuf protocol crosses between processes. A separately compiled shared library would require a different stable ABI and is not part of the initial design.
+The abstract C++ interface never crosses the process boundary. The user implementation and worker wrapper are compiled together, so the engine does not share C++ object layout, exception ABI or standard-library containers with the provider. Only the versioned Protobuf-shaped protocol crosses between processes. A separately compiled shared library would require a different stable ABI and is not part of the initial design.
+
+Both worker wrappers (`providerWorker.cpp` for C++, `__main__.py` for Python) implement the wire format from `protocol/relationshipProvider.proto` by hand — encoding/decoding the same field numbers and wire types Protobuf would — rather than linking libprotobuf, so a compiled provider executable never needs protobuf as a build dependency. The engine side (`providerRuntime.cpp`) does use generated Protobuf code from the same `.proto` file, so the schema has one source of truth even though the wire codec is duplicated by hand on the worker side; keep the three implementations in sync if the protocol changes.
 
 The public SDK must remain independent of engine implementation types. It should expose small versioned value types, numeric views and metadata rather than Boost property trees, execution-plan objects or mutable engine containers. Exceptions do not cross processes; the wrapper catches them and returns structured provider errors.
 
 ### Description and binding
 
-`describe()` declares provider-local input, parameter and output ports. It does not enumerate or acquire access to project states. The relationship editor binds those ports to concrete states and parameters using stable numeric model IDs, and the native validator approves the complete binding before a worker is initialized.
+`describe()` declares provider-local input and output ports. It does not enumerate or acquire access to project states. The relationship or source-term editor binds those ports to concrete states and parameters using stable numeric model IDs, and the native validator approves the complete binding before a worker is initialized. A source term's bindings only ever reference its own node's states — there is no source/target duality and no node-level parameter concept, so a binding is simply `{key, kind: "state", stateId}` with no `nodeId`/`role`.
 
 For example:
 
@@ -323,52 +356,38 @@ The initial implementation permits one bound gradient output. The description mo
 
 ### Python equivalent
 
-The Python SDK should expose the same lifecycle and concepts without requiring artificial C++ syntax. A base class or runtime-checkable protocol can document the contract, while the loader may accept any class that implements the required methods.
+**Implemented**, as `engine/sdk/python/konjugate/__init__.py`. `RelationshipProvider` is an `abc.ABC`; `describe()`/`evaluate()` are abstract, `initialize()`/`shutdown()` default to no-ops — the same shape as the C++ SDK, including the single flat `inputs` list and single `output` port rather than separate parameter/output collections:
 
 ```python
 from konjugate import (
+    EvaluationContext,
+    InputView,
+    OutputCollector,
+    RelationshipDescription,
     RelationshipProvider,
-    ProviderDescription,
-    state_input,
-    parameter,
-    gradient_output,
+    ScalarPort,
 )
 
 
 class ThermalConduction(RelationshipProvider):
     def describe(self):
-        return ProviderDescription(
-            inputs=[
-                state_input("sourceTemperature", "K"),
-                state_input("targetTemperature", "K"),
+        return RelationshipDescription(
+            "thermalConduction",
+            "Thermal conduction",
+            [
+                ScalarPort("sourceTemperature", "Source temperature", "K"),
+                ScalarPort("targetTemperature", "Target temperature", "K"),
+                ScalarPort("conductance", "Conductance", "W/K"),
             ],
-            parameters=[
-                parameter("conductance", "W/K"),
-            ],
-            outputs=[
-                gradient_output("targetTemperature", "K/s"),
-            ],
+            ScalarPort("targetTemperatureGradient", "Target temperature gradient", "K/s"),
         )
-
-    def initialize(self, context):
-        # Validate resolved configuration or prepare non-model caches.
-        pass
 
     def evaluate(self, context, inputs, outputs):
-        difference = (
-            inputs["sourceTemperature"] -
-            inputs["targetTemperature"]
-        )
-        outputs.add(
-            "targetTemperature",
-            inputs["conductance"] * difference,
-        )
-
-    def shutdown(self):
-        pass
+        difference = inputs["sourceTemperature"] - inputs["targetTemperature"]
+        outputs.add_gradient(inputs["conductance"] * difference)
 ```
 
-Konjugate launches the selected Python interpreter with its supplied worker module. The worker imports the provider, validates its methods, handles the same Protobuf protocol and translates Python exceptions into structured failures. C++ and Python providers therefore share binding, timing and contribution semantics even though their language-level SDKs remain idiomatic.
+Konjugate launches the selected Python interpreter (`python3` by default; no interpreter-discovery UI exists yet, only a `pythonInterpreter` configuration field) with its supplied worker module, `python -m konjugate <source path>`. The worker imports the provider, validates its methods, handles the same wire protocol as the C++ side and translates Python exceptions into structured failures. C++ and Python providers therefore share binding, timing and contribution semantics even though their language-level SDKs remain idiomatic. The Python worker never executes arbitrary source as part of *validation* — the editor's live syntax check (see [User experience](#user-experience)) uses `ast.parse` only, never imports or runs the module — so validation-while-typing cannot execute what the user has typed.
 
 ## Runtime contract
 
@@ -395,6 +414,8 @@ Possible operations are:
 | `shutdown` | Release workers, callbacks, files, devices and child processes reliably |
 
 The distinction between `evaluate` and `commit` matters for solvers that retry a step, evaluate an algebraic loop or roll back after an event. A first implementation may support only providers whose evaluation has no irreversible side effects, but the contract should not assume every evaluation is automatically committed.
+
+Only `describe`, `initialize`, `evaluate` and `shutdown` are implemented today, matching the stateless relationship/source-term SDK above. `commit`, `checkpoint` and `restore` remain future work pending the stateful computational-node provider design.
 
 ## Outputs
 
@@ -430,6 +451,8 @@ The provider is invoked when declared inputs change or an event is scheduled. Th
 
 ## Parallel and partitioned execution
 
+**Partially implemented.** Today `ProviderProcess` simply mutex-serializes every pipe round-trip to a given provider worker, so it is safe to call from the engine's thread-pool and partitioned backends but does not yet reentrantly parallelize across concurrent evaluations. Tasks are routed to a worker by `ContributionTask::sourceId` (a stable identifier), not `::sequence` (a per-node-local index), because the latter collides across nodes/edges under concurrent evaluation. The declared-reentrancy, cost-aware partitioning and invocation-cost reporting described below remain unimplemented.
+
 Provider capabilities must participate in execution planning. A provider may declare itself reentrant, one-instance-per-worker, single-threaded or externally serialized. The partitioner should account for provider computation cost and communication cadence. A stateful instance must remain attached to its owning node or partition unless it supports checkpoint-based migration.
 
 An external-process call across every graph cut could dominate numerical work. Execution summaries should therefore report provider invocation counts, evaluation time, serialization volume, wait time, timeouts and fallback decisions. Automatic backend selection must be allowed to avoid partitioning when provider placement or communication makes it counterproductive.
@@ -445,6 +468,8 @@ The engine should launch a provider process with explicit pipes or a narrowly sc
 Remote providers require a separate transport adapter. A local process protocol should not imply that arbitrary network endpoints are safe or numerically suitable.
 
 ## Local toolchains and runtimes
+
+**Partially implemented.** C++ discovery today is a fixed macOS path only: `xcrun -find clang++` plus the Apple SDK sysroot from `xcrun --show-sdk-path`. Python providers assume a `python3` on `PATH`. Neither has a discovery/selection UI yet, there is no manual executable override, and Windows/Linux discovery is not implemented. Compiled C++ providers are cached by a hash of their source, so an unchanged provider is not rebuilt on every run, but the resulting artifact identity, compiler identity and build configuration are not yet recorded in the project or results. The remainder of this section describes that still-unbuilt discovery and recording UI.
 
 Source-based providers require tools that are installed on the user's computer. Konjugate should discover common compilers and interpreters, validate them and let the user choose among compatible options. It should also allow an executable path to be selected manually. Discovery should inspect documented platform mechanisms and standard executable paths rather than search the entire filesystem.
 
@@ -592,7 +617,11 @@ Packaging must include notices for redistributed provider artifacts. Nothing sho
 
 ## User experience
 
-The relationship editor should continue to default to Equation. Its initial implementation selector offers Equation, C++ program and Python program. Prebuilt providers, installed extensions, FMUs and live connections appear only if their separately designed adapters become available later.
+**Implemented for the initial slice.** Both the relationship editor/builder and the node source-term editor default to Equation and offer an Implementation selector with Equation, C++ program and Python program. Prebuilt providers, installed extensions, FMUs and live connections appear only if their separately designed adapters become available later.
+
+Choosing C++ or Python generates a starter template (`src/providerTemplate.mjs`) scoped to the current bindings and output key, with explicit multi-line comments showing how to read each input and write the output. A "Reset template" action regenerates it after confirmation; it is not shown until the author has started editing, so it never displaces a first look at the generated starter.
+
+Editing happens in a dedicated auxiliary window (`src/providerEditor/`, mirroring the existing example-guide window) rather than inline in the relationship or source-term editor. It hosts a CodeMirror 6 editor with language-aware syntax highlighting and runs the source through a live validity check as the author types (debounced): C++ sources are checked with a real `clang++` syntax-only invocation (`-fsyntax-only`), Python sources are checked with `python3 -c "ast.parse(...)"`. The status indicator reflects `valid`/`invalid`/checking, and Apply is only enabled while the last check passed. Applying writes the source back into the same live-edit session (`beginEquationEditSession`/`finishEquationEdit`) used by the inline equation editors, so the whole edit collapses into one undo/redo entry. An earlier design considered delegating editing to the user's external editor of choice; it was dropped because there is no single correct default editor to launch for every user, and the in-app editor avoids that choice entirely while still providing highlighting and validation.
 
 Before application, the review UI should show:
 
@@ -623,16 +652,16 @@ Results mode should show the effective provider versions and any nondeterministi
 
 This sequence is illustrative. The conceptual author-facing class lifecycle is selected above; exact SDK type names and convenience APIs may still be refined during implementation.
 
-1. Define a separate engine-plugin manifest, registry and trust boundary without changing the existing result-visualizer add-on API.
-2. Define the stateless scalar `relationshipProvider` contract, inline source representation, bindings, output selection and trust prompt.
-3. Define one internal Protobuf worker protocol with persistent process lifetime, strict lifecycle cleanup and batched evaluation.
-4. Implement compiler discovery, a Konjugate C++ wrapper, native build validation and a C++ relationship editor.
-5. Implement interpreter discovery, a Konjugate Python wrapper, environment validation and a Python relationship editor over the same protocol.
-6. Record source, bindings, toolchain identity, artifact hash and provider timing in projects and results.
-7. Add native and interaction regressions proving that equation, C++ and Python edges receive identical bindings and contribution semantics.
-8. Package an inline provider as a reusable plugin and verify generated configuration without adding provider-specific host code.
-9. Measure process and batching overhead before expanding the output contract or adding another plugin contribution kind.
-10. Design stateful computational-node providers, checkpoints and external-software plugins as separate later phases.
+1. **Not done.** Define a separate engine-plugin manifest, registry and trust boundary without changing the existing result-visualizer add-on API.
+2. **Done**, and extended to node source terms as well as relationships. Define the stateless scalar `relationshipProvider` contract, inline source representation, bindings, output selection and trust prompt. (No trust prompt exists yet — see [Security and trust](#security-and-trust).)
+3. **Done.** Define one internal Protobuf worker protocol with persistent process lifetime, strict lifecycle cleanup and batched evaluation.
+4. **Done**, macOS-only discovery. Implement compiler discovery, a Konjugate C++ wrapper, native build validation and a C++ relationship editor.
+5. **Done**, `python3`-on-`PATH` only, no discovery UI. Implement interpreter discovery, a Konjugate Python wrapper, environment validation and a Python relationship editor over the same protocol.
+6. **Partially done.** Source and bindings are recorded in the project; toolchain identity, artifact hash and provider timing are not yet recorded.
+7. **Done.** Add native and interaction regressions proving that equation, C++ and Python edges receive identical bindings and contribution semantics. The same regressions were extended to source terms.
+8. **Not done.** Package an inline provider as a reusable plugin and verify generated configuration without adding provider-specific host code.
+9. **Not done.** Measure process and batching overhead before expanding the output contract or adding another plugin contribution kind.
+10. **Not done.** Design stateful computational-node providers, checkpoints and external-software plugins as separate later phases.
 
 ## Recommended decisions before implementation
 
@@ -689,3 +718,9 @@ The first public transport remains framed standard input/output with one engine 
 ### 13. Share installation presentation, not authority
 
 The application may present one Extensions interface with separate Add-ons and Plugins sections. Add-ons and plugins retain separate directories, registries, manifests, permissions, trust records and runtime hosts. Shared presentation can cover identity, versions, updates, licenses and diagnostics without implying equivalent authority.
+
+### 14. Treat empty bindings as a warning, never a hard error
+
+**Implemented.** A programmable relationship or source term with no input bindings is valid: an edge's contribution can depend only on its own parameters, and a source term can depend only on the node's own state, either of which is a legitimate implementation. The validator therefore never rejects a programmable block for having zero bindings, on either edges or source terms.
+
+Instead, the validator emits a non-blocking `warning`-severity diagnostic (`providerImplementationIncomplete` for edges, `sourceTermImplementationIncomplete` for source terms) when bindings are empty **and** the source still looks like the untouched generated template — detected by the literal marker text `TODO: read` that the templates in `src/providerTemplate.mjs` include in their input-reading comments. Writing any real implementation removes that marker and clears the warning, even if the author's logic still uses no bindings. This keeps the common "forgot to implement it" case visible without blocking valid no-input implementations, and applies identically to relationships and source terms.

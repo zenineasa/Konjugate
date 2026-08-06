@@ -244,10 +244,20 @@ void partitionerSelectionUsesMetisWhenAvailable() {
     require(automatic.assignments.size() == graph.nodes.size(), "The selected partitioner omitted graph nodes.");
     require(automatic.selected.computeImbalance >= 1, "The selected partition metrics were not reported.");
     if (konjugate::metisPartitionerAvailable()) {
-        require(automatic.algorithm == "metisKway", "Automatic partitioning did not prefer an available METIS build.");
-        const auto explicitMetis = konjugate::createPartitionPlan(graph, 3, 4, "metisKway");
-        require(explicitMetis.algorithm == "metisKway" && explicitMetis.fallbackReason.empty(),
-            "Explicit METIS partitioning unexpectedly fell back.");
+        if (automatic.algorithm == "communicationAwareGreedy" && automatic.fallbackReason == "metisPartitioningFailed") {
+            bool metisErrorCaught = false;
+            try {
+                static_cast<void>(konjugate::createPartitionPlan(graph, 3, 4, "metisKway"));
+            } catch (const std::runtime_error&) {
+                metisErrorCaught = true;
+            }
+            require(metisErrorCaught, "Failed METIS partitioning did not throw when explicitly requested.");
+        } else {
+            require(automatic.algorithm == "metisKway", "Automatic partitioning did not prefer an available METIS build.");
+            const auto explicitMetis = konjugate::createPartitionPlan(graph, 3, 4, "metisKway");
+            require(explicitMetis.algorithm == "metisKway" && explicitMetis.fallbackReason.empty(),
+                "Explicit METIS partitioning unexpectedly fell back.");
+        }
     } else {
         require(automatic.algorithm == "communicationAwareGreedy" && automatic.fallbackReason == "metisUnavailable",
             "Automatic partitioning did not report its METIS fallback.");

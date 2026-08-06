@@ -862,6 +862,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         });
     }).catch((error) => {
         if (updateTimer) clearTimeout(updateTimer);
+        console.error(`[Engine Error] Simulation job ${execution.jobId} failed:`, error.message || error);
         execution.cleanup().catch(() => {});
         if (!owner.isDestroyed()) owner.send('engineRunError', { jobId: execution.jobId, message: error.message });
     }).finally(() => activeEngineJobs.delete(execution.jobId));

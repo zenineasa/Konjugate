@@ -105,6 +105,10 @@ function fields(buffer) {
             if (offset + length.value > buffer.length) throw new Error('Truncated Protobuf length-delimited field.');
             result.push({ number, wireType, value: buffer.subarray(offset, offset + length.value) });
             offset += length.value;
+        } else if (wireType === 5) {
+            if (offset + 4 > buffer.length) throw new Error('Truncated Protobuf fixed32 field.');
+            result.push({ number, wireType, value: buffer.subarray(offset, offset + 4) });
+            offset += 4;
         } else {
             throw new Error(`Unsupported Protobuf wire type ${wireType}.`);
         }

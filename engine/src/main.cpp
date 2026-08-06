@@ -12,6 +12,10 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#if defined(_WIN32) || defined(_MSC_VER)
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace {
 void writeFramedMessage(std::ostream& output, const google::protobuf::MessageLite& message) {
@@ -41,6 +45,10 @@ bool hasKjtExtension(const std::filesystem::path& path) {
 }
 
 int main(int argc, char** argv) {
+#if defined(_WIN32) || defined(_MSC_VER)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     if (argc == 3 && std::string(argv[1]) == "capabilities" && std::string(argv[2]) == "--protobuf") {
         konjugate::protocol::EngineEvent event;
         event.set_protocol_version(1);

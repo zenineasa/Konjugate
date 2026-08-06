@@ -86,7 +86,17 @@ This project is currently in the early stages of development.
 
 ## Development
 
-Konjugate supports development on macOS, Windows and Linux. Install the short platform toolchain listed in [the development setup guide](docs/developmentSetup.md), then run the same procedure on every platform:
+Konjugate supports development on macOS, Windows and Linux.
+
+### Prerequisites
+
+- **Windows**: Node.js 22+, Git, CMake, and Visual Studio 2022+ with **Desktop development with C++**. (Run commands in Developer PowerShell).
+- **macOS**: Node.js 22+, CMake (`brew install cmake`), Git, and Xcode Command Line Tools (`xcode-select --install`).
+- **Linux (Ubuntu/Debian)**: Node.js 22+, CMake, Git, and C++ build tools (`sudo apt install build-essential cmake git curl zip unzip tar pkg-config`).
+
+### Quick Start
+
+Run the standard procedure on any platform:
 
 ```bash
 npm ci
@@ -94,7 +104,7 @@ npm run setup
 npm run dev
 ```
 
-Setup uses a pinned vcpkg dependency set for Zlib, OpenSSL, Boost.PropertyTree and METIS. Normal development requires METIS and fails clearly when it cannot be configured; the built-in fallback has a separate explicit test preset.
+Setup uses a pinned `vcpkg` baseline for native dependencies (Zlib, OpenSSL, Boost.PropertyTree, METIS) and configures the C++ engine. MSVC builds automatically enable multi-processor parallel compilation (`/MP`); see [the development setup guide](docs/developmentSetup.md) for Windows build performance optimization tips.
 
 ## Building
 

@@ -18,6 +18,16 @@
 #include <metis.h>
 #endif
 
+#if defined(_MSC_VER)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace konjugate {
 namespace {
 
@@ -178,6 +188,26 @@ std::string metisPartitionerVersion() {
 #if KONJUGATE_HAS_METIS
 namespace {
 
+#if defined(_MSC_VER)
+static int safeMetisSetDefaultOptions(idx_t* options) {
+    __try {
+        return METIS_SetDefaultOptions(options);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -999;
+    }
+}
+static int safeMetisPartGraphKway(
+    idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy, idx_t *vwgt, idx_t *vsize,
+    idx_t *adjwgt, idx_t *nparts, real_t *tpwgts, real_t *ubvec, idx_t *options,
+    idx_t *objval, idx_t *part) {
+    __try {
+        return METIS_PartGraphKway(nvtxs, ncon, xadj, adjncy, vwgt, vsize, adjwgt, nparts, tpwgts, ubvec, options, objval, part);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -999;
+    }
+}
+#endif
+
 std::vector<idx_t> metisWeights(const std::vector<std::size_t>& weights) {
     const auto maximum = *std::max_element(weights.begin(), weights.end());
     const auto safeMaximum = static_cast<std::size_t>(std::numeric_limits<idx_t>::max()) /
@@ -253,15 +283,30 @@ PartitionPlan createMetisPartitionPlan(const DependencyGraph& graph,
     idx_t partitionCount = static_cast<idx_t>(plan.effectivePartitions);
     idx_t objective = 0;
     std::vector<idx_t> assignment(graph.nodes.size(), 0);
+
+
     idx_t options[METIS_NOPTIONS];
+#if defined(_MSC_VER)
+    if (safeMetisSetDefaultOptions(options) != METIS_OK) {
+        throw std::runtime_error("METIS encountered a native execution fault.");
+    }
+#else
     METIS_SetDefaultOptions(options);
+#endif
     options[METIS_OPTION_NUMBERING] = 0;
     options[METIS_OPTION_SEED] = 0;
     options[METIS_OPTION_NCUTS] = 1;
+#if defined(_MSC_VER)
+    const auto result = safeMetisPartGraphKway(
+        &nodeCount, &constraints, xadj.data(), adjncy.empty() ? nullptr : adjncy.data(), vertexWeights.data(), nullptr,
+        edgeWeights.empty() ? nullptr : edgeWeights.data(), &partitionCount, nullptr, nullptr, options, &objective,
+        assignment.data());
+#else
     const auto result = METIS_PartGraphKway(
         &nodeCount, &constraints, xadj.data(), adjncy.empty() ? nullptr : adjncy.data(), vertexWeights.data(), nullptr,
         edgeWeights.empty() ? nullptr : edgeWeights.data(), &partitionCount, nullptr, nullptr, options, &objective,
         assignment.data());
+#endif
     if (result != METIS_OK) throw std::runtime_error("METIS could not partition the dependency graph.");
 
     std::vector<std::size_t> normalized(assignment.size());

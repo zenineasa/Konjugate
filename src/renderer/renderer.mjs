@@ -2953,6 +2953,7 @@ window.engine.onComplete(({ jobId, result }) => {
 });
 window.engine.onError(({ jobId, message }) => {
     if (jobId !== activeEngineJobId) return;
+    console.error(`[Simulation Error] Job ${jobId} failed:`, message);
     simulationRunning = false;
     updateLiveResultControls();
     $('#statusText').textContent = 'Simulation failed';

@@ -121,7 +121,11 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         cleaned = true;
         await rm(directory, { recursive: true, force: true });
     };
-    child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+    child.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        diagnostics += text;
+        console.error('[Engine stderr]', text.trim());
+    });
     const eventDecoder = new FramedEngineEventDecoder();
     child.stdout.on('data', (chunk) => {
         try {

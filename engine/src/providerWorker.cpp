@@ -9,6 +9,10 @@
 #include <map>
 #include <string>
 #include <vector>
+#if defined(_WIN32) || defined(_MSC_VER)
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace {
 
@@ -329,6 +333,10 @@ void buildInstanceBinding(const ProviderInstance& instance,
 } // anonymous namespace
 
 int main() {
+#if defined(_WIN32) || defined(_MSC_VER)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     std::cin.exceptions(std::ios::badbit);
     std::cout.exceptions(std::ios::badbit | std::ios::failbit);
 

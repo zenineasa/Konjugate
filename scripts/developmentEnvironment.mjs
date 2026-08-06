@@ -9,7 +9,21 @@ export const vcpkgCommit = 'eaca4a577b6b678c6e10252754b6988a61746c19';
 export const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const vcpkgDirectory = join(rootDirectory, '.tools', 'vcpkg');
 
+import { existsSync } from 'node:fs';
+
 if (process.platform === 'win32') {
+    const vsSearchDirs = [
+        'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin',
+        'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64',
+        'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin',
+        'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin'
+    ];
+    for (const dir of vsSearchDirs) {
+        if (existsSync(dir) && !process.env.PATH?.includes(dir)) {
+            process.env.PATH = `${dir};${process.env.PATH ?? ''}`;
+        }
+    }
+
     const keepVars = ['SystemRoot', 'SYSTEMROOT', 'SystemDrive', 'TEMP', 'TMP', 'PATH'];
     for (const envVar of ['VCPKG_KEEP_ENV_VARS', 'VCPKG_ENV_PASSTHROUGH_UNTRACKED']) {
         const current = process.env[envVar] ? process.env[envVar].split(';') : [];

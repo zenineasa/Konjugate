@@ -14,7 +14,21 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#include <stdlib.h>
+inline int setenv(const char* name, const char* value, int overwrite) {
+    if (!overwrite) {
+        size_t size = 0;
+        if (getenv_s(&size, nullptr, 0, name) == 0 && size > 0) {
+            return 0;
+        }
+    }
+    return _putenv_s(name, value);
+}
+#endif
+
 namespace {
+
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);

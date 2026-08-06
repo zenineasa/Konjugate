@@ -17,10 +17,20 @@
 #include <openssl/evp.h>
 #include <stdexcept>
 #include <string>
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#include <process.h>
+#include <fcntl.h>
+using ssize_t = intptr_t;
+using pid_t = int;
+#else
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 #include <unordered_map>
+
 #include <vector>
 
 namespace konjugate {
@@ -132,6 +142,81 @@ struct CompilerRunResult {
     std::string diagnostics;
 };
 
+#ifdef _WIN32
+CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vector<std::string>& arguments) {
+    std::string commandLine = "\"" + compilerPath + "\"";
+    for (const auto& arg : arguments) {
+        commandLine += " \"" + arg + "\"";
+    }
+
+    HANDLE hChildStd_OUT_Rd = NULL;
+    HANDLE hChildStd_OUT_Wr = NULL;
+    SECURITY_ATTRIBUTES saAttr;
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+
+    if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0)) {
+        throw std::runtime_error("Failed to create pipe for C++ provider build.");
+    }
+
+    if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(hChildStd_OUT_Rd);
+        CloseHandle(hChildStd_OUT_Wr);
+        throw std::runtime_error("Failed to set handle information for C++ provider build.");
+    }
+
+    PROCESS_INFORMATION piProcInfo;
+    STARTUPINFOA siStartInfo;
+    ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+    ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
+    siStartInfo.cb = sizeof(STARTUPINFOA);
+    siStartInfo.hStdError = hChildStd_OUT_Wr;
+    siStartInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    siStartInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+    std::vector<char> cmdLineBuf(commandLine.begin(), commandLine.end());
+    cmdLineBuf.push_back('\0');
+
+    BOOL bSuccess = CreateProcessA(
+        NULL,
+        cmdLineBuf.data(),
+        NULL,
+        NULL,
+        TRUE,
+        0,
+        NULL,
+        NULL,
+        &siStartInfo,
+        &piProcInfo
+    );
+
+    CloseHandle(hChildStd_OUT_Wr);
+
+    if (!bSuccess) {
+        CloseHandle(hChildStd_OUT_Rd);
+        throw std::runtime_error("Failed to spawn the C++ provider build process: " + std::to_string(GetLastError()));
+    }
+
+    std::string diagnostics;
+    std::array<char, 4096> buffer{};
+    DWORD bytesRead = 0;
+    while (ReadFile(hChildStd_OUT_Rd, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, NULL) && bytesRead > 0) {
+        diagnostics.append(buffer.data(), static_cast<std::size_t>(bytesRead));
+    }
+    CloseHandle(hChildStd_OUT_Rd);
+
+    WaitForSingleObject(piProcInfo.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(piProcInfo.hProcess, &exitCode);
+
+    CloseHandle(piProcInfo.hProcess);
+    CloseHandle(piProcInfo.hThread);
+
+    return {exitCode == 0, diagnostics};
+}
+#else
 CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vector<std::string>& arguments) {
     int errorPipe[2];
     if (::pipe(errorPipe) != 0) throw std::runtime_error("Failed to create a pipe for the C++ provider build.");
@@ -165,6 +250,7 @@ CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vec
     ::waitpid(pid, &status, 0);
     return {WIFEXITED(status) && WEXITSTATUS(status) == 0, diagnostics};
 }
+#endif
 
 // Compiles an inline C++ relationship's source, together with the public SDK header and
 // Konjugate's worker wrapper, into a native provider executable. The build is cached on
@@ -299,7 +385,11 @@ public:
 
     void shutdown() noexcept {
         std::lock_guard<std::mutex> lock(mutex_);
+#ifdef _WIN32
+        if (hProcess_ == NULL) return;
+#else
         if (pid_ <= 0) return;
+#endif
         try {
             EngineToProvider msg;
             msg.mutable_shutdown();
@@ -311,12 +401,120 @@ public:
         if (stdinFd_ != -1) { ::close(stdinFd_); stdinFd_ = -1; }
         if (stdoutFd_ != -1) { ::close(stdoutFd_); stdoutFd_ = -1; }
 
+#ifdef _WIN32
+        DWORD waitResult = WaitForSingleObject(hProcess_, 1000);
+        if (waitResult == WAIT_TIMEOUT) {
+            TerminateProcess(hProcess_, 1);
+        }
+        CloseHandle(hProcess_);
+        hProcess_ = NULL;
+        pid_ = -1;
+#else
         int status = 0;
         ::waitpid(pid_, &status, WNOHANG);
         pid_ = -1;
+#endif
     }
 
 private:
+#ifdef _WIN32
+    void spawn(const ProviderConfiguration& config) {
+        HANDLE hChildStd_IN_Rd = NULL;
+        HANDLE hChildStd_IN_Wr = NULL;
+        HANDLE hChildStd_OUT_Rd = NULL;
+        HANDLE hChildStd_OUT_Wr = NULL;
+
+        SECURITY_ATTRIBUTES saAttr;
+        saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+        saAttr.bInheritHandle = TRUE;
+        saAttr.lpSecurityDescriptor = NULL;
+
+        if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0)) {
+            throw std::runtime_error("Failed to create stdout pipe for provider process.");
+        }
+        if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)) {
+            CloseHandle(hChildStd_OUT_Rd);
+            CloseHandle(hChildStd_OUT_Wr);
+            throw std::runtime_error("Failed to set handle info for stdout pipe.");
+        }
+
+        if (!CreatePipe(&hChildStd_IN_Rd, &hChildStd_IN_Wr, &saAttr, 0)) {
+            CloseHandle(hChildStd_OUT_Rd);
+            CloseHandle(hChildStd_OUT_Wr);
+            throw std::runtime_error("Failed to create stdin pipe for provider process.");
+        }
+        if (!SetHandleInformation(hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0)) {
+            CloseHandle(hChildStd_OUT_Rd);
+            CloseHandle(hChildStd_OUT_Wr);
+            CloseHandle(hChildStd_IN_Rd);
+            CloseHandle(hChildStd_IN_Wr);
+            throw std::runtime_error("Failed to set handle info for stdin pipe.");
+        }
+
+        std::string commandLine;
+        if (implementation_ == ContributionImplementation::pythonProvider) {
+            std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
+            commandLine = "\"" + pythonExe + "\" -m konjugate \"" + sourcePath_ + "\"";
+        } else {
+            commandLine = "\"" + sourcePath_ + "\"";
+        }
+
+        BOOL bSuccess = FALSE;
+        PROCESS_INFORMATION piProcInfo;
+        ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+
+        auto tryCreateProcess = [&](const std::string& cmd) -> BOOL {
+            STARTUPINFOA siStartInfo;
+            ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
+            siStartInfo.cb = sizeof(STARTUPINFOA);
+            siStartInfo.hStdInput = hChildStd_IN_Rd;
+            siStartInfo.hStdOutput = hChildStd_OUT_Wr;
+            siStartInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+            siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+            std::vector<char> cmdLineBuf(cmd.begin(), cmd.end());
+            cmdLineBuf.push_back('\0');
+
+            return CreateProcessA(
+                NULL,
+                cmdLineBuf.data(),
+                NULL,
+                NULL,
+                TRUE,
+                0,
+                NULL,
+                NULL,
+                &siStartInfo,
+                &piProcInfo
+            );
+        };
+
+        bSuccess = tryCreateProcess(commandLine);
+        if (!bSuccess && implementation_ == ContributionImplementation::pythonProvider) {
+            std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
+            if (pythonExe == "python3") {
+                std::string fallbackCommandLine = "\"python\" -m konjugate \"" + sourcePath_ + "\"";
+                bSuccess = tryCreateProcess(fallbackCommandLine);
+            }
+        }
+
+        CloseHandle(hChildStd_IN_Rd);
+        CloseHandle(hChildStd_OUT_Wr);
+
+        if (!bSuccess) {
+            CloseHandle(hChildStd_IN_Wr);
+            CloseHandle(hChildStd_OUT_Rd);
+            throw std::runtime_error("Failed to spawn provider process: " + std::to_string(GetLastError()));
+        }
+
+        CloseHandle(piProcInfo.hThread);
+
+        stdinFd_ = _open_osfhandle(reinterpret_cast<intptr_t>(hChildStd_IN_Wr), _O_WRONLY | _O_BINARY);
+        stdoutFd_ = _open_osfhandle(reinterpret_cast<intptr_t>(hChildStd_OUT_Rd), _O_RDONLY | _O_BINARY);
+        hProcess_ = piProcInfo.hProcess;
+        pid_ = static_cast<pid_t>(piProcInfo.dwProcessId);
+    }
+#else
     void spawn(const ProviderConfiguration& config) {
         int inPipe[2];
         int outPipe[2];
@@ -361,6 +559,7 @@ private:
         stdinFd_ = inPipe[1];
         stdoutFd_ = outPipe[0];
     }
+#endif
 
     void performHandshake() {
         EngineToProvider msg;
@@ -385,6 +584,9 @@ private:
     ContributionImplementation implementation_;
     std::string sourcePath_;
     pid_t pid_ = -1;
+#ifdef _WIN32
+    HANDLE hProcess_ = NULL;
+#endif
     int stdinFd_ = -1;
     int stdoutFd_ = -1;
     InitializeRequest initializeReq_;

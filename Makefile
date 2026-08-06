@@ -12,8 +12,19 @@ packageDir := out/package
 releaseDir := out/release
 engineBuildDir := out/engine
 enginePackageDir := out/packageResources/engine
-hostSystem := $(shell uname -s)
-hostMachine := $(shell uname -m)
+ifeq ($(OS),Windows_NT)
+	hostSystem := Windows
+	ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
+		hostMachine := x86_64
+	else ifeq ($(PROCESSOR_ARCHITECTURE),ARM64)
+		hostMachine := arm64
+	else
+		hostMachine := $(PROCESSOR_ARCHITECTURE)
+	endif
+else
+	hostSystem := $(shell uname -s)
+	hostMachine := $(shell uname -m)
+endif
 macSignIdentity ?=
 appleNotaryProfile ?=
 
@@ -22,9 +33,15 @@ appleNotaryProfile ?=
 ifeq ($(hostMachine),x86_64)
 	hostArch := x64
 	appImageArch := x86_64
+else ifeq ($(hostMachine),AMD64)
+	hostArch := x64
+	appImageArch := x86_64
 else ifeq ($(hostMachine),amd64)
 	hostArch := x64
 	appImageArch := x86_64
+else ifeq ($(hostMachine),ARM64)
+	hostArch := arm64
+	appImageArch := aarch64
 else ifeq ($(hostMachine),aarch64)
 	hostArch := arm64
 	appImageArch := aarch64
@@ -40,10 +57,28 @@ ifeq ($(hostSystem),Darwin)
 	hostPlatform := darwin
 else ifeq ($(hostSystem),Linux)
 	hostPlatform := linux
+else ifeq ($(hostSystem),Windows)
+	hostPlatform := win32
 else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(hostSystem)))
 	hostPlatform := win32
 else
 	hostPlatform := unsupported
+endif
+
+ifeq ($(OS),Windows_NT)
+	RM := cmake -E rm -rf
+	RM_F := cmake -E rm -f
+	MKDIR := cmake -E make_directory
+	CP := cmake -E copy
+	CP_R := cmake -E copy_directory
+	PYTHON := python
+else
+	RM := rm -rf
+	RM_F := rm -f
+	MKDIR := mkdir -p
+	CP := cp
+	CP_R := cp -R
+	PYTHON := python3
 endif
 
 .PHONY: \
@@ -64,19 +99,26 @@ endif
 
 iconsPng: $(pngIcons) $(iconDir)/app.png
 
+ifeq ($(OS),Windows_NT)
+$(pngDir)/%.png: $(svgIcon)
+	@where rsvg-convert >nul 2>nul || (echo rsvg-convert is required (install librsvg). && exit 1)
+	@$(MKDIR) $(pngDir)
+	rsvg-convert --width $* --height $* $< --output $@
+else
 $(pngDir)/%.png: $(svgIcon)
 	@command -v rsvg-convert >/dev/null 2>&1 || { echo "rsvg-convert is required (install librsvg)."; exit 1; }
-	@mkdir -p $(pngDir)
+	@$(MKDIR) $(pngDir)
 	rsvg-convert --width $* --height $* $< --output $@
+endif
 
 $(iconDir)/app.png: $(pngDir)/512.png
-	@mkdir -p $(iconDir)
-	cp $< $@
+	@$(MKDIR) $(iconDir)
+	$(CP) $< $@
 
 iconsWindows: $(iconDir)/app.ico
 
 $(iconDir)/app.ico: $(pngIcons) scripts/pngToIco.py
-	python3 scripts/pngToIco.py \
+	$(PYTHON) scripts/pngToIco.py \
 		$(pngDir)/16.png \
 		$(pngDir)/24.png \
 		$(pngDir)/32.png \
@@ -96,31 +138,29 @@ $(iconDir)/app.icns: $(pngIcons) scripts/pngToIcns.mjs
 iconsWeb: $(iconDir)/favicon.ico $(iconDir)/favicon16.png $(iconDir)/favicon32.png $(iconDir)/appleTouchIcon.png
 
 $(iconDir)/favicon.ico: $(pngIcons) scripts/pngToIco.py
-	python3 scripts/pngToIco.py \
+	$(PYTHON) scripts/pngToIco.py \
 		$(pngDir)/16.png \
 		$(pngDir)/32.png \
 		$(pngDir)/48.png \
 		--output $@
 
 $(iconDir)/favicon16.png: $(pngDir)/16.png
-	cp $< $@
+	$(CP) $< $@
 
 $(iconDir)/favicon32.png: $(pngDir)/32.png
-	cp $< $@
+	$(CP) $< $@
 
 $(iconDir)/appleTouchIcon.png: $(svgIcon)
 	rsvg-convert --width 180 --height 180 $< --output $@
 
 cleanIcons:
-	rm -rf $(iconDir)
+	$(RM) $(iconDir)
 
 installDependencies:
-	@if [ ! -x node_modules/.bin/electron-packager ]; then \
-		if [ -f package-lock.json ]; then npm ci; else npm install; fi; \
-	fi
+	@node -e "try { require('@electron/packager'); } catch (e) { const fs = require('fs'); const cmd = fs.existsSync('package-lock.json') ? 'npm ci' : 'npm install'; require('child_process').execSync(cmd, { stdio: 'inherit' }); }"
 
 checkPackaging: installDependencies
-	@test -x node_modules/.bin/electron-packager || { echo "Electron Packager installation failed."; exit 1; }
+	@node -e "try { require('@electron/packager'); } catch (e) { console.error('Electron Packager installation failed.'); process.exit(1); }"
 
 engine: installDependencies
 	node scripts/setupDevelopment.mjs
@@ -141,7 +181,7 @@ else
 endif
 
 packageMacos: checkPackaging iconsMacos engine
-	node_modules/.bin/electron-packager . $(appName) \
+	npx electron-packager . $(appName) \
 		--platform=darwin \
 		--arch=$(hostArch) \
 		--app-bundle-id=$(appId) \
@@ -157,7 +197,7 @@ packageMacos: checkPackaging iconsMacos engine
 		$(packageDir)/$(appName)-darwin-$(hostArch)/$(appName).app/Contents/Resources
 
 packageWindows: checkPackaging iconsWindows engine
-	node_modules/.bin/electron-packager . $(appName) \
+	npx electron-packager . $(appName) \
 		--platform=win32 \
 		--arch=$(hostArch) \
 		--app-version=$(appVersion) \
@@ -172,7 +212,7 @@ packageWindows: checkPackaging iconsWindows engine
 		$(packageDir)/$(appName)-win32-$(hostArch)/resources
 
 packageLinux: checkPackaging iconsPng engine
-	node_modules/.bin/electron-packager . $(appName) \
+	npx electron-packager . $(appName) \
 		--platform=linux \
 		--arch=$(hostArch) \
 		--app-version=$(appVersion) \
@@ -232,8 +272,8 @@ endif
 	@echo "Created $(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg"
 
 distributableWindows: packageWindows
-	@mkdir -p $(releaseDir)
-	python3 scripts/createZip.py \
+	@$(MKDIR) $(releaseDir)
+	$(PYTHON) scripts/createZip.py \
 		$(packageDir)/$(appName)-win32-$(hostArch) \
 		$(releaseDir)/$(appName)-$(appVersion)-windows-$(hostArch).zip
 	@echo "Created $(releaseDir)/$(appName)-$(appVersion)-windows-$(hostArch).zip"
@@ -255,10 +295,10 @@ distributableLinux: packageLinux
 	@echo "Created $(releaseDir)/$(appName)-$(appVersion)-linux-$(hostArch).AppImage"
 
 cleanPackage:
-	rm -rf $(packageDir) $(releaseDir)
+	$(RM) $(packageDir) $(releaseDir)
 
 clean: cleanPackage cleanIcons
-	rm -rf \
+	$(RM) \
 		node_modules \
 		package-lock.json \
 		out \

@@ -9,6 +9,19 @@ export const vcpkgCommit = 'ce613c41372b23b1f51333815feb3edd87ef8a8b';
 export const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const vcpkgDirectory = join(rootDirectory, '.tools', 'vcpkg');
 
+if (process.platform === 'win32') {
+    const keepVars = ['SystemRoot', 'SYSTEMROOT', 'SystemDrive', 'TEMP', 'TMP', 'PATH'];
+    for (const envVar of ['VCPKG_KEEP_ENV_VARS', 'VCPKG_ENV_PASSTHROUGH_UNTRACKED']) {
+        const current = process.env[envVar] ? process.env[envVar].split(';') : [];
+        for (const v of keepVars) {
+            if (!current.includes(v)) {
+                current.push(v);
+            }
+        }
+        process.env[envVar] = current.join(';');
+    }
+}
+
 export function run(command, args, options = {}) {
     return new Promise((resolve, reject) => {
         const child = spawn(command, args, { stdio: 'inherit', ...options });

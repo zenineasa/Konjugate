@@ -1,6 +1,6 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
     commandExists,
@@ -26,10 +26,24 @@ if (!await commandExists(compilerCommand)) {
     throw new Error(`A C++20 compiler is required. ${hint}`);
 }
 
+let isPartialClone = false;
+if (await pathExists(join(vcpkgDirectory, '.git'))) {
+    try {
+        await run('git', ['config', '--get', 'remote.origin.promisor'], { cwd: vcpkgDirectory, stdio: 'ignore' });
+        isPartialClone = true;
+    } catch {
+        isPartialClone = false;
+    }
+}
+if (isPartialClone) {
+    console.log('Re-cloning vcpkg fully to avoid Windows network subprocess issues...');
+    await rm(vcpkgDirectory, { recursive: true, force: true });
+}
+
 if (!await pathExists(join(vcpkgDirectory, '.git'))) {
     await mkdir(join(rootDirectory, '.tools'), { recursive: true });
     await run('git', [
-        'clone', '--filter=blob:none', '--no-checkout',
+        'clone', '--no-checkout',
         'https://github.com/microsoft/vcpkg.git', vcpkgDirectory
     ]);
 }

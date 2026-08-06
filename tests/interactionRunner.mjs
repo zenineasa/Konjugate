@@ -483,22 +483,26 @@ export async function runInteractionTests(window) {
         await waitFor(editorWindow, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the provider editor window.');
         assert.equal(await evaluate(editorWindow, `document.querySelector('#editorKindLabel').textContent`), 'C++');
 
+        // These checks wait on a real clang invocation (plus the linter's own debounce),
+        // which is far more variable than a DOM/JS operation, so give it real headroom
+        // rather than the default timeout tuned for in-process checks.
+        const compileCheckTimeout = 20000;
         await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('valid')`,
-            'The starter template was not reported valid by the C++ syntax check.');
+            'The starter template was not reported valid by the C++ syntax check.', compileCheckTimeout);
 
         await evaluate(editorWindow, `(() => {
             const view = window.__providerEditorView;
             view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'this is not valid c plus plus' } });
         })()`);
         await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('invalid')`,
-            'Invalid C++ source was not flagged by the syntax check.');
+            'Invalid C++ source was not flagged by the syntax check.', compileCheckTimeout);
 
         await evaluate(editorWindow, `(() => {
             const view = window.__providerEditorView;
             view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(validCpp)} } });
         })()`);
         await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('valid')`,
-            'Restoring valid C++ source did not clear the invalid status.');
+            'Restoring valid C++ source did not clear the invalid status.', compileCheckTimeout);
 
         await evaluate(editorWindow, `document.querySelector('#applyButton').click()`);
         await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(validCpp)}`,
@@ -559,6 +563,50 @@ export async function runInteractionTests(window) {
         })()`);
     });
 
+    await run('node editor authors a source term with a programmable C++ implementation', async () => {
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
+        await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
+        await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        assert.equal(await isRenderedVisible(window, '#sourceTermEditor'), true);
+
+        await evaluate(window, `(() => {
+            const select = document.querySelector('#termImplementationKind');
+            select.value = 'cpp';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await isRenderedVisible(window, '#termProviderSection'), true);
+        assert.equal(await isRenderedVisible(window, '#termEquationHeading'), false);
+        assert.match(await evaluate(window, `document.querySelector('#termProviderSource').value`), /#include <konjugate\/relationshipProvider\.hpp>/);
+
+        await evaluate(window, `(() => {
+            document.querySelector('#termAddProviderBinding').click();
+            const key = document.querySelector('#termProviderBindings .providerBindingRow [data-field="key"]');
+            key.value = 'temperature';
+            key.dispatchEvent(new Event('change', { bubbles: true }));
+            const outputKey = document.querySelector('#termProviderOutputKey');
+            outputKey.value = 'heatRate';
+            outputKey.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+
+        await evaluate(window, `(() => {
+            window.confirm = () => true;
+            document.querySelector('#termInsertProviderTemplate').click();
+        })()`);
+        const regenerated = await evaluate(window, `document.querySelector('#termProviderSource').value`);
+        assert.match(regenerated, /ScalarPort\{"temperature", "temperature", ""\}/);
+        assert.match(regenerated, /ScalarPort\{"heatRate", "heatRate", ""\}/);
+
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`,
+            'The programmable source term did not reach native validation.');
+        assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
+
+        // Clean up: remove the source term so later tests see the original model state.
+        await evaluate(window, `document.querySelector('[data-delete-source-term]').click()`);
+        assert.equal(await isRenderedVisible(window, '#sourceTermEditor'), false);
+        assert.equal(await isRenderedVisible(window, '#nodeEditor'), true);
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+    });
+
     await run('node appearance changes and participates in undo', async () => {
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), false);
@@ -598,6 +646,39 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#redoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
+    });
+
+    await run('node builder creates a node with an inline Python source term', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#newNodeName').value = 'Interaction source node';
+            const values = { name: 'Level', symbol: 'level', value: '10', unit: 'm' };
+            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+            document.querySelector('#addSourceTerm').click();
+        })()`);
+        await evaluate(window, `(() => {
+            const kind = document.querySelector('.sourceTermRow .sourceTermKind');
+            kind.value = 'python';
+            kind.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderFields').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceExpression').hidden`), true);
+        assert.match(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderSource').value`), /from konjugate import/);
+
+        await evaluate(window, `(() => {
+            document.querySelector('.sourceTermRow .addSourceTermBinding').click();
+            const key = document.querySelector('.sourceTermRow .providerBindingRow [data-field="key"]');
+            key.value = 'level';
+            document.querySelector('.sourceTermRow .sourceTermProviderOutputKey').value = 'levelRate';
+            document.querySelector('#createNode').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`,
+            'The new node with a programmable source term did not reach native validation.');
+        assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
     });
 
     await run('edge creation composes state references and supports undo', async () => {

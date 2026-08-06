@@ -311,6 +311,37 @@
             <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
         </div>
 
+        <div id="sourceTermEditor" class="contextCard editorCard edgeEditor hidden">
+            <header><div><span class="contextKicker">Source term</span><strong id="sourceTermEditorTitle">Source term</strong></div><button data-close-card type="button">×</button></header>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <section>
+                <label class="editorField"><span>Implementation</span><select id="termImplementationKind">
+                    <option value="equation">Equation</option>
+                    <option value="cpp">C++ program</option>
+                    <option value="python">Python program</option>
+                </select></label>
+                <label class="editorField"><span>Updates</span><select id="termOutputState"></select></label>
+                <div id="termEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field>
+                <textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
+                <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
+                <div id="termReferencePicker" class="referencePicker"><span>Available references</span><div id="termStateReferenceChips"></div></div>
+                <div id="termProviderSection" hidden>
+                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                        <button id="termOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
+                        <button id="termInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                    </div></div>
+                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                    <textarea id="termProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <h3>Bindings <button id="termAddProviderBinding" type="button">＋</button></h3>
+                    <p class="builderHint">Each binding exposes one state of this node to the provider under a stable key.</p>
+                    <div id="termProviderBindings"></div>
+                    <label class="editorField"><span>Output key</span><input id="termProviderOutputKey" autocomplete="off" placeholder="e.g. rateGradient"></label>
+                </div>
+            </section>
+            <footer><button data-delete-source-term type="button">Delete source term</button></footer>
+        </div>
+
         <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Edge</span><strong>Relationship</strong></div><button data-close-card type="button">×</button></header>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>

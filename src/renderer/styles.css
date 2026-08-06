@@ -413,9 +413,15 @@ input, select { user-select: text; }
 .stateRow em { color: #5f7480; font-style: normal; font-weight: 400; }
 .emptyEditorState { margin: 0; padding: 9px; color: #566b76; background: #0f1c24; border-radius: 4px; font-size: 8px; }
 .editorStateRow { display: grid; grid-template-columns: 1.25fr .65fr .7fr .55fr 18px; gap: 4px; margin-bottom: 5px; }
-.editorSourceTermRow { display: grid; grid-template-columns: .8fr 1.4fr 18px; gap: 4px; margin-bottom: 5px; }
-.editorStateRow input, .editorSourceTermRow input, .editorSourceTermRow select { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
-.editorStateRow button, .editorSourceTermRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
+.editorStateRow input { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
+.editorStateRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
+.sourceTermSummaryRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 30px; padding: 0 7px; background: #111f28; border-bottom: 1px solid #243640; }
+.sourceTermSummaryRow:first-of-type { border-radius: 4px 4px 0 0; }
+.sourceTermSummaryRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
+.sourceTermOpen { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; padding: 0; color: inherit; background: none; border: 0; font-size: 8px; text-align: left; cursor: pointer; }
+.sourceTermPreview { overflow: hidden; color: #b8c7ce; text-overflow: ellipsis; white-space: nowrap; }
+.removeSourceTerm { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
+.kindBadge { padding: 3px 7px; color: #83d7cf; background: rgb(66 201 188 / 10%); border: 1px solid #2b4a4a; border-radius: 10px; font-size: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .editorParameterRow { display: grid; grid-template-columns: 1fr .6fr .55fr .55fr .75fr 18px; gap: 5px 4px; margin-bottom: 9px; }
 .providerBindingRow { display: grid; grid-template-columns: 1fr 1fr 18px; gap: 5px 4px; margin-bottom: 9px; }
 .parameterField { display: grid; min-width: 0; gap: 3px; color: #607580; font-size: 6px; }
@@ -523,10 +529,13 @@ input, select { user-select: text; }
 .builderHint { margin: -3px 0 9px; color: #566b77; font-size: 7px; line-height: 1.45; }
 .builderRows { display: grid; gap: 6px; }
 .builderRow { display: grid; grid-template-columns: 1.4fr .7fr .8fr .6fr 18px; gap: 5px; align-items: center; }
-.builderRow.sourceTermRow { grid-template-columns: .9fr 1.5fr 18px; }
+.builderRow.sourceTermRow { grid-template-columns: .8fr .8fr 1.2fr 18px; }
 .builderRow.parameterRow { grid-template-columns: 1fr .55fr .55fr .55fr .7fr 18px; align-items: end; }
 .builderRow.providerBindingRow { grid-template-columns: 1fr 1fr 18px; }
 .builderRow.parameterRow .parameterControlFields { grid-column: 1 / -1; }
+.sourceTermProviderFields { display: grid; grid-column: 1 / -1; gap: 6px; padding: 9px; background: rgb(66 201 188 / 4%); border: 1px solid #263d45; border-radius: 5px; }
+.sourceTermProviderFields[hidden] { display: none; }
+.sourceTermProviderFields .providerBindingRow { grid-template-columns: 1fr 1fr 18px; }
 .builderRow input, .builderRow select, .builderCard textarea { width: 100%; min-width: 0; height: 27px; padding: 0 6px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .builderCard textarea { height: auto; padding: 7px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.4; }
 .geometryImportField { display: flex; min-height: 42px; align-items: center; padding: 7px 9px; color: #7ec8c2; background: #0b171f; border: 1px dashed #31515a; border-radius: 5px; cursor: pointer; }

@@ -4,6 +4,7 @@
 #include "executionPlan.hpp"
 #include "modelValidator.hpp"
 #include "providerRuntime.hpp"
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <boost/property_tree/json_parser.hpp>
@@ -111,14 +112,41 @@ void validatorAcceptsACompleteProgrammableRelationship() {
         "The execution plan did not preserve stable provider port keys.");
 }
 
-void validatorRejectsMissingProviderBindingsAndOutputState() {
+void validatorRejectsAMissingProviderOutputState() {
     auto invalid = validImplementation();
-    invalid.replace(invalid.find("\"bindings\""), std::string("\"bindings\"").size(), "\"unusedBindings\"");
     invalid.replace(invalid.find("\"stateId\": 12"), std::string("\"stateId\": 12").size(), "\"stateId\": 999");
     const auto result = konjugate::validateModel(projectWithImplementation(invalid));
     require(!result.valid, "An invalid programmable relationship was accepted.");
-    require(hasIssue(result, "providerBindingsEmpty"), "Missing provider inputs were not diagnosed.");
     require(hasIssue(result, "providerOutputMissing"), "A missing provider output state was not diagnosed.");
+}
+
+void validatorWarnsWithoutBlockingAnUntouchedProgrammableRelationshipTemplate() {
+    // A relationship's provider need not read any bound value either, so an edge with zero
+    // bindings and the untouched generated template should warn without blocking the model.
+    std::string untouchedImplementation = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "// TODO: read the declared inputs above and add the computed contribution.",
+        "bindings": [],
+        "output": {"key": "targetTemperatureGradient", "role": "target", "stateId": 12}
+    })json";
+    const auto untouched = konjugate::validateModel(projectWithImplementation(untouchedImplementation));
+    require(untouched.valid, "An untouched programmable relationship template should warn, not block the model.");
+    const auto issue = std::find_if(untouched.issues.begin(), untouched.issues.end(),
+        [](const auto& item) { return item.code == "providerImplementationIncomplete"; });
+    require(issue != untouched.issues.end() && issue->severity == "warning",
+        "An untouched relationship template with no bindings should produce a warning, not an error.");
+
+    std::string editedImplementation = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "output.addGradient(9.81);",
+        "bindings": [],
+        "output": {"key": "targetTemperatureGradient", "role": "target", "stateId": 12}
+    })json";
+    const auto edited = konjugate::validateModel(projectWithImplementation(editedImplementation));
+    require(!hasIssue(edited, "providerImplementationIncomplete"),
+        "Writing real source should clear the incomplete-template warning even with zero bindings.");
 }
 
 void executionDelegatesResolvedScalarsWithoutChangingCadence() {
@@ -335,15 +363,139 @@ void providerRuntimeSerializesConcurrentEvaluationsOnASharedWorker() {
         "Concurrent evaluation against a shared provider worker produced a wrong result, hung, or corrupted the protocol.");
 }
 
+boost::property_tree::ptree sourceTermWithImplementationProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "nodes": [{
+            "id": 1,
+            "name": "Tank",
+            "states": [
+                {"id": 11, "name": "Level", "symbol": "level", "initialValue": 300},
+                {"id": 12, "name": "Rate", "symbol": "rate", "initialValue": 0}
+            ],
+            "sourceTerms": [{
+                "id": 21,
+                "state": "rate",
+                "expression": "",
+                "implementation": {
+                    "kind": "python",
+                    "providerApiVersion": 1,
+                    "source": "../tests/pythonRelationshipProviderTest.py",
+                    "bindings": [{"key": "delta", "kind": "state", "stateId": 11}],
+                    "output": {"key": "gradient", "stateId": 12}
+                }
+            }]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+void validatorAndExecutionPlanAcceptAProgrammableSourceTerm() {
+    const auto project = sourceTermWithImplementationProject();
+    const auto result = konjugate::validateModel(project);
+    require(result.valid, "A complete programmable source term was rejected.");
+    require(!hasIssue(result, "sourceExpressionEmpty"), "A programmable source term was incorrectly validated as an equation.");
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto& task = plan.nodes.at(0).contributions.front();
+    require(task.implementation == konjugate::ContributionImplementation::pythonProvider,
+        "The execution plan did not preserve the programmable source-term implementation kind.");
+    require(task.bindings.at(0).symbol == "delta" && task.providerOutputKey == "gradient",
+        "The execution plan did not preserve stable source-term provider port keys.");
+}
+
+void validatorRejectsAnIncompleteProgrammableSourceTerm() {
+    auto invalid = sourceTermWithImplementationProject();
+    invalid.get_child("nodes").begin()->second.get_child("sourceTerms").begin()->second
+        .put("implementation.output.stateId", 999);
+    const auto result = konjugate::validateModel(invalid);
+    require(!result.valid, "An invalid programmable source term was accepted.");
+    require(hasIssue(result, "providerOutputMissing"), "A missing source-term provider output state was not diagnosed.");
+}
+
+void validatorAndExecutionPlanAcceptAProgrammableSourceTermWithNoBindings() {
+    // Unlike an edge, a source term has no other endpoint to read from, so it may
+    // legitimately declare zero input bindings (e.g. a constant contribution). Since this
+    // fixture's source is real (not the untouched template), no warning should fire either.
+    auto project = sourceTermWithImplementationProject();
+    auto& implementation = project.get_child("nodes").begin()->second.get_child("sourceTerms").begin()->second
+        .get_child("implementation");
+    implementation.get_child("bindings").clear();
+
+    const auto result = konjugate::validateModel(project);
+    require(result.valid, "A programmable source term with zero bindings was incorrectly rejected.");
+    require(!hasIssue(result, "providerBindingsEmpty"), "Zero declared bindings should be legal for a source term.");
+    require(!hasIssue(result, "sourceTermImplementationIncomplete"),
+        "A source term with real custom source should not be flagged as incomplete.");
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto& task = plan.nodes.at(0).contributions.front();
+    require(task.bindings.empty(), "The execution plan should preserve zero bindings for a source term.");
+}
+
+void validatorWarnsWithoutBlockingAnUntouchedProgrammableSourceTermTemplate() {
+    // No bindings and the generated template's own TODO marker still present: this looks
+    // like an author has not started implementing the term yet, so it should warn without
+    // blocking the model (unlike edges, which require at least one binding unconditionally).
+    auto project = sourceTermWithImplementationProject();
+    auto& implementation = project.get_child("nodes").begin()->second.get_child("sourceTerms").begin()->second
+        .get_child("implementation");
+    implementation.get_child("bindings").clear();
+    implementation.put("source", "// TODO: read the declared inputs above and add the computed contribution.");
+
+    const auto untouched = konjugate::validateModel(project);
+    require(untouched.valid, "An untouched programmable source term template should warn, not block the model.");
+    require(hasIssue(untouched, "sourceTermImplementationIncomplete"),
+        "An untouched source-term template with no bindings was not flagged.");
+    const auto issue = std::find_if(untouched.issues.begin(), untouched.issues.end(),
+        [](const auto& item) { return item.code == "sourceTermImplementationIncomplete"; });
+    require(issue != untouched.issues.end() && issue->severity == "warning",
+        "The incomplete-template diagnostic should be a warning, not an error.");
+
+    implementation.put("source", "output.addGradient(9.81);");
+    const auto edited = konjugate::validateModel(project);
+    require(!hasIssue(edited, "sourceTermImplementationIncomplete"),
+        "Writing real source should clear the incomplete-template warning even with zero bindings.");
+}
+
+void providerRuntimeExecutesAProgrammableSourceTermEndToEnd() {
+    const auto plan = konjugate::compileExecutionPlan(sourceTermWithImplementationProject());
+    konjugate::ProviderConfiguration config;
+    config.pythonInterpreter = "python3";
+    ::setenv("PYTHONPATH", "../sdk/python", 1);
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto& node = plan.nodes.at(0);
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {300, 0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+
+    require(!evaluated.empty() && evaluated.front().value == 600,
+        "Programmable source-term end-to-end evaluation failed.");
+
+    runtime.shutdown();
+}
+
 }
 
 int main() {
     sdkProvidesStableKeyedReadOnlyInputsAndAdditiveOutput();
     validatorAcceptsACompleteProgrammableRelationship();
-    validatorRejectsMissingProviderBindingsAndOutputState();
+    validatorRejectsAMissingProviderOutputState();
+    validatorWarnsWithoutBlockingAnUntouchedProgrammableRelationshipTemplate();
     executionDelegatesResolvedScalarsWithoutChangingCadence();
     providerRuntimeExecutesPythonWorkerEndToEnd();
     providerRuntimeCompilesAndExecutesAnInlineCppProviderEndToEnd();
     providerRuntimeResolvesTasksByStableSourceIdAcrossCollidingLocalSequences();
     providerRuntimeSerializesConcurrentEvaluationsOnASharedWorker();
+    validatorAndExecutionPlanAcceptAProgrammableSourceTerm();
+    validatorRejectsAnIncompleteProgrammableSourceTerm();
+    validatorAndExecutionPlanAcceptAProgrammableSourceTermWithNoBindings();
+    validatorWarnsWithoutBlockingAnUntouchedProgrammableSourceTermTemplate();
+    providerRuntimeExecutesAProgrammableSourceTermEndToEnd();
 }

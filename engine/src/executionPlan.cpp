@@ -191,16 +191,25 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         std::size_t sequence = 0;
         for (const auto& termItem : node.get_child("sourceTerms")) {
             const auto& term = termItem.second;
+            const auto termImplementationKind = value(term, "implementation.kind");
+            const auto termProgrammable = termImplementationKind == "cpp" || termImplementationKind == "python";
             ContributionTask task;
             task.sequence = sequence++;
             task.sourceId = idValue(term, "id");
-            task.outputStateId = idValue(term, "expressionModel.output.stateId");
+            task.outputStateId = idValue(term, termProgrammable ? "implementation.output.stateId" : "expressionModel.output.stateId");
             task.outputStateIndex = localStateIndexes.at(task.outputStateId);
-            task.bindings = compileBindings(term.get_child("expressionModel.bindings"), compiledNode.nodeId, true,
-                plan.stateIndexes, localStateIndexes);
-            task.expression = compileExpression(term.get_child("expressionModel.mathJson"));
+            task.bindings = compileBindings(term.get_child(termProgrammable ? "implementation.bindings" : "expressionModel.bindings"),
+                compiledNode.nodeId, true, plan.stateIndexes, localStateIndexes, termProgrammable ? "key" : "symbol");
+            if (termProgrammable) {
+                task.implementation = termImplementationKind == "cpp"
+                    ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
+                task.providerSource = value(term, "implementation.source");
+                task.providerOutputKey = value(term, "implementation.output.key");
+            } else {
+                task.expression = compileExpression(term.get_child("expressionModel.mathJson"));
+            }
             bindTask(task);
-            compiledNode.estimatedOperationsPerSubstep += task.expression.operationCount();
+            compiledNode.estimatedOperationsPerSubstep += termProgrammable ? task.bindings.size() + 1 : task.expression.operationCount();
             compiledNode.contributions.push_back(std::move(task));
         }
         nodeIndexes[compiledNode.nodeId] = plan.nodes.size();

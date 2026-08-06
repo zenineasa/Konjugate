@@ -311,6 +311,8 @@ let validationRevision = 0;
 let engineValidationTimer = null;
 let equationEditSession = null;
 let providerEditTarget = null;
+let selectedSourceTermNodeId = null;
+let selectedSourceTermId = null;
 let simulationRunning = false;
 let activeResult = null;
 let activeEngineJobId = null;
@@ -1085,6 +1087,11 @@ function applyNodeModel(node, snapshot) {
     if (selectedNode === node && !$('#nodeEditor').classList.contains('hidden')) {
         renderNodeEditorModel(node);
     }
+    if (selectedSourceTermNodeId === node.userData.id && !$('#sourceTermEditor').classList.contains('hidden')) {
+        const term = definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
+        if (term) renderSourceTermEditor(node, term);
+        else $('#sourceTermEditor').classList.add('hidden');
+    }
 }
 
 function changeNodeModel(node, mutate) {
@@ -1157,24 +1164,205 @@ function renderNodeEditorModel(node) {
     sourceTermContainer.replaceChildren();
     if (!definition.sourceTerms.length) sourceTermContainer.innerHTML = '<p class="emptyEditorState">No source terms defined</p>';
     definition.sourceTerms.forEach((term) => {
+        const kind = term.implementation?.kind ?? 'equation';
+        const stateSymbol = kind === 'equation'
+            ? term.state
+            : definition.states.find((state) => state.id === term.implementation?.output?.stateId)?.symbol;
         const row = document.createElement('div');
-        row.className = 'editorSourceTermRow';
+        row.className = 'sourceTermSummaryRow';
         row.innerHTML = `
-            <select aria-label="Updated state">${definition.states.map((state) => `<option value="${escapeHtml(state.symbol)}" ${state.symbol === term.state ? 'selected' : ''}>${escapeHtml(state.label)}</option>`).join('')}</select>
-            <input value="${escapeHtml(term.expression)}" aria-label="Source expression">
-            <button type="button" title="Remove source term">×</button>
+            <button type="button" class="sourceTermOpen">
+                <span class="kindBadge">${kind === 'equation' ? 'Equation' : kind === 'cpp' ? 'C++' : 'Python'}</span>
+                <span class="sourceTermPreview">${escapeHtml(stateSymbol ? `Updates ${stateSymbol}` : 'No output state chosen')}</span>
+            </button>
+            <button type="button" class="removeSourceTerm" title="Remove source term">×</button>
         `;
-        $('select', row).addEventListener('change', (event) => changeNodeModel(node, (snapshot) => {
-            snapshot.sourceTerms.find((candidate) => candidate.id === term.id).state = event.target.value;
-        }));
-        $('input', row).addEventListener('change', (event) => changeNodeModel(node, (snapshot) => {
-            snapshot.sourceTerms.find((candidate) => candidate.id === term.id).expression = event.target.value.trim();
-        }));
-        $('button', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
+        $('.sourceTermOpen', row).addEventListener('click', () => openSourceTermEditor(node, term));
+        $('.removeSourceTerm', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
             snapshot.sourceTerms = snapshot.sourceTerms.filter((candidate) => candidate.id !== term.id);
         }));
         sourceTermContainer.appendChild(row);
     });
+}
+
+function sourceTermBindingCandidates(definition) {
+    return definition.states.map((state) => ({ kind: 'state', stateId: state.id, symbol: state.symbol, label: state.symbol }));
+}
+
+function normalizeSourceTermExpressionModel(definition, term, expressionModel = term.expressionModel) {
+    const bindings = sourceTermBindingCandidates(definition);
+    const base = expressionModel ?? {
+        latex: term.expression ?? '',
+        output: { stateId: definition.states.find((state) => state.symbol === term.state)?.id ?? null },
+        bindings: [],
+        mathJson: null
+    };
+    const output = definition.states.some((state) => state.id === base.output?.stateId)
+        ? base.output
+        : { stateId: definition.states[0]?.id ?? null };
+    const validation = validateEquationLatex(base.latex, bindings);
+    return { latex: base.latex ?? '', output, bindings, mathJson: validation.valid ? validation.mathJson : null };
+}
+
+function renderSourceTermDiagnostics(latex, bindings) {
+    const diagnostics = $('#termEquationDiagnostics');
+    const validation = validateEquationLatex(latex, bindings);
+    diagnostics.classList.toggle('valid', validation.valid);
+    diagnostics.textContent = validation.valid ? 'Valid expression · MathJSON ready' : validation.errors.join(' ');
+    return validation;
+}
+
+function insertSourceTermBinding(binding) {
+    if (activeResult) return;
+    const latex = latexForBinding(binding);
+    if ($('#termMathField').hidden) {
+        const source = $('#termEquation');
+        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
+        source.dispatchEvent(new Event('input', { bubbles: true }));
+        source.focus();
+    } else {
+        $('#termMathField').insert(latex);
+        $('#termMathField').focus();
+    }
+}
+
+function changeSourceTermModel(node, termId, mutate) {
+    changeNodeModel(node, (snapshot) => {
+        const term = snapshot.sourceTerms.find((candidate) => candidate.id === termId);
+        if (term) mutate(term, snapshot);
+    });
+}
+
+function sourceTermReferenceValue(reference) {
+    return `state:${reference.stateId}`;
+}
+
+function sourceTermReferenceToBinding(key, reference) {
+    return { key, kind: 'state', stateId: reference.stateId };
+}
+
+function renderSourceTermProviderBindingRows(node, term) {
+    const definition = node.userData.definition;
+    const container = $('#termProviderBindings');
+    container.replaceChildren();
+    const bindings = term.implementation?.bindings ?? [];
+    const candidates = sourceTermBindingCandidates(definition);
+    if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
+    bindings.forEach((binding, index) => {
+        const row = document.createElement('div');
+        row.className = 'providerBindingRow';
+        row.innerHTML = `
+            <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(binding.key ?? '')}"></label>
+            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
+            <button type="button" title="Remove binding">×</button>
+        `;
+        const select = $('[data-field="reference"]', row);
+        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, sourceTermReferenceValue(candidate))));
+        select.value = sourceTermReferenceValue(binding);
+        $('[data-field="key"]', row).addEventListener('change', (event) => {
+            changeSourceTermModel(node, term.id, (snapshotTerm) => {
+                snapshotTerm.implementation.bindings[index] = { ...snapshotTerm.implementation.bindings[index], key: event.target.value.trim() };
+            });
+        });
+        select.addEventListener('change', (event) => {
+            const candidate = candidates.find((option) => sourceTermReferenceValue(option) === event.target.value);
+            if (!candidate) return;
+            changeSourceTermModel(node, term.id, (snapshotTerm) => {
+                snapshotTerm.implementation.bindings[index] = sourceTermReferenceToBinding(snapshotTerm.implementation.bindings[index].key, candidate);
+            });
+        });
+        $(':scope > button', row).addEventListener('click', () => changeSourceTermModel(node, term.id, (snapshotTerm) => {
+            snapshotTerm.implementation.bindings.splice(index, 1);
+        }));
+        container.appendChild(row);
+    });
+}
+
+function renderSourceTermEditor(node, term) {
+    const definition = node.userData.definition;
+    $('#sourceTermEditorTitle').textContent = `${definition.title} · Source term`;
+    const implementationKind = term.implementation?.kind ?? 'equation';
+    const isEquation = implementationKind === 'equation';
+    $('#termImplementationKind').value = implementationKind;
+    $('#termEquationHeading').hidden = !isEquation;
+    $('#termEquationDiagnostics').hidden = !isEquation;
+    $('#termReferencePicker').hidden = !isEquation;
+    $('#termProviderSection').hidden = isEquation;
+
+    const output = $('#termOutputState');
+    output.replaceChildren(...definition.states.map((state) => new Option(state.symbol, state.id)));
+
+    const mathField = $('#termMathField');
+    const latexSource = $('#termEquation');
+    if (isEquation) {
+        term.expressionModel = normalizeSourceTermExpressionModel(definition, term);
+        term.expression = term.expressionModel.latex;
+        const latexMode = $('[data-term-equation-mode="latex"]').classList.contains('active');
+        mathField.hidden = latexMode;
+        latexSource.hidden = !latexMode;
+        mathField.value = term.expressionModel.latex;
+        latexSource.value = term.expressionModel.latex;
+        output.value = term.expressionModel.output.stateId ?? '';
+        renderSourceTermDiagnostics(term.expressionModel.latex, term.expressionModel.bindings);
+        const references = $('#termStateReferenceChips');
+        references.replaceChildren();
+        term.expressionModel.bindings.forEach((binding) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = binding.label;
+            button.title = 'Insert state reference';
+            button.addEventListener('click', () => insertSourceTermBinding(binding));
+            references.appendChild(button);
+        });
+    } else {
+        mathField.hidden = true;
+        latexSource.hidden = true;
+        output.value = term.implementation.output?.stateId ?? '';
+        $('#termProviderSource').value = term.implementation.source ?? '';
+        $('#termInsertProviderTemplate').hidden = !term.implementation.source?.trim();
+        $('#termProviderOutputKey').value = term.implementation.output?.key ?? '';
+        renderSourceTermProviderBindingRows(node, term);
+    }
+}
+
+function openSourceTermEditor(node, term) {
+    const editor = $('#sourceTermEditor');
+    selectedSourceTermNodeId = node.userData.id;
+    selectedSourceTermId = term.id;
+    hideCards(editor);
+    renderSourceTermEditor(node, term);
+    editor.style.removeProperty('left');
+    editor.style.removeProperty('top');
+    editor.classList.remove('hidden');
+    applyInspectorReadOnly();
+    requestAnimationFrame(avoidAssistantInspectorOverlap);
+}
+
+function previewSourceTermExpression(latex, origin) {
+    if (activeResult || !selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const definition = node?.userData.definition;
+    const term = definition?.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
+    if (!term) return;
+    beginEquationEditSession(`sourceTerm:${term.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
+    term.expressionModel = normalizeSourceTermExpressionModel(definition, term, { ...term.expressionModel, latex });
+    term.expression = latex;
+    if (origin !== 'visual') $('#termMathField').setValue(latex, { silenceNotifications: true });
+    if (origin !== 'latex') $('#termEquation').value = latex;
+    renderSourceTermDiagnostics(latex, term.expressionModel.bindings);
+    updateValidationStatus();
+}
+
+function previewSourceTermProviderSource(source) {
+    if (activeResult || !selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const definition = node?.userData.definition;
+    const term = definition?.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
+    if (!term) return;
+    beginEquationEditSession(`sourceTerm:${term.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
+    term.implementation = { ...term.implementation, source };
+    $('#termInsertProviderTemplate').hidden = !source.trim();
+    updateValidationStatus();
 }
 
 async function renderNodeResults(node) {
@@ -1645,6 +1833,11 @@ function refreshSourceStateOptions() {
         select.replaceChildren(...states.map((state) => new Option(`${state.name} (${state.symbol})`, state.symbol)));
         if ([...select.options].some((option) => option.value === selected)) select.value = selected;
     });
+    $$('#sourceTermRows .providerBindingRow [data-field="reference"]').forEach((select) => {
+        const selected = select.value;
+        select.replaceChildren(...states.map((state) => new Option(state.symbol, `state:${state.symbol}`)));
+        if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+    });
 }
 
 function addSourceTermRow() {
@@ -1652,12 +1845,80 @@ function addSourceTermRow() {
     row.className = 'builderRow sourceTermRow';
     row.innerHTML = `
         <select class="sourceState" aria-label="Updated state"></select>
+        <select class="sourceTermKind" aria-label="Implementation">
+            <option value="equation">Equation</option>
+            <option value="cpp">C++ program</option>
+            <option value="python">Python program</option>
+        </select>
         <input class="sourceExpression" placeholder="Source expression, e.g. qDot / heatCapacity">
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
+        <div class="sourceTermProviderFields" hidden>
+            <textarea class="sourceTermProviderSource" rows="8" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+            <div class="templateButtonGroup">
+                <button type="button" class="openSourceTermProviderEditor templateButton">Open code editor</button>
+                <button type="button" class="insertSourceTermTemplate templateButton" hidden>Reset template</button>
+            </div>
+            <div class="sourceTermProviderBindingRows"></div>
+            <button type="button" class="addSourceTermBinding templateButton">＋ Add binding</button>
+            <label class="editorField"><span>Output key</span><input class="sourceTermProviderOutputKey" placeholder="e.g. rateGradient"></label>
+        </div>
     `;
     $('#sourceTermRows').appendChild(row);
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
     refreshSourceStateOptions();
+
+    const kindSelect = $('.sourceTermKind', row);
+    const expressionInput = $('.sourceExpression', row);
+    const providerFields = $('.sourceTermProviderFields', row);
+    const providerSource = $('.sourceTermProviderSource', row);
+    const resetTemplateButton = $('.insertSourceTermTemplate', row);
+    const outputKeyInput = $('.sourceTermProviderOutputKey', row);
+
+    const bindingCandidates = () => stateVariablesFromBuilder().map((state) => ({ symbol: state.symbol, label: state.symbol }));
+    const refreshBindingRowOptions = () => {
+        const candidates = bindingCandidates();
+        $$('.providerBindingRow', providerFields).forEach((bindingRow) => {
+            const select = $('[data-field="reference"]', bindingRow);
+            const previous = select.value;
+            select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, `state:${candidate.symbol}`)));
+            if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+        });
+    };
+    const currentBindingKeys = () => $$('.providerBindingRow [data-field="key"]', providerFields).map((input) => ({ key: input.value }));
+    const regenerateTemplate = () => {
+        providerSource.value = defaultProviderSource(kindSelect.value, currentBindingKeys(), outputKeyInput.value, $('#newNodeName').value);
+        resetTemplateButton.hidden = !providerSource.value.trim();
+    };
+    const addBindingRow = () => {
+        const bindingRow = document.createElement('div');
+        bindingRow.className = 'providerBindingRow';
+        bindingRow.innerHTML = `
+            <label class="parameterField"><span>Key</span><input data-field="key"></label>
+            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
+            <button type="button" title="Remove binding">×</button>
+        `;
+        $('.sourceTermProviderBindingRows', providerFields).appendChild(bindingRow);
+        refreshBindingRowOptions();
+        bindingRow.querySelector('button').addEventListener('click', () => bindingRow.remove());
+    };
+
+    kindSelect.addEventListener('change', () => {
+        const isEquation = kindSelect.value === 'equation';
+        expressionInput.hidden = !isEquation;
+        providerFields.hidden = isEquation;
+        if (!isEquation && !providerSource.value.trim()) regenerateTemplate();
+    });
+    resetTemplateButton.addEventListener('click', () => {
+        if (providerSource.value.trim() && !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+        regenerateTemplate();
+    });
+    providerSource.addEventListener('input', () => { resetTemplateButton.hidden = !providerSource.value.trim(); });
+    $('.addSourceTermBinding', row).addEventListener('click', addBindingRow);
+    $('.openSourceTermProviderEditor', row).addEventListener('click', () => {
+        providerEditTarget = { type: 'builderSourceTerm', sourceElement: providerSource };
+        window.providerEditor.openWindow({ source: providerSource.value, kind: kindSelect.value, title: $('#newNodeName').value });
+    });
+
+    row.querySelector('.removeBuilderRow').addEventListener('click', () => { row.remove(); refreshSourceStateOptions(); });
 }
 
 function addEdgeParameterRow(values = {}) {
@@ -3865,6 +4126,15 @@ $$('[data-close-card]').forEach((button) => {
     button.addEventListener('click', () => {
         if (button.closest('#edgeEditor')) finishEquationEdit();
         if (button.closest('#edgeBuilder')) finishEndpointPick();
+        if (button.closest('#sourceTermEditor')) {
+            finishEquationEdit();
+            const node = selectedSourceTermNodeId ? nodeObjects.get(selectedSourceTermNodeId) : null;
+            selectedSourceTermNodeId = null;
+            selectedSourceTermId = null;
+            button.closest('.contextCard').classList.add('hidden');
+            if (node) openNodeEditor(node.userData.definition);
+            return;
+        }
         button.closest('.contextCard').classList.add('hidden');
     });
 });
@@ -3942,13 +4212,31 @@ $('#editEdgeDirectionality').addEventListener('change', (event) => {
     });
 });
 
+// A single live-edit session mechanism shared by every free-text field (edge equations,
+// edge provider source, source-term equations, source-term provider source) so keystrokes
+// preview immediately while only one undo/redo entry is recorded per continuous edit.
+function beginEquationEditSession(key, capture, apply) {
+    if (equationEditSession?.key === key) return;
+    finishEquationEdit();
+    equationEditSession = { key, before: capture(), capture, apply };
+}
+
+function finishEquationEdit() {
+    if (!equationEditSession) return;
+    const { before, capture, apply } = equationEditSession;
+    equationEditSession = null;
+    const after = capture();
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    recordHistory({
+        undo: () => apply(before),
+        redo: () => apply(after)
+    });
+}
+
 function previewProviderSource(source) {
     if (activeResult || !selectedRelationship) return;
     const definition = selectedRelationship;
-    if (!equationEditSession || equationEditSession.relationshipId !== definition.id) {
-        finishEquationEdit();
-        equationEditSession = { relationshipId: definition.id, definition, before: captureEdgeModel(definition) };
-    }
+    beginEquationEditSession(`edge:${definition.id}`, () => captureEdgeModel(definition), (snapshot) => applyEdgeModel(definition, snapshot));
     definition.implementation = { ...definition.implementation, source };
     $('#editInsertProviderTemplate').hidden = !source.trim();
     updateValidationStatus();
@@ -3957,10 +4245,7 @@ function previewProviderSource(source) {
 function previewEdgeEquation(latex, origin) {
     if (activeResult || !selectedRelationship) return;
     const definition = selectedRelationship;
-    if (!equationEditSession || equationEditSession.relationshipId !== definition.id) {
-        finishEquationEdit();
-        equationEditSession = { relationshipId: definition.id, definition, before: captureEdgeModel(definition) };
-    }
+    beginEquationEditSession(`edge:${definition.id}`, () => captureEdgeModel(definition), (snapshot) => applyEdgeModel(definition, snapshot));
     const equationModel = normalizeEdgeEquationModel(definition, {
         ...definition.equationModel,
         latex
@@ -3972,18 +4257,6 @@ function previewEdgeEquation(latex, origin) {
     renderEquationDiagnostics(latex, equationModel.bindings);
     updateRelationships();
     updateValidationStatus();
-}
-
-function finishEquationEdit() {
-    if (!equationEditSession) return;
-    const { definition, before } = equationEditSession;
-    equationEditSession = null;
-    const after = captureEdgeModel(definition);
-    if (JSON.stringify(before) === JSON.stringify(after)) return;
-    recordHistory({
-        undo: () => applyEdgeModel(definition, before),
-        redo: () => applyEdgeModel(definition, after)
-    });
 }
 
 $('#editEdgeMathField').addEventListener('input', (event) => {
@@ -4056,6 +4329,16 @@ window.providerEditor.onApplied(({ source }) => {
     } else if (providerEditTarget.type === 'builder' && !$('#edgeBuilder').classList.contains('hidden')) {
         $('#edgeProviderSource').value = source;
         $('#insertProviderTemplate').hidden = !source.trim();
+    } else if (providerEditTarget.type === 'sourceTerm') {
+        const node = nodeObjects.get(providerEditTarget.nodeId);
+        const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === providerEditTarget.termId);
+        if (!node || !term?.implementation) return;
+        changeSourceTermModel(node, providerEditTarget.termId, (snapshotTerm) => {
+            snapshotTerm.implementation.source = source;
+        });
+    } else if (providerEditTarget.type === 'builderSourceTerm' && document.body.contains(providerEditTarget.sourceElement)) {
+        providerEditTarget.sourceElement.value = source;
+        providerEditTarget.sourceElement.dispatchEvent(new Event('input', { bubbles: true }));
     }
 });
 $('#editEdgeProviderSource').addEventListener('input', (event) => {
@@ -4078,6 +4361,117 @@ $('#editAddProviderBinding').addEventListener('click', () => {
         snapshot.implementation.bindings.push(
             referenceToProviderBinding(`input${snapshot.implementation.bindings.length + 1}`, candidates[0]));
     });
+});
+$('#termOutputState').addEventListener('change', (event) => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const stateId = Number(event.target.value);
+    changeSourceTermModel(node, selectedSourceTermId, (term) => {
+        if (term.implementation) {
+            term.implementation.output = { ...term.implementation.output, stateId };
+        } else {
+            const state = node.userData.definition.states.find((candidate) => candidate.id === stateId);
+            if (state) term.state = state.symbol;
+            term.expressionModel = { ...term.expressionModel, output: { stateId } };
+        }
+    });
+});
+$('#termImplementationKind').addEventListener('change', (event) => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const kind = event.target.value;
+    changeSourceTermModel(node, selectedSourceTermId, (term) => {
+        if (kind === 'equation') {
+            term.implementation = null;
+            return;
+        }
+        const stateId = Number($('#termOutputState').value) || node.userData.definition.states[0]?.id || null;
+        const bindings = term.implementation?.bindings ?? [];
+        const output = term.implementation?.output ?? { key: 'output', stateId };
+        term.implementation = {
+            kind,
+            providerApiVersion: 1,
+            source: term.implementation?.source
+                || defaultProviderSource(kind, bindings, output.key, node.userData.definition.title),
+            bindings,
+            output
+        };
+    });
+});
+$('#termInsertProviderTemplate').addEventListener('click', () => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
+    if (!term?.implementation) return;
+    if ($('#termProviderSource').value.trim() &&
+        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+    changeSourceTermModel(node, selectedSourceTermId, (snapshotTerm) => {
+        snapshotTerm.implementation.source = defaultProviderSource(
+            snapshotTerm.implementation.kind, snapshotTerm.implementation.bindings,
+            snapshotTerm.implementation.output?.key, node.userData.definition.title);
+    });
+});
+$('#termAddProviderBinding').addEventListener('click', () => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    changeSourceTermModel(node, selectedSourceTermId, (term) => {
+        const candidates = sourceTermBindingCandidates(node.userData.definition);
+        if (!candidates.length) return;
+        term.implementation.bindings.push(
+            sourceTermReferenceToBinding(`input${term.implementation.bindings.length + 1}`, candidates[0]));
+    });
+});
+$('#termOpenProviderEditor').addEventListener('click', () => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const definition = node.userData.definition;
+    const term = definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
+    if (!term?.implementation) return;
+    providerEditTarget = { type: 'sourceTerm', nodeId: node.userData.id, termId: term.id };
+    window.providerEditor.openWindow({
+        source: $('#termProviderSource').value,
+        kind: term.implementation.kind,
+        title: definition.title
+    });
+});
+$('#termProviderSource').addEventListener('input', (event) => {
+    previewSourceTermProviderSource(event.target.value);
+});
+$('#termProviderSource').addEventListener('change', () => {
+    finishEquationEdit();
+});
+$('#termProviderOutputKey').addEventListener('change', (event) => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    changeSourceTermModel(node, selectedSourceTermId, (term) => {
+        term.implementation.output = { ...term.implementation.output, key: event.target.value.trim() };
+    });
+});
+$('#termMathField').addEventListener('input', (event) => {
+    previewSourceTermExpression(event.target.value, 'visual');
+});
+$('#termMathField').addEventListener('change', () => finishEquationEdit());
+$('#termEquation').addEventListener('input', (event) => {
+    previewSourceTermExpression(event.target.value, 'latex');
+});
+$('#termEquation').addEventListener('change', () => finishEquationEdit());
+$$('[data-term-equation-mode]').forEach((button) => button.addEventListener('click', () => {
+    $$('[data-term-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+    const latexMode = button.dataset.termEquationMode === 'latex';
+    $('#termMathField').hidden = latexMode;
+    $('#termEquation').hidden = !latexMode;
+    (latexMode ? $('#termEquation') : $('#termMathField')).focus();
+}));
+$('[data-delete-source-term]').addEventListener('click', () => {
+    if (!selectedSourceTermNodeId || !selectedSourceTermId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    changeNodeModel(node, (snapshot) => {
+        snapshot.sourceTerms = snapshot.sourceTerms.filter((candidate) => candidate.id !== selectedSourceTermId);
+    });
+    selectedSourceTermNodeId = null;
+    selectedSourceTermId = null;
+    $('#sourceTermEditor').classList.add('hidden');
+    openNodeEditor(node.userData.definition);
 });
 $$('[data-equation-mode]').forEach((button) => button.addEventListener('click', () => {
     $$('[data-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
@@ -4571,6 +4965,15 @@ $('#createNode').addEventListener('click', () => {
     }
 
     const id = allocateModelEntityId();
+    const resolvedStates = states.map((state) => ({
+        id: allocateModelEntityId(),
+        label: state.name,
+        symbol: state.symbol,
+        initialValue: Number(state.value) || 0,
+        unit: state.unit,
+        value: `${Number(state.value) || 0}${state.unit ? ` ${state.unit}` : ''}`
+    }));
+    const symbolToStateId = new Map(resolvedStates.map((state) => [state.symbol, state.id]));
     const definition = {
         id,
         title: $('#newNodeName').value.trim() || 'Untitled node',
@@ -4582,19 +4985,32 @@ $('#createNode').addEventListener('click', () => {
         subsystemId: activeSubsystemId,
         deleted: false,
         color: 0x34727a,
-        states: states.map((state) => ({
-            id: allocateModelEntityId(),
-            label: state.name,
-            symbol: state.symbol,
-            initialValue: Number(state.value) || 0,
-            unit: state.unit,
-            value: `${Number(state.value) || 0}${state.unit ? ` ${state.unit}` : ''}`
-        })),
-        sourceTerms: $$('.sourceTermRow').map((row) => ({
-            id: allocateModelEntityId(),
-            state: $('.sourceState', row).value,
-            expression: $('.sourceExpression', row).value.trim()
-        })).filter((term) => term.state && term.expression),
+        states: resolvedStates,
+        sourceTerms: $$('.sourceTermRow').map((row) => {
+            const stateSymbol = $('.sourceState', row).value;
+            const kind = $('.sourceTermKind', row)?.value ?? 'equation';
+            const termId = allocateModelEntityId();
+            if (kind === 'equation') {
+                return { id: termId, state: stateSymbol, expression: $('.sourceExpression', row).value.trim() };
+            }
+            const bindings = $$('.providerBindingRow', row).map((bindingRow) => ({
+                key: $('[data-field="key"]', bindingRow).value.trim(),
+                kind: 'state',
+                stateId: symbolToStateId.get($('[data-field="reference"]', bindingRow).value.replace('state:', ''))
+            })).filter((binding) => binding.stateId);
+            return {
+                id: termId,
+                state: stateSymbol,
+                expression: '',
+                implementation: {
+                    kind,
+                    providerApiVersion: 1,
+                    source: $('.sourceTermProviderSource', row).value,
+                    bindings,
+                    output: { key: $('.sourceTermProviderOutputKey', row).value.trim(), stateId: symbolToStateId.get(stateSymbol) }
+                }
+            };
+        }).filter((term) => term.state && (term.expression || term.implementation)),
         substepsPerGlobalStep: 1
     };
 

@@ -216,6 +216,53 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         if (const auto terms = node.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
             const auto& term = termEntry.second;
             registerId(value(term, "id"), "node", id, "Source term");
+            const auto termImplementation = term.get_child_optional("implementation");
+            const auto termImplementationKind = termImplementation ? value(*termImplementation, "kind") : "equation";
+            if (termImplementationKind != "equation" && termImplementationKind != "cpp" && termImplementationKind != "python") {
+                add(result, "sourceKindInvalid", "error", "Source term implementation kind must be equation, cpp or python.", "node", id, "sourceTerms");
+            }
+            if (termImplementationKind == "cpp" || termImplementationKind == "python") {
+                if (value(*termImplementation, "providerApiVersion") != "1") {
+                    add(result, "providerApiVersionInvalid", "error", "Programmable source terms require provider API version 1.", "node", id, "sourceTerms");
+                }
+                if (value(*termImplementation, "source").empty()) {
+                    add(result, "providerSourceEmpty", "error", "Programmable source terms require inline source.", "node", id, "sourceTerms");
+                }
+                // Unlike an edge, a source term has no other endpoint to read from, so zero
+                // declared bindings is not itself an error (e.g. a constant contribution).
+                // It only warrants a warning when the source still looks like the untouched,
+                // generated template — a signal the author has not started implementing it —
+                // and that warning clears as soon as real source is written, binding or not.
+                std::set<std::string> providerKeys;
+                const auto providerBindings = termImplementation->get_child_optional("bindings");
+                const bool hasBindings = providerBindings && !providerBindings->empty();
+                if (!hasBindings && value(*termImplementation, "source").find("TODO: read") != std::string::npos) {
+                    add(result, "sourceTermImplementationIncomplete", "warning",
+                        "This programmable source term has no input bindings and still contains the generated template.",
+                        "node", id, "sourceTerms");
+                }
+                if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
+                    const auto& binding = bindingEntry.second;
+                    const auto key = value(binding, "key");
+                    if (!std::regex_match(key, providerKeyPattern)) {
+                        add(result, "providerBindingKeyInvalid", "error", "Provider input keys must be lower camel case.", "node", id, "sourceTerms");
+                    } else if (!providerKeys.insert(key).second) {
+                        add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "sourceTerms");
+                    }
+                    if (value(binding, "kind") != "state" || !stateIds[id].contains(value(binding, "stateId"))) {
+                        add(result, "providerBindingMissing", "error", "Provider binding references a missing local state.", "node", id, "sourceTerms");
+                    }
+                }
+                const auto outputKey = value(*termImplementation, "output.key");
+                const auto outputStateId = value(*termImplementation, "output.stateId");
+                if (outputKey.empty() || !std::regex_match(outputKey, providerKeyPattern)) {
+                    add(result, "providerOutputKeyInvalid", "error", "Provider output key must be lower camel case.", "node", id, "sourceTerms");
+                }
+                if (outputStateId.empty() || !stateIds[id].contains(outputStateId)) {
+                    add(result, "providerOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "sourceTerms");
+                }
+                continue;
+            }
             const auto state = value(term, "state");
             if (!stateSymbols[id].contains(state)) add(result, "sourceStateMissing", "error", "Source term references a missing state.", "node", id, "sourceTerms");
             if (value(term, "expression").empty()) add(result, "sourceExpressionEmpty", "error", "Source term requires an expression.", "node", id, "sourceTerms");
@@ -290,11 +337,20 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (value(*implementation, "source").empty()) {
                 add(result, "providerSourceEmpty", "error", "Programmable relationships require inline source.", "edge", id, "implementation");
             }
+            // A relationship's provider need not read any bound value either (e.g. a constant
+            // or purely time-based contribution), so zero bindings is not itself an error. It
+            // only warrants a warning when the source still looks like the untouched, generated
+            // template — a signal the author has not started implementing it — and that warning
+            // clears as soon as real source is written, binding or not.
             std::set<std::string> providerKeys;
             const auto providerBindings = implementation->get_child_optional("bindings");
-            if (!providerBindings || providerBindings->empty()) {
-                add(result, "providerBindingsEmpty", "error", "Programmable relationships require at least one declared input binding.", "edge", id, "implementation");
-            } else for (const auto& bindingEntry : *providerBindings) {
+            const bool hasBindings = providerBindings && !providerBindings->empty();
+            if (!hasBindings && value(*implementation, "source").find("TODO: read") != std::string::npos) {
+                add(result, "providerImplementationIncomplete", "warning",
+                    "This programmable relationship has no input bindings and still contains the generated template.",
+                    "edge", id, "implementation");
+            }
+            if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
                 const auto& binding = bindingEntry.second;
                 const auto key = value(binding, "key");
                 if (!std::regex_match(key, providerKeyPattern)) {

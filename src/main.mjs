@@ -28,6 +28,9 @@ if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERAC
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
 }
 
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
 let mainWindow = null;

@@ -11,7 +11,9 @@ PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
                                   std::size_t nodeIndex,
                                   const StateValues& synchronizationSnapshot,
                                   const EntityValues& liveParameterValues,
-                                  double synchronizationStep) {
+                                  double simulationTime,
+                                  double synchronizationStep,
+                                  ProviderEvaluator* providerEvaluator = nullptr) {
     const auto startedAt = std::chrono::steady_clock::now();
     StateValues localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
@@ -20,7 +22,10 @@ PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
     const auto parameterValues = resolveParameterValues(node, liveParameterValues);
     const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
-        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, parameterValues);
+        const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
+        const auto evaluated = evaluateContributionTasks(
+            node, localStates, synchronizationSnapshot, parameterValues,
+            substepTime, nodeTimeStep, providerEvaluator);
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
     }
@@ -76,9 +81,11 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
                                                              std::size_t synchronizationIndex,
                                                              EntityValues parameterValues,
                                                              double synchronizationStep,
-                                                             std::chrono::milliseconds receiveTimeout) {
+                                                             double simulationTime,
+                                                             std::chrono::milliseconds receiveTimeout,
+                                                             ProviderEvaluator* providerEvaluator) {
     return executor_.submit([this, &transport, synchronizationIndex, parameterValues = std::move(parameterValues),
-                             synchronizationStep, receiveTimeout]() mutable {
+                             simulationTime, synchronizationStep, receiveTimeout, providerEvaluator]() mutable {
         const auto waitStartedAt = std::chrono::steady_clock::now();
         auto boundary = transport.receive(partition_, synchronizationIndex, receiveTimeout);
         const auto waitNanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -106,7 +113,7 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
                 }
             }
             result.nodes.push_back(integrateNode(
-                node, nodeIndex, synchronizationSnapshot, parameterValues, synchronizationStep));
+                node, nodeIndex, synchronizationSnapshot, parameterValues, simulationTime, synchronizationStep, providerEvaluator));
         }
         return result;
     });

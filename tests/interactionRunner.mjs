@@ -397,6 +397,64 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `!document.querySelector('#editEdgeMathField').hidden && document.querySelector('#editEdgeEquation').hidden`), true);
     });
 
+    await run('relationship editor authors an inline C++ provider implementation', async () => {
+        const kindSelect = `document.querySelector('#editEdgeImplementationKind')`;
+        await evaluate(window, `(() => {
+            const select = ${kindSelect};
+            select.value = 'cpp';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeEquationHeading').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeMathField').hidden`), true);
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), /#include <konjugate\/relationshipProvider\.hpp>/);
+
+        const source = 'int main() {}';
+        await evaluate(window, `(() => {
+            const textarea = document.querySelector('#editEdgeProviderSource');
+            textarea.value = ${JSON.stringify(source)};
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), source);
+
+        const bindingCountBefore = await evaluate(window, `document.querySelectorAll('.providerBindingRow').length`);
+        await evaluate(window, `document.querySelector('#editAddProviderBinding').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.providerBindingRow').length`), bindingCountBefore + 1);
+
+        await evaluate(window, `(() => {
+            const key = document.querySelector('.providerBindingRow:last-child [data-field="key"]');
+            key.value = 'delta';
+            key.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('.providerBindingRow:last-child [data-field="key"]').value`), 'delta');
+
+        await evaluate(window, `(() => {
+            const outputKey = document.querySelector('#editProviderOutputKey');
+            outputKey.value = 'gradient';
+            outputKey.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editProviderOutputKey').value`), 'gradient');
+
+        await evaluate(window, `(() => {
+            window.confirm = () => true;
+            document.querySelector('#editInsertProviderTemplate').click();
+        })()`);
+        const regeneratedSource = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        assert.match(regeneratedSource, /ScalarPort\{"delta", "delta", ""\}/);
+        assert.match(regeneratedSource, /ScalarPort\{"gradient", "gradient", ""\}/);
+
+        // Switch back to Equation so the following equation-editor tests see their expected state.
+        await evaluate(window, `(() => {
+            const select = ${kindSelect};
+            select.value = 'equation';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeEquationHeading').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeMathField').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection').hidden`), true);
+    });
+
     await run('C++ validation rejects unknown equation symbols while typing', async () => {
         const originalEquation = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
         await evaluate(window, `(() => {
@@ -416,6 +474,10 @@ export async function runInteractionTests(window) {
 
     await run('Backspace edits MathLive without deleting the relationship', async () => {
         const equationBefore = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
+        // A real pointer click (rather than a bare .focus() call) reliably restores keyboard
+        // routing into MathLive's custom element, matching how an actual user would interact
+        // with it after switching this relationship away from and back to Equation mode.
+        await clickElement(window, `document.querySelector('#editEdgeMathField')`);
         await evaluate(window, `(() => {
             const field = document.querySelector('#editEdgeMathField');
             field.focus();
@@ -488,6 +550,45 @@ export async function runInteractionTests(window) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
         assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    });
+
+    await run('edge builder creates a new relationship with an inline Python provider', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        await evaluate(window, `(() => {
+            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
+            choose('#edgeSource', 'Electrical losses');
+            choose('#edgeTarget', 'Enclosed air');
+            document.querySelector('#newEdgeName').value = 'Interaction provider relationship';
+            const kind = document.querySelector('#edgeImplementationKind');
+            kind.value = 'python';
+            kind.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeProviderSection').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationHeading').hidden`), true);
+        assert.match(await evaluate(window, `document.querySelector('#edgeProviderSource').value`), /from konjugate import/);
+        await evaluate(window, `(() => {
+            document.querySelector('#addProviderBinding').click();
+            const key = document.querySelector('#providerBindingRows .providerBindingRow [data-field="key"]');
+            key.value = 'sourceQDot';
+            key.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#providerOutputKey').value = 'targetHeatGradient';
+            window.confirm = () => true;
+            document.querySelector('#insertProviderTemplate').click();
+        })()`);
+        const builderSource = await evaluate(window, `document.querySelector('#edgeProviderSource').value`);
+        assert.match(builderSource, /ScalarPort\("sourceQDot", "sourceQDot", ""\)/);
+        assert.match(builderSource, /ScalarPort\("targetHeatGradient", "targetHeatGradient", ""\)/);
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The new provider relationship did not reach native validation.');
+        // The edge builder leaves source/target stateId null for every new relationship
+        // regardless of implementation kind, which the native validator separately flags
+        // (a pre-existing gap unrelated to provider support); only assert that the new
+        // implementation fields themselves did not produce a provider-specific diagnostic.
+        assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });

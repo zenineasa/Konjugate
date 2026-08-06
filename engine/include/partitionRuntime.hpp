@@ -72,7 +72,9 @@ public:
                                                std::size_t synchronizationIndex,
                                                EntityValues parameterValues,
                                                double synchronizationStep,
-                                               std::chrono::milliseconds receiveTimeout = std::chrono::seconds(5));
+                                               double simulationTime = 0,
+                                               std::chrono::milliseconds receiveTimeout = std::chrono::seconds(5),
+                                               ProviderEvaluator* providerEvaluator = nullptr);
 
 private:
     std::size_t partition_;

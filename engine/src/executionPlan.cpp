@@ -72,12 +72,13 @@ std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& 
                                              EntityId outputNodeId,
                                              bool sourceTerm,
                                              const std::unordered_map<EntityId, std::size_t>& stateIndexes,
-                                             const std::unordered_map<EntityId, std::size_t>& localStateIndexes) {
+                                             const std::unordered_map<EntityId, std::size_t>& localStateIndexes,
+                                             const std::string& identifierField = "symbol") {
     std::vector<CompiledBinding> result;
     for (const auto& bindingItem : bindings) {
         const auto& binding = bindingItem.second;
         CompiledBinding compiled;
-        compiled.symbol = value(binding, "symbol");
+        compiled.symbol = value(binding, identifierField);
         if (value(binding, "kind") == "parameter") {
             compiled.source = BindingSource::parameter;
             compiled.valueId = idValue(binding, "parameterId");
@@ -113,7 +114,7 @@ void bindTask(ContributionTask& task) {
         if (found == task.parameters.end()) throw std::runtime_error("An executable parameter binding is unresolved.");
         binding.parameterIndex = static_cast<std::size_t>(std::distance(task.parameters.begin(), found));
     }
-    bindExpressionSymbols(task.expression, task.bindings);
+    if (task.implementation == ContributionImplementation::equation) bindExpressionSymbols(task.expression, task.bindings);
 }
 
 double requireArgument(const CompiledExpression& expression, std::size_t index, const std::vector<double>& symbols) {
@@ -208,7 +209,9 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
 
     for (const auto& edgeItem : document.get_child("edges")) {
         const auto& edge = edgeItem.second;
-        const auto outputStateId = idValue(edge, "equationModel.output.stateId");
+        const auto implementationKind = value(edge, "implementation.kind");
+        const auto programmable = implementationKind == "cpp" || implementationKind == "python";
+        const auto outputStateId = idValue(edge, programmable ? "implementation.output.stateId" : "equationModel.output.stateId");
         const auto outputNodeId = plan.stateNodes.at(outputStateId);
         auto& node = plan.nodes.at(nodeIndexes.at(outputNodeId));
         std::unordered_map<EntityId, std::size_t> localStateIndexes;
@@ -218,15 +221,22 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         task.sourceId = idValue(edge, "id");
         task.outputStateId = outputStateId;
         task.outputStateIndex = localStateIndexes.at(outputStateId);
-        task.bindings = compileBindings(edge.get_child("equationModel.bindings"), outputNodeId, false,
-            plan.stateIndexes, localStateIndexes);
+        task.bindings = compileBindings(edge.get_child(programmable ? "implementation.bindings" : "equationModel.bindings"),
+            outputNodeId, false, plan.stateIndexes, localStateIndexes, programmable ? "key" : "symbol");
         for (const auto& parameterItem : edge.get_child("parameters")) {
             const auto& parameter = parameterItem.second;
             task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
         }
-        task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
+        if (programmable) {
+            task.implementation = implementationKind == "cpp"
+                ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
+            task.providerSource = value(edge, "implementation.source");
+            task.providerOutputKey = value(edge, "implementation.output.key");
+        } else {
+            task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
+        }
         bindTask(task);
-        node.estimatedOperationsPerSubstep += task.expression.operationCount();
+        node.estimatedOperationsPerSubstep += programmable ? task.bindings.size() + 1 : task.expression.operationCount();
         node.contributions.push_back(std::move(task));
     }
     std::sort(plan.stateIds.begin(), plan.stateIds.end());
@@ -249,7 +259,10 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeExecutionPlan& node,
     const StateValues& localStates,
     const StateValues& synchronizationSnapshot,
-    const NodeParameterValues& parameterValues) {
+    const NodeParameterValues& parameterValues,
+    double simulationTime,
+    double stepSize,
+    ProviderEvaluator* providerEvaluator) {
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
     for (std::size_t taskIndex = 0; taskIndex < node.contributions.size(); ++taskIndex) {
@@ -262,7 +275,11 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueIndex);
             else symbols[index] = synchronizationSnapshot.at(binding.valueIndex);
         }
-        const auto contribution = task.expression.evaluate(symbols);
+        const auto contribution = task.implementation == ContributionImplementation::equation
+            ? task.expression.evaluate(symbols)
+            : (providerEvaluator
+                ? providerEvaluator->evaluate(task, symbols, simulationTime, stepSize)
+                : throw std::runtime_error("A programmable relationship requires an initialized provider runtime."));
         if (!std::isfinite(contribution)) throw std::runtime_error("A contribution task produced a non-finite derivative.");
         evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
     }

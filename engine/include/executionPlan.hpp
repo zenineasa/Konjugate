@@ -49,6 +49,7 @@ struct CompiledExpression {
 };
 
 enum class BindingSource { localState, synchronizationSnapshot, parameter };
+enum class ContributionImplementation { equation, cppProvider, pythonProvider };
 
 struct CompiledBinding {
     std::string symbol;
@@ -72,6 +73,18 @@ struct ContributionTask {
     std::vector<CompiledBinding> bindings;
     std::vector<CompiledParameter> parameters;
     CompiledExpression expression;
+    ContributionImplementation implementation = ContributionImplementation::equation;
+    std::string providerSource;
+    std::string providerOutputKey;
+};
+
+class ProviderEvaluator {
+public:
+    virtual ~ProviderEvaluator() = default;
+    virtual double evaluate(const ContributionTask& task,
+                            const std::vector<double>& inputs,
+                            double simulationTime,
+                            double stepSize) = 0;
 };
 
 struct NodeExecutionPlan {
@@ -106,7 +119,10 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeExecutionPlan& node,
     const StateValues& localStates,
     const StateValues& synchronizationSnapshot,
-    const NodeParameterValues& parameterValues);
+    const NodeParameterValues& parameterValues,
+    double simulationTime = 0,
+    double stepSize = 0,
+    ProviderEvaluator* providerEvaluator = nullptr);
 
 NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues);
 

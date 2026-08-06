@@ -326,12 +326,26 @@
                 <div id="edgeEditorParameters"></div>
             </section>
             <section>
-                <div class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <label class="editorField"><span>Implementation</span><select id="editEdgeImplementationKind">
+                    <option value="equation">Equation</option>
+                    <option value="cpp">C++ program</option>
+                    <option value="python">Python program</option>
+                </select></label>
                 <label class="editorField"><span>Updates</span><select id="editEquationOutput"></select></label>
+                <div id="editEdgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
                 <math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
                 <textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
-                <div class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
+                <div id="editEdgeReferencePicker" class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
+                <div id="editEdgeProviderSection" hidden>
+                    <div class="equationHeading"><h3>Provider source</h3><button id="editInsertProviderTemplate" class="templateButton" type="button">Insert template</button></div>
+                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                    <textarea id="editEdgeProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <h3>Bindings <button id="editAddProviderBinding" type="button">＋</button></h3>
+                    <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
+                    <div id="editEdgeProviderBindings"></div>
+                    <label class="editorField"><span>Output key</span><input id="editProviderOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
+                </div>
             </section>
             <footer><button data-delete-edge type="button">Delete edge</button></footer>
         </div>
@@ -372,12 +386,26 @@
             </section>
             <section>
                 <label class="editorField"><span>Edge name</span><input id="newEdgeName" value="New relationship" autocomplete="off"></label>
-                <div class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-builder-equation-mode="visual" type="button">Visual</button><button data-builder-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <label class="editorField"><span>Implementation</span><select id="edgeImplementationKind">
+                    <option value="equation">Equation</option>
+                    <option value="cpp">C++ program</option>
+                    <option value="python">Python program</option>
+                </select></label>
                 <label class="editorField"><span>Updates</span><select id="edgeEquationOutput"></select></label>
+                <div id="edgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-builder-equation-mode="visual" type="button">Visual</button><button data-builder-equation-mode="latex" type="button">LaTeX</button></div></div>
                 <math-field id="edgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
                 <textarea id="edgeEquation" class="equationSource" rows="3" placeholder="Choose references below, or enter LaTeX" hidden></textarea>
                 <div id="builderEquationDiagnostics" class="equationDiagnostics" role="status"></div>
-                <div class="referencePicker"><span>Available references</span><div id="stateReferenceChips"></div></div>
+                <div id="edgeReferencePicker" class="referencePicker"><span>Available references</span><div id="stateReferenceChips"></div></div>
+                <div id="edgeProviderSection" hidden>
+                    <div class="equationHeading"><h3>Provider source</h3><button id="insertProviderTemplate" class="templateButton" type="button">Insert template</button></div>
+                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                    <textarea id="edgeProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <h3>Bindings <button id="addProviderBinding" type="button">＋</button></h3>
+                    <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
+                    <div id="providerBindingRows" class="builderRows"></div>
+                    <label class="editorField"><span>Output key</span><input id="providerOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
+                </div>
             </section>
             <section>
                 <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>

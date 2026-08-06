@@ -14,6 +14,7 @@ import {
     validateEquationLatex
 } from '../equationModel.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
+import { defaultProviderSource } from '../providerTemplate.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
@@ -217,6 +218,7 @@ function hydrateProjectDocument(document) {
             bindings: [],
             mathJson: null
         },
+        implementation: edge.implementation ?? null,
         parameters: edge.parameters ?? [],
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: Number(edge.appearance?.offset) || 0,
@@ -1260,6 +1262,7 @@ function captureEdgeModel(definition) {
         directionality: definition.directionality,
         equation: definition.equation,
         equationModel: structuredClone(equationModel),
+        implementation: structuredClone(definition.implementation ?? null),
         parameters: structuredClone(definition.parameters)
     };
 }
@@ -1273,6 +1276,7 @@ function applyEdgeModel(definition, snapshot) {
     definition.parameters = structuredClone(snapshot.parameters);
     definition.equationModel = normalizeEdgeEquationModel(definition, snapshot.equationModel);
     definition.equation = definition.equationModel.latex;
+    definition.implementation = structuredClone(snapshot.implementation ?? null);
     setRelationshipDirectionality(definition, snapshot.directionality);
     updateRelationships();
     updateValidationStatus();
@@ -1387,12 +1391,17 @@ function renderEdgeEditor(definition) {
         }));
         parameterContainer.appendChild(row);
     });
-    definition.equationModel = normalizeEdgeEquationModel(definition);
-    definition.equation = definition.equationModel.latex;
-    const mathField = $('#editEdgeMathField');
-    const latexSource = $('#editEdgeEquation');
-    mathField.value = definition.equationModel.latex;
-    latexSource.value = definition.equationModel.latex;
+    const implementationKind = definition.implementation?.kind ?? 'equation';
+    const isEquation = implementationKind === 'equation';
+    $('#editEdgeImplementationKind').value = implementationKind;
+    // The math-field/latex-textarea toggle their own `hidden` directly (matching the existing
+    // Visual/LaTeX mode toggle) rather than through a hidden ancestor: MathLive's custom element
+    // does not reliably accept focus again once an ancestor of it has been display:none'd.
+    $('#editEdgeEquationHeading').hidden = !isEquation;
+    $('#equationDiagnostics').hidden = !isEquation;
+    $('#editEdgeReferencePicker').hidden = !isEquation;
+    $('#editEdgeProviderSection').hidden = isEquation;
+
     const output = $('#editEquationOutput');
     output.replaceChildren();
     [['source', definition.source], ['target', definition.target]].forEach(([role, nodeId]) => {
@@ -1401,17 +1410,100 @@ function renderEdgeEditor(definition) {
             output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.id}`));
         });
     });
-    output.value = `${definition.equationModel.output.role}:${definition.equationModel.output.stateId}`;
-    renderEquationDiagnostics(definition.equationModel.latex, definition.equationModel.bindings);
-    const references = $('#editStateReferenceChips');
-    references.replaceChildren();
-    definition.equationModel.bindings.forEach((binding) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = binding.label;
-        button.title = binding.kind === 'parameter' ? 'Insert parameter' : 'Insert state reference';
-        button.addEventListener('click', () => insertEquationBinding(binding));
-        references.appendChild(button);
+
+    const mathField = $('#editEdgeMathField');
+    const latexSource = $('#editEdgeEquation');
+    if (isEquation) {
+        definition.equationModel = normalizeEdgeEquationModel(definition);
+        definition.equation = definition.equationModel.latex;
+        const latexMode = $('[data-equation-mode="latex"]').classList.contains('active');
+        mathField.hidden = latexMode;
+        latexSource.hidden = !latexMode;
+        mathField.value = definition.equationModel.latex;
+        latexSource.value = definition.equationModel.latex;
+        output.value = `${definition.equationModel.output.role}:${definition.equationModel.output.stateId}`;
+        renderEquationDiagnostics(definition.equationModel.latex, definition.equationModel.bindings);
+        const references = $('#editStateReferenceChips');
+        references.replaceChildren();
+        definition.equationModel.bindings.forEach((binding) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = binding.label;
+            button.title = binding.kind === 'parameter' ? 'Insert parameter' : 'Insert state reference';
+            button.addEventListener('click', () => insertEquationBinding(binding));
+            references.appendChild(button);
+        });
+    } else {
+        mathField.hidden = true;
+        latexSource.hidden = true;
+        output.value = `${definition.implementation.output?.role ?? 'target'}:${definition.implementation.output?.stateId ?? ''}`;
+        $('#editEdgeProviderSource').value = definition.implementation.source ?? '';
+        $('#editProviderOutputKey').value = definition.implementation.output?.key ?? '';
+        renderProviderBindingRows(definition);
+    }
+}
+
+function providerReferenceCandidates(definition) {
+    const sourceNode = model.nodes.find((node) => node.id === definition.source);
+    const targetNode = model.nodes.find((node) => node.id === definition.target);
+    return reconcileEquationBindings([], sourceNode, targetNode, definition.parameters);
+}
+
+function providerReferenceValue(reference) {
+    return reference.kind === 'parameter'
+        ? `parameter:${reference.parameterId}`
+        : `state:${reference.role}:${reference.nodeId}:${reference.stateId}`;
+}
+
+function providerBindingToReference(binding) {
+    return {
+        kind: binding.kind,
+        role: binding.role,
+        nodeId: binding.nodeId,
+        stateId: binding.stateId,
+        parameterId: binding.parameterId
+    };
+}
+
+function referenceToProviderBinding(key, reference) {
+    return reference.kind === 'parameter'
+        ? { key, kind: 'parameter', parameterId: reference.parameterId }
+        : { key, kind: 'state', role: reference.role, nodeId: reference.nodeId, stateId: reference.stateId };
+}
+
+function renderProviderBindingRows(definition) {
+    const container = $('#editEdgeProviderBindings');
+    container.replaceChildren();
+    const bindings = definition.implementation?.bindings ?? [];
+    const candidates = providerReferenceCandidates(definition);
+    if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
+    bindings.forEach((binding, index) => {
+        const row = document.createElement('div');
+        row.className = 'providerBindingRow';
+        row.innerHTML = `
+            <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(binding.key ?? '')}"></label>
+            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
+            <button type="button" title="Remove binding">×</button>
+        `;
+        const select = $('[data-field="reference"]', row);
+        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
+        select.value = providerReferenceValue(providerBindingToReference(binding));
+        $('[data-field="key"]', row).addEventListener('change', (event) => {
+            changeEdgeModel(definition, (snapshot) => {
+                snapshot.implementation.bindings[index] = { ...snapshot.implementation.bindings[index], key: event.target.value.trim() };
+            });
+        });
+        select.addEventListener('change', (event) => {
+            const candidate = candidates.find((option) => providerReferenceValue(option) === event.target.value);
+            if (!candidate) return;
+            changeEdgeModel(definition, (snapshot) => {
+                snapshot.implementation.bindings[index] = referenceToProviderBinding(snapshot.implementation.bindings[index].key, candidate);
+            });
+        });
+        $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
+            snapshot.implementation.bindings.splice(index, 1);
+        }));
+        container.appendChild(row);
     });
 }
 
@@ -1716,6 +1808,37 @@ function refreshStateReferences() {
     if ([...output.options].some((option) => option.value === selectedOutput)) output.value = selectedOutput;
     else if (targetNode?.states[0]) output.value = `target:${targetNode.states[0].id}`;
     renderBuilderEquationDiagnostics(bindings);
+    refreshProviderBindingRowOptions(bindings);
+}
+
+function refreshProviderBindingRowOptions(candidates) {
+    $$('#providerBindingRows .providerBindingRow').forEach((row) => {
+        const select = $('[data-field="reference"]', row);
+        const previous = select.value;
+        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
+        if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+    });
+}
+
+function addProviderBindingRow(values = {}) {
+    const row = document.createElement('div');
+    row.className = 'builderRow providerBindingRow';
+    row.innerHTML = `
+        <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(values.key ?? '')}"></label>
+        <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
+        <button class="removeBuilderRow" type="button" title="Remove binding">×</button>
+    `;
+    $('#providerBindingRows').appendChild(row);
+    const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
+    const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
+    const parameters = $$('.parameterRow').map((parameterRow, index) => ({
+        id: `builderParameter${index}`,
+        symbol: $('[data-field="symbol"]', parameterRow).value.trim()
+    })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
+    const candidates = reconcileEquationBindings([], sourceNode, targetNode, parameters);
+    refreshProviderBindingRowOptions(candidates);
+    if (values.referenceValue) $('[data-field="reference"]', row).value = values.referenceValue;
+    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
 }
 
 function renderBuilderEquationDiagnostics(bindings = null) {
@@ -2811,6 +2934,7 @@ function serializeProjectDocument() {
                 directionality: edge.directionality,
                 equation: edge.equationModel?.latex ?? edge.equation ?? '',
                 equationModel: normalizeEdgeEquationModel(edge),
+                ...(edge.implementation ? { implementation: edge.implementation } : {}),
                 parameters: edge.parameters ?? [],
                 appearance: {
                     color: `#${edge.color.toString(16).padStart(6, '0')}`,
@@ -3558,10 +3682,18 @@ function openEdgeBuilder(clientX, clientY) {
     const builder = $('#edgeBuilder');
     hideCards(builder);
     $('#newEdgeName').value = 'New relationship';
+    $('#edgeImplementationKind').value = 'equation';
     $('#edgeEquation').value = '';
     $('#edgeMathField').setValue('', { silenceNotifications: true });
     $('#edgeMathField').hidden = false;
     $('#edgeEquation').hidden = true;
+    $('#edgeEquationHeading').hidden = false;
+    $('#builderEquationDiagnostics').hidden = false;
+    $('#edgeReferencePicker').hidden = false;
+    $('#edgeProviderSection').hidden = true;
+    $('#edgeProviderSource').value = '';
+    $('#providerOutputKey').value = '';
+    $('#providerBindingRows').replaceChildren();
     $$('[data-builder-equation-mode]').forEach((button) => {
         button.classList.toggle('active', button.dataset.builderEquationMode === 'visual');
     });
@@ -3807,6 +3939,17 @@ $('#editEdgeDirectionality').addEventListener('change', (event) => {
     });
 });
 
+function previewProviderSource(source) {
+    if (activeResult || !selectedRelationship) return;
+    const definition = selectedRelationship;
+    if (!equationEditSession || equationEditSession.relationshipId !== definition.id) {
+        finishEquationEdit();
+        equationEditSession = { relationshipId: definition.id, definition, before: captureEdgeModel(definition) };
+    }
+    definition.implementation = { ...definition.implementation, source };
+    updateValidationStatus();
+}
+
 function previewEdgeEquation(latex, origin) {
     if (activeResult || !selectedRelationship) return;
     const definition = selectedRelationship;
@@ -3855,7 +3998,59 @@ $('#editEquationOutput').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     const [role, stateId] = event.target.value.split(':');
     changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.equationModel.output = { role, stateId };
+        if (snapshot.implementation) snapshot.implementation.output = { ...snapshot.implementation.output, role, stateId };
+        else snapshot.equationModel.output = { role, stateId };
+    });
+});
+$('#editEdgeImplementationKind').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    const kind = event.target.value;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        if (kind === 'equation') {
+            snapshot.implementation = null;
+            return;
+        }
+        const [role, stateId] = $('#editEquationOutput').value.split(':');
+        const bindings = snapshot.implementation?.bindings ?? [];
+        const output = snapshot.implementation?.output ?? { key: 'output', role, stateId };
+        snapshot.implementation = {
+            kind,
+            providerApiVersion: 1,
+            source: snapshot.implementation?.source
+                || defaultProviderSource(kind, bindings, output.key, snapshot.title),
+            bindings,
+            output
+        };
+    });
+});
+$('#editInsertProviderTemplate').addEventListener('click', () => {
+    if (!selectedRelationship?.implementation) return;
+    const { kind, bindings, output } = selectedRelationship.implementation;
+    if ($('#editEdgeProviderSource').value.trim() &&
+        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title);
+    });
+});
+$('#editEdgeProviderSource').addEventListener('input', (event) => {
+    previewProviderSource(event.target.value);
+});
+$('#editEdgeProviderSource').addEventListener('change', () => {
+    finishEquationEdit();
+});
+$('#editProviderOutputKey').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.implementation.output = { ...snapshot.implementation.output, key: event.target.value.trim() };
+    });
+});
+$('#editAddProviderBinding').addEventListener('click', () => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        const candidates = providerReferenceCandidates(snapshot);
+        if (!candidates.length) return;
+        snapshot.implementation.bindings.push(
+            referenceToProviderBinding(`input${snapshot.implementation.bindings.length + 1}`, candidates[0]));
     });
 });
 $$('[data-equation-mode]').forEach((button) => button.addEventListener('click', () => {
@@ -4245,6 +4440,35 @@ $$('[data-builder-equation-mode]').forEach((button) => button.addEventListener('
     $('#edgeEquation').hidden = !latexMode;
     (latexMode ? $('#edgeEquation') : $('#edgeMathField')).focus();
 }));
+function builderProviderBindingKeys() {
+    return $$('#providerBindingRows .providerBindingRow [data-field="key"]').map((input) => ({ key: input.value }));
+}
+
+$('#edgeImplementationKind').addEventListener('change', (event) => {
+    const kind = event.target.value;
+    const isEquation = kind === 'equation';
+    $('#edgeEquationHeading').hidden = !isEquation;
+    $('#builderEquationDiagnostics').hidden = !isEquation;
+    $('#edgeReferencePicker').hidden = !isEquation;
+    $('#edgeProviderSection').hidden = isEquation;
+    // The math-field/latex-textarea toggle their own `hidden` directly (matching the existing
+    // Visual/LaTeX mode toggle) rather than through a hidden ancestor: MathLive's custom element
+    // does not reliably accept focus again once an ancestor of it has been display:none'd.
+    const latexMode = $('[data-builder-equation-mode="latex"]').classList.contains('active');
+    $('#edgeMathField').hidden = !isEquation || latexMode;
+    $('#edgeEquation').hidden = !isEquation || !latexMode;
+    if (!isEquation && !$('#edgeProviderSource').value.trim()) {
+        $('#edgeProviderSource').value = defaultProviderSource(
+            kind, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
+    }
+});
+$('#insertProviderTemplate').addEventListener('click', () => {
+    if ($('#edgeProviderSource').value.trim() &&
+        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+    $('#edgeProviderSource').value = defaultProviderSource(
+        $('#edgeImplementationKind').value, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
+});
+$('#addProviderBinding').addEventListener('click', () => addProviderBindingRow());
 $('#newNodeShape').addEventListener('change', (event) => {
     $('#geometryImportField').hidden = event.target.value !== 'imported';
 });
@@ -4383,6 +4607,7 @@ $('#createEdge').addEventListener('click', () => {
         $('[data-control-field="minimum"]', row).focus();
         return;
     }
+    const implementationKind = $('#edgeImplementationKind').value;
     const definition = {
         id: allocateModelEntityId(),
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
@@ -4393,7 +4618,7 @@ $('#createEdge').addEventListener('click', () => {
         directionality: 'directed',
         color: 0x9c83c4,
         offset: 0,
-        equation: $('#edgeEquation').value.trim(),
+        equation: implementationKind === 'equation' ? $('#edgeEquation').value.trim() : '',
         parameters
     };
     definition.equationModel = normalizeEdgeEquationModel(definition);
@@ -4401,10 +4626,30 @@ $('#createEdge').addEventListener('click', () => {
     if (outputRole && outputStateId) {
         definition.equationModel.output = { role: outputRole, stateId: Number(outputStateId) };
     }
-    if (definition.equation && !definition.equationModel.mathJson) {
-        renderBuilderEquationDiagnostics(definition.equationModel.bindings);
-        ($('#edgeMathField').hidden ? $('#edgeEquation') : $('#edgeMathField')).focus();
-        return;
+    if (implementationKind === 'equation') {
+        if (definition.equation && !definition.equationModel.mathJson) {
+            renderBuilderEquationDiagnostics(definition.equationModel.bindings);
+            ($('#edgeMathField').hidden ? $('#edgeEquation') : $('#edgeMathField')).focus();
+            return;
+        }
+    } else {
+        const fakeParameterIdToReal = Object.fromEntries(parameters.map((parameter, index) => [`builderParameter${index}`, parameter.id]));
+        const bindings = $$('#providerBindingRows .providerBindingRow').map((row) => {
+            const key = $('[data-field="key"]', row).value.trim();
+            const referenceValue = $('[data-field="reference"]', row).value;
+            if (referenceValue.startsWith('parameter:')) {
+                return { key, kind: 'parameter', parameterId: fakeParameterIdToReal[referenceValue.slice('parameter:'.length)] };
+            }
+            const [, role, nodeId, stateId] = referenceValue.split(':');
+            return { key, kind: 'state', role, nodeId: Number(nodeId), stateId: Number(stateId) };
+        });
+        definition.implementation = {
+            kind: implementationKind,
+            providerApiVersion: 1,
+            source: $('#edgeProviderSource').value,
+            bindings,
+            output: { key: $('#providerOutputKey').value.trim(), role: outputRole, stateId: Number(outputStateId) }
+        };
     }
 
     finishEndpointPick();

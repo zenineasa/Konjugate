@@ -7,6 +7,7 @@
 #include "executionPlan.hpp"
 #include "partitionPlan.hpp"
 #include "partitionRuntime.hpp"
+#include "providerRuntime.hpp"
 #include "taskExecutor.hpp"
 #include <algorithm>
 #include <chrono>
@@ -249,7 +250,9 @@ ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& t
 NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const Values& synchronizationSnapshot,
                                     const EntityValues& liveParameterValues,
-                                    double synchronizationStep) {
+                                    double simulationTime,
+                                    double synchronizationStep,
+                                    ProviderEvaluator* providerEvaluator = nullptr) {
     const auto startedAt = std::chrono::steady_clock::now();
     Values localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
@@ -258,7 +261,10 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     const auto parameterValues = resolveParameterValues(node, liveParameterValues);
     const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
-        const auto evaluated = evaluateContributionTasks(node, localStates, synchronizationSnapshot, parameterValues);
+        const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
+        const auto evaluated = evaluateContributionTasks(
+            node, localStates, synchronizationSnapshot, parameterValues,
+            substepTime, nodeTimeStep, providerEvaluator);
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
     }
@@ -289,6 +295,19 @@ void runSimulation(const boost::property_tree::ptree& document,
 
     const auto planningStartedAt = std::chrono::steady_clock::now();
     const auto executionPlan = compileExecutionPlan(document);
+    ProviderConfiguration providerConfig;
+    if (const auto providers = configuration.get_child_optional("providers")) {
+        providerConfig.cppCompiler = providers->get<std::string>("cpp.compiler", "");
+        providerConfig.cppSdkPath = providers->get<std::string>("cpp.sdkPath", "");
+        providerConfig.pythonInterpreter = providers->get<std::string>("python.interpreter", "");
+        providerConfig.pythonSdkPath = providers->get<std::string>("python.sdkPath", "");
+        providerConfig.buildDirectory = providers->get<std::string>("buildDirectory", "");
+    }
+    std::unique_ptr<ProviderRuntime> providerRuntime;
+    if (planRequiresProviders(executionPlan)) {
+        providerRuntime = std::make_unique<ProviderRuntime>(providerConfig);
+        providerRuntime->initialize(executionPlan);
+    }
     const auto dependencyGraph = buildDependencyGraph(executionPlan);
     auto executionSettings = executionSettingsFromTree(configuration, executionPlan);
     const auto requestedPartitions = configuration.get<std::size_t>("execution.partitionCount", executionSettings.workerThreads);
@@ -660,8 +679,8 @@ void runSimulation(const boost::property_tree::ptree& document,
             futures.resize(executionPlan.nodes.size());
             for (const auto index : executionPlan.taskSubmissionOrder) {
                 const auto* nodePlan = &executionPlan.nodes[index];
-                futures[index] = taskExecutor->submit([nodePlan, &snapshot, &parameterValues, synchronizationStep] {
-                    return integrateNode(*nodePlan, snapshot, parameterValues, synchronizationStep);
+                futures[index] = taskExecutor->submit([nodePlan, &snapshot, &parameterValues, currentTime, synchronizationStep, evaluatorPtr = providerRuntime.get()] {
+                    return integrateNode(*nodePlan, snapshot, parameterValues, currentTime, synchronizationStep, evaluatorPtr);
                 });
             }
             for (std::size_t index = 0; index < futures.size(); ++index) nodeResults[index] = futures[index].get();
@@ -689,8 +708,8 @@ void runSimulation(const boost::property_tree::ptree& document,
             futures.reserve(partitionRuntimes.size());
             for (auto& runtime : partitionRuntimes) {
                 futures.push_back(runtime->submit(
-                    *partitionTransport, step, parameterValues, synchronizationStep,
-                    std::chrono::milliseconds(partitionReceiveTimeoutMilliseconds)));
+                    *partitionTransport, step, parameterValues, synchronizationStep, currentTime,
+                    std::chrono::milliseconds(partitionReceiveTimeoutMilliseconds), providerRuntime.get()));
             }
             for (std::size_t partition = 0; partition < futures.size(); ++partition) {
                 const auto result = futures[partition].get();
@@ -704,7 +723,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             }
         } else {
             for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
-                nodeResults[index] = integrateNode(executionPlan.nodes[index], snapshot, runControl.parameterValues, synchronizationStep);
+                nodeResults[index] = integrateNode(executionPlan.nodes[index], snapshot, runControl.parameterValues, currentTime, synchronizationStep, providerRuntime.get());
             }
         }
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {

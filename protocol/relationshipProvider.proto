@@ -1,0 +1,89 @@
+// Copyright © 2026 Zenin Easa Panthakkalakath
+
+edition = "2024";
+
+package konjugate.provider.protocol;
+
+enum RuntimeKind {
+    RUNTIME_KIND_UNSPECIFIED = 0;
+    RUNTIME_KIND_CPP = 1;
+    RUNTIME_KIND_PYTHON = 2;
+}
+
+message HandshakeRequest {
+    uint32 protocol_version = 1;
+    uint32 provider_api_version = 2;
+}
+
+message HandshakeResponse {
+    uint32 protocol_version = 1;
+    uint32 provider_api_version = 2;
+    RuntimeKind runtime = 3;
+    string provider_id = 4;
+    repeated string input_keys = 5;
+    string output_key = 6;
+}
+
+message ProviderInstance {
+    uint64 instance_id = 1;
+    repeated string input_keys = 2;
+}
+
+message InitializeRequest {
+    repeated ProviderInstance instances = 1;
+}
+
+message InitializeResponse {
+    repeated uint64 initialized_instance_ids = 1;
+}
+
+message Evaluation {
+    uint64 instance_id = 1;
+    repeated double inputs = 2;
+}
+
+message EvaluateBatchRequest {
+    uint64 sequence = 1;
+    double simulation_time = 2;
+    double step_size = 3;
+    repeated Evaluation evaluations = 4;
+}
+
+message GradientContribution {
+    uint64 instance_id = 1;
+    double value = 2;
+}
+
+message EvaluateBatchResponse {
+    uint64 sequence = 1;
+    repeated GradientContribution contributions = 2;
+}
+
+message ShutdownRequest {}
+message ShutdownResponse {}
+
+message ProviderFailure {
+    uint64 sequence = 1;
+    string code = 2;
+    string message = 3;
+    bool fatal = 4;
+}
+
+message EngineToProvider {
+    oneof payload {
+        HandshakeRequest handshake = 1;
+        InitializeRequest initialize = 2;
+        EvaluateBatchRequest evaluate_batch = 3;
+        ShutdownRequest shutdown = 4;
+    }
+}
+
+message ProviderToEngine {
+    oneof payload {
+        HandshakeResponse handshake = 1;
+        InitializeResponse initialize = 2;
+        EvaluateBatchResponse evaluate_batch = 3;
+        ShutdownResponse shutdown = 4;
+        ProviderFailure failure = 5;
+    }
+}

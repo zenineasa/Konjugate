@@ -13,6 +13,7 @@ namespace konjugate {
 namespace {
 const std::regex entityIdPattern("^[1-9][0-9]{0,15}$");
 const std::regex symbolPattern("^[a-z][A-Za-z0-9]*$");
+const std::regex providerKeyPattern("^[a-z][A-Za-z0-9]*$");
 
 void add(ValidationResult& result, std::string code, std::string severity, std::string message,
          std::string kind = "model", std::string entityId = {}, std::string field = {}) {
@@ -21,6 +22,29 @@ void add(ValidationResult& result, std::string code, std::string severity, std::
 
 std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
     return tree.get<std::string>(key, "");
+}
+
+void validateProviderOutput(ValidationResult& result,
+                            const boost::property_tree::ptree& implementation,
+                            const std::unordered_map<std::string, std::set<std::string>>& stateIds,
+                            const std::string& sourceNode,
+                            const std::string& targetNode,
+                            const std::string& edgeId) {
+    const auto role = value(implementation, "output.role");
+    const auto stateId = value(implementation, "output.stateId");
+    const auto key = value(implementation, "output.key");
+    if (key.empty() || !std::regex_match(key, providerKeyPattern)) {
+        add(result, "providerOutputKeyInvalid", "error", "Provider output key must be lower camel case.", "edge", edgeId, "implementation");
+    }
+    if (role != "source" && role != "target") {
+        add(result, "providerOutputMissing", "error", "Provider output role must be source or target.", "edge", edgeId, "implementation");
+        return;
+    }
+    const auto nodeId = role == "source" ? sourceNode : targetNode;
+    const auto states = stateIds.find(nodeId);
+    if (stateId.empty() || states == stateIds.end() || !states->second.contains(stateId)) {
+        add(result, "providerOutputMissing", "error", "Provider output must reference an existing endpoint state.", "edge", edgeId, "implementation");
+    }
 }
 
 std::string upperFirst(std::string input) {
@@ -253,6 +277,48 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     add(result, "parameterControlInvalid", "error", "Live parameter slider settings require minimum < maximum, step > 0 and an initial value within the bounds.", "edge", id, "parameters");
                 }
             }
+        }
+        const auto implementation = edge.get_child_optional("implementation");
+        const auto implementationKind = implementation ? value(*implementation, "kind") : "equation";
+        if (implementationKind != "equation" && implementationKind != "cpp" && implementationKind != "python") {
+            add(result, "providerKindInvalid", "error", "Relationship implementation kind must be equation, cpp or python.", "edge", id, "implementation");
+        }
+        if (implementationKind == "cpp" || implementationKind == "python") {
+            if (value(*implementation, "providerApiVersion") != "1") {
+                add(result, "providerApiVersionInvalid", "error", "Programmable relationships require provider API version 1.", "edge", id, "implementation");
+            }
+            if (value(*implementation, "source").empty()) {
+                add(result, "providerSourceEmpty", "error", "Programmable relationships require inline source.", "edge", id, "implementation");
+            }
+            std::set<std::string> providerKeys;
+            const auto providerBindings = implementation->get_child_optional("bindings");
+            if (!providerBindings || providerBindings->empty()) {
+                add(result, "providerBindingsEmpty", "error", "Programmable relationships require at least one declared input binding.", "edge", id, "implementation");
+            } else for (const auto& bindingEntry : *providerBindings) {
+                const auto& binding = bindingEntry.second;
+                const auto key = value(binding, "key");
+                if (!std::regex_match(key, providerKeyPattern)) {
+                    add(result, "providerBindingKeyInvalid", "error", "Provider input keys must be lower camel case.", "edge", id, "implementation");
+                } else if (!providerKeys.insert(key).second) {
+                    add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "edge", id, "implementation");
+                }
+                if (value(binding, "kind") == "parameter") {
+                    if (!parameterIds.contains(value(binding, "parameterId"))) {
+                        add(result, "providerBindingMissing", "error", "Provider binding references a missing parameter.", "edge", id, "implementation");
+                    }
+                } else if (value(binding, "kind") == "state") {
+                    const auto bindingNode = value(binding, "nodeId");
+                    const auto states = stateIds.find(bindingNode);
+                    if ((bindingNode != sourceNode && bindingNode != targetNode) || states == stateIds.end() ||
+                        !states->second.contains(value(binding, "stateId"))) {
+                        add(result, "providerBindingMissing", "error", "Provider binding references a missing endpoint state.", "edge", id, "implementation");
+                    }
+                } else {
+                    add(result, "providerBindingKindInvalid", "error", "Provider binding kind must be state or parameter.", "edge", id, "implementation");
+                }
+            }
+            validateProviderOutput(result, *implementation, stateIds, sourceNode, targetNode, id);
+            continue;
         }
         if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& bindingEntry : *bindings) {
             const auto& binding = bindingEntry.second;

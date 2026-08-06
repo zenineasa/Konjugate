@@ -18,6 +18,7 @@ find_package(Threads REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
 
 protobuf_generate_cpp(PROTOCOL_SOURCES PROTOCOL_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/engineProtocol.proto")
+protobuf_generate_cpp(PROVIDER_PROTOCOL_SOURCES PROVIDER_PROTOCOL_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/relationshipProvider.proto")
 
 option(KONJUGATE_ENABLE_METIS "Enable METIS graph partitioning when the library is available" ON)
 option(KONJUGATE_REQUIRE_METIS "Fail configuration when METIS is unavailable" OFF)
@@ -81,6 +82,8 @@ endif()
 add_executable(konjugateEngine
     ${PROTOCOL_SOURCES}
     ${PROTOCOL_HEADERS}
+    ${PROVIDER_PROTOCOL_SOURCES}
+    ${PROVIDER_PROTOCOL_HEADERS}
     src/dependencyGraph.cpp
     src/executionBackend.cpp
     src/executionPlan.cpp
@@ -89,6 +92,7 @@ add_executable(konjugateEngine
     src/partitionPlan.cpp
     src/partitionRuntime.cpp
     src/projectContainer.cpp
+    src/providerRuntime.cpp
     src/simulationRunner.cpp
     src/taskExecutor.cpp
     src/validationReport.cpp
@@ -107,6 +111,11 @@ if(KONJUGATE_HAS_METIS)
     target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
     target_link_libraries(konjugateEngine PRIVATE ${KONJUGATE_METIS_LINK_LIBRARY})
 endif()
+
+add_library(konjugateProviderWorker STATIC
+    src/providerWorker.cpp
+)
+target_include_directories(konjugateProviderWorker PUBLIC include)
 
 install(TARGETS konjugateEngine RUNTIME DESTINATION .)
 if(KONJUGATE_HAS_METIS AND APPLE AND METIS_BUNDLED_LIBRARY)
@@ -128,6 +137,7 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter)
     add_executable(executionPlanTests
         tests/executionPlanTests.cpp
         src/dependencyGraph.cpp
@@ -151,20 +161,47 @@ if(BUILD_TESTING)
         target_link_libraries(executionPlanTests PRIVATE ${KONJUGATE_METIS_LINK_LIBRARY})
     endif()
     add_test(NAME executionPlanTests COMMAND executionPlanTests)
+
+    add_executable(relationshipProviderTests
+        tests/relationshipProviderTests.cpp
+        ${PROVIDER_PROTOCOL_SOURCES}
+        ${PROVIDER_PROTOCOL_HEADERS}
+        src/executionPlan.cpp
+        src/modelValidator.cpp
+        src/providerRuntime.cpp
+    )
+    target_include_directories(relationshipProviderTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(relationshipProviderTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads)
+    add_test(NAME relationshipProviderTests COMMAND relationshipProviderTests)
+    if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME pythonRelationshipProviderTest
+            COMMAND "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
+                "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/pythonRelationshipProviderTest.py"
+        )
+    endif()
 endif()
 
 if(MSVC)
     target_compile_options(konjugateEngine PRIVATE /W4 /permissive-)
     if(BUILD_TESTING)
         target_compile_options(executionPlanTests PRIVATE /W4 /permissive-)
+        target_compile_options(relationshipProviderTests PRIVATE /W4 /permissive-)
     endif()
 else()
     target_compile_options(konjugateEngine PRIVATE -Wall -Wextra -Wpedantic)
     if(BUILD_TESTING)
         target_compile_options(executionPlanTests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(relationshipProviderTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
 if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(konjugateEngine PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+    target_compile_options(konjugateProviderWorker PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+    if(BUILD_TESTING)
+        target_compile_options(executionPlanTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+        target_compile_options(relationshipProviderTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+    endif()
 endif()

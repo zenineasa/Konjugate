@@ -120,7 +120,7 @@ The provider process remains alive for the run and serves repeated evaluation re
 
 The engine should support batching multiple provider instances into one request and one process. Stable binding tables are sent during initialization, while repeated evaluations exchange packed numeric arrays. Shared memory may be added for measured high-volume cases without changing the conceptual provider contract.
 
-For the initial implementation, Konjugate supplies separate C++ and Python wrappers over this common protocol. Relationship authors implement a small calculation interface rather than process management. A conceptual C++ body might return a `double` from a typed context, while the Python equivalent returns a numeric value from the same named bindings. The exact source interface remains an open design decision and must not expose mutable engine memory.
+For the initial implementation, Konjugate supplies separate C++ and Python wrappers over this common protocol. Relationship authors implement the managed provider-class lifecycle described below rather than process management. Exact SDK type names and convenience accessors may be refined, but the source interface must not expose mutable engine memory.
 
 ### FMU/FMI
 

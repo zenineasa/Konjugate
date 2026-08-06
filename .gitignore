@@ -3,6 +3,13 @@
 node_modules
 **/.DS_Store
 **/.vscode
+**/.idea
 out
 assets/icons
 .tools
+**/*.pyc
+**/__pycache__
+build
+**/build
+compile_commands.json
+.clangd

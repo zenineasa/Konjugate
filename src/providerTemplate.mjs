@@ -28,9 +28,7 @@ function cppTemplate(inputKeys, outputKey, title) {
     const inputPorts = inputKeys.length
         ? inputKeys.map((key) => `                konjugate::sdk::v1::ScalarPort{"${key}", "${key}", ""}`).join(',\n')
         : '                // No bindings declared yet — add one below, then insert this template again.';
-    const inputReads = inputKeys.length
-        ? `context.inputs.at("${inputKeys.join('"), context.inputs.at("')}")`
-        : 'the declared inputs above';
+    const readLines = (inputKeys.length ? inputKeys : ['key']).map((key) => `        //   const double ${key} = context.inputs.at("${key}");`).join('\n');
     return `#include <konjugate/relationshipProvider.hpp>
 
 #include <memory>
@@ -52,7 +50,10 @@ ${inputPorts}
 
     void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
                   konjugate::sdk::v1::OutputCollector& output) override {
-        // TODO: read ${inputReads} and add the computed contribution through output.addGradient(...).
+        // Read each bound input by its declared key:
+${readLines}
+        // Add your computed contribution to the declared output:
+        //   output.addGradient(value);
         output.addGradient(0);
     }
 };
@@ -70,9 +71,7 @@ function pythonTemplate(inputKeys, outputKey, title) {
     const inputPorts = inputKeys.length
         ? inputKeys.map((key) => `                ScalarPort("${key}", "${key}", ""),`).join('\n')
         : '                # No bindings declared yet — add one below, then insert this template again.';
-    const inputReads = inputKeys.length
-        ? inputKeys.map((key) => `inputs["${key}"]`).join(', ')
-        : 'the declared inputs above';
+    const readLines = (inputKeys.length ? inputKeys : ['key']).map((key) => `        #   ${key} = inputs["${key}"]`).join('\n');
     return `from konjugate import (
     EvaluationContext,
     InputView,
@@ -95,7 +94,10 @@ ${inputPorts}
         )
 
     def evaluate(self, context, inputs, outputs):
-        # TODO: read ${inputReads} and add the computed contribution through outputs.add_gradient(...).
+        # Read each bound input by its declared key:
+${readLines}
+        # Add your computed contribution to the declared output:
+        #   outputs.add_gradient(value)
         outputs.add_gradient(0)
 `;
 }

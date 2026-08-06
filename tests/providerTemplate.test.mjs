@@ -12,7 +12,8 @@ test('C++ template declares every binding key as an input port and the output po
     assert.match(source, /ScalarPort\{"sourceTemperature", "sourceTemperature", ""\}/);
     assert.match(source, /ScalarPort\{"conductance", "conductance", ""\}/);
     assert.match(source, /ScalarPort\{"targetTemperatureGradient", "targetTemperatureGradient", ""\}/);
-    assert.match(source, /context\.inputs\.at\("sourceTemperature"\), context\.inputs\.at\("conductance"\)/);
+    assert.match(source, /const double sourceTemperature = context\.inputs\.at\("sourceTemperature"\);/);
+    assert.match(source, /const double conductance = context\.inputs\.at\("conductance"\);/);
     assert.match(source, /"thermalCoupling"/);
     assert.match(source, /"Thermal Coupling"/);
     assert.match(source, /class ThermalCoupling final/);
@@ -25,7 +26,8 @@ test('Python template declares every binding key as an input port and the output
     assert.match(source, /ScalarPort\("sourceTemperature", "sourceTemperature", ""\)/);
     assert.match(source, /ScalarPort\("conductance", "conductance", ""\)/);
     assert.match(source, /ScalarPort\("targetTemperatureGradient", "targetTemperatureGradient", ""\)/);
-    assert.match(source, /inputs\["sourceTemperature"\], inputs\["conductance"\]/);
+    assert.match(source, /sourceTemperature = inputs\["sourceTemperature"\]/);
+    assert.match(source, /conductance = inputs\["conductance"\]/);
     assert.match(source, /class ThermalCoupling\(RelationshipProvider\)/);
 });
 

@@ -10,7 +10,7 @@ function renderInline(value) {
 }
 
 function renderMarkdown(markdown) {
-    const lines = escapeHtml(markdown.replace(/<!--[\s\S]*?-->/g, '')).split('\n');
+    const lines = escapeHtml(markdown.replace(/\r/g, '').replace(/<!--[\s\S]*?-->/g, '')).split('\n');
     const output = [];
     let list = null;
     let code = false;

@@ -2,7 +2,7 @@
     "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
     "name": "konjugate",
     "version-string": "0.2.0",
-    "builtin-baseline": "ce613c41372b23b1f51333815feb3edd87ef8a8b",
+    "builtin-baseline": "eaca4a577b6b678c6e10252754b6988a61746c19",
     "dependencies": [
         "boost-property-tree",
         "metis",

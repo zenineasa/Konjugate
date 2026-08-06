@@ -5,7 +5,7 @@ import { access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const vcpkgCommit = 'ce613c41372b23b1f51333815feb3edd87ef8a8b';
+export const vcpkgCommit = 'eaca4a577b6b678c6e10252754b6988a61746c19';
 export const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const vcpkgDirectory = join(rootDirectory, '.tools', 'vcpkg');
 

@@ -297,9 +297,14 @@ distributableLinux: packageLinux
 cleanPackage:
 	$(RM) $(packageDir) $(releaseDir)
 
-clean: cleanPackage cleanIcons
-	$(RM) \
-		node_modules \
-		package-lock.json \
-		out \
-		scripts/__pycache__
+cleanVCPKG:
+	$(RM) .tools/vcpkg/buildtrees
+	$(RM) .tools/vcpkg/packages
+
+cleanWorkspace:
+	$(RM) node_modules
+	$(RM) package-lock.json
+	$(RM) out
+	$(RM) scripts/__pycache__
+
+clean: cleanPackage cleanIcons cleanVCPKG cleanWorkspace

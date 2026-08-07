@@ -11,7 +11,7 @@ delete environment.ELECTRON_RUN_AS_NODE;
 
 const userDataDirectory = await mkdtemp(join(tmpdir(), 'konjugate-interaction-'));
 environment.KONJUGATE_INTERACTION_USER_DATA = userDataDirectory;
-const child = spawn(electronPath, ['.', '--interaction-test', '--disable-gpu'], {
+const child = spawn(electronPath, ['.', '--interaction-test', '--disable-gpu', '--enable-unsafe-swiftshader'], {
     cwd: process.cwd(),
     env: environment,
     stdio: 'inherit'

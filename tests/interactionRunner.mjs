@@ -291,6 +291,17 @@ export async function runInteractionTests(window) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         await clickElement(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air'))`, ['shift']);
         await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Real Shift-click did not add the second node.');
+        // Give the CSS2DRenderer a frame to reposition the bundle label after the selection
+        // change before reading its bounding rect for the click below — under SwiftShader
+        // software rendering (used in headless/CI test runs) this can otherwise still be
+        // mid-transition, sending the click past the label onto the canvas underneath.
+        // SwiftShader frames have been observed stalling well past 250ms, so wait for two
+        // consecutive identical bounding rects rather than a single fixed delay.
+        await waitFor(window, `(() => {
+            const rectOf = () => { const rect = document.querySelector('.bundleLabel')?.getBoundingClientRect(); return rect && JSON.stringify(rect); };
+            const first = rectOf();
+            return new Promise((resolve) => requestAnimationFrame(() => resolve(Boolean(first) && first === rectOf())));
+        })()`, 'The bundle label did not settle into a stable position.', 3000);
         await clickElement(window, `document.querySelector('.bundleLabel')`, ['shift']);
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
         const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);

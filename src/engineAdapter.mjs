@@ -85,6 +85,18 @@ function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function cppProviderSdkPath({ applicationPath, resourcesPath, packaged }) {
+    // buildCppProvider() expects this to be the engine/ root: it compiles against
+    // <sdkPath>/include and links <sdkPath>/src/providerWorker.cpp.
+    return join(packaged ? resourcesPath : applicationPath, 'engine');
+}
+
+function pythonProviderSdkPath({ applicationPath, resourcesPath, packaged }) {
+    // Put on the provider process's PYTHONPATH; must be the directory containing the
+    // konjugate/ package, not the package directory itself.
+    return join(packaged ? resourcesPath : applicationPath, 'engine', 'sdk', 'python');
+}
+
 export async function startEngineRun(content, configuration, options, { onUpdate, retainResult = false } = {}) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };
@@ -95,7 +107,15 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const jobId = randomUUID();
     const initialPacing = normalizePacing(configuration.pacing);
     await writeFile(inputPath, await encodeProjectFile(content));
-    await writeFile(configurationPath, JSON.stringify({ ...configuration, pacing: initialPacing }));
+    await writeFile(configurationPath, JSON.stringify({
+        ...configuration,
+        pacing: initialPacing,
+        providers: {
+            ...configuration.providers,
+            cpp: { sdkPath: cppProviderSdkPath(options), ...configuration.providers?.cpp },
+            python: { sdkPath: pythonProviderSdkPath(options), ...configuration.providers?.python }
+        }
+    }));
     const liveParameterIds = new Set(JSON.parse(content).edges.flatMap((edge) =>
         (edge.parameters ?? []).filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)));
     const child = spawn(executable, [

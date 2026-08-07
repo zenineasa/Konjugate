@@ -26,14 +26,31 @@ if(KONJUGATE_REQUIRE_METIS AND NOT KONJUGATE_ENABLE_METIS)
     message(FATAL_ERROR "KONJUGATE_REQUIRE_METIS cannot be enabled when KONJUGATE_ENABLE_METIS is disabled")
 endif()
 if(KONJUGATE_ENABLE_METIS)
-    find_path(METIS_INCLUDE_DIR metis.h)
-    find_library(METIS_LIBRARY NAMES metis)
-    find_library(GKLIB_LIBRARY NAMES GKlib gklib)
+    if(APPLE)
+        # Prefer a system/Homebrew METIS on macOS: it is the long-verified configuration here
+        # (see the dylib rpath-fixup below), whereas vcpkg's statically-linked metis+GKlib port
+        # is only exercised on Windows/Linux, where there is no equivalent system package.
+        find_path(METIS_INCLUDE_DIR metis.h PATHS /usr/local/include /opt/homebrew/include NO_DEFAULT_PATH)
+        find_library(METIS_LIBRARY NAMES metis PATHS /usr/local/lib /opt/homebrew/lib NO_DEFAULT_PATH)
+    endif()
+    if(NOT METIS_INCLUDE_DIR OR NOT METIS_LIBRARY)
+        find_path(METIS_INCLUDE_DIR metis.h)
+        find_library(METIS_LIBRARY NAMES metis)
+        find_library(GKLIB_LIBRARY NAMES GKlib gklib)
+    endif()
 endif()
 
 if(METIS_INCLUDE_DIR AND METIS_LIBRARY)
     set(KONJUGATE_HAS_METIS 1)
     message(STATUS "METIS partitioning enabled: ${METIS_LIBRARY}")
+    if(APPLE AND NOT METIS_LIBRARY MATCHES "\\.dylib$")
+        message(FATAL_ERROR "METIS resolved to a static library (${METIS_LIBRARY}) on macOS instead of a "
+            "Homebrew dylib. This exact combination previously corrupted the live simulation event stream at "
+            "runtime (surfacing as 'The engine protocol frame is too large' on the Electron side) rather than "
+            "failing at build time, so it is rejected here instead. Run 'brew install metis' so this build uses "
+            "the verified dylib path, or delete METIS_INCLUDE_DIR/METIS_LIBRARY/GKLIB_LIBRARY from the CMake "
+            "cache if you intentionally need to test the vcpkg static path on this platform.")
+    endif()
 else()
     set(KONJUGATE_HAS_METIS 0)
     if(KONJUGATE_REQUIRE_METIS)

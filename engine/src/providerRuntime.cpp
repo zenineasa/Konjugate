@@ -252,6 +252,31 @@ CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vec
 }
 #endif
 
+// Python needs no build step, but an inline implementation authored in the editor is still
+// literal source text, not a path — it must be written to a real .py file before it can be
+// passed to `python3 -m konjugate <path>`. A provider source that already names an existing
+// file (as used by references to standalone, non-inline scripts) is passed through as-is.
+// Cached alongside compiled C++ providers, by the same source-hash scheme.
+std::string preparePythonProviderSource(const std::string& source, const ProviderConfiguration& config) {
+    std::error_code existsError;
+    if (std::filesystem::exists(source, existsError) && !existsError) return source;
+
+    const auto hash = sha256Hex(source);
+    const std::filesystem::path buildRoot = config.buildDirectory.empty()
+        ? std::filesystem::temp_directory_path() / "konjugateProviders"
+        : std::filesystem::path(config.buildDirectory);
+    const auto providerDirectory = buildRoot / hash;
+    const auto sourcePath = providerDirectory / "relationship.py";
+
+    if (!std::filesystem::exists(sourcePath)) {
+        std::filesystem::create_directories(providerDirectory);
+        std::ofstream sourceFile(sourcePath, std::ios::trunc);
+        if (!sourceFile) throw std::runtime_error("Failed to write Python provider source to " + sourcePath.string());
+        sourceFile << source;
+    }
+    return sourcePath.string();
+}
+
 // Compiles an inline C++ relationship's source, together with the public SDK header and
 // Konjugate's worker wrapper, into a native provider executable. The build is cached on
 // disk by a hash of the source text, so repeated runs of the same inline implementation
@@ -454,6 +479,18 @@ private:
         std::string commandLine;
         if (implementation_ == ContributionImplementation::pythonProvider) {
             std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
+            // The resolved python3 may be a distribution (Anaconda, a pyenv shim, ...) with no
+            // knowledge of Konjugate's SDK; put it on PYTHONPATH explicitly rather than relying on
+            // the package being installed into whichever interpreter is found. CreateProcessA below
+            // passes a NULL environment block, which inherits this process's environment, so setting
+            // it here (rather than building an explicit block) is sufficient.
+            if (!config.pythonSdkPath.empty()) {
+                char existingPythonPath[32768];
+                const auto existingLength = GetEnvironmentVariableA("PYTHONPATH", existingPythonPath, sizeof(existingPythonPath));
+                const std::string pythonPath = existingLength > 0
+                    ? config.pythonSdkPath + ";" + std::string(existingPythonPath, existingLength) : config.pythonSdkPath;
+                SetEnvironmentVariableA("PYTHONPATH", pythonPath.c_str());
+            }
             commandLine = "\"" + pythonExe + "\" -m konjugate \"" + sourcePath_ + "\"";
         } else {
             commandLine = "\"" + sourcePath_ + "\"";
@@ -536,6 +573,15 @@ private:
 
             if (implementation_ == ContributionImplementation::pythonProvider) {
                 std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
+                // The resolved python3 may be a distribution (Anaconda, a pyenv shim, ...) with no
+                // knowledge of Konjugate's SDK; put it on the child's PYTHONPATH explicitly rather
+                // than relying on the package being installed into whichever interpreter is found.
+                if (!config.pythonSdkPath.empty()) {
+                    const char* existingPythonPath = std::getenv("PYTHONPATH");
+                    const std::string pythonPath = existingPythonPath && *existingPythonPath
+                        ? config.pythonSdkPath + ":" + existingPythonPath : config.pythonSdkPath;
+                    ::setenv("PYTHONPATH", pythonPath.c_str(), 1);
+                }
                 std::vector<const char*> args;
                 args.push_back(pythonExe.c_str());
                 args.push_back("-m");
@@ -613,7 +659,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             if (!proc) {
                 const std::string launchPath = task.implementation == ContributionImplementation::cppProvider
                     ? buildCppProvider(task.providerSource, configuration_)
-                    : task.providerSource;
+                    : preparePythonProviderSource(task.providerSource, configuration_);
                 proc = std::make_unique<ProviderProcess>(key, task.implementation, launchPath, configuration_);
             }
 

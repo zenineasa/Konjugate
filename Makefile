@@ -85,7 +85,7 @@ endif
 	icons iconsPng iconsWindows iconsMacos iconsWeb cleanIcons \
 	engine \
 	installDependencies checkPackaging packageApp packageMacos packageWindows packageLinux \
-	distributable distributableMacos distributableWindows distributableLinux \
+	distributable distributableMacos distributableWindows distributableWindowsPortable distributableLinux \
 	build cleanPackage clean
 
 build: icons
@@ -272,6 +272,20 @@ endif
 	@echo "Created $(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg"
 
 distributableWindows: packageWindows
+	@where makensis >nul 2>nul || (echo makensis is required to create the Windows installer (install NSIS). && exit 1)
+	@$(MKDIR) $(releaseDir)
+	makensis \
+		-DAPP_NAME=$(appName) \
+		-DAPP_VERSION=$(appVersion) \
+		-DAPP_ID=$(appId) \
+		-DSOURCE_DIR=$(packageDir)/$(appName)-win32-$(hostArch) \
+		-DICON_PATH=$(iconDir)/app.ico \
+		-DLICENSE_PATH=LICENSE \
+		-DOUTPUT_FILE=$(releaseDir)/$(appName)-$(appVersion)-windows-$(hostArch)-setup.exe \
+		packaging/windows/installer.nsi
+	@echo "Created $(releaseDir)/$(appName)-$(appVersion)-windows-$(hostArch)-setup.exe"
+
+distributableWindowsPortable: packageWindows
 	@$(MKDIR) $(releaseDir)
 	$(PYTHON) scripts/createZip.py \
 		$(packageDir)/$(appName)-win32-$(hostArch) \

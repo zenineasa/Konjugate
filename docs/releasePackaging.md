@@ -23,9 +23,19 @@ Additional host tools are currently required:
 - macOS uses `rsvg-convert` and the platform `hdiutil` utility. Konjugate writes
   its ICNS container directly from the generated PNG sizes to avoid depending
   on version-sensitive `iconutil` iconset validation.
-- Windows uses Python 3 for icon and ZIP generation and currently requires a
-  Make-compatible shell for the packaging recipes.
+- Windows uses Python 3 for icon generation and requires NSIS (`makensis`) on
+  `PATH` to build the installer, plus a Make-compatible shell for the
+  packaging recipes. `make distributable` produces a signed-shortcut,
+  Add/Remove Programs-registered `*-setup.exe` from
+  `packaging/windows/installer.nsi`; `make distributableWindowsPortable`
+  still produces the plain ZIP for users who want an install-free copy.
 - Linux uses `rsvg-convert` and requires `appimagetool` for an AppImage.
+
+The NSIS script only stages files already produced by `packageWindows`
+(the electron-packager output plus the CMake-installed engine and METIS
+runtime) — it does not itself decide what ships, so the packaging notice
+verifier continues to run against the same `packageWindows` output before
+`distributableWindows` ever invokes `makensis`.
 
 The Windows Make dependency is a packaging limitation, not a development
 requirement. Packaging orchestration should move to cross-platform Node scripts

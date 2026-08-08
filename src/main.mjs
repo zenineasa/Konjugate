@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { cppProviderSdkPath, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import {
     createVisualizerSession,
     publicToolstripContributions,
@@ -743,7 +743,9 @@ async function validateCppSource(source) {
         const filePath = join(directory, 'relationship.cpp');
         await writeFile(filePath, source ?? '', 'utf8');
         const { compiler, flavor } = await resolveCppCompiler();
-        const includePath = join(app.getAppPath(), 'engine', 'include');
+        const includePath = join(cppProviderSdkPath({
+            applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged
+        }), 'include');
         let args;
         if (flavor === 'msvc') {
             if (!process.env.INCLUDE) {

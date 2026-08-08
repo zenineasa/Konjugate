@@ -139,6 +139,16 @@ add_library(konjugateProviderWorker STATIC
 target_include_directories(konjugateProviderWorker PUBLIC include)
 
 install(TARGETS konjugateEngine RUNTIME DESTINATION .)
+# The C++/Python provider SDKs are source, not build output, but a packaged app still needs
+# them on disk: buildCppProvider() compiles inline C++ providers against the public header and
+# links them against providerWorker.cpp at run time, and Python providers need the konjugate
+# package on PYTHONPATH. See cppProviderSdkPath()/pythonProviderSdkPath() in engineAdapter.mjs,
+# which expect exactly this layout under the packaged resources directory.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/konjugate" DESTINATION include)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp" DESTINATION src)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sdk/python/konjugate" DESTINATION sdk/python
+    PATTERN "__pycache__" EXCLUDE
+)
 if(KONJUGATE_HAS_METIS AND APPLE AND METIS_BUNDLED_LIBRARY)
     install(FILES "${METIS_BUNDLED_LIBRARY}" DESTINATION .)
 elseif(KONJUGATE_HAS_METIS AND UNIX AND METIS_LIBRARY MATCHES "\\.so(\\.[0-9.]+)?$")

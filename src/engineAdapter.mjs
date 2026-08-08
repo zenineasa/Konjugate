@@ -85,7 +85,7 @@ function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function cppProviderSdkPath({ applicationPath, resourcesPath, packaged }) {
+export function cppProviderSdkPath({ applicationPath, resourcesPath, packaged }) {
     // buildCppProvider() expects this to be the engine/ root: it compiles against
     // <sdkPath>/include and links <sdkPath>/src/providerWorker.cpp.
     return join(packaged ? resourcesPath : applicationPath, 'engine');

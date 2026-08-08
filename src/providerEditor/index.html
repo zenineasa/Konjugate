@@ -41,7 +41,21 @@
     <div class="editorToolbar">
         <span id="editorKindLabel" class="kindBadge"></span>
         <span id="editorStatus" class="editorStatus" role="status">Checking…</span>
+        <select id="editorThemeSelect" class="editorThemeSelect" aria-label="Editor color theme"></select>
         <button id="applyButton" class="applyButton" type="button">Apply</button>
+    </div>
+    <div id="editorThemePanel" class="editorThemePanel" hidden>
+        <label><span>Background</span><input id="themeColor-background" type="color" data-theme-field="background"></label>
+        <label><span>Text</span><input id="themeColor-foreground" type="color" data-theme-field="foreground"></label>
+        <label><span>Gutter</span><input id="themeColor-gutterBackground" type="color" data-theme-field="gutterBackground"></label>
+        <label><span>Line numbers</span><input id="themeColor-gutterForeground" type="color" data-theme-field="gutterForeground"></label>
+        <label><span>Cursor &amp; accent</span><input id="themeColor-caret" type="color" data-theme-field="caret"></label>
+        <label><span>Comment</span><input id="themeColor-comment" type="color" data-theme-field="comment"></label>
+        <label><span>Keyword</span><input id="themeColor-keyword" type="color" data-theme-field="keyword"></label>
+        <label><span>String</span><input id="themeColor-string" type="color" data-theme-field="string"></label>
+        <label><span>Number</span><input id="themeColor-number" type="color" data-theme-field="number"></label>
+        <label><span>Function</span><input id="themeColor-function" type="color" data-theme-field="function"></label>
+        <label><span>Type</span><input id="themeColor-typeName" type="color" data-theme-field="typeName"></label>
     </div>
     <div id="editorHost"></div>
     <script type="module" src="renderer.mjs"></script>

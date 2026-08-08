@@ -22,6 +22,13 @@ body { display: flex; flex-direction: column; height: 100vh; margin: 0; color: #
 .applyButton:hover { background: #57d6ca; }
 .applyButton:disabled { color: #566a6c; background: #1c2c2c; }
 
+.editorThemeSelect { height: 27px; padding: 0 8px; color: #c7d4d9; background: #101d25; border: 1px solid #253944; border-radius: 5px; font-size: 10px; }
+
+.editorThemePanel { display: flex; flex: none; flex-wrap: wrap; gap: 8px 14px; padding: 10px 12px; background: #0a151d; border-bottom: 1px solid #253944; -webkit-app-region: no-drag; }
+.editorThemePanel[hidden] { display: none; }
+.editorThemePanel label { display: flex; align-items: center; gap: 6px; color: #778d98; font-size: 9px; }
+.editorThemePanel input[type="color"] { width: 22px; height: 22px; padding: 0; background: transparent; border: 1px solid #253944; border-radius: 4px; }
+
 #editorHost { flex: 1; min-height: 0; overflow: hidden; }
 #editorHost .cm-editor { height: 100%; }
 #editorHost .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.55; }

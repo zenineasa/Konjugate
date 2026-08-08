@@ -1,10 +1,13 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { EditorView, basicSetup } from 'codemirror';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
 import { linter, lintGutter } from '@codemirror/lint';
+import {
+    buildThemeExtensions, customThemeFields, customTokenFields, defaultThemeId, themeFromCustomColors, themePresets
+} from './themes.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -16,17 +19,15 @@ $('#close').addEventListener('click', () => window.windowControls.close());
 let currentKind = 'cpp';
 let latestDiagnostics = [];
 let validationSequence = 0;
+const themeCompartment = new Compartment();
 
-function editorTheme() {
-    return EditorView.theme({
-        '&': { color: '#c7d4d9', backgroundColor: '#09131b', height: '100%' },
-        '.cm-content': { caretColor: '#6ce0d5' },
-        '.cm-cursor': { borderLeftColor: '#6ce0d5' },
-        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'rgb(66 201 188 / 22%)' },
-        '.cm-gutters': { color: '#4c6069', backgroundColor: '#081119', border: 'none' },
-        '.cm-activeLine': { backgroundColor: 'rgb(66 201 188 / 4%)' },
-        '.cm-activeLineGutter': { backgroundColor: 'rgb(66 201 188 / 6%)' }
-    }, { dark: true });
+const storedThemeId = localStorage.getItem('konjugate.providerEditor.themeId');
+let activeThemeId = storedThemeId && (storedThemeId === 'custom' || themePresets[storedThemeId]) ? storedThemeId : defaultThemeId;
+let customColors = {};
+try { customColors = JSON.parse(localStorage.getItem('konjugate.providerEditor.customColors') ?? '{}'); } catch { customColors = {}; }
+
+function activeTheme() {
+    return activeThemeId === 'custom' ? themeFromCustomColors(customColors) : themePresets[activeThemeId];
 }
 
 async function sourceLinter(view) {
@@ -61,7 +62,7 @@ function createEditor(source, kind) {
         extensions: [
             basicSetup,
             languageExtension,
-            editorTheme(),
+            themeCompartment.of(buildThemeExtensions(activeTheme())),
             lintGutter(),
             linter(sourceLinter, { delay: 500 })
         ]
@@ -79,6 +80,54 @@ window.providerEditorWindow.onContent(({ source, kind, title }) => {
     editorView = createEditor(source ?? '', kind);
     editorView.focus();
     window.__providerEditorView = editorView; // Debug/test hook only; not part of the app's public surface.
+});
+
+function populateThemeSelect() {
+    const select = $('#editorThemeSelect');
+    select.replaceChildren(
+        ...Object.entries(themePresets).map(([id, preset]) => new Option(preset.label, id)),
+        new Option('Custom…', 'custom')
+    );
+    select.value = activeThemeId;
+}
+
+function populateCustomColorInputs() {
+    const theme = activeTheme();
+    for (const field of customThemeFields) $(`#themeColor-${field}`).value = theme.chrome[field];
+    for (const field of customTokenFields) $(`#themeColor-${field}`).value = theme.tokens[field];
+}
+
+function applyActiveTheme() {
+    if (editorView) {
+        editorView.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(activeTheme())) });
+    }
+    $('#editorThemePanel').hidden = activeThemeId !== 'custom';
+    if (activeThemeId === 'custom') populateCustomColorInputs();
+}
+
+populateThemeSelect();
+applyActiveTheme();
+
+$('#editorThemeSelect').addEventListener('change', (event) => {
+    const nextThemeId = event.target.value;
+    // The first time a user opens Custom, start from whatever preset they were just looking
+    // at rather than always resetting to the default theme's colors.
+    if (nextThemeId === 'custom' && Object.keys(customColors).length === 0) {
+        const seed = activeTheme();
+        customColors = { ...seed.chrome, ...seed.tokens };
+        localStorage.setItem('konjugate.providerEditor.customColors', JSON.stringify(customColors));
+    }
+    activeThemeId = nextThemeId;
+    localStorage.setItem('konjugate.providerEditor.themeId', activeThemeId);
+    applyActiveTheme();
+});
+
+$('#editorThemePanel').addEventListener('input', (event) => {
+    const field = event.target.dataset.themeField;
+    if (!field) return;
+    customColors = { ...customColors, [field]: event.target.value };
+    localStorage.setItem('konjugate.providerEditor.customColors', JSON.stringify(customColors));
+    if (editorView) editorView.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(activeTheme())) });
 });
 
 $('#applyButton').addEventListener('click', async () => {

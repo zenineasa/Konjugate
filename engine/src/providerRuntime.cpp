@@ -589,6 +589,12 @@ private:
                 args.push_back(sourcePath_.c_str());
                 args.push_back(nullptr);
                 ::execvp(pythonExe.c_str(), const_cast<char* const*>(args.data()));
+                if (pythonExe == "python3") {
+                    // No override was configured and "python3" itself was not found; some
+                    // platforms only provide the interpreter as "python".
+                    args[0] = "python";
+                    ::execvp("python", const_cast<char* const*>(args.data()));
+                }
             } else {
                 std::vector<const char*> args;
                 args.push_back(sourcePath_.c_str());

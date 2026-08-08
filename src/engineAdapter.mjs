@@ -112,8 +112,16 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         pacing: initialPacing,
         providers: {
             ...configuration.providers,
-            cpp: { sdkPath: cppProviderSdkPath(options), ...configuration.providers?.cpp },
-            python: { sdkPath: pythonProviderSdkPath(options), ...configuration.providers?.python }
+            cpp: {
+                sdkPath: cppProviderSdkPath(options),
+                ...(options.providerToolchains?.cpp?.compilerPath ? { compiler: options.providerToolchains.cpp.compilerPath } : {}),
+                ...configuration.providers?.cpp
+            },
+            python: {
+                sdkPath: pythonProviderSdkPath(options),
+                ...(options.providerToolchains?.python?.interpreterPath ? { interpreter: options.providerToolchains.python.interpreterPath } : {}),
+                ...configuration.providers?.python
+            }
         }
     }));
     const liveParameterIds = new Set(JSON.parse(content).edges.flatMap((edge) =>

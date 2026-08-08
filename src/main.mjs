@@ -22,6 +22,7 @@ import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
+import { createProviderToolchainStore } from './providerToolchainStore.mjs';
 import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -51,6 +52,7 @@ const activeAIOperations = new Set();
 const activeValidationOperations = new Set();
 let aiProviderRegistry = null;
 let aiConfigurationStore = null;
+let providerToolchainStore = null;
 let applicationShutdownPromise = null;
 let applicationShutdownComplete = false;
 
@@ -627,7 +629,9 @@ function runProcess(command, args, { input } = {}) {
     });
 }
 
-async function resolveCppCompiler() {
+// Returns what auto-detection alone would choose, ignoring any stored override — used both
+// as resolveCppCompiler()'s fallback and to show the user what "auto-detect" currently means.
+async function autoDetectCppCompiler() {
     if (process.platform === 'darwin') {
         const result = await runProcess('xcrun', ['-find', 'clang++']);
         if (result.code === 0 && result.stdout.trim()) return { compiler: result.stdout.trim(), flavor: 'clang' };
@@ -652,6 +656,49 @@ async function resolveCppCompiler() {
         if (clangResult.code === 0) return { compiler: 'clang++', flavor: 'clang' };
     }
     return { compiler: 'c++', flavor: 'clang' };
+}
+
+// A GUI-launched app doesn't inherit the shell PATH additions a compiler manager (Homebrew,
+// asdf, a non-default MSVC install, ...) may rely on, so auto-detection can genuinely miss a
+// toolchain that is present on the machine. A stored override takes precedence when set.
+async function resolveCppCompiler() {
+    const overridePath = (await providerToolchainStore.get()).cpp.compilerPath;
+    if (overridePath) {
+        return { compiler: overridePath, flavor: /(^|[\\/])cl(\.exe)?$/i.test(overridePath) ? 'msvc' : 'clang' };
+    }
+    return autoDetectCppCompiler();
+}
+
+async function autoDetectPythonInterpreter() {
+    for (const candidate of ['python3', 'python']) {
+        if ((await runProcess(candidate, ['--version'])).code === 0) return candidate;
+    }
+    return null;
+}
+
+async function resolvePythonInterpreter() {
+    const overridePath = (await providerToolchainStore.get()).python.interpreterPath;
+    if (overridePath) return overridePath;
+    return (await autoDetectPythonInterpreter()) ?? 'python3';
+}
+
+// Runs a candidate compiler/interpreter path with a harmless version-reporting flag to confirm
+// it is actually runnable, before it is saved as an override or used to explain a failure.
+async function testToolchainPath(kind, path) {
+    const trimmed = (path ?? '').trim();
+    if (!trimmed) return { valid: false, message: 'Enter a path first.' };
+    if (kind === 'python') {
+        const result = await runProcess(trimmed, ['--version']);
+        if (result.code === 0) return { valid: true, message: (result.stdout || result.stderr).trim() || 'Python found.' };
+        return { valid: false, message: result.stderr.trim() || result.stdout.trim() || 'That path could not be run.' };
+    }
+    const versionResult = await runProcess(trimmed, ['--version']);
+    if (versionResult.code === 0) return { valid: true, message: versionResult.stdout.trim().split('\n')[0] || 'Compiler found.' };
+    const helpResult = await runProcess(trimmed, ['/?']);
+    if (helpResult.code === 0 || helpResult.stdout.includes('Microsoft') || helpResult.stderr.includes('Microsoft')) {
+        return { valid: true, message: 'MSVC compiler found.' };
+    }
+    return { valid: false, message: versionResult.stderr.trim() || versionResult.stdout.trim() || 'That path could not be run.' };
 }
 
 async function resolveAppleSdkSysroot() {
@@ -735,7 +782,8 @@ const PYTHON_SYNTAX_CHECK_SCRIPT = 'import ast, sys\n'
     + '    sys.exit(1)\n';
 
 async function validatePythonSource(source) {
-    const result = await runProcess('python3', ['-c', PYTHON_SYNTAX_CHECK_SCRIPT], { input: source ?? '' });
+    const interpreter = await resolvePythonInterpreter();
+    const result = await runProcess(interpreter, ['-c', PYTHON_SYNTAX_CHECK_SCRIPT], { input: source ?? '' });
     if (result.code === 0) return { valid: true, diagnostics: [] };
     const match = result.stderr.trim().match(/^(\d+):(\d+):\s*(.*)$/);
     if (!match) {
@@ -754,6 +802,46 @@ ipcMain.handle('providerEditorValidate', async (_event, { source, kind }) => (
 
 ipcMain.handle('providerEditorApply', (_event, { source }) => {
     providerEditorOwner?.send('providerEditorApplied', { source });
+});
+
+function requireMainWindow(event) {
+    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can access toolchain settings.');
+}
+
+ipcMain.handle('providerToolchainGet', async (event, kind) => {
+    requireMainWindow(event);
+    const settings = await providerToolchainStore.get();
+    const overridePath = kind === 'python' ? settings.python.interpreterPath : settings.cpp.compilerPath;
+    const guess = kind === 'python' ? await autoDetectPythonInterpreter() : (await autoDetectCppCompiler()).compiler;
+    const detectedPath = guess && (await testToolchainPath(kind, guess)).valid ? guess : null;
+    return { overridePath, detectedPath };
+});
+
+ipcMain.handle('providerToolchainSet', async (event, { kind, path }) => {
+    requireMainWindow(event);
+    const trimmed = (path ?? '').trim();
+    if (trimmed) {
+        const test = await testToolchainPath(kind, trimmed);
+        if (!test.valid) throw new Error(test.message || 'That path could not be verified.');
+    }
+    const settings = await providerToolchainStore.set(kind, trimmed);
+    return kind === 'python' ? settings.python : settings.cpp;
+});
+
+ipcMain.handle('providerToolchainTest', async (event, { kind, path }) => {
+    requireMainWindow(event);
+    return testToolchainPath(kind, path);
+});
+
+ipcMain.handle('providerToolchainBrowse', async (event, kind) => {
+    requireMainWindow(event);
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: kind === 'python' ? 'Select a Python interpreter' : 'Select a C++ compiler',
+        properties: ['openFile'],
+        ...(process.platform === 'win32' ? { filters: [{ name: 'Executable', extensions: ['exe'] }] } : {})
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
 });
 
 ipcMain.handle('aiListConfigurations', async (event) => {
@@ -845,17 +933,18 @@ ipcMain.handle('aiCancelRequest', async (event, requestUuid) => {
     return true;
 });
 
-const engineOptions = () => ({
+const engineOptions = async () => ({
     applicationPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
-    packaged: app.isPackaged
+    packaged: app.isPackaged,
+    providerToolchains: await providerToolchainStore.get()
 });
 
 ipcMain.handle('engineValidate', async (event, content) => {
     const active = { owner: event.sender, controller: new AbortController(), completion: null };
     activeValidationOperations.add(active);
     try {
-        active.completion = validateWithEngine(content, { ...engineOptions(), signal: active.controller.signal });
+        active.completion = validateWithEngine(content, { ...await engineOptions(), signal: active.controller.signal });
         return await active.completion;
     } finally {
         activeValidationOperations.delete(active);
@@ -863,7 +952,7 @@ ipcMain.handle('engineValidate', async (event, content) => {
 });
 
 ipcMain.handle('engineRun', async (event, content, configuration) => {
-    const execution = await startEngineRun(content, configuration, engineOptions());
+    const execution = await startEngineRun(content, configuration, await engineOptions());
     if (!execution.available) return execution;
     activeEngineJobs.set(execution.jobId, { owner: event.sender, latestResult: null, ...execution });
     try {
@@ -888,7 +977,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         samples: result.samples?.length ? [result.samples.at(-1)] : [],
         checkpoints: []
     });
-    execution = await startEngineRun(content, configuration, engineOptions(), {
+    execution = await startEngineRun(content, configuration, await engineOptions(), {
         retainResult: true,
         onUpdate: (result) => {
             const job = activeEngineJobs.get(execution.jobId);
@@ -983,6 +1072,9 @@ app.whenReady().then(async () => {
     aiConfigurationStore = createAIConfigurationStore({
         directory: join(app.getPath('userData'), 'ai'),
         credentialVault: createElectronCredentialVault(safeStorage)
+    });
+    providerToolchainStore = createProviderToolchainStore({
+        directory: join(app.getPath('userData'), 'providers')
     });
     createWindow();
 

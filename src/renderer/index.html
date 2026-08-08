@@ -63,6 +63,7 @@
             <button id="zoomInButton" class="uiZoomButton" type="button" aria-label="Zoom interface in" data-tooltip="Zoom interface in">A+</button>
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="assistantButton" class="titleAssistantControl" type="button" aria-label="Model assistant" data-tooltip="Model assistant" aria-expanded="false" aria-controls="assistantPanel">✦</button>
+            <button id="providerToolchainsButton" class="titleAssistantControl" type="button" aria-label="Provider toolchains" data-tooltip="Provider toolchains" aria-haspopup="dialog">⚒</button>
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="minimizeButton" type="button" aria-label="Minimize" data-tooltip="Minimize">−</button>
             <button id="maximizeButton" type="button" aria-label="Maximize" data-tooltip="Maximize"><span id="maximizeIcon">□</span></button>
@@ -143,6 +144,36 @@
             </section>
             <div class="passwordError" id="runConfigurationError" role="alert"></div>
             <footer><button id="runConfigurationCancel" type="button">Cancel</button><button id="applyRunConfiguration" class="doneButton" type="submit">Apply</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="providerToolchainsDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Providers</span>
+            <strong>Compiler &amp; interpreter</strong>
+            <p>Override the C++ compiler or Python interpreter used to build and run inline providers, if auto-detection does not find the right one on this machine.</p>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">C++ compiler</span>
+                <small id="toolchainCppDetected" class="toolchainDetected"></small>
+                <div class="toolchainPathRow">
+                    <input id="toolchainCppPath" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect">
+                    <button id="toolchainCppBrowse" type="button">Browse…</button>
+                    <button id="toolchainCppTest" type="button">Test</button>
+                </div>
+                <p id="toolchainCppStatus" class="assistantConfigurationStatus"></p>
+            </section>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">Python interpreter</span>
+                <small id="toolchainPythonDetected" class="toolchainDetected"></small>
+                <div class="toolchainPathRow">
+                    <input id="toolchainPythonPath" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect">
+                    <button id="toolchainPythonBrowse" type="button">Browse…</button>
+                    <button id="toolchainPythonTest" type="button">Test</button>
+                </div>
+                <p id="toolchainPythonStatus" class="assistantConfigurationStatus"></p>
+            </section>
+            <div class="passwordError" id="providerToolchainsError" role="alert"></div>
+            <footer><button id="providerToolchainsCancel" type="button">Cancel</button><button id="providerToolchainsSave" class="doneButton" type="submit">Save</button></footer>
         </form>
     </dialog>
 

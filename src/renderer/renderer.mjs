@@ -3043,6 +3043,58 @@ $('#runConfigurationDialog form').addEventListener('submit', (event) => {
     $('#runConfigurationDialog').close();
 });
 
+function toolchainFields(kind) {
+    const prefix = kind === 'python' ? 'toolchainPython' : 'toolchainCpp';
+    return { path: $(`#${prefix}Path`), detected: $(`#${prefix}Detected`), status: $(`#${prefix}Status`) };
+}
+
+async function refreshToolchainField(kind) {
+    const { path, detected, status } = toolchainFields(kind);
+    const { overridePath, detectedPath } = await window.providerToolchains.get(kind);
+    path.value = overridePath ?? '';
+    path.placeholder = detectedPath ? `Auto-detected: ${detectedPath}` : 'Leave blank to auto-detect';
+    detected.textContent = detectedPath ? `Auto-detected: ${detectedPath}` : 'Not auto-detected on this machine.';
+    status.textContent = '';
+    status.className = 'assistantConfigurationStatus';
+}
+
+async function testToolchainField(kind) {
+    const { path, status } = toolchainFields(kind);
+    status.textContent = 'Testing…';
+    status.className = 'assistantConfigurationStatus';
+    const result = await window.providerToolchains.test(kind, path.value);
+    status.textContent = result.message;
+    status.className = `assistantConfigurationStatus ${result.valid ? '' : 'error'}`;
+}
+
+async function browseToolchainField(kind) {
+    const path = await window.providerToolchains.browse(kind);
+    if (path) toolchainFields(kind).path.value = path;
+}
+
+$('#providerToolchainsButton').addEventListener('click', async () => {
+    $('#providerToolchainsError').textContent = '';
+    await Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python')]);
+    $('#providerToolchainsDialog').showModal();
+});
+$('#providerToolchainsCancel').addEventListener('click', () => $('#providerToolchainsDialog').close());
+$('#toolchainCppBrowse').addEventListener('click', () => browseToolchainField('cpp'));
+$('#toolchainPythonBrowse').addEventListener('click', () => browseToolchainField('python'));
+$('#toolchainCppTest').addEventListener('click', () => testToolchainField('cpp'));
+$('#toolchainPythonTest').addEventListener('click', () => testToolchainField('python'));
+$('#providerToolchainsDialog').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const error = $('#providerToolchainsError');
+    error.textContent = '';
+    try {
+        await window.providerToolchains.set('cpp', $('#toolchainCppPath').value);
+        await window.providerToolchains.set('python', $('#toolchainPythonPath').value);
+        $('#providerToolchainsDialog').close();
+    } catch (submitError) {
+        error.textContent = submitError.message;
+    }
+});
+
 function syncContextualOverlays() {
     const bundles = activeRelationshipBundles();
     const activeKeys = new Set(bundles.map((bundle) => bundle.key));

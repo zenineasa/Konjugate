@@ -156,6 +156,10 @@ input, select { user-select: text; }
 .configurationModelField { display: grid; grid-template-columns: 1fr auto; }
 .passwordDialog .configurationModelField :is(input, select) { border-radius: 4px 0 0 4px; }
 .passwordDialog .configurationModelField button { padding: 0 9px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; }
+.toolchainDetected { display: block; margin-top: 5px; color: #657985; font-size: 7px; overflow-wrap: anywhere; }
+.toolchainPathRow { display: flex; gap: 5px; margin-top: 5px; }
+.toolchainPathRow input { flex: 1; min-width: 0; }
+.passwordDialog .toolchainPathRow button { padding: 0 9px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 7px; }
 .assistantConfigurationDialog footer #deleteAssistantConfiguration { color: #c17980; }
 @media (max-width: 650px) {
     .assistantConfigurationWorkspace { grid-template-columns: 180px minmax(0, 1fr); }

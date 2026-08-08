@@ -47,6 +47,13 @@ contextBridge.exposeInMainWorld('providerEditor', {
     onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload))
 });
 
+contextBridge.exposeInMainWorld('providerToolchains', {
+    get: (kind) => ipcRenderer.invoke('providerToolchainGet', kind),
+    set: (kind, path) => ipcRenderer.invoke('providerToolchainSet', { kind, path }),
+    test: (kind, path) => ipcRenderer.invoke('providerToolchainTest', { kind, path }),
+    browse: (kind) => ipcRenderer.invoke('providerToolchainBrowse', kind)
+});
+
 const graphClipboardFormat = 'application/x-konjugate-graph-fragment';
 contextBridge.exposeInMainWorld('modelClipboard', {
     write: (fragment) => clipboard.writeBuffer(graphClipboardFormat, Buffer.from(JSON.stringify(fragment))),

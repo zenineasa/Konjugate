@@ -98,6 +98,30 @@
             ]
         },
         {
+            "example": "thermalEquilibrium",
+            "configuration": {
+                "targetTime": 60,
+                "globalTimeStep": 0.01,
+                "outputInterval": 15
+            },
+            "samples": [
+                {
+                    "time": 30,
+                    "states": {
+                        "2": 321.491371819941,
+                        "4": 318.508628180059
+                    }
+                },
+                {
+                    "time": 60,
+                    "states": {
+                        "2": 320.0741396635103,
+                        "4": 319.9258603364897
+                    }
+                }
+            ]
+        },
+        {
             "example": "twoRoomBuilding",
             "configuration": {
                 "targetTime": 3600,

@@ -332,11 +332,17 @@ export async function runInteractionTests(window) {
         // Fixed by wrapping the read in Buffer.from(bytes) before .toString('utf8').
         const visibleNodeCount = () => `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length`;
         const before = await evaluate(window, visibleNodeCount());
-        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        // Excludes "... copy" labels: a soft-deleted "Battery module copy" from an earlier test
+        // can still be present (hidden) in the DOM, and a plain .includes('Battery module')
+        // would match it too.
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy')).click()`);
         await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 1`, 'Node selection did not register before the copy shortcut.');
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, ctrlKey: true, bubbles: true }))`);
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true }))`);
-        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module copy'))`, 'The Cmd/Ctrl+V shortcut did not paste the copied node.');
+        // Wait on the actual visible count rather than the "... copy" label text existing: a
+        // stale, soft-deleted (hidden) copy from an earlier test would satisfy a text-only wait
+        // immediately, before this test's own paste has actually landed.
+        await waitFor(window, `${visibleNodeCount()} === ${before} + 1`, 'The Cmd/Ctrl+V shortcut did not paste the copied node.');
         assert.equal(await evaluate(window, visibleNodeCount()), before + 1);
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
         await waitFor(window, `${visibleNodeCount()} === ${before}`, 'Undo did not remove the pasted node.');

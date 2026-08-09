@@ -72,6 +72,18 @@ try {
         } else if (testCase.example === 'twoRoomBuilding') {
             assert.ok(dynamicSeries.every((states) => states.get(2)
                 > states.get(4)), 'The initially warmer room must remain warmer during this run.');
+        } else if (testCase.example === 'thermalEquilibrium') {
+            // Validates that a bidirectional edge applies a genuinely reciprocal contribution:
+            // the hot and cold bodies share a thermal capacitance, so their combined temperature
+            // must stay exactly constant (energy conservation), while their difference decays
+            // toward the shared equilibrium value instead of only one side ever moving.
+            const combined = dynamicSeries.map((states) => states.get(2) + states.get(4));
+            assert.ok(combined.every((value) => Math.abs(value - 640) < 1e-8),
+                'The hot and cold bodies must conserve their combined temperature.');
+            const differences = dynamicSeries.map((states) => states.get(2) - states.get(4));
+            assert.ok(differences.every((value, index) => !index || value < differences[index - 1]),
+                'The temperature difference must shrink monotonically toward equilibrium.');
+            assert.ok(differences.at(-1) < 0.2, 'The two bodies must have nearly equalized by the end of the run.');
         }
         console.log(`✓ numerical regression: ${testCase.example}`);
     }

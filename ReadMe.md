@@ -123,8 +123,8 @@ make build
 The build installs missing dependencies, generates application and web icons, packages Electron and writes the shareable artifact to `out/release/`.
 
 - macOS produces a DMG.
-- Windows produces a portable ZIP containing the executable.
-- Linux produces an AppImage and requires `appimagetool`.
+- Windows produces an installer (`*-setup.exe`) and requires NSIS (`makensis`) on `PATH`. A portable ZIP is also available via `make distributableWindowsPortable`.
+- Linux produces an AppImage and requires `appimagetool` on `PATH`. The official download is named after its architecture (e.g. `appimagetool-x86_64.AppImage`), so rename or symlink it to `appimagetool` and mark it executable. See [release packaging](docs/releasePackaging.md) for details.
 
 Generated application bundles are stored in `out/package/`. Run `make clean` to remove dependencies, the lockfile, generated icons, caches and all build outputs.
 

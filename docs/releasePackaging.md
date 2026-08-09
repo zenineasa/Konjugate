@@ -29,7 +29,12 @@ Additional host tools are currently required:
   Add/Remove Programs-registered `*-setup.exe` from
   `packaging/windows/installer.nsi`; `make distributableWindowsPortable`
   still produces the plain ZIP for users who want an install-free copy.
-- Linux uses `rsvg-convert` and requires `appimagetool` for an AppImage.
+- Linux uses `rsvg-convert` and requires `appimagetool` for an AppImage. The
+  binary downloaded from the official releases page is named after its
+  architecture (e.g. `appimagetool-x86_64.AppImage`), not `appimagetool` — the
+  Makefile looks for `appimagetool` on `PATH`, so rename it or symlink it
+  (`ln -s appimagetool-x86_64.AppImage appimagetool`) into a directory on
+  `PATH`, and make sure it's executable (`chmod +x`).
 
 The NSIS script only stages files already produced by `packageWindows`
 (the electron-packager output plus the CMake-installed engine and METIS

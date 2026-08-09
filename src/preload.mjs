@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { clipboard, contextBridge, ipcRenderer, webFrame } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -56,10 +56,13 @@ contextBridge.exposeInMainWorld('providerToolchains', {
 
 const graphClipboardFormat = 'application/x-konjugate-graph-fragment';
 contextBridge.exposeInMainWorld('modelClipboard', {
-    write: (fragment) => clipboard.writeBuffer(graphClipboardFormat, Buffer.from(JSON.stringify(fragment))),
+    write: (fragment) => ipcRenderer.sendSync('clipboardWriteBuffer', {
+        format: graphClipboardFormat,
+        buffer: Buffer.from(JSON.stringify(fragment))
+    }),
     read: () => {
-        const bytes = clipboard.readBuffer(graphClipboardFormat);
-        if (!bytes.length) return null;
+        const bytes = ipcRenderer.sendSync('clipboardReadBuffer', graphClipboardFormat);
+        if (!bytes || !bytes.length) return null;
         try {
             return JSON.parse(bytes.toString('utf8'));
         } catch {

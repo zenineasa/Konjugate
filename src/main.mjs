@@ -1,9 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -23,7 +23,6 @@ import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createProviderToolchainStore } from './providerToolchainStore.mjs';
-import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -118,27 +117,6 @@ function createWindow() {
     }
 
     mainWindow.loadFile(join(currentDir, 'renderer', 'index.html'));
-}
-
-async function checkForUpdates() {
-    let update;
-    try {
-        update = await findAvailableUpdate(app.getVersion());
-    } catch (error) {
-        console.warn('Update check failed:', error.message);
-        return;
-    }
-    if (!update || !mainWindow || mainWindow.isDestroyed()) return;
-    const { response } = await dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Update available',
-        message: `Konjugate ${update.version} is available.`,
-        detail: `You're running ${app.getVersion()}.`,
-        buttons: ['View Release', 'Later'],
-        defaultId: 0,
-        cancelId: 1
-    });
-    if (response === 0) shell.openExternal(update.url);
 }
 
 async function openExampleGuide(id) {
@@ -598,7 +576,7 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
             await unlink(temporaryPath);
         }
     } catch (error) {
-        await unlink(temporaryPath).catch(() => {});
+        await unlink(temporaryPath).catch(() => { });
         throw error;
     }
     return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resultBytes) };
@@ -674,8 +652,10 @@ async function autoDetectCppCompiler() {
                 return { compiler: candidate, flavor: 'msvc' };
             }
         }
-        const clangResult = await runProcess('clang++', ['--version']);
-        if (clangResult.code === 0) return { compiler: 'clang++', flavor: 'clang' };
+        for (const candidate of ['clang++', 'g++', 'c++']) {
+            const result = await runProcess(candidate, ['--version']);
+            if (result.code === 0) return { compiler: candidate, flavor: 'clang' };
+        }
     }
     return { compiler: 'c++', flavor: 'clang' };
 }
@@ -758,6 +738,56 @@ function parseCompilerDiagnostics(output, filePath) {
     return diagnostics;
 }
 
+function findMsvcIncludeDirs() {
+    const includeDirs = [];
+    const vsBases = [
+        'C:\\Program Files\\Microsoft Visual Studio',
+        'C:\\Program Files (x86)\\Microsoft Visual Studio'
+    ];
+    for (const vsBase of vsBases) {
+        if (!existsSync(vsBase)) continue;
+        try {
+            for (const year of readdirSync(vsBase)) {
+                const yearPath = join(vsBase, year);
+                for (const edition of readdirSync(yearPath)) {
+                    const msvcPath = join(yearPath, edition, 'VC', 'Tools', 'MSVC');
+                    if (existsSync(msvcPath)) {
+                        for (const version of readdirSync(msvcPath)) {
+                            const inc = join(msvcPath, version, 'include');
+                            if (existsSync(inc)) {
+                                includeDirs.push(inc);
+                                break;
+                            }
+                        }
+                    }
+                    if (includeDirs.length) break;
+                }
+                if (includeDirs.length) break;
+            }
+        } catch {}
+        if (includeDirs.length) break;
+    }
+    const winKitsBases = [
+        'C:\\Program Files (x86)\\Windows Kits\\10\\Include',
+        'C:\\Program Files\\Windows Kits\\10\\Include'
+    ];
+    for (const winKitBase of winKitsBases) {
+        if (!existsSync(winKitBase)) continue;
+        try {
+            const sdks = readdirSync(winKitBase);
+            if (sdks.length) {
+                const latestSdk = join(winKitBase, sdks[sdks.length - 1]);
+                for (const sub of ['ucrt', 'um', 'shared']) {
+                    const inc = join(latestSdk, sub);
+                    if (existsSync(inc)) includeDirs.push(inc);
+                }
+                break;
+            }
+        } catch {}
+    }
+    return includeDirs;
+}
+
 // Runs syntax checking (-fsyntax-only on Clang/GCC, /zs on MSVC), a parse/type-check pass that never produces or runs a binary.
 async function validateCppSource(source) {
     const directory = await mkdtemp(join(tmpdir(), 'konjugateProviderCheck-'));
@@ -770,16 +800,15 @@ async function validateCppSource(source) {
         }), 'include');
         let args;
         if (flavor === 'msvc') {
-            if (!process.env.INCLUDE) {
-                const defaultIncludeDirs = [
-                    'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\include',
-                    'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt',
-                    'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um',
-                    'C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared'
-                ];
-                process.env.INCLUDE = defaultIncludeDirs.filter(existsSync).join(';');
+            const msvcIncs = findMsvcIncludeDirs();
+            if (!process.env.INCLUDE && msvcIncs.length) {
+                process.env.INCLUDE = msvcIncs.join(';');
             }
-            args = ['/std:c++20', '/EHsc', '/Zs', '/nologo', '/I' + includePath, filePath];
+            args = ['/std:c++20', '/EHsc', '/Zs', '/nologo', '/I' + includePath];
+            for (const dir of msvcIncs) {
+                args.push('/I' + dir);
+            }
+            args.push(filePath);
         } else {
             args = ['-std=c++20', '-fsyntax-only', '-I' + includePath];
             if (process.platform === 'darwin') {
@@ -831,6 +860,15 @@ ipcMain.handle('providerEditorApply', (_event, { source }) => {
 function requireMainWindow(event) {
     if (!senderIs(mainWindow, event)) throw new Error('Only the project window can access toolchain settings.');
 }
+
+ipcMain.on('clipboardReadBuffer', (event, format) => {
+    event.returnValue = clipboard.readBuffer(format);
+});
+
+ipcMain.on('clipboardWriteBuffer', (event, { format, buffer }) => {
+    clipboard.writeBuffer(format, Buffer.from(buffer));
+    event.returnValue = true;
+});
 
 ipcMain.handle('providerToolchainGet', async (event, kind) => {
     requireMainWindow(event);
@@ -957,12 +995,19 @@ ipcMain.handle('aiCancelRequest', async (event, requestUuid) => {
     return true;
 });
 
-const engineOptions = async () => ({
-    applicationPath: app.getAppPath(),
-    resourcesPath: process.resourcesPath,
-    packaged: app.isPackaged,
-    providerToolchains: await providerToolchainStore.get()
-});
+const engineOptions = async () => {
+    const resolvedCpp = await resolveCppCompiler();
+    const resolvedPython = await resolvePythonInterpreter();
+    return {
+        applicationPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        packaged: app.isPackaged,
+        providerToolchains: {
+            cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
+            python: { interpreterPath: resolvedPython ?? '' }
+        }
+    };
+};
 
 ipcMain.handle('engineValidate', async (event, content) => {
     const active = { owner: event.sender, controller: new AbortController(), completion: null };
@@ -1027,7 +1072,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
     }).catch((error) => {
         if (updateTimer) clearTimeout(updateTimer);
         console.error(`[Engine Error] Simulation job ${execution.jobId} failed:`, error.message || error);
-        execution.cleanup().catch(() => {});
+        execution.cleanup().catch(() => { });
         if (!owner.isDestroyed()) owner.send('engineRunError', { jobId: execution.jobId, message: error.message });
     }).finally(() => activeEngineJobs.delete(execution.jobId));
     return { available: true, jobId: execution.jobId };
@@ -1101,7 +1146,6 @@ app.whenReady().then(async () => {
         directory: join(app.getPath('userData'), 'providers')
     });
     createWindow();
-    if (!process.argv.includes('--interaction-test')) checkForUpdates();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

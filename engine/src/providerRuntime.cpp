@@ -172,7 +172,7 @@ CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vec
     ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
     siStartInfo.cb = sizeof(STARTUPINFOA);
     siStartInfo.hStdError = hChildStd_OUT_Wr;
-    siStartInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    siStartInfo.hStdOutput = hChildStd_OUT_Wr;
     siStartInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
 
@@ -195,8 +195,13 @@ CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vec
     CloseHandle(hChildStd_OUT_Wr);
 
     if (!bSuccess) {
+        DWORD err = GetLastError();
         CloseHandle(hChildStd_OUT_Rd);
-        throw std::runtime_error("Failed to spawn the C++ provider build process: " + std::to_string(GetLastError()));
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
+            throw std::runtime_error("C++ compiler executable not found: \"" + compilerPath +
+                "\". Please install a C++ compiler (MSVC cl.exe, MinGW g++, or Clang) or configure the toolchain path in Provider Toolchains.");
+        }
+        throw std::runtime_error("Failed to spawn the C++ provider build process: " + std::to_string(err));
     }
 
     std::string diagnostics;
@@ -226,6 +231,7 @@ CompilerRunResult runCppCompiler(const std::string& compilerPath, const std::vec
 
     if (pid == 0) {
         ::dup2(errorPipe[1], STDERR_FILENO);
+        ::dup2(errorPipe[1], STDOUT_FILENO);
         ::close(errorPipe[0]);
         ::close(errorPipe[1]);
         std::vector<const char*> argv;
@@ -277,6 +283,112 @@ std::string preparePythonProviderSource(const std::string& source, const Provide
     return sourcePath.string();
 }
 
+#ifdef _WIN32
+struct MsvcEnvironmentFlags {
+    std::vector<std::string> includeFlags;
+    std::vector<std::string> libpathFlags;
+};
+
+MsvcEnvironmentFlags getMsvcEnvironmentFlags(const std::string& compilerPath) {
+    MsvcEnvironmentFlags result;
+    std::vector<std::filesystem::path> includeDirs;
+    std::vector<std::filesystem::path> libDirs;
+
+    try {
+        std::filesystem::path p(compilerPath);
+        if (p.is_absolute() && std::filesystem::exists(p)) {
+            auto msvcRoot = p.parent_path();
+            for (int i = 0; i < 3 && msvcRoot.has_parent_path(); ++i) {
+                msvcRoot = msvcRoot.parent_path();
+            }
+            auto inc = msvcRoot / "include";
+            if (std::filesystem::exists(inc / "cstddef")) {
+                includeDirs.push_back(inc);
+            }
+            auto lib = msvcRoot / "lib" / "x64";
+            if (std::filesystem::exists(lib)) {
+                libDirs.push_back(lib);
+            }
+        }
+    } catch (...) {}
+
+    if (includeDirs.empty() || libDirs.empty()) {
+        const std::filesystem::path vsBases[] = {
+            "C:\\Program Files\\Microsoft Visual Studio",
+            "C:\\Program Files (x86)\\Microsoft Visual Studio"
+        };
+        for (const auto& vsBase : vsBases) {
+            if (!std::filesystem::exists(vsBase)) continue;
+            try {
+                for (const auto& yearEntry : std::filesystem::directory_iterator(vsBase)) {
+                    if (!yearEntry.is_directory()) continue;
+                    for (const auto& edEntry : std::filesystem::directory_iterator(yearEntry.path())) {
+                        if (!edEntry.is_directory()) continue;
+                        auto msvcTools = edEntry.path() / "VC" / "Tools" / "MSVC";
+                        if (std::filesystem::exists(msvcTools)) {
+                            for (const auto& verEntry : std::filesystem::directory_iterator(msvcTools)) {
+                                if (!verEntry.is_directory()) continue;
+                                auto inc = verEntry.path() / "include";
+                                auto lib = verEntry.path() / "lib" / "x64";
+                                if (includeDirs.empty() && std::filesystem::exists(inc / "cstddef")) {
+                                    includeDirs.push_back(inc);
+                                }
+                                if (libDirs.empty() && std::filesystem::exists(lib)) {
+                                    libDirs.push_back(lib);
+                                }
+                                if (!includeDirs.empty() && !libDirs.empty()) break;
+                            }
+                        }
+                        if (!includeDirs.empty() && !libDirs.empty()) break;
+                    }
+                    if (!includeDirs.empty() && !libDirs.empty()) break;
+                }
+            } catch (...) {}
+            if (!includeDirs.empty() && !libDirs.empty()) break;
+        }
+    }
+
+    const std::filesystem::path winKitsIncludeBases[] = {
+        "C:\\Program Files (x86)\\Windows Kits\\10\\Include",
+        "C:\\Program Files\\Windows Kits\\10\\Include"
+    };
+    for (const auto& winKitBase : winKitsIncludeBases) {
+        if (!std::filesystem::exists(winKitBase)) continue;
+        try {
+            std::filesystem::path latestSdk;
+            for (const auto& sdkEntry : std::filesystem::directory_iterator(winKitBase)) {
+                if (sdkEntry.is_directory()) {
+                    auto ucrt = sdkEntry.path() / "ucrt";
+                    if (std::filesystem::exists(ucrt / "stdlib.h")) {
+                        latestSdk = sdkEntry.path();
+                    }
+                }
+            }
+            if (!latestSdk.empty()) {
+                if (std::filesystem::exists(latestSdk / "ucrt")) includeDirs.push_back(latestSdk / "ucrt");
+                if (std::filesystem::exists(latestSdk / "um")) includeDirs.push_back(latestSdk / "um");
+                if (std::filesystem::exists(latestSdk / "shared")) includeDirs.push_back(latestSdk / "shared");
+
+                std::filesystem::path libBase = winKitBase.parent_path() / "Lib" / latestSdk.filename();
+                if (std::filesystem::exists(libBase)) {
+                    if (std::filesystem::exists(libBase / "ucrt" / "x64")) libDirs.push_back(libBase / "ucrt" / "x64");
+                    if (std::filesystem::exists(libBase / "um" / "x64")) libDirs.push_back(libBase / "um" / "x64");
+                }
+                break;
+            }
+        } catch (...) {}
+    }
+
+    for (const auto& dir : includeDirs) {
+        result.includeFlags.push_back("/I" + dir.string());
+    }
+    for (const auto& dir : libDirs) {
+        result.libpathFlags.push_back("/LIBPATH:" + dir.string());
+    }
+    return result;
+}
+#endif
+
 // Compiles an inline C++ relationship's source, together with the public SDK header and
 // Konjugate's worker wrapper, into a native provider executable. The build is cached on
 // disk by a hash of the source text, so repeated runs of the same inline implementation
@@ -293,7 +405,11 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
         ? std::filesystem::temp_directory_path() / "konjugateProviders"
         : std::filesystem::path(config.buildDirectory);
     const auto providerDirectory = buildRoot / hash;
+#ifdef _WIN32
+    const auto executablePath = providerDirectory / "provider.exe";
+#else
     const auto executablePath = providerDirectory / "provider";
+#endif
 
     if (!std::filesystem::exists(executablePath)) {
         std::filesystem::create_directories(providerDirectory);
@@ -304,19 +420,47 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
         sourceFile.close();
 
         const std::filesystem::path sdkRoot(config.cppSdkPath);
-        std::vector<std::string> arguments = {"-std=c++20", "-O1", "-I" + (sdkRoot / "include").string()};
-#ifdef __APPLE__
-        if (const auto sysroot = resolveAppleSdkSysroot(); !sysroot.empty()) {
-            arguments.push_back("-isysroot");
-            arguments.push_back(sysroot);
-        }
-#endif
-        arguments.push_back(sourcePath.string());
-        arguments.push_back((sdkRoot / "src" / "providerWorker.cpp").string());
-        arguments.push_back("-o");
-        arguments.push_back(executablePath.string());
+        const std::string compiler = resolveCppCompiler(config);
 
-        const auto result = runCppCompiler(resolveCppCompiler(config), arguments);
+        std::string compilerLower = compiler;
+        std::transform(compilerLower.begin(), compilerLower.end(), compilerLower.begin(), ::tolower);
+        const bool isMsvc = (compilerLower.find("cl.exe") != std::string::npos || compilerLower == "cl");
+
+        std::vector<std::string> arguments;
+        if (isMsvc) {
+            arguments = {
+                "/std:c++20",
+                "/O1",
+                "/EHsc",
+                "/nologo",
+                "/I" + (sdkRoot / "include").string(),
+                sourcePath.string(),
+                (sdkRoot / "src" / "providerWorker.cpp").string(),
+                "/Fe" + executablePath.string()
+            };
+#ifdef _WIN32
+            auto msvcFlags = getMsvcEnvironmentFlags(compiler);
+            arguments.insert(arguments.end(), msvcFlags.includeFlags.begin(), msvcFlags.includeFlags.end());
+            if (!msvcFlags.libpathFlags.empty()) {
+                arguments.push_back("/link");
+                arguments.insert(arguments.end(), msvcFlags.libpathFlags.begin(), msvcFlags.libpathFlags.end());
+            }
+#endif
+        } else {
+            arguments = {"-std=c++20", "-O1", "-I" + (sdkRoot / "include").string()};
+#ifdef __APPLE__
+            if (const auto sysroot = resolveAppleSdkSysroot(); !sysroot.empty()) {
+                arguments.push_back("-isysroot");
+                arguments.push_back(sysroot);
+            }
+#endif
+            arguments.push_back(sourcePath.string());
+            arguments.push_back((sdkRoot / "src" / "providerWorker.cpp").string());
+            arguments.push_back("-o");
+            arguments.push_back(executablePath.string());
+        }
+
+        const auto result = runCppCompiler(compiler, arguments);
         if (!result.success) {
             std::filesystem::remove(executablePath);
             throw std::runtime_error("Failed to compile the C++ relationship provider:\n" + result.diagnostics);

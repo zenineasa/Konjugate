@@ -76,6 +76,11 @@ struct ContributionTask {
     ContributionImplementation implementation = ContributionImplementation::equation;
     std::string providerSource;
     std::string providerOutputKey;
+    // True for the complementary contribution a bidirectional edge applies to its other
+    // endpoint: the same computed value, sign-flipped, since what leaves one node enters the
+    // other. False for every other contribution (source terms, directed edges, and a
+    // bidirectional edge's own primary output).
+    bool negateOutput = false;
 };
 
 class ProviderEvaluator {

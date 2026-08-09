@@ -214,8 +214,8 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
             }
             const edge = {
                 name: requireText(operation.name, 'name', operationIndex),
-                source: { nodeId: source.id, stateId: null },
-                target: { nodeId: target.id, stateId: null },
+                source: { nodeId: source.id, stateId: source.states[0]?.id ?? '' },
+                target: { nodeId: target.id, stateId: target.states[0]?.id ?? '' },
                 directionality,
                 equation: '',
                 equationModel: { latex: '', output: { role: 'target', stateId: null }, bindings: [], mathJson: null },
@@ -292,12 +292,12 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
             if (operation.sourceNodeRef !== undefined) {
                 const source = resolve(operation.sourceNodeRef, 'node', operationIndex).value;
                 endpointChanged ||= source.id !== edge.source.nodeId;
-                edge.source = { nodeId: source.id, stateId: source.states[0]?.id ?? null };
+                edge.source = { nodeId: source.id, stateId: source.states[0]?.id ?? '' };
             }
             if (operation.targetNodeRef !== undefined) {
                 const target = resolve(operation.targetNodeRef, 'node', operationIndex).value;
                 endpointChanged ||= target.id !== edge.target.nodeId;
-                edge.target = { nodeId: target.id, stateId: target.states[0]?.id ?? null };
+                edge.target = { nodeId: target.id, stateId: target.states[0]?.id ?? '' };
             }
             if (edge.source.nodeId === edge.target.nodeId) throw new AssistantProposalError('An edge must connect two different nodes.', operationIndex);
             if (endpointChanged) clearEdgeEquation(edge);
@@ -381,8 +381,8 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
             const bindings = reconcileEquationBindings([], sourceNode, targetNode, edge.parameters);
             const validation = validateEquationLatex(latex, bindings);
             if (!validation.valid) throw new AssistantProposalError(validation.errors.join(' '), operationIndex);
-            edge.source.stateId ??= sourceNode.states[0]?.id ?? null;
-            edge.target.stateId ??= targetNode.states[0]?.id ?? null;
+            edge.source.stateId ??= sourceNode.states[0]?.id ?? '';
+            edge.target.stateId ??= targetNode.states[0]?.id ?? '';
             edge.equation = latex;
             edge.equationModel = {
                 latex,

@@ -10,3 +10,5 @@ await run(process.execPath, [join(rootDirectory, 'scripts', 'buildEngine.mjs')])
 await run('ctest', ['--test-dir', engineDirectory, '-C', 'RelWithDebInfo', '--output-on-failure']);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'engineCompatibility.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'numericalRegression.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'edgeDirectionalityContract.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'edgeNullStateIdContract.mjs'), executable]);

@@ -323,6 +323,25 @@ export async function runInteractionTests(window) {
         await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length === ${before.nodes}`, 'Undoing paste did not remove the copied graph fragment.');
     });
 
+    await run('Cmd/Ctrl+V pastes a single copied node', async () => {
+        // Regression test: same root cause as the multi-selection test above (modelClipboard.read()
+        // in src/preload.mjs used to decode the clipboard buffer with a bare `bytes.toString('utf8')`,
+        // but `bytes` crosses the IPC boundary as a plain Uint8Array rather than a Node Buffer, so
+        // the 'utf8' argument was silently ignored and JSON.parse always threw), isolated to the
+        // keyboard-shortcut path (Cmd/Ctrl+C / Cmd/Ctrl+V) and a single node rather than a group.
+        // Fixed by wrapping the read in Buffer.from(bytes) before .toString('utf8').
+        const visibleNodeCount = () => `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length`;
+        const before = await evaluate(window, visibleNodeCount());
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 1`, 'Node selection did not register before the copy shortcut.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module copy'))`, 'The Cmd/Ctrl+V shortcut did not paste the copied node.');
+        assert.equal(await evaluate(window, visibleNodeCount()), before + 1);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `${visibleNodeCount()} === ${before}`, 'Undo did not remove the pasted node.');
+    });
+
     await run('rectangle tool selects visible nodes without opening an inspector', async () => {
         await evaluate(window, `document.querySelector('[data-tool="rectangleSelect"]').click()`);
         const bounds = await evaluate(window, `(() => {
@@ -750,6 +769,57 @@ export async function runInteractionTests(window) {
         // (a pre-existing gap unrelated to provider support); only assert that the new
         // implementation fields themselves did not produce a provider-specific diagnostic.
         assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    });
+
+    await run('clicking a relationship after replacing a deleted one selects the new edge', async () => {
+        // Regression test: deleting a relationship only soft-deletes it (definition.deleted =
+        // true, line/marker hidden via .visible = false) -- its mesh is never removed from
+        // relationshipPickTargets, which is only ever cleared on a full project reload. A new
+        // relationship created between the same two nodes renders at the same curve (same node
+        // pair, default zero offset), so without a .visible filter, firstIntersection() could
+        // resolve the tie to the invisible, deleted original instead of the new one. Fixed by
+        // having firstIntersection() skip non-visible hits (Three.js's Raycaster does not check
+        // .visible itself -- confirmed in node_modules/three/src/core/Raycaster.js).
+        const createEdge = async (name) => {
+            await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+            await evaluate(window, `(() => {
+                const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
+                choose('#edgeSource', 'Electrical losses');
+                choose('#edgeTarget', 'Enclosed air');
+                document.querySelector('#newEdgeName').value = ${JSON.stringify(name)};
+                const field = document.querySelector('#edgeMathField');
+                field.setValue('\\\\mathrm{sourceQDot}');
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                document.querySelector('#createEdge').click();
+            })()`);
+            assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        };
+
+        await createEdge('First relationship');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
+        await evaluate(window, `document.querySelector('[data-action="delete"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+
+        await createEdge('Second relationship');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
+
+        if (await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`)) {
+            await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+        }
+
+        const point = await evaluate(window, `window.__relationshipScreenPoint('Second relationship')`);
+        assert.ok(point, 'Could not locate the new relationship on screen.');
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the relationship did not open the edge editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Second relationship');
+
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });

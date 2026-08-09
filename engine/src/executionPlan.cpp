@@ -220,33 +220,68 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         const auto& edge = edgeItem.second;
         const auto implementationKind = value(edge, "implementation.kind");
         const auto programmable = implementationKind == "cpp" || implementationKind == "python";
+        const auto outputRole = value(edge, programmable ? "implementation.output.role" : "equationModel.output.role");
         const auto outputStateId = idValue(edge, programmable ? "implementation.output.stateId" : "equationModel.output.stateId");
         const auto outputNodeId = plan.stateNodes.at(outputStateId);
-        auto& node = plan.nodes.at(nodeIndexes.at(outputNodeId));
-        std::unordered_map<EntityId, std::size_t> localStateIndexes;
-        for (std::size_t index = 0; index < node.stateIds.size(); ++index) localStateIndexes[node.stateIds[index]] = index;
-        ContributionTask task;
-        task.sequence = node.contributions.size();
-        task.sourceId = idValue(edge, "id");
-        task.outputStateId = outputStateId;
-        task.outputStateIndex = localStateIndexes.at(outputStateId);
-        task.bindings = compileBindings(edge.get_child(programmable ? "implementation.bindings" : "equationModel.bindings"),
-            outputNodeId, false, plan.stateIndexes, localStateIndexes, programmable ? "key" : "symbol");
-        for (const auto& parameterItem : edge.get_child("parameters")) {
-            const auto& parameter = parameterItem.second;
-            task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
+
+        auto buildContribution = [&](EntityId contributionNodeId, EntityId contributionStateId, bool negate) {
+            auto& contributionNode = plan.nodes.at(nodeIndexes.at(contributionNodeId));
+            std::unordered_map<EntityId, std::size_t> localStateIndexes;
+            for (std::size_t index = 0; index < contributionNode.stateIds.size(); ++index) {
+                localStateIndexes[contributionNode.stateIds[index]] = index;
+            }
+            ContributionTask task;
+            task.sequence = contributionNode.contributions.size();
+            task.sourceId = idValue(edge, "id");
+            task.outputStateId = contributionStateId;
+            task.outputStateIndex = localStateIndexes.at(contributionStateId);
+            task.negateOutput = negate;
+            task.bindings = compileBindings(edge.get_child(programmable ? "implementation.bindings" : "equationModel.bindings"),
+                contributionNodeId, false, plan.stateIndexes, localStateIndexes, programmable ? "key" : "symbol");
+            for (const auto& parameterItem : edge.get_child("parameters")) {
+                const auto& parameter = parameterItem.second;
+                task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
+            }
+            if (programmable) {
+                task.implementation = implementationKind == "cpp"
+                    ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
+                task.providerSource = value(edge, "implementation.source");
+                task.providerOutputKey = value(edge, "implementation.output.key");
+            } else {
+                task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
+            }
+            bindTask(task);
+            contributionNode.estimatedOperationsPerSubstep += programmable ? task.bindings.size() + 1 : task.expression.operationCount();
+            contributionNode.contributions.push_back(std::move(task));
+        };
+
+        buildContribution(outputNodeId, outputStateId, false);
+
+        if (value(edge, "directionality") == "bidirectional") {
+            // A bidirectional edge applies the same computed value to both connected nodes, with
+            // the sign flipped for the other side -- what leaves one enters the other. The other
+            // side's state is the edge's own source/target stateId when the model provides one
+            // (see src/renderer/renderer.mjs's edge creation, which defaults it to the endpoint
+            // node's first state); otherwise fall back to that node's first state directly, so an
+            // older saved edge without one still resolves sensibly.
+            const auto otherNodeId = outputRole == "target" ? idValue(edge, "source.nodeId") : idValue(edge, "target.nodeId");
+            const auto otherStateField = outputRole == "target" ? "source.stateId" : "target.stateId";
+            const auto otherStateText = value(edge, otherStateField);
+            const auto& otherNode = plan.nodes.at(nodeIndexes.at(otherNodeId));
+            if (otherNode.stateIds.empty()) {
+                throw std::runtime_error("A bidirectional relationship's other endpoint has no states.");
+            }
+            EntityId otherStateId = otherNode.stateIds.front();
+            if (!otherStateText.empty()) {
+                std::size_t consumed = 0;
+                const auto parsed = std::stoull(otherStateText, &consumed);
+                if (parsed && consumed == otherStateText.size() &&
+                    std::find(otherNode.stateIds.begin(), otherNode.stateIds.end(), parsed) != otherNode.stateIds.end()) {
+                    otherStateId = parsed;
+                }
+            }
+            buildContribution(otherNodeId, otherStateId, true);
         }
-        if (programmable) {
-            task.implementation = implementationKind == "cpp"
-                ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
-            task.providerSource = value(edge, "implementation.source");
-            task.providerOutputKey = value(edge, "implementation.output.key");
-        } else {
-            task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
-        }
-        bindTask(task);
-        node.estimatedOperationsPerSubstep += programmable ? task.bindings.size() + 1 : task.expression.operationCount();
-        node.contributions.push_back(std::move(task));
     }
     std::sort(plan.stateIds.begin(), plan.stateIds.end());
     plan.taskSubmissionOrder = planTaskSubmissionOrder(plan.nodes);
@@ -284,11 +319,12 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueIndex);
             else symbols[index] = synchronizationSnapshot.at(binding.valueIndex);
         }
-        const auto contribution = task.implementation == ContributionImplementation::equation
+        auto contribution = task.implementation == ContributionImplementation::equation
             ? task.expression.evaluate(symbols)
             : (providerEvaluator
                 ? providerEvaluator->evaluate(task, symbols, simulationTime, stepSize)
                 : throw std::runtime_error("A programmable relationship requires an initialized provider runtime."));
+        if (task.negateOutput) contribution = -contribution;
         if (!std::isfinite(contribution)) throw std::runtime_error("A contribution task produced a non-finite derivative.");
         evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
     }

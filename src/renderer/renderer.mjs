@@ -986,8 +986,26 @@ function setPointerFromEvent(event) {
 }
 
 function firstIntersection(targets) {
-    return raycaster.intersectObjects(targets, true)[0];
+    // Three.js's Raycaster does not itself check .visible (confirmed in node_modules/three/src/
+    // core/Raycaster.js) -- an invisible object (soft-deleted, or hidden by subsystem scoping)
+    // is exactly as raycast-hittable as a visible one. Skip hits the user can't actually see.
+    return raycaster.intersectObjects(targets, true).find((hit) => hit.object.visible);
 }
+
+// Debug/test hook only; not part of the app's public surface (mirrors window.__providerEditorView
+// in src/providerEditor/renderer.mjs). Exposes the on-screen point for a relationship's rendered
+// line midpoint so interaction tests can click it without duplicating the camera-projection math.
+window.__relationshipScreenPoint = (title) => {
+    const relationship = [...relationshipObjects.values()].find((entry) => entry.definition.title === title);
+    if (!relationship) return null;
+    const midpoint = relationship.line.userData.curve.getPoint(0.5);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const projected = midpoint.clone().project(camera);
+    return {
+        x: Math.round(rect.left + (projected.x + 1) / 2 * rect.width),
+        y: Math.round(rect.top + (1 - projected.y) / 2 * rect.height)
+    };
+};
 
 function rootNodeFromIntersection(intersection) {
     let object = intersection?.object;
@@ -3351,8 +3369,8 @@ function serializeProjectDocument() {
             .map((edge) => ({
                 id: edge.id,
                 name: edge.title,
-                source: { nodeId: edge.source, stateId: edge.sourceStateId ?? null },
-                target: { nodeId: edge.target, stateId: edge.targetStateId ?? null },
+                source: { nodeId: edge.source, stateId: edge.sourceStateId ?? '' },
+                target: { nodeId: edge.target, stateId: edge.targetStateId ?? '' },
                 directionality: edge.directionality,
                 equation: edge.equationModel?.latex ?? edge.equation ?? '',
                 equationModel: normalizeEdgeEquationModel(edge),
@@ -5247,13 +5265,15 @@ $('#createEdge').addEventListener('click', () => {
         return;
     }
     const implementationKind = $('#edgeImplementationKind').value;
+    const sourceNode = model.nodes.find((node) => node.id === source);
+    const targetNode = model.nodes.find((node) => node.id === target);
     const definition = {
         id: allocateModelEntityId(),
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
         source,
         target,
-        sourceStateId: null,
-        targetStateId: null,
+        sourceStateId: sourceNode?.states[0]?.id ?? null,
+        targetStateId: targetNode?.states[0]?.id ?? null,
         directionality: 'directed',
         color: 0x9c83c4,
         offset: 0,

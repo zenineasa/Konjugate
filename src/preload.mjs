@@ -71,7 +71,11 @@ contextBridge.exposeInMainWorld('modelClipboard', {
         const bytes = ipcRenderer.sendSync('clipboardReadBuffer', graphClipboardFormat);
         if (!bytes || !bytes.length) return null;
         try {
-            return JSON.parse(bytes.toString('utf8'));
+            // `bytes` crosses the IPC boundary as a plain Uint8Array, not a Node Buffer.
+            // Uint8Array.prototype.toString is Array.prototype.toString, which ignores the
+            // 'utf8' argument and comma-joins the raw byte values instead of decoding them --
+            // wrap it in Buffer.from() first so the encoding argument actually takes effect.
+            return JSON.parse(Buffer.from(bytes).toString('utf8'));
         } catch {
             return null;
         }

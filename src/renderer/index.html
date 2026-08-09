@@ -64,6 +64,7 @@
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="assistantButton" class="titleAssistantControl" type="button" aria-label="Model assistant" data-tooltip="Model assistant" aria-expanded="false" aria-controls="assistantPanel">✦</button>
             <button id="providerToolchainsButton" class="titleAssistantControl" type="button" aria-label="Provider toolchains" data-tooltip="Provider toolchains" aria-haspopup="dialog">⚒</button>
+            <button id="diagnosticsButton" class="titleAssistantControl" type="button" aria-label="Diagnostics log" data-tooltip="Diagnostics log" aria-haspopup="dialog">⚠<span id="diagnosticsBadge" class="diagnosticsBadge" hidden></span></button>
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="minimizeButton" type="button" aria-label="Minimize" data-tooltip="Minimize">−</button>
             <button id="maximizeButton" type="button" aria-label="Maximize" data-tooltip="Maximize"><span id="maximizeIcon">□</span></button>
@@ -74,6 +75,14 @@
     <div id="encryptionMenu" class="contextCard encryptionMenu hidden" role="menu">
         <button id="changePasswordButton" type="button" role="menuitem"><strong>Change password…</strong><span>Re-encrypt this file with a new password</span></button>
         <button id="removeEncryptionButton" type="button" role="menuitem"><strong>Remove encryption…</strong><span>Keep compression but remove password protection</span></button>
+    </div>
+
+    <div id="diagnosticsPanel" class="contextCard diagnosticsPanel hidden" role="dialog" aria-label="Diagnostics log">
+        <header>
+            <strong>Diagnostics</strong>
+            <button id="diagnosticsClearButton" type="button">Clear</button>
+        </header>
+        <div id="diagnosticsList" class="diagnosticsList"></div>
     </div>
 
     <dialog id="passwordDialog" class="passwordDialog">

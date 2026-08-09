@@ -38,6 +38,74 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 }[character]));
 const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+// Backstop so any console.error/console.warn -- including ones nobody has wired up to a
+// dedicated UI element -- still reaches the user via the quiet diagnostics badge/panel below,
+// instead of only a devtools console most users never open.
+const diagnosticsEntries = [];
+const diagnosticsSeenIds = new Set();
+let diagnosticsUnseenCount = 0;
+let diagnosticsNextLocalId = -1;
+
+function formatConsoleArgs(args) {
+    return args.map((arg) => (
+        arg instanceof Error ? (arg.stack || arg.message)
+            : (typeof arg === 'string' ? arg : (() => { try { return JSON.stringify(arg); } catch { return String(arg); } })())
+    )).join(' ');
+}
+
+function addDiagnosticsEntry(entry) {
+    if (diagnosticsSeenIds.has(entry.id)) return;
+    diagnosticsSeenIds.add(entry.id);
+    diagnosticsEntries.unshift(entry);
+    if (diagnosticsEntries.length > 200) diagnosticsEntries.pop();
+    diagnosticsUnseenCount += 1;
+    renderDiagnosticsBadge();
+    if (!$('#diagnosticsPanel').classList.contains('hidden')) renderDiagnosticsList();
+}
+
+function renderDiagnosticsBadge() {
+    const badge = $('#diagnosticsBadge');
+    badge.hidden = diagnosticsUnseenCount === 0;
+    badge.textContent = diagnosticsUnseenCount > 99 ? '99+' : String(diagnosticsUnseenCount);
+}
+
+function renderDiagnosticsList() {
+    const container = $('#diagnosticsList');
+    container.innerHTML = '';
+    if (!diagnosticsEntries.length) {
+        const empty = document.createElement('p');
+        empty.className = 'diagnosticsEmpty';
+        empty.textContent = 'No issues logged.';
+        container.appendChild(empty);
+        return;
+    }
+    for (const entry of diagnosticsEntries) {
+        const row = document.createElement('div');
+        row.className = `diagnosticsEntry diagnosticsEntry-${entry.severity}`;
+        const time = document.createElement('span');
+        time.className = 'diagnosticsEntryTime';
+        time.textContent = new Date(entry.timestamp).toLocaleTimeString();
+        const message = document.createElement('span');
+        message.className = 'diagnosticsEntryMessage';
+        message.textContent = entry.message;
+        row.append(time, message);
+        container.appendChild(row);
+    }
+}
+
+const originalConsoleError = console.error.bind(console);
+const originalConsoleWarn = console.warn.bind(console);
+console.error = (...args) => {
+    originalConsoleError(...args);
+    addDiagnosticsEntry({ id: diagnosticsNextLocalId--, severity: 'error', message: formatConsoleArgs(args), timestamp: Date.now() });
+};
+console.warn = (...args) => {
+    originalConsoleWarn(...args);
+    addDiagnosticsEntry({ id: diagnosticsNextLocalId--, severity: 'warning', message: formatConsoleArgs(args), timestamp: Date.now() });
+};
+window.diagnostics?.list().then((entries) => entries.forEach(addDiagnosticsEntry));
+window.diagnostics?.onIssue(addDiagnosticsEntry);
 const defaultWorkerThreads = Math.max(1, Math.min(256, Number(navigator.hardwareConcurrency) || 1));
 let nextModelEntityId = 1;
 const validModelEntityId = (value) => Number.isSafeInteger(value) && value > 0;
@@ -4913,6 +4981,31 @@ $('#removeEncryptionButton').addEventListener('click', async () => {
 });
 
 $('#encryptionMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
+
+$('#diagnosticsButton').addEventListener('click', (event) => {
+    event.stopPropagation();
+    const panel = $('#diagnosticsPanel');
+    const rect = event.currentTarget.getBoundingClientRect();
+    panel.style.left = `${Math.max(8, rect.right - 320)}px`;
+    panel.style.top = `${rect.bottom + 5}px`;
+    const opening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+    if (opening) {
+        renderDiagnosticsList();
+        diagnosticsUnseenCount = 0;
+        renderDiagnosticsBadge();
+    }
+});
+$('#diagnosticsPanel').addEventListener('pointerdown', (event) => event.stopPropagation());
+$('#diagnosticsClearButton').addEventListener('click', () => {
+    diagnosticsEntries.length = 0;
+    renderDiagnosticsList();
+});
+window.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('#diagnosticsButton') && !event.target.closest('#diagnosticsPanel')) {
+        $('#diagnosticsPanel').classList.add('hidden');
+    }
+});
 $('#exampleButton').addEventListener('click', (event) => {
     event.stopPropagation();
     toggleExampleMenu();

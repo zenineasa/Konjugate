@@ -25,10 +25,32 @@ import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSerie
 import { createProviderToolchainStore } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
+import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
 }
+
+// Backstop for anything logged via console.error/console.warn -- including paths nobody has
+// explicitly wired up to a UI element -- so it still reaches the renderer's diagnostics panel
+// instead of vanishing into a console nobody watching a packaged app will ever open.
+function formatConsoleArgs(args) {
+    return args.map((arg) => (
+        arg instanceof Error ? (arg.stack || arg.message) : (typeof arg === 'string' ? arg : JSON.stringify(arg))
+    )).join(' ');
+}
+const originalConsoleError = console.error.bind(console);
+const originalConsoleWarn = console.warn.bind(console);
+console.error = (...args) => {
+    originalConsoleError(...args);
+    recordDiagnostic({ severity: 'error', message: formatConsoleArgs(args) });
+};
+console.warn = (...args) => {
+    originalConsoleWarn(...args);
+    recordDiagnostic({ severity: 'warning', message: formatConsoleArgs(args) });
+};
+process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -510,6 +532,11 @@ ipcMain.on('windowClose', (event) => {
     else targetWindow.close();
 });
 
+ipcMain.handle('diagnosticsList', () => listDiagnostics());
+onDiagnostic((entry) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('diagnosticsIssue', entry);
+});
+
 const examplesDir = join(currentDir, '..', 'examples');
 
 async function exampleFiles() {
@@ -841,7 +868,16 @@ async function validateCppSource(source) {
         }
         const result = await runProcess(compiler, args);
         const output = (result.stderr + '\n' + result.stdout).trim();
-        return { valid: result.code === 0, diagnostics: parseCompilerDiagnostics(output, filePath) };
+        const diagnostics = parseCompilerDiagnostics(output, filePath);
+        if (result.code !== 0 && diagnostics.length === 0) {
+            diagnostics.push({
+                line: 1,
+                column: 1,
+                severity: 'error',
+                message: output || `The C++ compiler ("${compiler}") exited with code ${result.code}.`
+            });
+        }
+        return { valid: result.code === 0, diagnostics };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

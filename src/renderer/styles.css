@@ -181,6 +181,12 @@ input, select { user-select: text; }
 .windowControls .titleAssistantControl { position: relative; width: 38px; color: #82cfc8; font-size: 15px; }
 .windowControls .titleAssistantControl[aria-expanded="true"] { color: #a1f2ea; background: rgb(66 201 188 / 10%); }
 .windowControls .titleAssistantControl:disabled { color: #344751; cursor: default; }
+#diagnosticsButton { color: #5c7079; font-size: 12px; }
+.diagnosticsBadge {
+    position: absolute; top: 6px; right: 4px; min-width: 13px; height: 13px; padding: 0 3px;
+    color: #1a0d0f; background: #e0929a; border-radius: 7px; font-size: 7px; font-weight: 750;
+    line-height: 13px; text-align: center;
+}
 .windowControlDivider { width: 1px; height: 17px; align-self: center; background: #263944; }
 .windowControls button:hover { background: #1a2730; }
 .windowControls :is(.uiZoomButton, .titleAssistantControl):disabled:hover { background: transparent; }
@@ -365,7 +371,21 @@ input, select { user-select: text; }
 
 .contextCard { position: absolute; z-index: 20; color: #b8c7ce; background: rgb(14 25 34 / 97%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px); }
 .contextCard.encryptionMenu { position: fixed; z-index: 70; }
+.contextCard.diagnosticsPanel { position: fixed; z-index: 70; width: 320px; max-height: 360px; overflow: hidden; display: flex; flex-direction: column; }
 .contextCard.hidden { display: none; }
+.diagnosticsPanel > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #263742; }
+.diagnosticsPanel > header strong { color: #d5e1e6; font-size: 10px; }
+.diagnosticsPanel > header button { padding: 3px 8px; color: #7f929c; background: transparent; border: 1px solid #354954; border-radius: 4px; font-size: 7px; }
+.diagnosticsPanel > header button:hover { color: #e4eef2; background: #1c2b35; }
+.diagnosticsList { overflow-y: auto; padding: 6px; }
+.diagnosticsEmpty { padding: 14px 8px; color: #5c7079; font-size: 8px; text-align: center; }
+.diagnosticsEntry { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border-radius: 4px; }
+.diagnosticsEntry + .diagnosticsEntry { margin-top: 2px; }
+.diagnosticsEntry:hover { background: #1a2933; }
+.diagnosticsEntryTime { color: #5c7079; font-size: 6px; letter-spacing: .04em; }
+.diagnosticsEntryMessage { overflow-wrap: anywhere; color: #b8c7ce; font-size: 8px; white-space: pre-wrap; }
+.diagnosticsEntry-error .diagnosticsEntryMessage { color: #e0929a; }
+.diagnosticsEntry-warning .diagnosticsEntryMessage { color: #d9b06b; }
 .editorCard { width: 390px; }
 .edgeEditor { width: 440px; }
 .contextCard.nodeEditor,

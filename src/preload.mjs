@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld('windowControls', {
     }
 });
 
+contextBridge.exposeInMainWorld('diagnostics', {
+    list: () => ipcRenderer.invoke('diagnosticsList'),
+    onIssue: (callback) => {
+        ipcRenderer.on('diagnosticsIssue', (_event, entry) => callback(entry));
+    }
+});
+
 contextBridge.exposeInMainWorld('projectFiles', {
     listExamples: () => ipcRenderer.invoke('projectListExamples'),
     loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),

@@ -10,11 +10,14 @@ appId := com.konjugate
 appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
-engineBuildDir := out/engine
 enginePackageDir := out/packageResources/engine
 ifeq ($(OS),Windows_NT)
 	hostSystem := Windows
-	ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
+	ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
+		hostMachine := x86_64
+	else ifeq ($(PROCESSOR_ARCHITEW6432),ARM64)
+		hostMachine := arm64
+	else ifeq ($(PROCESSOR_ARCHITECTURE),AMD64)
 		hostMachine := x86_64
 	else ifeq ($(PROCESSOR_ARCHITECTURE),ARM64)
 		hostMachine := arm64
@@ -48,6 +51,24 @@ else ifeq ($(hostMachine),aarch64)
 else ifeq ($(hostMachine),arm64)
 	hostArch := arm64
 	appImageArch := aarch64
+else ifeq ($(hostMachine),x86)
+	hostArch := ia32
+	appImageArch := i686
+else ifeq ($(hostMachine),i386)
+	hostArch := ia32
+	appImageArch := i686
+else ifeq ($(hostMachine),i486)
+	hostArch := ia32
+	appImageArch := i686
+else ifeq ($(hostMachine),i586)
+	hostArch := ia32
+	appImageArch := i686
+else ifeq ($(hostMachine),i686)
+	hostArch := ia32
+	appImageArch := i686
+else ifeq ($(hostMachine),ia32)
+	hostArch := ia32
+	appImageArch := i686
 else
 	hostArch := $(hostMachine)
 	appImageArch := $(hostMachine)
@@ -66,11 +87,11 @@ else
 endif
 
 ifeq ($(OS),Windows_NT)
-	RM := cmake -E rm -rf
-	RM_F := cmake -E rm -f
-	MKDIR := cmake -E make_directory
-	CP := cmake -E copy
-	CP_R := cmake -E copy_directory
+	RM := node -e "const fs=require('fs'); for (const p of process.argv.slice(1)) fs.rmSync(p, {recursive: true, force: true});"
+	RM_F := node -e "const fs=require('fs'); for (const p of process.argv.slice(1)) fs.rmSync(p, {force: true});"
+	MKDIR := node -e "const fs=require('fs'); fs.mkdirSync(process.argv[1], {recursive: true});"
+	CP := node -e "const fs=require('fs'); fs.copyFileSync(process.argv[1], process.argv[2]);"
+	CP_R := node -e "const fs=require('fs'); fs.cpSync(process.argv[1], process.argv[2], {recursive: true});"
 	PYTHON := python
 else
 	RM := rm -rf
@@ -101,7 +122,7 @@ iconsPng: $(pngIcons) $(iconDir)/app.png
 
 ifeq ($(OS),Windows_NT)
 $(pngDir)/%.png: $(svgIcon)
-	@where rsvg-convert >nul 2>nul || (echo rsvg-convert is required (install librsvg). && exit 1)
+	@where rsvg-convert >nul 2>nul || (echo rsvg-convert is required - please install librsvg. && exit 1)
 	@$(MKDIR) $(pngDir)
 	rsvg-convert --width $* --height $* $< --output $@
 else
@@ -164,9 +185,7 @@ checkPackaging: installDependencies
 
 engine: installDependencies
 	node scripts/setupDevelopment.mjs
-	node scripts/buildEngine.mjs
-	cmake -E remove_directory $(enginePackageDir)
-	cmake --install $(engineBuildDir) --config RelWithDebInfo --prefix $(enginePackageDir)
+	node scripts/buildEngine.mjs --install
 
 packageApp:
 ifeq ($(hostPlatform),darwin)
@@ -190,6 +209,8 @@ packageMacos: checkPackaging iconsMacos engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
+		--ignore="^/out($|/)" \
+		--ignore="^/\.tools($|/)" \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -205,6 +226,8 @@ packageWindows: checkPackaging iconsWindows engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
+		--ignore="^/out($|/)" \
+		--ignore="^/\.tools($|/)" \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -220,6 +243,8 @@ packageLinux: checkPackaging iconsPng engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
+		--ignore="^/out($|/)" \
+		--ignore="^/\.tools($|/)" \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -272,7 +297,7 @@ endif
 	@echo "Created $(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg"
 
 distributableWindows: packageWindows
-	@where makensis >nul 2>nul || (echo makensis is required to create the Windows installer (install NSIS). && exit 1)
+	@where makensis >nul 2>nul || (echo makensis is required to create the Windows installer - please install NSIS. && exit 1)
 	@$(MKDIR) $(releaseDir)
 	makensis \
 		-DAPP_NAME=$(appName) \

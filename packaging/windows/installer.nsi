@@ -27,6 +27,8 @@
   !error "OUTPUT_FILE must be defined"
 !endif
 
+!cd "../.."
+
 !include "MUI2.nsh"
 
 Name "${APP_NAME}"

@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -23,6 +23,7 @@ import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createProviderToolchainStore } from './providerToolchainStore.mjs';
+import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
 
 if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -117,6 +118,27 @@ function createWindow() {
     }
 
     mainWindow.loadFile(join(currentDir, 'renderer', 'index.html'));
+}
+
+async function checkForUpdates() {
+    let update;
+    try {
+        update = await findAvailableUpdate(app.getVersion());
+    } catch (error) {
+        console.warn('Update check failed:', error.message);
+        return;
+    }
+    if (!update || !mainWindow || mainWindow.isDestroyed()) return;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update available',
+        message: `Konjugate ${update.version} is available.`,
+        detail: `You're running ${app.getVersion()}.`,
+        buttons: ['View Release', 'Later'],
+        defaultId: 0,
+        cancelId: 1
+    });
+    if (response === 0) shell.openExternal(update.url);
 }
 
 async function openExampleGuide(id) {
@@ -1079,6 +1101,7 @@ app.whenReady().then(async () => {
         directory: join(app.getPath('userData'), 'providers')
     });
     createWindow();
+    if (!process.argv.includes('--interaction-test')) checkForUpdates();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

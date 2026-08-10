@@ -107,6 +107,7 @@ endif
 	engine \
 	installDependencies checkPackaging packageApp packageMacos packageWindows packageLinux \
 	distributable distributableMacos distributableWindows distributableWindowsPortable distributableLinux \
+	verifyPackagedEngine verifyPackagedInteraction verifyPackage \
 	build cleanPackage clean
 
 build: icons
@@ -198,6 +199,19 @@ else
 	@echo "Unsupported packaging host: $(hostSystem)"
 	@exit 1
 endif
+
+# Runs the engine/interaction test suites against the packaged app rather than the dev build --
+# catches packaging-only failures (missing bundled libraries, resource paths that only resolve
+# once actually laid out the way the packager produces, code-signing side effects) that dev-mode
+# testing structurally cannot. Slower than the dev-mode suites since each depends on a fresh
+# package build; treat as a pre-release check, not a fast dev-loop one.
+verifyPackagedEngine: packageApp
+	node scripts/testPackagedEngine.mjs
+
+verifyPackagedInteraction: packageApp
+	node scripts/runPackagedInteractionTests.mjs
+
+verifyPackage: verifyPackagedEngine verifyPackagedInteraction
 
 packageMacos: checkPackaging iconsMacos engine
 	npx electron-packager . $(appName) \

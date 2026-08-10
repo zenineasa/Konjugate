@@ -350,10 +350,25 @@ export async function runInteractionTests(window) {
 
     await run('rectangle tool selects visible nodes without opening an inspector', async () => {
         await evaluate(window, `document.querySelector('[data-tool="rectangleSelect"]').click()`);
+        // The preceding paste/undo tests leave the CSS2DRenderer mid-reposition (same cause as the
+        // bundle-label wait in the multi-selection test above); under SwiftShader software rendering
+        // this can still be settling when we read the label rects below, silently skewing the
+        // computed drag rectangle. Wait for two consecutive identical rects, like that test does.
+        const labelRectsSelector = `[...document.querySelectorAll('.node-label-container')]
+            .filter((label) => (label.textContent.includes('Battery module') || label.textContent.includes('Enclosed air')) && !label.textContent.includes('copy'))
+            .map((label) => label.getBoundingClientRect())`;
+        await waitFor(window, `(() => {
+            const rectsOf = () => JSON.stringify(${labelRectsSelector});
+            const first = rectsOf();
+            return new Promise((resolve) => requestAnimationFrame(() => resolve(first === rectsOf())));
+        })()`, 'The node labels did not settle into a stable position.', 3000);
         const bounds = await evaluate(window, `(() => {
+            // Excludes "... copy" labels: a soft-deleted "Battery module copy" from the preceding
+            // paste-undo test can still be present (hidden) in the DOM, and getBoundingClientRect()
+            // on a display:none element returns all zeros, which would wreck these bounds.
             const labels = [...document.querySelectorAll('.node-label-container')];
-            const battery = labels.find((label) => label.textContent.includes('Battery module')).getBoundingClientRect();
-            const air = labels.find((label) => label.textContent.includes('Enclosed air')).getBoundingClientRect();
+            const battery = labels.find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy')).getBoundingClientRect();
+            const air = labels.find((label) => label.textContent.includes('Enclosed air') && !label.textContent.includes('copy')).getBoundingClientRect();
             return {
                 start: { x: Math.round(Math.min(battery.left, air.left) - 220), y: Math.round(Math.min(battery.top, air.top) - 100) },
                 end: { x: Math.round(Math.max(battery.right, air.right) + 20), y: Math.round(Math.max(battery.bottom, air.bottom) + 100) }

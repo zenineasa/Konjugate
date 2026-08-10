@@ -132,6 +132,25 @@ Every packaged application includes `thirdPartyNotices.md` and the applicable li
 
 ---
 
+## Testing
+
+```bash
+npm test                 # unit tests
+npm run test:engine      # C++ engine test suite, against the dev build
+npm run test:interaction # Electron UI interaction tests, against the dev build
+npm run test:all         # unit + interaction
+```
+
+Dev-build tests run against `out/engine/` and a plain `electron .` launch. To also catch packaging-only failures they can't reach — a missing bundled library, a resource path that only resolves once laid out the way the packager produces it, code-signing side effects — run the same suites against an actual packaged build instead:
+
+```bash
+npm run test:package
+```
+
+This packages the app for the host platform (equivalent to `npm run package`) and then runs the engine and interaction suites against that package rather than the dev build. It's slower than the dev-mode suites, since it depends on a fresh package build each time, so treat it as a pre-release check rather than part of the fast dev loop. To run just one half, use `make verifyPackagedEngine` or `make verifyPackagedInteraction` (each also builds the package first).
+
+---
+
 ## Vision and Roadmap
 
 The vision of this project is to create an integrated environment for modelling and simulating complex systems.

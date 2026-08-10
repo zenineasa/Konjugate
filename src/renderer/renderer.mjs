@@ -876,7 +876,8 @@ function captureNodeAppearance(definition) {
     return {
         shape: definition.shape,
         importedGeometry: definition.importedGeometry?.clone() ?? null,
-        geometryFileName: definition.geometryFileName ?? null
+        geometryFileName: definition.geometryFileName ?? null,
+        color: definition.color
     };
 }
 
@@ -886,6 +887,7 @@ function applyNodeAppearance(node, appearance) {
     definition.shape = appearance.shape;
     definition.importedGeometry = appearance.importedGeometry?.clone() ?? null;
     definition.geometryFileName = appearance.geometryFileName ?? null;
+    definition.color = appearance.color;
     node.geometry.dispose();
     node.geometry = geometryFor(definition);
     node.material.dispose();
@@ -1498,6 +1500,7 @@ function openNodeEditor(definition, clientX, clientY) {
     const initialTab = activeResult ? 'results' : 'model';
     selectNodeEditorTab(initialTab);
     $('#editNodeShape').value = definition.shape === 'imported' ? '' : definition.shape;
+    $('#editNodeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
     $('#editNodeGeometryFile').value = '';
     $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file';
     $('#editNodeGeometryFile').closest('.geometryImportField').classList.remove('loading', 'error');
@@ -1538,8 +1541,16 @@ function captureEdgeModel(definition) {
         equation: definition.equation,
         equationModel: structuredClone(equationModel),
         implementation: structuredClone(definition.implementation ?? null),
-        parameters: structuredClone(definition.parameters)
+        parameters: structuredClone(definition.parameters),
+        color: definition.color
     };
+}
+
+function setRelationshipColor(definition, color) {
+    definition.color = color;
+    const relationship = relationshipObjects.get(definition.id);
+    relationship?.line.material.color.setHex(color);
+    relationship?.marker?.material.color.setHex(color);
 }
 
 function applyEdgeModel(definition, snapshot) {
@@ -1553,6 +1564,7 @@ function applyEdgeModel(definition, snapshot) {
     definition.equation = definition.equationModel.latex;
     definition.implementation = structuredClone(snapshot.implementation ?? null);
     setRelationshipDirectionality(definition, snapshot.directionality);
+    setRelationshipColor(definition, snapshot.color);
     updateRelationships();
     updateValidationStatus();
     if (selectedRelationship?.id === definition.id && !$('#edgeEditor').classList.contains('hidden')) {
@@ -1610,6 +1622,7 @@ function renderEdgeEditor(definition) {
     source.value = definition.source;
     target.value = definition.target;
     $('#editEdgeDirectionality').value = definition.directionality;
+    $('#editEdgeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
     const parameterContainer = $('#edgeEditorParameters');
     parameterContainer.replaceChildren();
     if (!definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
@@ -4104,6 +4117,7 @@ function openNodeBuilder(clientX, clientY) {
     hideCards(builder);
     $('#newNodeName').value = 'New node';
     $('#newNodeShape').value = 'box';
+    $('#newNodeColor').value = '#34727a';
     $('#nodeGeometryFile').value = '';
     $('#geometryImportField').hidden = true;
     $('#geometryImportField').classList.remove('loading', 'error');
@@ -4122,6 +4136,7 @@ function openEdgeBuilder(clientX, clientY) {
     const builder = $('#edgeBuilder');
     hideCards(builder);
     $('#newEdgeName').value = 'New relationship';
+    $('#newEdgeColor').value = '#9c83c4';
     $('#edgeImplementationKind').value = 'equation';
     $('#edgeEquation').value = '';
     $('#edgeMathField').setValue('', { silenceNotifications: true });
@@ -4386,6 +4401,12 @@ $('#editEdgeDirectionality').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.directionality = event.target.value;
+    });
+});
+$('#editEdgeColor').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.color = Number.parseInt(event.target.value.replace('#', ''), 16);
     });
 });
 
@@ -4679,6 +4700,14 @@ $('#editNodeShape').addEventListener('change', (event) => {
         geometryFileName: null
     });
     $('#editGeometryStatus').textContent = 'Choose a CAD or mesh file';
+});
+
+$('#editNodeColor').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    changeNodeAppearance(selectedNode, {
+        ...captureNodeAppearance(selectedNode.userData.definition),
+        color: Number.parseInt(event.target.value.replace('#', ''), 16)
+    });
 });
 
 $('#editNodeGeometryFile').addEventListener('change', async (event) => {
@@ -5186,7 +5215,7 @@ $('#createNode').addEventListener('click', () => {
         position: [0, -0.7, 0],
         subsystemId: activeSubsystemId,
         deleted: false,
-        color: 0x34727a,
+        color: Number.parseInt($('#newNodeColor').value.replace('#', ''), 16),
         states: resolvedStates,
         sourceTerms: $$('.sourceTermRow').map((row) => {
             const stateSymbol = $('.sourceState', row).value;
@@ -5275,7 +5304,7 @@ $('#createEdge').addEventListener('click', () => {
         sourceStateId: sourceNode?.states[0]?.id ?? null,
         targetStateId: targetNode?.states[0]?.id ?? null,
         directionality: 'directed',
-        color: 0x9c83c4,
+        color: Number.parseInt($('#newEdgeColor').value.replace('#', ''), 16),
         offset: 0,
         equation: implementationKind === 'equation' ? $('#edgeEquation').value.trim() : '',
         parameters

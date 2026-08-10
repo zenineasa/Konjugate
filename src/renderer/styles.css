@@ -462,6 +462,7 @@ input, select { user-select: text; }
 .doneButton { color: #09201e !important; background: var(--accent) !important; border-color: var(--accent) !important; font-weight: 700; }
 .editorField { display: grid; gap: 5px; margin-bottom: 10px; color: #6c818d; font-size: 8px; }
 .editorField select, .editorField input { width: 100%; height: 29px; padding: 0 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
+.editorField input[type="color"] { padding: 3px; cursor: pointer; }
 .editorCard textarea { width: 100%; padding: 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.45; }
 .equationHeading { display: flex; align-items: center; justify-content: space-between; }
 .equationHeading[hidden] { display: none; }

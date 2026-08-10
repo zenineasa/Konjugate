@@ -4517,27 +4517,41 @@ $('#editOpenProviderEditor').addEventListener('click', () => {
     });
 });
 window.providerEditor.onApplied(({ source }) => {
-    if (!providerEditTarget) return;
+    const fail = (error) => window.providerEditor.reportApplied({ applied: false, error });
+    const succeed = () => window.providerEditor.reportApplied({ applied: true });
+    if (!providerEditTarget) return fail('Nothing is being edited anymore.');
     if (providerEditTarget.type === 'editor') {
+        if (activeResult) return fail('Results are locked — close them to apply changes.');
         const relationship = model.relationships.find((candidate) => candidate.id === providerEditTarget.relationshipId);
-        if (!relationship?.implementation) return;
+        if (!relationship?.implementation || relationship.deleted) return fail('This relationship no longer exists.');
         changeEdgeModel(relationship, (snapshot) => {
             snapshot.implementation.source = source;
         });
-    } else if (providerEditTarget.type === 'builder' && !$('#edgeBuilder').classList.contains('hidden')) {
+        return succeed();
+    }
+    if (providerEditTarget.type === 'builder') {
+        if ($('#edgeBuilder').classList.contains('hidden')) return fail('The relationship builder was closed.');
         $('#edgeProviderSource').value = source;
         $('#insertProviderTemplate').hidden = !source.trim();
-    } else if (providerEditTarget.type === 'sourceTerm') {
+        return succeed();
+    }
+    if (providerEditTarget.type === 'sourceTerm') {
+        if (activeResult) return fail('Results are locked — close them to apply changes.');
         const node = nodeObjects.get(providerEditTarget.nodeId);
         const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === providerEditTarget.termId);
-        if (!node || !term?.implementation) return;
+        if (!node || node.userData.definition.deleted || !term?.implementation) return fail('This source term no longer exists.');
         changeSourceTermModel(node, providerEditTarget.termId, (snapshotTerm) => {
             snapshotTerm.implementation.source = source;
         });
-    } else if (providerEditTarget.type === 'builderSourceTerm' && document.body.contains(providerEditTarget.sourceElement)) {
+        return succeed();
+    }
+    if (providerEditTarget.type === 'builderSourceTerm') {
+        if (!document.body.contains(providerEditTarget.sourceElement)) return fail('The source term builder was closed.');
         providerEditTarget.sourceElement.value = source;
         providerEditTarget.sourceElement.dispatchEvent(new Event('input', { bubbles: true }));
+        return succeed();
     }
+    return fail('Unknown edit target.');
 });
 $('#editEdgeProviderSource').addEventListener('input', (event) => {
     previewProviderSource(event.target.value);

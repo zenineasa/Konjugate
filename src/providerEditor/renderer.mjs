@@ -54,6 +54,23 @@ async function sourceLinter(view) {
         });
 }
 
+// The Apply button doubles as a save-status indicator: 'clean' (nothing to save, matches the
+// last successful apply or freshly loaded content), 'dirty' (edited since then), 'applying'
+// (request in flight) and 'failed' (the project window rejected the apply -- e.g. its
+// relationship or source term was deleted while this window was open).
+let applyInFlight = false;
+function setApplyState(state, detail = '') {
+    applyInFlight = state === 'applying';
+    const button = $('#applyButton');
+    button.classList.remove('applyClean', 'applyDirty', 'applyFailed');
+    button.disabled = state === 'clean' || state === 'applying';
+    button.title = state === 'failed' ? detail : '';
+    if (state === 'clean') { button.classList.add('applyClean'); button.textContent = 'Saved'; }
+    else if (state === 'applying') { button.textContent = 'Applying…'; }
+    else if (state === 'failed') { button.classList.add('applyFailed'); button.textContent = 'Apply failed'; }
+    else { button.classList.add('applyDirty'); button.textContent = 'Apply'; }
+}
+
 function createEditor(source, kind) {
     currentKind = kind;
     const languageExtension = kind === 'python' ? python() : cpp();
@@ -64,7 +81,14 @@ function createEditor(source, kind) {
             languageExtension,
             themeCompartment.of(buildThemeExtensions(activeTheme())),
             lintGutter(),
-            linter(sourceLinter, { delay: 500 })
+            linter(sourceLinter, { delay: 500 }),
+            EditorView.updateListener.of((update) => {
+                // Ignore doc changes fired while an apply is in flight -- the click handler
+                // resolves the correct end state (clean/dirty/failed) once it settles, and
+                // flipping the button back to a clickable "Apply" mid-request would let a
+                // second overlapping apply race the first (see pendingProviderApply in main.mjs).
+                if (update.docChanged && !applyInFlight) setApplyState('dirty');
+            })
         ]
     });
     return new EditorView({ state, parent: $('#editorHost') });
@@ -79,6 +103,7 @@ window.providerEditorWindow.onContent(({ source, kind, title }) => {
     if (editorView) editorView.destroy();
     editorView = createEditor(source ?? '', kind);
     editorView.focus();
+    setApplyState('clean');
     window.__providerEditorView = editorView; // Debug/test hook only; not part of the app's public surface.
 });
 
@@ -130,13 +155,29 @@ $('#editorThemePanel').addEventListener('input', (event) => {
     if (editorView) editorView.dispatch({ effects: themeCompartment.reconfigure(buildThemeExtensions(activeTheme())) });
 });
 
-$('#applyButton').addEventListener('click', async () => {
-    if (!editorView) return;
-    const button = $('#applyButton');
-    button.disabled = true;
+async function applySource() {
+    if (!editorView || applyInFlight) return;
+    const source = editorView.state.doc.toString();
+    setApplyState('applying');
     try {
-        await window.providerEditorWindow.apply(editorView.state.doc.toString());
-    } finally {
-        button.disabled = false;
+        const result = await window.providerEditorWindow.apply(source);
+        if (!result.applied) {
+            setApplyState('failed', result.error);
+        } else {
+            // The user may have kept typing while this request was in flight; a successful
+            // apply of the older text still leaves those newer keystrokes unsaved.
+            setApplyState(editorView.state.doc.toString() === source ? 'clean' : 'dirty');
+        }
+    } catch (error) {
+        setApplyState('failed', error?.message ?? 'The apply request failed.');
+    }
+}
+
+$('#applyButton').addEventListener('click', applySource);
+
+window.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        applySource();
     }
 });

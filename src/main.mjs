@@ -911,8 +911,26 @@ ipcMain.handle('providerEditorValidate', async (_event, { source, kind }) => (
     kind === 'python' ? validatePythonSource(source) : validateCppSource(source)
 ));
 
+let pendingProviderApply = null;
+
 ipcMain.handle('providerEditorApply', (_event, { source }) => {
-    providerEditorOwner?.send('providerEditorApplied', { source });
+    if (!providerEditorOwner || providerEditorOwner.isDestroyed()) {
+        return { applied: false, error: 'The originating window is no longer available.' };
+    }
+    // The project window computes success/failure (e.g. its edge or source term may have been
+    // deleted while this editor was open) and reports back over providerEditorApplyResult,
+    // since webContents.send() has no built-in reply channel of its own.
+    pendingProviderApply?.({ applied: false, error: 'Superseded by a newer apply.' });
+    return new Promise((resolve) => {
+        pendingProviderApply = resolve;
+        providerEditorOwner.send('providerEditorApplied', { source });
+    });
+});
+
+ipcMain.on('providerEditorApplyResult', (event, result) => {
+    if (!senderIs(mainWindow, event)) return;
+    pendingProviderApply?.(result);
+    pendingProviderApply = null;
 });
 
 function requireMainWindow(event) {

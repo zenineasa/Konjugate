@@ -51,7 +51,8 @@ contextBridge.exposeInMainWorld('projectFiles', {
 
 contextBridge.exposeInMainWorld('providerEditor', {
     openWindow: (payload) => ipcRenderer.invoke('providerEditorOpenWindow', payload),
-    onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload))
+    onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload)),
+    reportApplied: (result) => ipcRenderer.send('providerEditorApplyResult', result)
 });
 
 contextBridge.exposeInMainWorld('providerToolchains', {

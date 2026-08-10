@@ -21,6 +21,8 @@ body { display: flex; flex-direction: column; height: 100vh; margin: 0; color: #
 .applyButton { height: 27px; padding: 0 14px; color: #09201e; background: var(--accent, #42c9bc); border: 0; border-radius: 5px; font-size: 10px; font-weight: 700; }
 .applyButton:hover { background: #57d6ca; }
 .applyButton:disabled { color: #566a6c; background: #1c2c2c; }
+.applyButton.applyFailed { background: #d96f78; color: #2a0d10; }
+.applyButton.applyFailed:hover { background: #e0838a; }
 
 .editorThemeSelect { height: 27px; padding: 0 8px; color: #c7d4d9; background: #101d25; border: 1px solid #253944; border-radius: 5px; font-size: 10px; }
 

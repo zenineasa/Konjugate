@@ -173,6 +173,38 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#nodeEditor [data-close-card]').click(); document.querySelector('#closeAssistantPanel').click()`);
     });
 
+    await run('local assistant can disable and enable a node and a relationship', async () => {
+        const nodeLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy'))`;
+        await evaluate(window, `document.querySelector('#assistantButton').click(); (() => {
+            document.querySelector('#assistantPrompt').value = 'Disable the battery module.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The disable-node proposal was not ready.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantChange.update').length`), 1);
+        assert.match(await evaluate(window, `document.querySelector('.assistantChange dd').textContent`), /true → false/);
+        assert.equal(await evaluate(window, `window.konjugateAssistant.applyProposal()`), true);
+        // `?.` throughout: a plain top-level thrown exception during a polled evaluate() (not one
+        // swallowed inside a click listener) surfaces from Electron as an opaque "Script failed to
+        // execute" IPC error with no message, so a transient re-render leaving .find() briefly
+        // unmatched would otherwise crash the whole test run rather than just failing one waitFor.
+        await waitFor(window, `${nodeLabel}?.closest('.node-label-container').classList.contains('disabled')`, 'The assistant-applied node disable did not render.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `${nodeLabel}?.closest('.node-label-container').classList.contains('disabled') === false`, 'Undo did not restore the assistant-applied node disable.');
+
+        await evaluate(window, `document.querySelector('#assistantButton').click(); (() => {
+            document.querySelector('#assistantPrompt').value = 'Disable the Heat source relationship.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The disable-edge proposal was not ready.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantChange.update').length`), 1);
+        assert.match(await evaluate(window, `document.querySelector('.assistantChange dd').textContent`), /true → false/);
+        assert.equal(await evaluate(window, `window.konjugateAssistant.applyProposal()`), true);
+        await waitFor(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Electrical losses'))?.textContent.includes('Disabled')`, 'The assistant-applied edge disable did not render.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `![...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Electrical losses'))?.textContent.includes('Disabled')`, 'Undo did not restore the assistant-applied edge disable.');
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    });
+
     await run('model configurations expose all provider adapters without renderer credential access', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [

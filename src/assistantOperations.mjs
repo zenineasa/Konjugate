@@ -263,6 +263,10 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
                 if (!/^#[0-9a-f]{6}$/i.test(operation.color)) throw new AssistantProposalError('color must be a six-digit hexadecimal color.', operationIndex);
                 node.appearance = { ...node.appearance, color: operation.color };
             }
+            if (operation.enabled !== undefined) {
+                if (typeof operation.enabled !== 'boolean') throw new AssistantProposalError('enabled must be a boolean.', operationIndex);
+                node.enabled = operation.enabled;
+            }
             const fields = changedFields(before, node);
             if (!fields.length) throw new AssistantProposalError('updateNode must change at least one field.', operationIndex);
             changes.push({ kind: operation.kind, action: 'update', entityId: node.id, focusEntityId: node.id, label: `Update node “${before.name}”`, fields });
@@ -301,6 +305,10 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
             }
             if (edge.source.nodeId === edge.target.nodeId) throw new AssistantProposalError('An edge must connect two different nodes.', operationIndex);
             if (endpointChanged) clearEdgeEquation(edge);
+            if (operation.enabled !== undefined) {
+                if (typeof operation.enabled !== 'boolean') throw new AssistantProposalError('enabled must be a boolean.', operationIndex);
+                edge.enabled = operation.enabled;
+            }
             const fields = changedFields(before, edge);
             if (!fields.length) throw new AssistantProposalError('updateEdge must change at least one field.', operationIndex);
             changes.push({ kind: operation.kind, action: 'update', entityId: edge.id, focusEntityId: edge.id, label: `Update relationship “${before.name}”`, fields });

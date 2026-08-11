@@ -4016,12 +4016,12 @@ function assistantModelSummary() {
         version: document.version,
         units: document.metadata.units,
         nodes: document.nodes.map((node) => ({
-            id: node.id, name: node.name, type: node.type,
+            id: node.id, name: node.name, type: node.type, enabled: node.enabled !== false,
             states: node.states.map((state) => ({ id: state.id, name: state.name, symbol: state.symbol, initialValue: state.initialValue, unit: state.unit }))
         })),
         edges: document.edges.map((edge) => ({
             id: edge.id, name: edge.name, sourceNodeId: edge.source.nodeId,
-            targetNodeId: edge.target.nodeId, directionality: edge.directionality
+            targetNodeId: edge.target.nodeId, directionality: edge.directionality, enabled: edge.enabled !== false
         }))
     };
 }

@@ -46,9 +46,28 @@ async function generateLocalProposal({ context, request, signal }) {
             operations: [{ kind: 'updateState', stateRef: targetState.id, initialValue: Number.parseFloat(requestedTemperature[1]), unit: 'K' }]
         };
     }
+    if (/\b(disable|enable)\b/i.test(text)) {
+        const enabled = !/\bdisable\b/i.test(text);
+        const matchedNode = context.nodes.find((node) => text.toLowerCase().includes(node.name.toLowerCase()));
+        const matchedEdge = !matchedNode && context.edges.find((edge) => text.toLowerCase().includes(edge.name.toLowerCase()));
+        if (!matchedNode && !matchedEdge) {
+            throw new AssistantProviderError('Name the node or relationship to disable or enable.', 'missingContext');
+        }
+        return matchedNode
+            ? {
+                proposalVersion: 1,
+                summary: `${enabled ? 'Enable' : 'Disable'} ${matchedNode.name}.`,
+                operations: [{ kind: 'updateNode', nodeRef: matchedNode.id, enabled }]
+            }
+            : {
+                proposalVersion: 1,
+                summary: `${enabled ? 'Enable' : 'Disable'} ${matchedEdge.name}.`,
+                operations: [{ kind: 'updateEdge', edgeRef: matchedEdge.id, enabled }]
+            };
+    }
     if (!/ambient|environment|surroundings/i.test(text) || !/thermal|temperature|heat|conduct/i.test(text)) {
         throw new AssistantProviderError(
-            'The local demonstration provider currently supports adding an ambient thermal boundary. Try “Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K.”',
+            'The local demonstration provider currently supports adding an ambient thermal boundary, updating a node’s initial temperature, and enabling/disabling a node or relationship. Try “Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K.”',
             'unsupportedRequest'
         );
     }

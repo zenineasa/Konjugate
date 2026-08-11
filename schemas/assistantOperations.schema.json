@@ -98,7 +98,8 @@
                 "kind": { "const": "updateNode" }, "nodeRef": { "$ref": "#/$defs/entityRef" },
                 "name": { "type": "string", "minLength": 1 }, "type": { "type": "string", "minLength": 1 },
                 "substepsPerGlobalStep": { "type": "integer", "minimum": 1 },
-                "shape": { "enum": ["box", "cylinder", "sphere"] }, "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+                "shape": { "enum": ["box", "cylinder", "sphere"] }, "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+                "enabled": { "type": "boolean" }
             }
         },
         "updateState": {
@@ -115,7 +116,8 @@
             "properties": {
                 "kind": { "const": "updateEdge" }, "edgeRef": { "$ref": "#/$defs/entityRef" },
                 "name": { "type": "string", "minLength": 1 }, "sourceNodeRef": { "$ref": "#/$defs/entityRef" },
-                "targetNodeRef": { "$ref": "#/$defs/entityRef" }, "directionality": { "enum": ["directed", "bidirectional"] }
+                "targetNodeRef": { "$ref": "#/$defs/entityRef" }, "directionality": { "enum": ["directed", "bidirectional"] },
+                "enabled": { "type": "boolean" }
             }
         },
         "updateParameter": {

@@ -22,6 +22,8 @@ test('assistant operation schema is valid JSON and describes proposal version 1'
     const schema = JSON.parse(await readFile(new URL('../schemas/assistantOperations.schema.json', import.meta.url), 'utf8'));
     assert.equal(schema.properties.proposalVersion.const, 1);
     assert.equal(schema.$defs.addNode.properties.kind.const, 'addNode');
+    assert.equal(schema.$defs.updateNode.properties.enabled.type, 'boolean');
+    assert.equal(schema.$defs.updateEdge.properties.enabled.type, 'boolean');
 });
 
 test('builds a model from ordered temporary-reference operations without mutating the source', () => {
@@ -131,6 +133,40 @@ test('updates existing model entities and reports before and after fields', () =
     assert.equal(result.document.edges[0].parameters[0].value, 18);
     assert.equal(result.changes.every((change) => change.action === 'update' && change.fields.length), true);
     assert.equal(result.changes[1].focusEntityId, 1);
+});
+
+test('updateNode and updateEdge can toggle enabled, and reject a non-boolean value', () => {
+    const source = emptyProject();
+    source.nodes.push({
+        id: 1, name: 'Body', type: 'Mass', numerics: { substepsPerGlobalStep: 1 }, position: [0, 0, 0],
+        states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 300, unit: 'K' }],
+        sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#34727a' }
+    });
+    source.nodes.push({
+        id: 3, name: 'Ambient', type: 'Boundary', numerics: { substepsPerGlobalStep: 1 }, position: [3, 0, 0],
+        states: [{ id: 4, name: 'Temperature', symbol: 'temperature', initialValue: 290, unit: 'K' }],
+        sourceTerms: [], appearance: { type: 'primitive', shape: 'sphere', color: '#34727a' }
+    });
+    source.edges.push({
+        id: 5, name: 'Heat transfer', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 3, stateId: 4 },
+        directionality: 'directed', equation: '', equationModel: { latex: '', output: { role: 'target', stateId: 4 }, bindings: [], mathJson: null },
+        parameters: [], appearance: { color: '#9c83c4', offset: 0 }
+    });
+    const result = applyAssistantProposal(source, { proposalVersion: 1, operations: [
+        { kind: 'updateNode', nodeRef: 1, enabled: false },
+        { kind: 'updateEdge', edgeRef: 5, enabled: false }
+    ] });
+    assert.equal(result.document.nodes[0].enabled, false);
+    assert.equal(result.document.edges[0].enabled, false);
+    assert.deepEqual(result.changes[0].fields, [{ field: 'enabled', before: undefined, after: false }]);
+    assert.deepEqual(result.changes[1].fields, [{ field: 'enabled', before: undefined, after: false }]);
+
+    assert.throws(() => applyAssistantProposal(source, {
+        proposalVersion: 1, operations: [{ kind: 'updateNode', nodeRef: 1, enabled: 'false' }]
+    }), /enabled must be a boolean/);
+    assert.throws(() => applyAssistantProposal(source, {
+        proposalVersion: 1, operations: [{ kind: 'updateEdge', edgeRef: 5, enabled: 'true' }]
+    }), /enabled must be a boolean/);
 });
 
 test('removing a node cascades to connected edges and their parameters', () => {

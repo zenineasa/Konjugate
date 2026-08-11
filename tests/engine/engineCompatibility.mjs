@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { decodeProjectBundle, encodeProjectFile } from '../../src/projectFile.mjs';
 import { normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
@@ -49,6 +49,16 @@ function doubleBits(value) {
 
 const executable = process.argv[2];
 if (!executable) throw new Error('Pass the konjugateEngine executable path.');
+// Mirrors resolveEnginePath() in src/engineAdapter.mjs in reverse: reconstructs whichever layout
+// `executable` actually sits in (dev build under out/engine/, or packaged build under
+// resources/engine/) instead of assuming dev -- this file is run against both, via
+// scripts/testEngine.mjs and scripts/testPackagedEngine.mjs, and the latter doesn't build a dev
+// engine first, so a hardcoded dev-relative applicationPath left the adapter unable to find it.
+const engineDirectory = dirname(executable);
+const engineParentDirectory = dirname(engineDirectory);
+const engineOptions = basename(engineParentDirectory) === 'out'
+    ? { applicationPath: dirname(engineParentDirectory), resourcesPath: '', packaged: false }
+    : { applicationPath: '', resourcesPath: engineParentDirectory, packaged: true };
 const capabilityEvents = await readProtocolEvents(executable, ['capabilities', '--protobuf']);
 assert.equal(capabilityEvents.length, 1);
 assert.equal(capabilityEvents[0].capabilities.metisAvailable, true);
@@ -276,18 +286,10 @@ await writeFile(encryptedInput, await encodeProjectFile(project, {
 assert.equal(await run(executable, ['validate', encryptedInput, '--report', report]), 4);
 assert.equal(await run(executable, ['validate', encryptedInput, '--report', report], { KONJUGATE_PASSWORD: 'wrong password' }), 4);
 assert.equal(await run(executable, ['validate', encryptedInput, '--report', report], { KONJUGATE_PASSWORD: 'engine compatibility password' }), 0);
-const adapted = await validateWithEngine(project, {
-    applicationPath: new URL('../..', import.meta.url).pathname,
-    resourcesPath: '',
-    packaged: false
-});
+const adapted = await validateWithEngine(project, engineOptions);
 assert.equal(adapted.available, true);
 assert.equal(adapted.report.valid, true);
-const adaptedRun = await runWithEngine(example, { name: 'Adapter', targetTime: 0.1, globalTimeStep: 0.01, outputInterval: 0.1 }, {
-    applicationPath: new URL('../..', import.meta.url).pathname,
-    resourcesPath: '',
-    packaged: false
-});
+const adaptedRun = await runWithEngine(example, { name: 'Adapter', targetTime: 0.1, globalTimeStep: 0.01, outputInterval: 0.1 }, engineOptions);
 assert.equal(adaptedRun.available, true);
 assert.equal(adaptedRun.result.globalSteps, 10);
 assert.deepEqual(normalizePacing({ mode: 'realTime', simulationSecondsPerWallSecond: 9 }), {
@@ -300,9 +302,7 @@ const liveRun = await startEngineRun(example, {
     name: 'Live adapter', targetTime: 0.5, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
-    applicationPath: new URL('../..', import.meta.url).pathname,
-    resourcesPath: '',
-    packaged: false
+    ...engineOptions
 }, { onUpdate: (result) => liveUpdates.push(result) });
 const liveResult = await liveRun.completion;
 assert.ok(performance.now() - liveStartedAt >= 450);
@@ -334,8 +334,7 @@ const controlledRun = await startEngineRun(JSON.stringify(liveParameterProject),
     name: 'Controlled adapter', targetTime: 0.4, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
-    applicationPath: new URL('../..', import.meta.url).pathname,
-    resourcesPath: '', packaged: false
+    ...engineOptions
 }, { onUpdate: (result) => controlledUpdates.push(result) });
 await new Promise((resolve) => setTimeout(resolve, 90));
 await controlledRun.setExecutionState('paused');
@@ -364,8 +363,7 @@ const stoppedRun = await startEngineRun(example, {
     name: 'Stopped adapter', targetTime: 2, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
-    applicationPath: new URL('../..', import.meta.url).pathname,
-    resourcesPath: '', packaged: false
+    ...engineOptions
 }, { onUpdate: (result) => {
     if (result.lifecycle === 'running' && result.availableResultTime > 0) resolveStoppedProgress();
 } });
@@ -382,8 +380,7 @@ const shutdownRun = await startEngineRun(example, {
     name: 'Application shutdown', targetTime: 10, globalTimeStep: 0.01, outputInterval: 0.05,
     pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
 }, {
-    applicationPath: new URL('../..', import.meta.url).pathname,
-    resourcesPath: '', packaged: false
+    ...engineOptions
 }, { onUpdate: (result) => {
     if (result.lifecycle === 'running' && result.availableResultTime > 0) resolveShutdownProgress();
 } });

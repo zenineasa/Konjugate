@@ -1,0 +1,101 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "shapes": [
+        {
+            "id": "mechanical/hexStandoff",
+            "name": "Hex Standoff",
+            "domain": "mechanical",
+            "format": "step",
+            "file": "mechanical/hexStandoff.step",
+            "tags": ["hex", "standoff", "spacer", "fastener"]
+        },
+        {
+            "id": "mechanical/lBracket",
+            "name": "L-Bracket",
+            "domain": "mechanical",
+            "format": "step",
+            "file": "mechanical/lBracket.step",
+            "tags": ["bracket", "angle", "mounting", "corner"]
+        },
+        {
+            "id": "mechanical/spurGear",
+            "name": "Spur Gear",
+            "domain": "mechanical",
+            "format": "stl",
+            "file": "mechanical/spurGear.stl",
+            "tags": ["gear", "teeth", "transmission", "cog"]
+        },
+        {
+            "id": "structural/iBeamSegment",
+            "name": "I-Beam Segment",
+            "domain": "structural",
+            "format": "step",
+            "file": "structural/iBeamSegment.step",
+            "tags": ["beam", "girder", "steel", "i-beam"]
+        },
+        {
+            "id": "structural/mountingPlate",
+            "name": "Mounting Plate",
+            "domain": "structural",
+            "format": "step",
+            "file": "structural/mountingPlate.step",
+            "tags": ["plate", "panel", "chamfered", "base"]
+        },
+        {
+            "id": "structural/angleGusset",
+            "name": "Angle Gusset",
+            "domain": "structural",
+            "format": "step",
+            "file": "structural/angleGusset.step",
+            "tags": ["gusset", "triangle", "brace", "reinforcement"]
+        },
+        {
+            "id": "electrical/batteryCell",
+            "name": "Battery Cell",
+            "domain": "electrical",
+            "format": "stl",
+            "file": "electrical/batteryCell.stl",
+            "tags": ["battery", "cell", "cylindrical", "power"]
+        },
+        {
+            "id": "electrical/terminalBlock",
+            "name": "Terminal Block",
+            "domain": "electrical",
+            "format": "step",
+            "file": "electrical/terminalBlock.step",
+            "tags": ["terminal", "connector", "block", "wiring"]
+        },
+        {
+            "id": "electrical/motorHousing",
+            "name": "Motor Housing",
+            "domain": "electrical",
+            "format": "stl",
+            "file": "electrical/motorHousing.stl",
+            "tags": ["motor", "housing", "actuator", "enclosure"]
+        },
+        {
+            "id": "fluid/pipeSegment",
+            "name": "Pipe Segment",
+            "domain": "fluid",
+            "format": "stl",
+            "file": "fluid/pipeSegment.stl",
+            "tags": ["pipe", "tube", "conduit", "straight"]
+        },
+        {
+            "id": "fluid/pipeElbow",
+            "name": "Pipe Elbow",
+            "domain": "fluid",
+            "format": "stl",
+            "file": "fluid/pipeElbow.stl",
+            "tags": ["elbow", "bend", "pipe", "90-degree"]
+        },
+        {
+            "id": "fluid/valveBody",
+            "name": "Valve Body",
+            "domain": "fluid",
+            "format": "stl",
+            "file": "fluid/valveBody.stl",
+            "tags": ["valve", "port", "fitting", "control"]
+        }
+    ]
+}

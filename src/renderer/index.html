@@ -5,7 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-R99P3T/HWhyAgXfcKO1LXdBqflZS8lIqy/ATk8AYBTc='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self'">
+    <!-- 'unsafe-eval' is required for occt-import-js (the STEP importer): its Emscripten/embind
+         bindings construct fast-path invoker functions with `new Function(...)` at load time, on
+         top of needing 'wasm-unsafe-eval' just to instantiate the WebAssembly module itself.
+         Without both, STEP import fails outright with a CSP violation -- there is no narrower
+         grant that satisfies this specific (upstream, prebuilt) library. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-R99P3T/HWhyAgXfcKO1LXdBqflZS8lIqy/ATk8AYBTc='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self'">
     <title>Konjugate</title>
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
@@ -153,6 +158,19 @@
             </section>
             <div class="passwordError" id="runConfigurationError" role="alert"></div>
             <footer><button id="runConfigurationCancel" type="button">Cancel</button><button id="applyRunConfiguration" class="doneButton" type="submit">Apply</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="shapeLibraryDialog" class="passwordDialog shapeLibraryDialog">
+        <form method="dialog">
+            <span class="contextKicker">Node appearance</span>
+            <strong>Shape library</strong>
+            <p>Pick a bundled STL or STEP shape to use for this node.</p>
+            <input id="shapeLibrarySearch" type="search" placeholder="Search shapes…" autocomplete="off">
+            <div id="shapeLibraryDomains" class="shapeLibraryDomains"></div>
+            <div id="shapeLibraryResults" class="shapeLibraryResults"></div>
+            <p id="shapeLibraryEmpty" class="emptyEditorState" hidden>No shapes match your search.</p>
+            <footer><button id="shapeLibraryCancel" type="button">Cancel</button></footer>
         </form>
     </dialog>
 
@@ -346,10 +364,14 @@
                 <section>
                     <label class="editorField"><span>Colour</span><input id="editNodeColor" type="color"></label>
                     <label class="editorField"><span>Primitive shape</span><select id="editNodeShape"><option value="" disabled>Select a primitive…</option><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option></select></label>
-                    <label class="geometryImportField">
-                        <input id="editNodeGeometryFile" type="file" accept=".stl,.step,.stp">
-                        <span><b>↥ Import STL or STEP</b><small id="editGeometryStatus">Replace the current geometry from a file</small></span>
-                    </label>
+                    <div class="geometrySourceRow">
+                        <label class="geometrySourceButton">
+                            <input id="editNodeGeometryFile" type="file" accept=".stl,.step,.stp">
+                            <span>↥ Import file</span>
+                        </label>
+                        <button id="editBrowseShapeLibrary" class="geometrySourceButton" type="button">⌕ Shape library</button>
+                    </div>
+                    <small id="editGeometryStatus" class="geometrySourceStatus">Choose a CAD or mesh file, or browse the bundled library</small>
                 </section>
             </div>
             <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
@@ -441,10 +463,14 @@
                 <label class="editorField"><span>Name</span><input id="newNodeName" value="New node" autocomplete="off"></label>
                 <label class="editorField"><span>Appearance</span><select id="newNodeShape"><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option><option value="imported">Imported geometry</option></select></label>
                 <label class="editorField"><span>Colour</span><input id="newNodeColor" type="color" value="#34727a"></label>
-                <label id="geometryImportField" class="geometryImportField" hidden>
-                    <input id="nodeGeometryFile" type="file" accept=".stl,.step,.stp">
-                    <span><b>↥ Choose STL or STEP</b><small id="geometryImportStatus">No geometry selected</small></span>
-                </label>
+                <div class="geometrySourceRow">
+                    <label class="geometrySourceButton">
+                        <input id="nodeGeometryFile" type="file" accept=".stl,.step,.stp">
+                        <span>↥ Import file</span>
+                    </label>
+                    <button id="builderBrowseShapeLibrary" class="geometrySourceButton" type="button">⌕ Shape library</button>
+                </div>
+                <small id="geometryImportStatus" class="geometrySourceStatus">No geometry selected</small>
             </section>
             <section>
                 <h3>State variables <button id="addStateVariable" type="button">＋</button></h3>

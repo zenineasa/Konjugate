@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('projectFiles', {
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });
 
+contextBridge.exposeInMainWorld('shapeLibrary', {
+    list: () => ipcRenderer.invoke('shapeLibraryList'),
+    load: (id) => ipcRenderer.invoke('shapeLibraryLoad', id)
+});
+
 contextBridge.exposeInMainWorld('providerEditor', {
     openWindow: (payload) => ipcRenderer.invoke('providerEditorOpenWindow', payload),
     onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload)),

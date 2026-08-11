@@ -7,6 +7,24 @@ async function evaluate(window, expression) {
     return window.webContents.executeJavaScript(expression, true);
 }
 
+// A renderer-side exception thrown synchronously inside a DOM event listener (e.g. from a
+// synthetic element.click()) never rejects executeJavaScript's promise -- the browser's event
+// dispatch loop swallows it and only reports it to the console as "Uncaught ...". Any assertion
+// checking DOM/JS state after such a call can't distinguish "ran correctly" from "the handler
+// crashed before reaching that state" (a value it never got to update just looks unchanged).
+// This captures renderer console output around a task so callers can assert nothing was logged.
+async function captureConsoleMessages(window, task) {
+    const messages = [];
+    const listener = (event) => messages.push(event.message);
+    window.webContents.on('console-message', listener);
+    try {
+        await task();
+    } finally {
+        window.webContents.off('console-message', listener);
+    }
+    return messages;
+}
+
 // Checks the rendered computed style rather than the `hidden` IDL property: a `hidden`
 // element can still render if some other CSS rule sets `display` with equal or higher
 // specificity than the UA stylesheet's `[hidden] { display: none }`, which the property
@@ -664,15 +682,82 @@ export async function runInteractionTests(window) {
     });
 
     await run('node appearance changes and participates in undo', async () => {
+        const reopenAppearanceTab = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`;
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), false);
         await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), true);
-        await evaluate(window, `(() => { const field = document.querySelector('#editNodeShape'); field.value = 'sphere'; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'sphere');
+        const originalColor = await evaluate(window, `document.querySelector('#editNodeColor').value`);
+
+        const consoleMessages = await captureConsoleMessages(window, async () => {
+            await evaluate(window, `(() => { const field = document.querySelector('#editNodeShape'); field.value = 'sphere'; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'sphere');
+            await evaluate(window, reopenAppearanceTab);
+            assert.equal(await evaluate(window, `document.querySelector('#editNodeColor').value`), originalColor);
+            await evaluate(window, `document.querySelector('#editBrowseShapeLibrary').click()`);
+            await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open.');
+            await evaluate(window, `document.querySelector('.shapeLibraryItem[data-shape-id="mechanical/spurGear"]').click()`);
+            await waitFor(window, `!document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not close after applying a shape.');
+            await evaluate(window, reopenAppearanceTab);
+            assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), '');
+            assert.equal(await evaluate(window, `document.querySelector('#editNodeColor').value`), originalColor);
+        });
+        // Regression: switching the primitive shape (or applying a file/library shape) used to
+        // build its appearance patch without a colour field, which wiped definition.color to
+        // undefined outright (no fallback to the existing value). That failure doesn't reject
+        // any of the assertions above -- it throws later, inside the click handler that reopens
+        // the editor and reads definition.color.toString(16), and a synthetic element.click()
+        // swallows an exception thrown inside its own listener rather than propagating it, so
+        // only the console (captured here) actually catches it.
+        assert.deepEqual(consoleMessages.filter((message) => /color|toString/i.test(message)), []);
+
         await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, reopenAppearanceTab);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'box');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeColor').value`), originalColor);
+    });
+
+    await run('shape library searches, filters by domain and applies a shape', async () => {
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`);
+        await evaluate(window, `document.querySelector('#editBrowseShapeLibrary').click()`);
+        await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open.');
+        const shapeCount = await evaluate(window, `document.querySelectorAll('.shapeLibraryItem').length`);
+        assert.ok(shapeCount > 0, 'Shape library did not list any shapes.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#shapeLibraryDomains button')].map((button) => button.textContent)`),
+            ['All', 'Mechanical', 'Structural', 'Electrical', 'Fluid']);
+
+        await evaluate(window, `(() => { const input = document.querySelector('#shapeLibrarySearch'); input.value = 'gear'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.shapeLibraryItem b')].map((element) => element.textContent)`), ['Spur Gear']);
+        assert.equal(await evaluate(window, `document.querySelector('#shapeLibraryEmpty').hidden`), true);
+
+        await evaluate(window, `(() => { const input = document.querySelector('#shapeLibrarySearch'); input.value = 'no such shape'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.shapeLibraryItem').length`), 0);
+        assert.equal(await evaluate(window, `document.querySelector('#shapeLibraryEmpty').hidden`), false);
+
+        await evaluate(window, `(() => { const input = document.querySelector('#shapeLibrarySearch'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(window, `[...document.querySelectorAll('#shapeLibraryDomains button')].find((button) => button.textContent === 'Fluid').click()`);
+        const fluidShapes = await evaluate(window, `[...document.querySelectorAll('.shapeLibraryItem')].map((item) => item.dataset.shapeId)`);
+        assert.ok(fluidShapes.length > 0 && fluidShapes.every((id) => id.startsWith('fluid/')));
+
+        // Apply a STEP-format shape (mechanical/lBracket) via the editor path.
+        await evaluate(window, `[...document.querySelectorAll('#shapeLibraryDomains button')].find((button) => button.textContent === 'All').click()`);
+        await evaluate(window, `document.querySelector('.shapeLibraryItem[data-shape-id="mechanical/lBracket"]').click()`);
+        await waitFor(window, `!document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not close after applying a shape.');
+        assert.equal(await evaluate(window, `document.querySelector('#editGeometryStatus').textContent`), 'L-Bracket applied');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), '');
+
+        // Apply an STL-format shape via the "Add node" builder path.
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(window, `document.querySelector('#builderBrowseShapeLibrary').click()`);
+        await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open from the node builder.');
+        await evaluate(window, `document.querySelector('.shapeLibraryItem[data-shape-id="fluid/valveBody"]').click()`);
+        await waitFor(window, `!document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not close after applying a shape.');
+        assert.equal(await evaluate(window, `document.querySelector('#geometryImportStatus').textContent`), 'Valve Body ready');
+        assert.equal(await evaluate(window, `document.querySelector('#newNodeShape').value`), 'imported');
+        await evaluate(window, `document.querySelector('#nodeBuilder [data-close-card]').click()`);
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
     });
 
     await run('Connect to chooses a canvas endpoint and restores the builder', async () => {

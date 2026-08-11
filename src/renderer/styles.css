@@ -121,6 +121,18 @@ input, select { user-select: text; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .runConfigurationDialog { width: 360px; }
+.shapeLibraryDialog { width: 480px; }
+.shapeLibraryDialog #shapeLibrarySearch { box-sizing: border-box; width: 100%; height: 30px; padding: 0 9px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 9px; }
+.shapeLibraryDomains { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.shapeLibraryDomains button { padding: 4px 9px; color: #8199a3; background: #0f1c24; border: 1px solid #263b45; border-radius: 999px; font-size: 7px; text-transform: uppercase; letter-spacing: .06em; }
+.shapeLibraryDomains button.active { color: #09201e; background: var(--accent, #42c9bc); border-color: transparent; }
+.shapeLibraryResults { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; max-height: 300px; overflow-y: auto; }
+.shapeLibraryItem { display: grid; gap: 3px; padding: 9px; text-align: left; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 5px; }
+.shapeLibraryItem:hover { background: rgb(66 201 188 / 6%); border-color: #47736f; }
+.shapeLibraryItem b { color: #d8e4e9; font-size: 9px; }
+.shapeLibraryItem small { display: flex; gap: 5px; color: #6c818d; font-size: 7px; text-transform: uppercase; letter-spacing: .05em; }
+.shapeLibraryItem .shapeFormatBadge { padding: 1px 5px; background: #16262e; border-radius: 3px; }
+#shapeLibraryEmpty { margin-top: 8px; }
 .executionConfiguration { margin-top: 13px; padding-top: 11px; border-top: 1px solid #263a44; }
 .configurationSectionTitle { display: block; color: #8aa0aa; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
 .executionAdvanced { margin-top: 11px; padding: 8px 9px; background: #0a161d; border: 1px solid #263b45; border-radius: 5px; }
@@ -415,7 +427,7 @@ input, select { user-select: text; }
 .resultReadOnlyNotice[hidden] { display: none; }
 .resultReadOnlyNotice strong { color: #8fd8d1; font-size: 8px; }
 .resultReadOnlyNotice span { color: #627a82; }
-.resultModeLocked .editorCard :is(input, select, textarea, math-field, .geometryImportField):disabled,
+.resultModeLocked .editorCard :is(input, select, textarea, math-field, .geometrySourceButton):disabled,
 .resultModeLocked .editorCard math-field[read-only] { opacity: .55; cursor: not-allowed; }
 .editorCard [data-node-panel][hidden] { display: none; }
 .nodeResultsPanel { position: relative; min-height: 285px; padding: 8px !important; }
@@ -563,15 +575,13 @@ input, select { user-select: text; }
 .sourceTermProviderFields .providerBindingRow { grid-template-columns: 1fr 1fr 18px; }
 .builderRow input, .builderRow select, .builderCard textarea { width: 100%; min-width: 0; height: 27px; padding: 0 6px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .builderCard textarea { height: auto; padding: 7px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.4; }
-.geometryImportField { display: flex; min-height: 42px; align-items: center; padding: 7px 9px; color: #7ec8c2; background: #0b171f; border: 1px dashed #31515a; border-radius: 5px; cursor: pointer; }
-.geometryImportField[hidden] { display: none; }
-.geometryImportField:hover { background: rgb(66 201 188 / 6%); border-color: #47736f; }
-.geometryImportField input { display: none; }
-.geometryImportField b, .geometryImportField small { display: block; }
-.geometryImportField b { font-size: 8px; }
-.geometryImportField small { margin-top: 4px; color: #5c717d; font-size: 7px; }
-.geometryImportField.loading { pointer-events: none; opacity: .65; }
-.geometryImportField.error { color: #d58b91; border-color: #70444c; }
+.geometrySourceRow { display: flex; gap: 6px; }
+.geometrySourceButton { display: flex; flex: 1; min-width: 0; height: 29px; align-items: center; justify-content: center; padding: 0 8px; color: #7ec8c2; background: #0b171f; border: 1px dashed #31515a; border-radius: 5px; cursor: pointer; font-size: 8px; white-space: nowrap; }
+.geometrySourceButton:hover { background: rgb(66 201 188 / 6%); border-color: #47736f; }
+.geometrySourceButton input { display: none; }
+.geometrySourceStatus { display: block; margin: 4px 0 10px; color: #5c717d; font-size: 7px; }
+.geometrySourceStatus.loading { opacity: .65; }
+.geometrySourceStatus.error { color: #d58b91; }
 .builderRow .removeBuilderRow { padding: 0; color: #7d5c65; background: transparent; border: 0; font-size: 13px; }
 .builderRowHeader { color: #536874; font-size: 6px; text-transform: uppercase; }
 .paletteShape { display: block; width: 23px; height: 18px; background: #2b565b; border: 1px solid #4d8c8d; border-radius: 2px; transform: skewY(-12deg); }

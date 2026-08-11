@@ -564,6 +564,20 @@ ipcMain.handle('projectOpenExampleGuide', async (event, id) => {
     return openExampleGuide(id);
 });
 
+const shapesDir = join(currentDir, '..', 'assets', 'shapes');
+
+async function shapeLibraryManifest() {
+    return JSON.parse(await readFile(join(shapesDir, 'manifest.json'), 'utf8')).shapes;
+}
+
+ipcMain.handle('shapeLibraryList', async () => shapeLibraryManifest());
+
+ipcMain.handle('shapeLibraryLoad', async (_event, id) => {
+    const shape = (await shapeLibraryManifest()).find((candidate) => candidate.id === id);
+    if (!shape) throw new Error('That shape is not available.');
+    return { ...shape, data: await readFile(join(shapesDir, shape.file)) };
+});
+
 ipcMain.handle('projectOpen', async (event) => {
     const targetWindow = getWindowFromEvent(event);
     const result = await dialog.showOpenDialog(targetWindow, {

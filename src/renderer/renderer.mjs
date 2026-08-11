@@ -887,7 +887,10 @@ function applyNodeAppearance(node, appearance) {
     definition.shape = appearance.shape;
     definition.importedGeometry = appearance.importedGeometry?.clone() ?? null;
     definition.geometryFileName = appearance.geometryFileName ?? null;
-    definition.color = appearance.color;
+    // Callers that build a partial appearance object (switching just the primitive shape, or
+    // just importing a file) may not specify color -- fall back to the current value rather
+    // than wiping it to undefined and crashing the next time the color picker reads it.
+    definition.color = appearance.color ?? definition.color;
     node.geometry.dispose();
     node.geometry = geometryFor(definition);
     node.material.dispose();
@@ -1502,8 +1505,8 @@ function openNodeEditor(definition, clientX, clientY) {
     $('#editNodeShape').value = definition.shape === 'imported' ? '' : definition.shape;
     $('#editNodeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
     $('#editNodeGeometryFile').value = '';
-    $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file';
-    $('#editNodeGeometryFile').closest('.geometryImportField').classList.remove('loading', 'error');
+    $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file, or browse the bundled library';
+    $('#editGeometryStatus').classList.remove('loading', 'error');
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
     editor.classList.remove('hidden');
@@ -1898,9 +1901,9 @@ function geometryFromStepResult(result) {
     return merged;
 }
 
-async function importNodeGeometry(file) {
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    const buffer = await file.arrayBuffer();
+// Shared by both the on-disk "Import STL or STEP" flow and the bundled shape library, since
+// a library entry is parsed exactly like a user-supplied file once its bytes are in hand.
+async function geometryFromBytes(buffer, extension) {
     if (extension === 'stl') return normalizeImportedGeometry(new STLLoader().parse(buffer));
     if (extension === 'step' || extension === 'stp') {
         if (!window.occtimportjs) throw new Error('The STEP importer is unavailable.');
@@ -1914,6 +1917,93 @@ async function importNodeGeometry(file) {
         return normalizeImportedGeometry(geometryFromStepResult(result));
     }
     throw new Error('Choose an STL, STEP, or STP file.');
+}
+
+async function importNodeGeometry(file) {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    return geometryFromBytes(await file.arrayBuffer(), extension);
+}
+
+async function importLibraryShape(id) {
+    const shape = await window.shapeLibrary.load(id);
+    // shape.data crosses the IPC boundary as a plain Uint8Array (structured clone), not a
+    // Node Buffer -- pull out a real ArrayBuffer the same way STLLoader/occt-import-js expect.
+    const bytes = shape.data;
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const geometry = await geometryFromBytes(buffer, shape.format);
+    return { geometry, name: shape.name };
+}
+
+let shapeLibraryEntries = null;
+let shapeLibraryTarget = null;
+let shapeLibraryDomain = 'all';
+
+function domainLabel(domain) {
+    return `${domain.charAt(0).toUpperCase()}${domain.slice(1)}`;
+}
+
+function renderShapeLibraryResults() {
+    const query = $('#shapeLibrarySearch').value.trim().toLowerCase();
+    const matches = shapeLibraryEntries.filter((shape) => {
+        if (shapeLibraryDomain !== 'all' && shape.domain !== shapeLibraryDomain) return false;
+        if (!query) return true;
+        const haystack = [shape.name, shape.domain, ...(shape.tags ?? [])].join(' ').toLowerCase();
+        return haystack.includes(query);
+    });
+    $('#shapeLibraryResults').replaceChildren(...matches.map((shape) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'shapeLibraryItem';
+        button.dataset.shapeId = shape.id;
+        button.innerHTML = `<b>${escapeHtml(shape.name)}</b><small>${escapeHtml(domainLabel(shape.domain))}<span class="shapeFormatBadge">${escapeHtml(shape.format.toUpperCase())}</span></small>`;
+        return button;
+    }));
+    $('#shapeLibraryEmpty').hidden = matches.length > 0;
+}
+
+async function openShapeLibrary(target) {
+    shapeLibraryTarget = target;
+    if (!shapeLibraryEntries) shapeLibraryEntries = await window.shapeLibrary.list();
+    shapeLibraryDomain = 'all';
+    $('#shapeLibrarySearch').value = '';
+    const domains = ['all', ...new Set(shapeLibraryEntries.map((shape) => shape.domain))];
+    $('#shapeLibraryDomains').replaceChildren(...domains.map((domain) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = domain === 'all' ? 'All' : domainLabel(domain);
+        button.classList.toggle('active', domain === shapeLibraryDomain);
+        button.addEventListener('click', () => {
+            shapeLibraryDomain = domain;
+            $$('#shapeLibraryDomains button').forEach((chip) => chip.classList.toggle('active', chip === button));
+            renderShapeLibraryResults();
+        });
+        return button;
+    }));
+    renderShapeLibraryResults();
+    $('#shapeLibraryDialog').showModal();
+    $('#shapeLibrarySearch').focus();
+}
+
+async function applyLibraryShape(id) {
+    const { geometry, name } = await importLibraryShape(id);
+    if (shapeLibraryTarget === 'editor' && selectedNode) {
+        changeNodeAppearance(selectedNode, {
+            ...captureNodeAppearance(selectedNode.userData.definition),
+            shape: 'imported',
+            importedGeometry: geometry,
+            geometryFileName: name
+        });
+        $('#editNodeShape').value = '';
+        $('#editGeometryStatus').textContent = `${name} applied`;
+    } else if (shapeLibraryTarget === 'builder') {
+        pendingImportedGeometry?.dispose();
+        pendingImportedGeometry = geometry;
+        pendingGeometryFileName = name;
+        $('#newNodeShape').value = 'imported';
+        $('#geometryImportStatus').textContent = `${name} ready`;
+    }
+    geometry.dispose();
+    $('#shapeLibraryDialog').close();
 }
 
 function stateVariablesFromBuilder() {
@@ -4119,8 +4209,7 @@ function openNodeBuilder(clientX, clientY) {
     $('#newNodeShape').value = 'box';
     $('#newNodeColor').value = '#34727a';
     $('#nodeGeometryFile').value = '';
-    $('#geometryImportField').hidden = true;
-    $('#geometryImportField').classList.remove('loading', 'error');
+    $('#geometryImportStatus').classList.remove('loading', 'error');
     $('#geometryImportStatus').textContent = 'No geometry selected';
     pendingImportedGeometry?.dispose();
     pendingImportedGeometry = null;
@@ -4709,6 +4798,7 @@ $('#editAddEdgeParameter').addEventListener('click', () => {
 $('#editNodeShape').addEventListener('change', (event) => {
     if (!selectedNode) return;
     changeNodeAppearance(selectedNode, {
+        ...captureNodeAppearance(selectedNode.userData.definition),
         shape: event.target.value,
         importedGeometry: null,
         geometryFileName: null
@@ -4728,14 +4818,14 @@ $('#editNodeGeometryFile').addEventListener('change', async (event) => {
     const [file] = event.target.files;
     if (!file || !selectedNode) return;
     const node = selectedNode;
-    const field = event.target.closest('.geometryImportField');
     const status = $('#editGeometryStatus');
-    field.classList.remove('error');
-    field.classList.add('loading');
+    status.classList.remove('error');
+    status.classList.add('loading');
     status.textContent = `Loading ${file.name}…`;
     try {
         const geometry = await importNodeGeometry(file);
         changeNodeAppearance(node, {
+            ...captureNodeAppearance(node.userData.definition),
             shape: 'imported',
             importedGeometry: geometry,
             geometryFileName: file.name
@@ -4744,16 +4834,28 @@ $('#editNodeGeometryFile').addEventListener('change', async (event) => {
         $('#editNodeShape').value = '';
         status.textContent = `${file.name} applied`;
     } catch (error) {
-        field.classList.add('error');
+        status.classList.add('error');
         status.textContent = error.message;
         $('#editNodeShape').value = node.userData.definition.shape === 'imported'
             ? ''
             : node.userData.definition.shape;
     } finally {
-        field.classList.remove('loading');
+        status.classList.remove('loading');
         event.target.value = '';
     }
 });
+
+$('#editBrowseShapeLibrary').addEventListener('click', () => {
+    if (!selectedNode) return;
+    openShapeLibrary('editor');
+});
+
+$('#shapeLibrarySearch').addEventListener('input', renderShapeLibraryResults);
+$('#shapeLibraryResults').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-shape-id]');
+    if (button) applyLibraryShape(button.dataset.shapeId);
+});
+$('#shapeLibraryCancel').addEventListener('click', () => $('#shapeLibraryDialog').close());
 
 $('#addButton').addEventListener('click', (event) => {
     if (activeResult) return;
@@ -5147,16 +5249,13 @@ $('#openProviderEditor').addEventListener('click', () => {
     });
 });
 $('#addProviderBinding').addEventListener('click', () => addProviderBindingRow());
-$('#newNodeShape').addEventListener('change', (event) => {
-    $('#geometryImportField').hidden = event.target.value !== 'imported';
-});
+$('#builderBrowseShapeLibrary').addEventListener('click', () => openShapeLibrary('builder'));
 $('#nodeGeometryFile').addEventListener('change', async (event) => {
     const [file] = event.target.files;
     if (!file) return;
-    const field = $('#geometryImportField');
     const status = $('#geometryImportStatus');
-    field.classList.remove('error');
-    field.classList.add('loading');
+    status.classList.remove('error');
+    status.classList.add('loading');
     status.textContent = `Loading ${file.name}…`;
     $('#createNode').disabled = true;
     try {
@@ -5165,16 +5264,15 @@ $('#nodeGeometryFile').addEventListener('change', async (event) => {
         pendingImportedGeometry = geometry;
         pendingGeometryFileName = file.name;
         $('#newNodeShape').value = 'imported';
-        field.hidden = false;
         status.textContent = `${file.name} ready`;
     } catch (error) {
         pendingImportedGeometry?.dispose();
         pendingImportedGeometry = null;
         pendingGeometryFileName = '';
-        field.classList.add('error');
+        status.classList.add('error');
         status.textContent = error.message;
     } finally {
-        field.classList.remove('loading');
+        status.classList.remove('loading');
         $('#createNode').disabled = false;
     }
 });

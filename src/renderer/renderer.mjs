@@ -258,6 +258,7 @@ function hydrateProjectDocument(document) {
             badgeClass: '',
             subsystemId: node.subsystemId ?? null,
             deleted: false,
+            enabled: node.enabled !== false,
             substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
             sourceTerms: node.sourceTerms ?? [],
             states: (node.states ?? []).map((state) => ({
@@ -290,7 +291,8 @@ function hydrateProjectDocument(document) {
         parameters: edge.parameters ?? [],
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: Number(edge.appearance?.offset) || 0,
-        deleted: false
+        deleted: false,
+        enabled: edge.enabled !== false
     }));
     const runConfigurations = Array.isArray(document.runConfigurations) && document.runConfigurations.length
         ? document.runConfigurations.map((configuration) => ({
@@ -605,11 +607,32 @@ function geometryFor(definition) {
     return new THREE.BoxGeometry(2.8, 1.8, 1.8, 2, 1, 1);
 }
 
+// A disabled node/edge stays fully present in the model and the saved file -- unlike delete, it
+// is never dropped from serializeProjectDocument() -- but the engine treats it exactly as if it
+// had been deleted (see compileExecutionPlan/validateModel). This blend is the visual half:
+// muted toward grey and slightly transparent, so "disabled" reads clearly without hiding it.
+function disabledDisplayColor(color) {
+    return new THREE.Color(color).lerp(new THREE.Color(0x74808a), 0.65).getHex();
+}
+
+// An edge is effectively disabled -- and rendered as such -- if it is disabled itself, or if
+// either endpoint node is, even though the edge's own `enabled` stays untouched in that case.
+// Re-enabling the node alone is enough to bring every edge on it back, with no per-edge cleanup.
+function isEdgeEffectivelyEnabled(edge) {
+    if (edge.enabled === false) return false;
+    const sourceNode = model.nodes.find((node) => node.id === edge.source);
+    const targetNode = model.nodes.find((node) => node.id === edge.target);
+    return sourceNode?.enabled !== false && targetNode?.enabled !== false;
+}
+
 function materialFor(definition) {
+    const enabled = definition.enabled !== false;
     return new THREE.MeshStandardMaterial({
-        color: definition.color,
+        color: enabled ? definition.color : disabledDisplayColor(definition.color),
         metalness: 0.2,
-        roughness: 0.42
+        roughness: 0.42,
+        transparent: !enabled,
+        opacity: enabled ? 1 : 0.55
     });
 }
 
@@ -627,6 +650,7 @@ function nodeLabelOffset(geometry) {
 function createNodeLabel(definition, geometry) {
     const wrapper = document.createElement('div');
     wrapper.className = 'node-label-container';
+    wrapper.classList.toggle('disabled', definition.enabled === false);
     wrapper.dataset.node = definition.id;
 
     const stateRows = definition.states.map((state) => `
@@ -641,6 +665,7 @@ function createNodeLabel(definition, geometry) {
             <div>
                 <strong>${escapeHtml(definition.title)}</strong>
                 <span class="typeBadge ${escapeHtml(definition.badgeClass ?? '')}">${escapeHtml(definition.type)}</span>
+                <span class="disabledBadge">Disabled</span>
             </div>
             <dl>${stateRows}</dl>
             <span class="stateCount">${definition.states.length} ${definition.states.length === 1 ? 'state' : 'states'}</span>
@@ -788,10 +813,13 @@ function relationshipPoints(definition) {
 function createDirectionMarker(definition, curve) {
     if (definition.directionality !== 'directed') return null;
 
+    const enabled = isEdgeEffectivelyEnabled(definition);
     const marker = new THREE.Mesh(
         new THREE.ConeGeometry(0.14, 0.42, 14),
         new THREE.MeshBasicMaterial({
-            color: definition.color,
+            color: enabled ? definition.color : disabledDisplayColor(definition.color),
+            transparent: !enabled,
+            opacity: enabled ? 1 : 0.4,
             depthTest: false
         })
     );
@@ -821,10 +849,11 @@ function createRelationship(definition) {
         points.end
     ]);
     const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(42));
+    const enabled = isEdgeEffectivelyEnabled(definition);
     const material = new THREE.LineBasicMaterial({
-        color: definition.color,
+        color: enabled ? definition.color : disabledDisplayColor(definition.color),
         transparent: true,
-        opacity: 0.92
+        opacity: enabled ? 0.92 : 0.4
     });
     const line = new THREE.Line(geometry, material);
     line.userData = {
@@ -870,6 +899,45 @@ function setNodeVisibility(id, visible) {
     if (!node) return;
     node.userData.definition.deleted = !visible;
     refreshSubsystemView();
+}
+
+// Disabling is distinct from delete: the node/edge stays fully present (and, unlike delete, is
+// saved in the file -- see serializeProjectDocument), just visually muted and excluded from the
+// engine. Disabling a node cascades to every edge touching it via isEdgeEffectivelyEnabled --
+// their own `enabled` field is left untouched, so re-enabling the node alone restores them too.
+function setNodeEnabled(id, enabled) {
+    const node = nodeObjects.get(id);
+    if (!node) return;
+    node.userData.definition.enabled = enabled;
+    node.material.dispose();
+    node.material = materialFor(node.userData.definition);
+    const label = node.children.find((child) => child.element?.classList.contains('node-label-container'));
+    label?.element.classList.toggle('disabled', !enabled);
+    relationshipObjects.forEach((relationship) => {
+        if (relationship.definition.source === id || relationship.definition.target === id) {
+            refreshRelationshipVisual(relationship.definition);
+        }
+    });
+    invalidateRelationshipBundles();
+    syncContextualOverlays();
+    // setNodeEnabled is also reached from undo/redo, not just its own button's click handler --
+    // keep the open editor's button label truthful either way, same as applyEdgeModel does for
+    // its own fields.
+    if (selectedNode?.userData.definition.id === id && !$('#nodeEditor').classList.contains('hidden')) {
+        $('#toggleNodeEnabled').textContent = enabled ? 'Disable node' : 'Enable node';
+    }
+}
+
+function setRelationshipEnabled(id, enabled) {
+    const relationship = relationshipObjects.get(id);
+    if (!relationship) return;
+    relationship.definition.enabled = enabled;
+    refreshRelationshipVisual(relationship.definition);
+    invalidateRelationshipBundles();
+    syncContextualOverlays();
+    if (selectedRelationship?.id === id && !$('#edgeEditor').classList.contains('hidden')) {
+        $('#toggleEdgeEnabled').textContent = enabled ? 'Disable edge' : 'Enable edge';
+    }
 }
 
 function captureNodeAppearance(definition) {
@@ -1507,6 +1575,7 @@ function openNodeEditor(definition, clientX, clientY) {
     $('#editNodeGeometryFile').value = '';
     $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file, or browse the bundled library';
     $('#editGeometryStatus').classList.remove('loading', 'error');
+    $('#toggleNodeEnabled').textContent = definition.enabled === false ? 'Enable node' : 'Disable node';
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
     editor.classList.remove('hidden');
@@ -1549,11 +1618,27 @@ function captureEdgeModel(definition) {
     };
 }
 
+// Applies definition.color/enabled (and every connected node's enabled state, via
+// isEdgeEffectivelyEnabled) to the live line and direction-marker materials, without rebuilding
+// geometry. Used both when the edge's own color changes and whenever its enabled cascade does.
+function refreshRelationshipVisual(definition) {
+    const relationship = relationshipObjects.get(definition.id);
+    if (!relationship) return;
+    const enabled = isEdgeEffectivelyEnabled(definition);
+    const color = enabled ? definition.color : disabledDisplayColor(definition.color);
+    relationship.line.material.color.setHex(color);
+    relationship.line.material.opacity = enabled ? 0.92 : 0.4;
+    if (relationship.marker) {
+        relationship.marker.material.color.setHex(color);
+        relationship.marker.material.transparent = !enabled;
+        relationship.marker.material.opacity = enabled ? 1 : 0.4;
+        relationship.marker.material.needsUpdate = true;
+    }
+}
+
 function setRelationshipColor(definition, color) {
     definition.color = color;
-    const relationship = relationshipObjects.get(definition.id);
-    relationship?.line.material.color.setHex(color);
-    relationship?.marker?.material.color.setHex(color);
+    refreshRelationshipVisual(definition);
 }
 
 function applyEdgeModel(definition, snapshot) {
@@ -1617,6 +1702,7 @@ function parameterControlError(value, control) {
 function renderEdgeEditor(definition) {
     $('.edgeEditor > header strong').textContent = definition.title;
     $('#editEdgeName').value = definition.title;
+    $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
     const source = $('#editEdgeSource');
     const target = $('#editEdgeTarget');
     const options = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
@@ -3364,7 +3450,8 @@ function renderRelationshipBundle(overlay, bundle) {
         title: relationship.title,
         directionality: relationship.directionality,
         equation: relationship.equation,
-        parameter: relationship.parameters?.[0]
+        parameter: relationship.parameters?.[0],
+        enabled: isEdgeEffectivelyEnabled(relationship)
     })));
     if (overlay.signature === signature) return;
     overlay.signature = signature;
@@ -3375,13 +3462,15 @@ function renderRelationshipBundle(overlay, bundle) {
         const summary = parameter
             ? `${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`
             : relationship.equation ? 'Equation' : 'No equation';
+        const enabled = isEdgeEffectivelyEnabled(relationship);
         row.className = 'relationshipRow';
+        row.classList.toggle('disabled', !enabled);
         row.dataset.relationship = relationship.id;
         row.type = 'button';
         row.innerHTML = `
             <i class="relationColor" style="background:#${relationship.color.toString(16).padStart(6, '0')}"></i>
             <span><b>${relationship.directionality === 'directed' ? '→' : '⇄'}</b> ${escapeHtml(relationship.title)}</span>
-            <em>${escapeHtml(summary)}</em>
+            <em>${enabled ? escapeHtml(summary) : 'Disabled'}</em>
         `;
         overlay.element.appendChild(row);
     });
@@ -3426,6 +3515,7 @@ function serializeProjectDocument() {
                 name: node.title,
                 type: node.type,
                 ...(node.subsystemId === null ? {} : { subsystemId: node.subsystemId }),
+                enabled: node.enabled !== false,
                 numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep },
                 position: object.position.toArray(),
                 states: node.states.map((state) => ({
@@ -3475,6 +3565,7 @@ function serializeProjectDocument() {
                 source: { nodeId: edge.source, stateId: edge.sourceStateId ?? '' },
                 target: { nodeId: edge.target, stateId: edge.targetStateId ?? '' },
                 directionality: edge.directionality,
+                enabled: edge.enabled !== false,
                 equation: edge.equationModel?.latex ?? edge.equation ?? '',
                 equationModel: normalizeEdgeEquationModel(edge),
                 ...(edge.implementation ? { implementation: edge.implementation } : {}),
@@ -5327,6 +5418,7 @@ $('#createNode').addEventListener('click', () => {
         position: [0, -0.7, 0],
         subsystemId: activeSubsystemId,
         deleted: false,
+        enabled: true,
         color: Number.parseInt($('#newNodeColor').value.replace('#', ''), 16),
         states: resolvedStates,
         sourceTerms: $$('.sourceTermRow').map((row) => {
@@ -5418,6 +5510,7 @@ $('#createEdge').addEventListener('click', () => {
         directionality: 'directed',
         color: Number.parseInt($('#newEdgeColor').value.replace('#', ''), 16),
         offset: 0,
+        enabled: true,
         equation: implementationKind === 'equation' ? $('#edgeEquation').value.trim() : '',
         parameters
     };
@@ -5723,6 +5816,7 @@ function hydrateFragmentNode(node) {
         badgeClass: '',
         subsystemId: activeSubsystemId,
         deleted: false,
+        enabled: node.enabled !== false,
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
         sourceTerms: node.sourceTerms ?? [],
         states: (node.states ?? []).map((state) => ({
@@ -5750,7 +5844,8 @@ function hydrateFragmentRelationship(edge) {
         equationModel: edge.equationModel,
         parameters: edge.parameters ?? [],
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
-        offset: Number(edge.appearance?.offset) || 0
+        offset: Number(edge.appearance?.offset) || 0,
+        enabled: edge.enabled !== false
     };
 }
 
@@ -5903,6 +5998,26 @@ $('[data-delete-node]').addEventListener('click', () => {
 $('[data-delete-edge]').addEventListener('click', () => {
     deleteSelected();
     $('#edgeEditor').classList.add('hidden');
+});
+$('#toggleNodeEnabled').addEventListener('click', () => {
+    if (activeResult || !selectedNode) return;
+    const id = selectedNode.userData.definition.id;
+    const nextEnabled = selectedNode.userData.definition.enabled === false;
+    setNodeEnabled(id, nextEnabled);
+    recordHistory({
+        undo: () => setNodeEnabled(id, !nextEnabled),
+        redo: () => setNodeEnabled(id, nextEnabled)
+    });
+});
+$('#toggleEdgeEnabled').addEventListener('click', () => {
+    if (activeResult || !selectedRelationship) return;
+    const id = selectedRelationship.id;
+    const nextEnabled = selectedRelationship.enabled === false;
+    setRelationshipEnabled(id, nextEnabled);
+    recordHistory({
+        undo: () => setRelationshipEnabled(id, !nextEnabled),
+        redo: () => setRelationshipEnabled(id, nextEnabled)
+    });
 });
 window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !$('#exampleMenu').hidden) {

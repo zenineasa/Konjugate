@@ -13,9 +13,11 @@ The decoded `.kjt` payload is UTF-8 JSON with these top-level fields:
 
 Every persistent model entity uses a project-scoped positive integer `id` from 1 through `Number.MAX_SAFE_INTEGER` (`9,007,199,254,740,991`). IDs are unique across nodes, states, source terms, edges, parameters and run configurations in one project. User-facing names are mutable and must never be references. Version 1 does not accept legacy UUID identifiers.
 
-A node contains `id`, `name`, optional `type`, three-number `position`, `states`, `sourceTerms`, `numerics`, and `appearance`. State symbols are unique lower-camel-case identifiers within their node. Source terms identify their updated state by symbol in version 1. `numerics.substepsPerGlobalStep` is an integer from 1 through 10,000 and defaults to 1.
+A node contains `id`, `name`, optional `type`, three-number `position`, `states`, `sourceTerms`, `numerics`, `appearance`, and optional `enabled`. State symbols are unique lower-camel-case identifiers within their node. Source terms identify their updated state by symbol in version 1. `numerics.substepsPerGlobalStep` is an integer from 1 through 10,000 and defaults to 1.
 
-An edge contains `id`, `name`, source and target node/state references, directionality, LaTeX equation, optional normalized `equationModel`, parameters, and appearance. Parameter symbols are unique lower-camel-case identifiers within their edge. Normalized equation bindings and outputs use numeric entity references.
+An edge contains `id`, `name`, source and target node/state references, directionality, LaTeX equation, optional normalized `equationModel`, parameters, appearance, and optional `enabled`. Parameter symbols are unique lower-camel-case identifiers within their edge. Normalized equation bindings and outputs use numeric entity references.
+
+`enabled` (boolean, default `true` when absent) marks a node or edge as disabled without removing it: unlike a UI delete, a disabled entity is written to the file and round-trips through save and load. The engine treats a disabled node or edge exactly as if it had been deleted — its states are not part of the state vector, and it contributes nothing — but its definition, bindings and equations are preserved and are not validated while disabled. An edge is inert if it is disabled itself, or if either endpoint node is disabled, even if the edge's own `enabled` is `true`; re-enabling the node alone is enough to restore that edge without needing to touch it directly.
 
 For an executable relationship, `equationModel` is required and contains:
 

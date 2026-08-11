@@ -12,3 +12,4 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'engineCompa
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'numericalRegression.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'edgeDirectionalityContract.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'edgeNullStateIdContract.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'disabledEntityContract.mjs'), executable]);

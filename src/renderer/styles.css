@@ -335,6 +335,9 @@ input, select { user-select: text; }
 .objectLabel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .objectLabel strong { color: #d5e2e8; font-size: 11px; font-weight: 650; }
 .typeBadge { display: none; padding: 2px 5px; color: #70d8cf; background: rgb(66 201 188 / 10%); border-radius: 3px; font-size: 7px; }
+.disabledBadge { display: none; padding: 2px 5px; color: #e0a458; background: rgb(224 164 88 / 12%); border-radius: 3px; font-size: 7px; text-transform: uppercase; letter-spacing: .04em; }
+.node-label-container.disabled .objectLabel { border-style: dashed; opacity: .72; }
+.node-label-container.disabled .disabledBadge { display: inline-block; }
 .objectLabel dl { display: none; gap: 5px; margin: 9px 0 5px; padding-top: 7px; border-top: 1px solid #263a45; }
 .objectLabel dl div { display: flex; align-items: center; justify-content: space-between; }
 .objectLabel dt { color: #718692; font-size: 8px; }
@@ -367,6 +370,8 @@ input, select { user-select: text; }
 .relationshipRow b { display: inline-block; width: 13px; color: #c6d5db; }
 .relationshipRow span { font-size: 8px; }
 .relationshipRow em { color: #6e828d; font-size: 8px; font-style: normal; }
+.relationshipRow.disabled { opacity: .6; }
+.relationshipRow.disabled em { color: #e0a458; }
 .relationColor { width: 5px; height: 5px; border-radius: 50%; }
 .bundleLabel:not(:hover):not(.pinned) header { border: 0; }
 .bundleLabel:not(:hover):not(.pinned) header strong { font-size: 8px; }

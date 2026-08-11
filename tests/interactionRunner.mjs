@@ -760,6 +760,46 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#undoButton').click()`);
     });
 
+    await run('disabling a node greys it out, cascades to its edges, and is undoable', async () => {
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleNodeEnabled').textContent`), 'Disable node');
+        assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
+
+        await evaluate(window, `document.querySelector('#toggleNodeEnabled').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleNodeEnabled').textContent`), 'Enable node');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).closest('.node-label-container').classList.contains('disabled')`), true);
+
+        // The edge cascades (renders as disabled) even though its own `enabled` field never
+        // changed -- only the node's did. Its own toggle button must still read "Disable edge".
+        await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+
+        // Undo restores the node (and, since nothing about the edge's own state changed, its
+        // cascaded edges too) in one step.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleNodeEnabled').textContent`), 'Disable node');
+        assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+    });
+
+    await run('disabling an edge directly is independent of its endpoint nodes and is undoable', async () => {
+        await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
+
+        await evaluate(window, `document.querySelector('#toggleEdgeEnabled').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Enable edge');
+        // Its endpoint nodes are untouched -- only the edge itself is disabled.
+        assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    });
+
     await run('Connect to chooses a canvas endpoint and restores the builder', async () => {
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Electrical losses')).click()`);
         await evaluate(window, `document.querySelector('#connectFromNode').click()`);

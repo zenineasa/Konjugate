@@ -5,6 +5,7 @@
 #include <cmath>
 #include <numeric>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace konjugate {
 namespace {
@@ -167,8 +168,16 @@ std::size_t CompiledExpression::operationCount() const noexcept {
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     ExecutionPlan plan;
     std::unordered_map<EntityId, std::size_t> nodeIndexes;
+    // A disabled node contributes no state and no contribution tasks -- exactly as if it, and
+    // every edge touching it, had been deleted from the model. Tracked so the edge loop below
+    // can skip edges into a disabled node too, since their endpoint's state was never allocated.
+    std::unordered_set<EntityId> disabledNodeIds;
     for (const auto& nodeItem : document.get_child("nodes")) {
         const auto& node = nodeItem.second;
+        if (value(node, "enabled") == "false") {
+            disabledNodeIds.insert(idValue(node, "id"));
+            continue;
+        }
         NodeExecutionPlan compiledNode;
         compiledNode.nodeId = idValue(node, "id");
         compiledNode.substeps = node.get<std::size_t>("numerics.substepsPerGlobalStep", 1);
@@ -218,6 +227,14 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
 
     for (const auto& edgeItem : document.get_child("edges")) {
         const auto& edge = edgeItem.second;
+        // Same rule as a disabled node: skip a disabled edge, or one whose endpoint is disabled
+        // (that endpoint's state was never allocated above, so its output/binding lookups below
+        // would otherwise throw).
+        if (value(edge, "enabled") == "false" ||
+            disabledNodeIds.contains(idValue(edge, "source.nodeId")) ||
+            disabledNodeIds.contains(idValue(edge, "target.nodeId"))) {
+            continue;
+        }
         const auto implementationKind = value(edge, "implementation.kind");
         const auto programmable = implementationKind == "cpp" || implementationKind == "python";
         const auto outputRole = value(edge, programmable ? "implementation.output.role" : "equationModel.output.role");

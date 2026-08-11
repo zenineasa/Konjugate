@@ -374,7 +374,7 @@
                     <small id="editGeometryStatus" class="geometrySourceStatus">Choose a CAD or mesh file, or browse the bundled library</small>
                 </section>
             </div>
-            <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
+            <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="toggleNodeEnabled" type="button">Disable node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
         </div>
 
         <div id="sourceTermEditor" class="contextCard editorCard edgeEditor hidden">
@@ -448,7 +448,7 @@
                     <label class="editorField"><span>Output key</span><input id="editProviderOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
                 </div>
             </section>
-            <footer><button data-delete-edge type="button">Delete edge</button></footer>
+            <footer><button data-delete-edge type="button">Delete edge</button><button id="toggleEdgeEnabled" type="button">Disable edge</button></footer>
         </div>
 
         <div id="addPalette" class="contextCard addPalette hidden">

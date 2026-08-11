@@ -186,36 +186,48 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
 
     result.nodeCount = nodesOptional->size();
     if (!result.nodeCount) add(result, "emptyModel", "warning", "Add at least one node to begin building a model.");
+    std::set<std::string> disabledNodeIds;
     for (const auto& entry : *nodesOptional) {
         const auto& node = entry.second;
         const auto id = value(node, "id");
         const auto name = value(node, "name");
         registerId(id, "node", id, "Node \"" + (name.empty() ? std::string("Untitled") : name) + "\"");
         nodesById[id] = &node;
-        const auto substepsValue = value(node, "numerics.substepsPerGlobalStep");
-        if (!substepsValue.empty()) {
-            try {
-                std::size_t consumed = 0;
-                const auto substeps = std::stoull(substepsValue, &consumed);
-                if (consumed != substepsValue.size() || !substeps || substeps > 10000) throw std::out_of_range("substeps");
-            } catch (...) {
-                add(result, "nodeSubstepsInvalid", "error", "Node substeps per global step must be an integer from 1 through 10000.", "node", id, "numerics");
+        // A disabled node is inert from the engine's perspective (compileExecutionPlan skips it
+        // entirely, same as if it had been deleted), so its own content isn't validated -- only
+        // its ids, which must stay globally unique even while off so nothing collides whenever it
+        // (or something added later) gets re-enabled.
+        const bool nodeEnabled = value(node, "enabled") != "false";
+        if (nodeEnabled) {
+            const auto substepsValue = value(node, "numerics.substepsPerGlobalStep");
+            if (!substepsValue.empty()) {
+                try {
+                    std::size_t consumed = 0;
+                    const auto substeps = std::stoull(substepsValue, &consumed);
+                    if (consumed != substepsValue.size() || !substeps || substeps > 10000) throw std::out_of_range("substeps");
+                } catch (...) {
+                    add(result, "nodeSubstepsInvalid", "error", "Node substeps per global step must be an integer from 1 through 10000.", "node", id, "numerics");
+                }
             }
+        } else {
+            disabledNodeIds.insert(id);
         }
         const auto states = node.get_child_optional("states");
-        if (!states || states->empty()) add(result, "nodeStatesEmpty", "warning", "This node has no state variables.", "node", id, "states");
+        if (nodeEnabled && (!states || states->empty())) add(result, "nodeStatesEmpty", "warning", "This node has no state variables.", "node", id, "states");
         if (states) for (const auto& stateEntry : *states) {
             const auto& state = stateEntry.second;
             const auto stateId = value(state, "id");
             const auto symbol = value(state, "symbol");
             registerId(stateId, "node", id, "State \"" + value(state, "name") + "\"");
             stateIds[id].insert(stateId);
+            if (!nodeEnabled) continue;
             if (!std::regex_match(symbol, symbolPattern)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
             else if (!stateSymbols[id].insert(symbol).second) add(result, "stateSymbolDuplicate", "error", "State symbol \"" + symbol + "\" is duplicated in this node.", "node", id, "states");
         }
         if (const auto terms = node.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
             const auto& term = termEntry.second;
             registerId(value(term, "id"), "node", id, "Source term");
+            if (!nodeEnabled) continue;
             const auto termImplementation = term.get_child_optional("implementation");
             const auto termImplementationKind = termImplementation ? value(*termImplementation, "kind") : "equation";
             if (termImplementationKind != "equation" && termImplementationKind != "cpp" && termImplementationKind != "python") {
@@ -295,20 +307,30 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         registerId(id, "edge", id, "Relationship \"" + value(edge, "name") + "\"");
         const auto sourceNode = value(edge, "source.nodeId");
         const auto targetNode = value(edge, "target.nodeId");
-        if (!stateIds.contains(sourceNode)) add(result, "edgeSourceMissing", "error", "Relationship source node no longer exists.", "edge", id, "source");
-        if (!stateIds.contains(targetNode)) add(result, "edgeTargetMissing", "error", "Relationship target node no longer exists.", "edge", id, "target");
-        if (!sourceNode.empty() && sourceNode == targetNode) add(result, "edgeSelfConnection", "error", "A relationship must connect two different nodes.", "edge", id, "target");
+        // An edge is inert -- and its content unvalidated -- if it's disabled itself, or either
+        // endpoint node is (an edge into a disabled node can't contribute to anything either,
+        // exactly as if it had been deleted alongside that node).
+        const bool edgeEnabled = value(edge, "enabled") != "false" &&
+            !disabledNodeIds.contains(sourceNode) && !disabledNodeIds.contains(targetNode);
+        if (edgeEnabled) {
+            if (!stateIds.contains(sourceNode)) add(result, "edgeSourceMissing", "error", "Relationship source node no longer exists.", "edge", id, "source");
+            if (!stateIds.contains(targetNode)) add(result, "edgeTargetMissing", "error", "Relationship target node no longer exists.", "edge", id, "target");
+            if (!sourceNode.empty() && sourceNode == targetNode) add(result, "edgeSelfConnection", "error", "A relationship must connect two different nodes.", "edge", id, "target");
+        }
         const auto sourceState = value(edge, "source.stateId");
         const auto targetState = value(edge, "target.stateId");
-        if (!sourceState.empty() && !stateIds[sourceNode].contains(sourceState)) add(result, "edgeSourceStateMissing", "error", "Relationship source state no longer exists.", "edge", id, "source");
-        if (!targetState.empty() && !stateIds[targetNode].contains(targetState)) add(result, "edgeTargetStateMissing", "error", "Relationship target state no longer exists.", "edge", id, "target");
+        if (edgeEnabled) {
+            if (!sourceState.empty() && !stateIds[sourceNode].contains(sourceState)) add(result, "edgeSourceStateMissing", "error", "Relationship source state no longer exists.", "edge", id, "source");
+            if (!targetState.empty() && !stateIds[targetNode].contains(targetState)) add(result, "edgeTargetStateMissing", "error", "Relationship target state no longer exists.", "edge", id, "target");
+        }
         std::set<std::string> parameters;
         std::set<std::string> parameterIds;
         if (const auto parameterList = edge.get_child_optional("parameters")) for (const auto& parameterEntry : *parameterList) {
             const auto& parameter = parameterEntry.second;
             registerId(value(parameter, "id"), "edge", id, "Parameter \"" + value(parameter, "name") + "\"");
-            const auto symbol = value(parameter, "symbol");
             parameterIds.insert(value(parameter, "id"));
+            if (!edgeEnabled) continue;
+            const auto symbol = value(parameter, "symbol");
             if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "edge", id, "parameters");
             else if (!parameters.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Parameter symbol \"" + symbol + "\" is duplicated.", "edge", id, "parameters");
             const auto mode = value(parameter, "mode");
@@ -325,6 +347,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 }
             }
         }
+        if (!edgeEnabled) continue;
         const auto implementation = edge.get_child_optional("implementation");
         const auto implementationKind = implementation ? value(*implementation, "kind") : "equation";
         if (implementationKind != "equation" && implementationKind != "cpp" && implementationKind != "python") {

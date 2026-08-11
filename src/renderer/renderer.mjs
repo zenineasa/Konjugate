@@ -692,6 +692,10 @@ function createNodeLabel(definition, geometry) {
     wrapper.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (activeResult) return;
+        const node = nodeObjects.get(definition.id);
+        if (!(selectedNodeIds.size > 1 && selectedNodeIds.has(definition.id))) selectNode(node);
+        openNodeContextMenu(event.clientX, event.clientY);
     });
 
     const label = new CSS2DObject(wrapper);
@@ -940,6 +944,44 @@ function setRelationshipEnabled(id, enabled) {
     }
 }
 
+function toggleSelectedNodeEnabled() {
+    if (activeResult || !selectedNode) return;
+    const id = selectedNode.userData.definition.id;
+    const nextEnabled = selectedNode.userData.definition.enabled === false;
+    setNodeEnabled(id, nextEnabled);
+    recordHistory({
+        undo: () => setNodeEnabled(id, !nextEnabled),
+        redo: () => setNodeEnabled(id, nextEnabled)
+    });
+}
+
+function toggleSelectedEdgeEnabled() {
+    if (activeResult || !selectedRelationship) return;
+    const id = selectedRelationship.id;
+    const nextEnabled = selectedRelationship.enabled === false;
+    setRelationshipEnabled(id, nextEnabled);
+    recordHistory({
+        undo: () => setRelationshipEnabled(id, !nextEnabled),
+        redo: () => setRelationshipEnabled(id, nextEnabled)
+    });
+}
+
+// "Disable all"/"Enable all" are explicit, uni-directional bulk actions rather than a toggle --
+// a mixed-state selection (some already disabled) has no sensible single "next" state to flip to.
+// Undo restores each node's own prior enabled state rather than just the opposite of the target,
+// so a bulk disable over a mixed selection undoes back to that same mix.
+function setSelectedNodesEnabled(enabled) {
+    if (activeResult || !selectedNodeIds.size) return;
+    const ids = [...selectedNodeIds];
+    const previous = new Map(ids.map((id) => [id, nodeObjects.get(id)?.userData.definition.enabled !== false]));
+    const apply = (targetEnabled) => ids.forEach((id) => setNodeEnabled(id, targetEnabled));
+    apply(enabled);
+    recordHistory({
+        undo: () => ids.forEach((id) => setNodeEnabled(id, previous.get(id))),
+        redo: () => apply(enabled)
+    });
+}
+
 function captureNodeAppearance(definition) {
     return {
         shape: definition.shape,
@@ -1160,6 +1202,15 @@ function clearSelection() {
     updateRelationshipSelection();
     transformControls.detach();
     if (activeResult) window.addons.publishEvent('selection.change', null);
+}
+
+function selectAllNodes() {
+    if (activeResult) return;
+    const nodes = [...nodeObjects.values()].filter((node) => node.visible);
+    if (!nodes.length) return;
+    clearSelection();
+    nodes.forEach((node) => selectNode(node, { additive: true }));
+    $('#statusText').textContent = `${selectedNodeIds.size} node${selectedNodeIds.size === 1 ? '' : 's'} selected`;
 }
 
 function updateRelationshipSelection() {
@@ -1925,6 +1976,32 @@ function openAddPalette(clientX, clientY) {
     const palette = $('#addPalette');
     hideCards(palette);
     positionCard(palette, clientX, clientY);
+}
+
+function openNodeContextMenu(clientX, clientY) {
+    const menu = $('#nodeContextMenu');
+    hideCards(menu);
+    const multi = selectedNodeIds.size > 1;
+    $('#nodeContextConnect').hidden = multi;
+    $('#nodeContextToggle').hidden = multi;
+    $('#nodeContextDisableAll').hidden = !multi;
+    $('#nodeContextEnableAll').hidden = !multi;
+    if (multi) {
+        $('#nodeContextDeleteLabel').textContent = `Delete ${selectedNodeIds.size} nodes`;
+    } else {
+        const enabled = selectedNode?.userData.definition.enabled !== false;
+        $('#nodeContextToggleLabel').textContent = enabled ? 'Disable node' : 'Enable node';
+        $('#nodeContextDeleteLabel').textContent = 'Delete node';
+    }
+    positionCard(menu, clientX, clientY);
+}
+
+function openEdgeContextMenu(clientX, clientY) {
+    const menu = $('#edgeContextMenu');
+    hideCards(menu);
+    const enabled = selectedRelationship?.enabled !== false;
+    $('#edgeContextToggleLabel').textContent = enabled ? 'Disable edge' : 'Enable edge';
+    positionCard(menu, clientX, clientY);
 }
 
 function addStateVariableRow(values = {}) {
@@ -3423,12 +3500,15 @@ function createRelationshipBundleOverlay(key) {
     element.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (activeResult) return;
         const row = event.target.closest('.relationshipRow');
         const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
         const definition = row
             ? model.relationships.find((relationship) => relationship.id === Number(row.dataset.relationship))
             : bundle?.relationships[0];
-        if (definition) selectRelationship(definition);
+        if (!definition) return;
+        selectRelationship(definition);
+        openEdgeContextMenu(event.clientX, event.clientY);
     });
     $('.collapseBundle', element).addEventListener('click', (event) => {
         event.stopPropagation();
@@ -4344,6 +4424,16 @@ function openEdgeBuilder(clientX, clientY) {
     builder.classList.remove('hidden');
 }
 
+// Reuses the edge builder's own endpoint-pick flow: pre-fills the source with the node that was
+// right-clicked, then immediately starts picking the target on the canvas, same as clicking the
+// builder's own "pick target" control would.
+function connectFromNode(node) {
+    openEdgeBuilder();
+    $('#edgeSource').value = String(node.userData.definition.id);
+    refreshStateReferences();
+    startEndpointPick('target');
+}
+
 let nodePointerDown = null;
 
 function captureAdditiveNodeSelection(event) {
@@ -4481,13 +4571,16 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
     const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
 
     if (node) {
-        selectNode(node);
+        if (activeResult) { selectNode(node); return; }
+        if (!(selectedNodeIds.size > 1 && selectedNodeIds.has(node.userData.id))) selectNode(node);
+        openNodeContextMenu(event.clientX, event.clientY);
         return;
     }
 
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
         selectRelationship(relationshipHit.object.userData.definition);
+        if (!activeResult) openEdgeContextMenu(event.clientX, event.clientY);
         return;
     }
 
@@ -5372,13 +5465,7 @@ $$('[data-pick-endpoint]').forEach((button) => {
 });
 $('#cancelEndpointPick').addEventListener('click', finishEndpointPick);
 $('#connectFromNode').addEventListener('click', () => {
-    if (activeResult || !selectedNode) return;
-    const sourceId = selectedNode.userData.id;
-    const editorRect = $('#nodeEditor').getBoundingClientRect();
-    openEdgeBuilder(editorRect.left, editorRect.top);
-    $('#edgeSource').value = sourceId;
-    refreshStateReferences();
-    startEndpointPick('target');
+    if (!activeResult && selectedNode) connectFromNode(selectedNode);
 });
 
 $('#createNode').addEventListener('click', () => {
@@ -5943,6 +6030,7 @@ $('#undoButton').dataset.tooltip = `Undo (${isMac ? '⌘Z' : 'Ctrl+Z'})`;
 $('#redoButton').dataset.tooltip = `Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`;
 $('#copySelection').dataset.tooltip = `Copy selected (${isMac ? '⌘C' : 'Ctrl+C'})`;
 $('#pasteSelection').dataset.tooltip = `Paste (${isMac ? '⌘V' : 'Ctrl+V'})`;
+$('#selectAllShortcutHint').textContent = isMac ? '⌘A' : 'Ctrl+A';
 $('#undoButton').addEventListener('click', undo);
 $('#redoButton').addEventListener('click', redo);
 updateHistoryControls();
@@ -5999,25 +6087,39 @@ $('[data-delete-edge]').addEventListener('click', () => {
     deleteSelected();
     $('#edgeEditor').classList.add('hidden');
 });
-$('#toggleNodeEnabled').addEventListener('click', () => {
-    if (activeResult || !selectedNode) return;
-    const id = selectedNode.userData.definition.id;
-    const nextEnabled = selectedNode.userData.definition.enabled === false;
-    setNodeEnabled(id, nextEnabled);
-    recordHistory({
-        undo: () => setNodeEnabled(id, !nextEnabled),
-        redo: () => setNodeEnabled(id, nextEnabled)
-    });
+$('#toggleNodeEnabled').addEventListener('click', toggleSelectedNodeEnabled);
+$('#toggleEdgeEnabled').addEventListener('click', toggleSelectedEdgeEnabled);
+$('#nodeContextConnect').addEventListener('click', () => {
+    hideCards();
+    if (!activeResult && selectedNode) connectFromNode(selectedNode);
 });
-$('#toggleEdgeEnabled').addEventListener('click', () => {
-    if (activeResult || !selectedRelationship) return;
-    const id = selectedRelationship.id;
-    const nextEnabled = selectedRelationship.enabled === false;
-    setRelationshipEnabled(id, nextEnabled);
-    recordHistory({
-        undo: () => setRelationshipEnabled(id, !nextEnabled),
-        redo: () => setRelationshipEnabled(id, nextEnabled)
-    });
+$('#nodeContextToggle').addEventListener('click', () => {
+    hideCards();
+    toggleSelectedNodeEnabled();
+});
+$('#nodeContextDisableAll').addEventListener('click', () => {
+    hideCards();
+    setSelectedNodesEnabled(false);
+});
+$('#nodeContextEnableAll').addEventListener('click', () => {
+    hideCards();
+    setSelectedNodesEnabled(true);
+});
+$('#nodeContextDelete').addEventListener('click', () => {
+    hideCards();
+    deleteSelected();
+});
+$('#edgeContextToggle').addEventListener('click', () => {
+    hideCards();
+    toggleSelectedEdgeEnabled();
+});
+$('#edgeContextDelete').addEventListener('click', () => {
+    hideCards();
+    deleteSelected();
+});
+$('[data-action="select-all"]').addEventListener('click', () => {
+    hideCards();
+    selectAllNodes();
 });
 window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !$('#exampleMenu').hidden) {
@@ -6075,6 +6177,11 @@ window.addEventListener('keydown', (event) => {
     if (!isEditing && commandKey && event.key.toLowerCase() === 'v') {
         event.preventDefault();
         pasteGraph();
+        return;
+    }
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        selectAllNodes();
         return;
     }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'z') {

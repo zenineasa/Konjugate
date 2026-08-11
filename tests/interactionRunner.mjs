@@ -55,6 +55,21 @@ async function clickElement(window, expression, modifiers = []) {
     window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1, modifiers });
 }
 
+// Re-resolves the element's screen position on every call rather than caching one set of
+// coordinates -- a CSS2D label can shift by a pixel or two as selection/disabled styling changes
+// its box (border, badge text), and a stale cached point can miss the element entirely on a
+// later right-click in the same test.
+async function rightClickElement(window, expression) {
+    const point = await evaluate(window, `(() => {
+        const element = ${expression};
+        const bounds = element.getBoundingClientRect();
+        return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
+    })()`);
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+    window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'right', clickCount: 1 });
+    window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'right', clickCount: 1 });
+}
+
 export async function runInteractionTests(window) {
     let passed = 0;
     const run = async (name, task) => {
@@ -435,13 +450,13 @@ export async function runInteractionTests(window) {
         ]);
     });
 
-    await run('canvas help reflects left-click inspection controls', async () => {
+    await run('canvas help reflects left-click inspection and right-click action controls', async () => {
         const help = await evaluate(window, `document.querySelector('.canvasHelp').textContent.replace(/\\s+/g, ' ').trim()`);
         assert.match(help, /Left click inspect/);
+        assert.match(help, /Right click actions/);
         assert.match(help, /Drag move or orbit/);
         assert.match(help, /Shift-drag pan/);
         assert.match(help, /Scroll or −\/\+ zoom/);
-        assert.doesNotMatch(help, /Right click edit/);
     });
 
     await run('left-click opens node and relationship inspectors', async () => {
@@ -810,6 +825,127 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
         assert.notEqual(await evaluate(window, `document.querySelector('#edgeTarget').value`), '');
         await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+    });
+
+    // Excludes "... copy" matches: a soft-deleted "... copy" node from an earlier paste test can
+    // still be present (hidden) in the DOM, and a plain .includes() would match it too, since
+    // e.g. "Enclosed air copy" contains "Enclosed air" as a substring.
+    const electricalLossesLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Electrical losses') && !label.textContent.includes('copy'))`;
+    const batteryModuleLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy'))`;
+    const enclosedAirLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air') && !label.textContent.includes('copy'))`;
+    const batteryBundleLabel = `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy'))`;
+
+    await run('right-clicking a node opens a context menu with connect, disable and delete', async () => {
+        await rightClickElement(window, electricalLossesLabel);
+        await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden')`, 'Right-clicking a node did not open its context menu.');
+        assert.equal(await evaluate(window, `${electricalLossesLabel}.closest('.node-label-container').classList.contains('selected')`), true);
+        assert.equal(await isRenderedVisible(window, '#nodeContextConnect'), true);
+        assert.equal(await isRenderedVisible(window, '#nodeContextToggle'), true);
+        assert.equal(await isRenderedVisible(window, '#nodeContextDisableAll'), false);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeContextToggleLabel').textContent`), 'Disable node');
+
+        // "Connect from here" reuses the editor's own endpoint-pick flow.
+        await evaluate(window, `document.querySelector('#nodeContextConnect').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeContextMenu').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#endpointPickBanner').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeSource').value`), await evaluate(window, `${electricalLossesLabel}.closest('.node-label-container').dataset.node`));
+        await evaluate(window, `${batteryModuleLabel}.click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+
+        // Disable via the context menu toggle, then delete via the context menu, both undoable.
+        await rightClickElement(window, electricalLossesLabel);
+        await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden')`, 'The node context menu did not reopen.');
+        await evaluate(window, `document.querySelector('#nodeContextToggle').click()`);
+        assert.equal(await evaluate(window, `${electricalLossesLabel}.closest('.node-label-container').classList.contains('disabled')`), true);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `${electricalLossesLabel}.closest('.node-label-container').classList.contains('disabled')`), false);
+
+        const before = await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
+        await rightClickElement(window, electricalLossesLabel);
+        await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden')`, 'The node context menu did not reopen for delete.');
+        await evaluate(window, `document.querySelector('#nodeContextDelete').click()`);
+        await waitFor(window, `document.querySelectorAll('.modelStatus span')[0].textContent !== '${before}'`, 'The context menu delete action did not remove the node.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `document.querySelectorAll('.modelStatus span')[0].textContent === '${before}'`, 'Undo did not restore the deleted node.');
+    });
+
+    await run('right-clicking a multi-selected node offers bulk disable/enable all', async () => {
+        // Shift-clicks both nodes rather than a plain click + shift-click: a plain click also
+        // opens the node editor, and this deep into the suite the editor panel can overlap
+        // where the second label renders, making a real mouse click land on the panel instead.
+        await clickElement(window, batteryModuleLabel, ['shift']);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await clickElement(window, enclosedAirLabel, ['shift']);
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Shift-click did not build a two-node selection.');
+
+        await rightClickElement(window, enclosedAirLabel);
+        await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden')`, 'Right-clicking a selected node did not open the context menu.');
+        // Right-clicking a member of an existing multi-selection must not collapse it to one node.
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
+        assert.equal(await isRenderedVisible(window, '#nodeContextConnect'), false);
+        assert.equal(await isRenderedVisible(window, '#nodeContextToggle'), false);
+        assert.equal(await isRenderedVisible(window, '#nodeContextDisableAll'), true);
+        assert.equal(await isRenderedVisible(window, '#nodeContextEnableAll'), true);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeContextDeleteLabel').textContent`), 'Delete 2 nodes');
+
+        await evaluate(window, `document.querySelector('#nodeContextDisableAll').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.disabled').length`), 2);
+
+        // Chains straight into "enable all" while the selection is still intact -- undo/redo
+        // deliberately clear the selection (see undo()/redo() in renderer.mjs), so exercising
+        // that separately below rebuilds the selection first rather than assuming it survives.
+        await rightClickElement(window, enclosedAirLabel);
+        await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden')`, 'The node context menu did not reopen for enable-all.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
+        await evaluate(window, `document.querySelector('#nodeContextEnableAll').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.disabled').length`), 0);
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.disabled').length`), 2);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.disabled').length`), 0);
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.disabled').length`), 2);
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.disabled').length`), 0);
+    });
+
+    await run('right-clicking an edge label opens a context menu with disable and delete', async () => {
+        await waitFor(window, `Boolean(${batteryBundleLabel})`, 'Battery module bundle label was not available.');
+        await rightClickElement(window, batteryBundleLabel);
+        await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking an edge did not open its context menu.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextToggleLabel').textContent`), 'Disable edge');
+
+        await evaluate(window, `document.querySelector('#edgeContextToggle').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
+        assert.match(await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).textContent`), /Disabled/);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.doesNotMatch(await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).textContent`), /Disabled/);
+    });
+
+    await run('select all via Ctrl/Cmd+A and via the canvas context menu', async () => {
+        const totalNodes = await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === ${totalNodes.match(/\d+/)[0]}`, 'Ctrl/Cmd+A did not select every node.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), Number(totalNodes.match(/\d+/)[0]));
+
+        const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...emptyPoint });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1 });
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 0`, 'Clicking blank canvas did not clear the select-all selection.');
+
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...emptyPoint });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'right', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'right', clickCount: 1 });
+        await waitFor(window, `!document.querySelector('#addPalette').classList.contains('hidden')`, 'Right-clicking blank canvas did not open the add palette.');
+        await evaluate(window, `document.querySelector('[data-action="select-all"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#addPalette').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), Number(totalNodes.match(/\d+/)[0]));
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...emptyPoint });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1 });
     });
 
     await run('node creation closes its dialog and supports undo and redo', async () => {

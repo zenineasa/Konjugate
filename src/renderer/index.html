@@ -455,6 +455,26 @@
             <span class="contextKicker">Add to model</span>
             <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and source terms</small></span><b>›</b></button>
             <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Edge</strong><small>Connect nodes with an equation</small></span><b>›</b></button>
+            <hr>
+            <span class="contextKicker">Selection</span>
+            <button data-action="select-all" type="button"><i class="primitiveIcon">▦</i><span><strong>Select all</strong><small>Select every node in the model</small></span><kbd id="selectAllShortcutHint">Ctrl+A</kbd></button>
+        </div>
+
+        <div id="nodeContextMenu" class="contextCard addPalette hidden">
+            <span class="contextKicker">Node</span>
+            <button id="nodeContextConnect" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Connect from here</strong><small>Start a new edge at this node</small></span><b>›</b></button>
+            <button id="nodeContextToggle" type="button"><i class="primitiveIcon">⏻</i><span><strong id="nodeContextToggleLabel">Disable node</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
+            <button id="nodeContextDisableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Disable all</strong><small>Disable every selected node</small></span><b>›</b></button>
+            <button id="nodeContextEnableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Enable all</strong><small>Enable every selected node</small></span><b>›</b></button>
+            <hr>
+            <button id="nodeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong id="nodeContextDeleteLabel">Delete node</strong></span><b>›</b></button>
+        </div>
+
+        <div id="edgeContextMenu" class="contextCard addPalette hidden">
+            <span class="contextKicker">Edge</span>
+            <button id="edgeContextToggle" type="button"><i class="primitiveIcon edgeIcon">⏻</i><span><strong id="edgeContextToggleLabel">Disable edge</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
+            <hr>
+            <button id="edgeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete edge</strong></span><b>›</b></button>
         </div>
 
         <div id="nodeBuilder" class="contextCard builderCard hidden">
@@ -561,7 +581,7 @@
         </section>
 
         <div class="canvasHelp">
-            <span><b>Left click</b> inspect</span><i></i><span><b>Drag</b> move or orbit</span><i></i><span><b>Shift-drag</b> pan</span><i></i><span><b>Scroll or −/+</b> zoom</span>
+            <span><b>Left click</b> inspect</span><i></i><span><b>Right click</b> actions</span><i></i><span><b>Drag</b> move or orbit</span><i></i><span><b>Shift-drag</b> pan</span><i></i><span><b>Scroll or −/+</b> zoom</span>
         </div>
         <div id="viewCube" class="viewCube" aria-label="3D view cube">
             <div class="panPad" aria-label="Camera pan controls">

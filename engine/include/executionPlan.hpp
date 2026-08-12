@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <limits>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -76,6 +77,12 @@ struct ContributionTask {
     ContributionImplementation implementation = ContributionImplementation::equation;
     std::string providerSource;
     std::string providerOutputKey;
+    // Precomputed once by bindTask() at plan-compile time: providerProcessKey() used to
+    // concatenate "cpp:"/"py:" with the entire inline source text on every single evaluation
+    // call, which is invisible next to an IPC round trip but was measurable overhead in its
+    // own right once nothing else dominates (e.g. the in-process transport). Empty for
+    // equation tasks, which never call providerProcessKey().
+    std::string providerProcessKeyCache;
     // True for the complementary contribution a bidirectional edge applies to its other
     // endpoint: the same computed value, sign-flipped, since what leaves one node enters the
     // other. False for every other contribution (source terms, directed edges, and a
@@ -86,7 +93,7 @@ struct ContributionTask {
 // Contributions sharing the same (implementation, providerSource) run in the same worker
 // process/library, so callers group tasks by this key before batching them into one
 // evaluateBatch call rather than one round trip per contribution.
-std::string providerProcessKey(const ContributionTask& task);
+const std::string& providerProcessKey(const ContributionTask& task);
 
 class ProviderEvaluator {
 public:
@@ -95,7 +102,7 @@ public:
     // (evaluateContributionTasks) is responsible for grouping them that way. Results are
     // returned in the same order as tasks/inputs.
     virtual std::vector<double> evaluateBatch(const std::vector<const ContributionTask*>& tasks,
-                                              const std::vector<std::vector<double>>& inputs,
+                                              const std::vector<std::span<const double>>& inputs,
                                               double simulationTime,
                                               double stepSize) = 0;
 };

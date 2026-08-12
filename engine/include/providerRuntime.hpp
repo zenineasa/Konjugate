@@ -43,7 +43,7 @@ public:
     void initialize(const ExecutionPlan& plan);
 
     std::vector<double> evaluateBatch(const std::vector<const ContributionTask*>& tasks,
-                                      const std::vector<std::vector<double>>& inputs,
+                                      const std::vector<std::span<const double>>& inputs,
                                       double simulationTime,
                                       double stepSize) override;
 

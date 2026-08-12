@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -85,7 +86,7 @@ std::chrono::nanoseconds timeUnbatched(konjugate::ProviderRuntime& runtime,
     for (int repetition = 0; repetition < repetitions; ++repetition) {
         for (const auto& task : node.contributions) {
             const std::vector<const konjugate::ContributionTask*> tasks = {&task};
-            const std::vector<std::vector<double>> batchInputs = {inputs};
+            const std::vector<std::span<const double>> batchInputs = {inputs};
             if (runtime.evaluateBatch(tasks, batchInputs, 1.5, 0.01).size() != 1) {
                 throw std::runtime_error("Unexpected unbatched result size.");
             }
@@ -99,13 +100,14 @@ std::chrono::nanoseconds timeBatched(konjugate::ProviderRuntime& runtime,
                                      const konjugate::NodeExecutionPlan& node,
                                      int repetitions) {
     std::vector<const konjugate::ContributionTask*> tasks;
-    std::vector<std::vector<double>> batchInputs;
+    std::vector<std::vector<double>> inputStorage;
     tasks.reserve(node.contributions.size());
-    batchInputs.reserve(node.contributions.size());
+    inputStorage.reserve(node.contributions.size());
     for (const auto& task : node.contributions) {
         tasks.push_back(&task);
-        batchInputs.push_back({300.0});
+        inputStorage.push_back({300.0});
     }
+    std::vector<std::span<const double>> batchInputs(inputStorage.begin(), inputStorage.end());
 
     const auto started = std::chrono::steady_clock::now();
     for (int repetition = 0; repetition < repetitions; ++repetition) {

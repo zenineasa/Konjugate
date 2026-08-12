@@ -1260,7 +1260,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
 }
 
 std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const ContributionTask*>& tasks,
-                                                    const std::vector<std::vector<double>>& inputs,
+                                                    const std::vector<std::span<const double>>& inputs,
                                                     double simulationTime,
                                                     double stepSize) {
     if (tasks.empty()) return {};
@@ -1292,7 +1292,7 @@ std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const Contr
         if (instIt == taskInstanceIds_.end()) {
             throw std::runtime_error("Task not registered in ProviderRuntime.");
         }
-        evaluations.emplace_back(instIt->second, std::span<const double>(inputs[index]));
+        evaluations.emplace_back(instIt->second, inputs[index]);
     }
 
     const auto results = proc->evaluateBatch(tasks.front()->sequence, simulationTime, stepSize, evaluations);

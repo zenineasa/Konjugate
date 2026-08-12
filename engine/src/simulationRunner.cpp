@@ -302,12 +302,12 @@ void runSimulation(const boost::property_tree::ptree& document,
         providerConfig.pythonInterpreter = providers->get<std::string>("python.interpreter", "");
         providerConfig.pythonSdkPath = providers->get<std::string>("python.sdkPath", "");
         providerConfig.buildDirectory = providers->get<std::string>("buildDirectory", "");
-        // Not surfaced in any user-facing settings UI: an internal lever the engine's own
-        // callers can set in the run configuration to opt a run into the shared-memory
-        // provider transport (see ProviderExecutionMode). Absent, this always defaults to the
+        // See ProviderExecutionMode. Absent or unrecognized always defaults to the
         // always-available pipe transport.
-        providerConfig.executionMode = providers->get<std::string>("executionMode", "") == "sharedMemoryWorker"
-            ? ProviderExecutionMode::sharedMemoryWorker : ProviderExecutionMode::pipeWorker;
+        const auto executionModeText = providers->get<std::string>("executionMode", "");
+        providerConfig.executionMode = executionModeText == "inProcess" ? ProviderExecutionMode::inProcess
+            : executionModeText == "sharedMemoryWorker" ? ProviderExecutionMode::sharedMemoryWorker
+            : ProviderExecutionMode::pipeWorker;
     }
     std::unique_ptr<ProviderRuntime> providerRuntime;
     if (planRequiresProviders(executionPlan)) {

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -117,6 +118,7 @@ void bindTask(ContributionTask& task) {
         binding.parameterIndex = static_cast<std::size_t>(std::distance(task.parameters.begin(), found));
     }
     if (task.implementation == ContributionImplementation::equation) bindExpressionSymbols(task.expression, task.bindings);
+    else task.providerProcessKeyCache = (task.implementation == ContributionImplementation::pythonProvider ? "py:" : "cpp:") + task.providerSource;
 }
 
 double requireArgument(const CompiledExpression& expression, std::size_t index, const std::vector<double>& symbols) {
@@ -317,8 +319,8 @@ std::vector<std::size_t> planTaskSubmissionOrder(const std::vector<NodeExecution
     return order;
 }
 
-std::string providerProcessKey(const ContributionTask& task) {
-    return (task.implementation == ContributionImplementation::pythonProvider ? "py:" : "cpp:") + task.providerSource;
+const std::string& providerProcessKey(const ContributionTask& task) {
+    return task.providerProcessKeyCache;
 }
 
 namespace {
@@ -344,8 +346,12 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
 
     // Provider tasks are collected by process key rather than evaluated immediately, so every
     // instance of a shared provider in this node can go out in a single evaluateBatch call
-    // instead of one round trip per contribution.
-    std::unordered_map<std::string, std::vector<std::size_t>> providerGroups;
+    // instead of one round trip per contribution. A real node typically has only a handful of
+    // provider tasks (often exactly one), so this groups by a linear scan over key pointers
+    // rather than an unordered_map: providerProcessKey() returns a reference into each task's
+    // own precomputed cache, so grouping this way never hashes or copies that (potentially
+    // long, since it is derived from the provider's whole inline source) string at all.
+    std::vector<std::pair<const std::string*, std::vector<std::size_t>>> providerGroups;
     std::vector<std::vector<double>> symbolsByTask(node.contributions.size());
 
     for (std::size_t taskIndex = 0; taskIndex < node.contributions.size(); ++taskIndex) {
@@ -364,7 +370,11 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             const auto contribution = finalizeContribution(task, task.expression.evaluate(symbols));
             evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
         } else {
-            providerGroups[providerProcessKey(task)].push_back(taskIndex);
+            const auto& key = providerProcessKey(task);
+            const auto found = std::find_if(providerGroups.begin(), providerGroups.end(),
+                [&](const auto& group) { return *group.first == key; });
+            if (found != providerGroups.end()) found->second.push_back(taskIndex);
+            else providerGroups.emplace_back(&key, std::vector<std::size_t>{taskIndex});
         }
     }
 
@@ -372,12 +382,12 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
         if (!providerEvaluator) throw std::runtime_error("A programmable relationship requires an initialized provider runtime.");
 
         std::vector<const ContributionTask*> tasks;
-        std::vector<std::vector<double>> inputs;
+        std::vector<std::span<const double>> inputs;
         tasks.reserve(taskIndexes.size());
         inputs.reserve(taskIndexes.size());
         for (const auto taskIndex : taskIndexes) {
             tasks.push_back(&node.contributions[taskIndex]);
-            inputs.push_back(symbolsByTask[taskIndex]);
+            inputs.emplace_back(symbolsByTask[taskIndex]);
         }
 
         const auto results = providerEvaluator->evaluateBatch(tasks, inputs, simulationTime, stepSize);

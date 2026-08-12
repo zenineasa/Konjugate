@@ -36,6 +36,7 @@
         "test:engine": "node scripts/testEngine.mjs",
         "test:package": "make verifyPackage",
         "benchmark:engine": "npm run build:engine && node tests/engine/executionBenchmark.mjs",
+        "benchmark:providers": "npm run build:engine && node tests/engine/providerExecutionBenchmark.mjs",
         "benchmark:protocol": "node scripts/benchmarkProtocolEncoding.mjs",
         "start": "npm run build:engine && electron .",
         "dev": "npm start",

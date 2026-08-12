@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <boost/property_tree/json_parser.hpp>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -77,14 +78,15 @@ bool hasIssue(const konjugate::ValidationResult& result, const std::string& code
 class RecordingEvaluator final : public konjugate::ProviderEvaluator {
 public:
     std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>& tasks,
-                                      const std::vector<std::vector<double>>& inputs,
+                                      const std::vector<std::span<const double>>& inputs,
                                       double simulationTime,
                                       double stepSize) override {
         require(tasks.size() == 1, "This test expects exactly one provider task in the batch.");
         const auto& task = *tasks.front();
         const auto& taskInputs = inputs.front();
         require(task.providerOutputKey == "targetTemperatureGradient", "The evaluator received the wrong provider task.");
-        require(taskInputs == std::vector<double>({300, 2}), "The evaluator received incorrectly resolved provider inputs.");
+        require(std::vector<double>(taskInputs.begin(), taskInputs.end()) == std::vector<double>({300, 2}),
+            "The evaluator received incorrectly resolved provider inputs.");
         require(simulationTime == 4.5 && stepSize == 0.01, "The evaluator received incorrect substep timing.");
         called = true;
         return {taskInputs[1] * taskInputs[0]};
@@ -99,7 +101,7 @@ public:
 class CountingEvaluator final : public konjugate::ProviderEvaluator {
 public:
     std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>& tasks,
-                                      const std::vector<std::vector<double>>& inputs,
+                                      const std::vector<std::span<const double>>& inputs,
                                       double simulationTime,
                                       double stepSize) override {
         static_cast<void>(simulationTime);

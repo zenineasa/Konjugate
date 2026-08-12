@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <openssl/evp.h>
+#include <span>
 #include <stdexcept>
 #include <string>
 #ifdef _WIN32
@@ -518,7 +519,7 @@ public:
     virtual void sendInitialization() = 0;
     virtual std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
-        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) = 0;
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) = 0;
     virtual void shutdown() noexcept = 0;
 };
 
@@ -563,7 +564,7 @@ public:
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatchOverPipe(
         std::uint64_t sequence, double simulationTime, double stepSize,
-        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) {
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) {
         EngineToProvider msg;
         auto* batch = msg.mutable_evaluate_batch();
         batch->set_sequence(sequence);
@@ -853,7 +854,7 @@ public:
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
-        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) override {
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) override {
         // Multiple relationship instances sharing this worker may be evaluated from
         // different execution-plan threads in the same synchronization step; the pipe
         // round-trip is not reentrant, so concurrent callers must be serialized here.
@@ -897,7 +898,7 @@ public:
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
-        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) override {
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) override {
         static_cast<void>(sequence);
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -1102,7 +1103,7 @@ public:
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
-        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) override {
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) override {
         static_cast<void>(sequence);
         // There is no IPC to serialize here, but user-authored provider code is not guaranteed
         // thread-safe (e.g. it may hold mutable member state a real relationship implementation
@@ -1274,7 +1275,10 @@ std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const Contr
     }
     auto& proc = processIt->second;
 
-    std::vector<std::pair<std::uint64_t, std::vector<double>>> evaluations;
+    // Spans, not copies: every backend only ever reads these values (serializing them onto a
+    // pipe/into shared memory/straight into a C-ABI call), and inputs outlives this whole call,
+    // so there is no need to heap-allocate a fresh vector per task just to hand it downstream.
+    std::vector<std::pair<std::uint64_t, std::span<const double>>> evaluations;
     evaluations.reserve(tasks.size());
     for (std::size_t index = 0; index < tasks.size(); ++index) {
         const auto* task = tasks[index];
@@ -1288,7 +1292,7 @@ std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const Contr
         if (instIt == taskInstanceIds_.end()) {
             throw std::runtime_error("Task not registered in ProviderRuntime.");
         }
-        evaluations.emplace_back(instIt->second, inputs[index]);
+        evaluations.emplace_back(instIt->second, std::span<const double>(inputs[index]));
     }
 
     const auto results = proc->evaluateBatch(tasks.front()->sequence, simulationTime, stepSize, evaluations);
@@ -1296,19 +1300,19 @@ std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const Contr
         throw std::runtime_error("A provider process returned a different number of contributions than requested.");
     }
 
-    std::unordered_map<std::uint64_t, double> valueByInstance;
-    valueByInstance.reserve(results.size());
-    for (const auto& [instanceId, value] : results) valueByInstance[instanceId] = value;
-
+    // Every backend returns results in the same order the evaluations were submitted (the pipe
+    // worker and the shared-memory eval loop both process their request slots in order;
+    // InProcessProviderBackend iterates evaluations directly), so results can be zipped back to
+    // tasks positionally rather than reassociated through a per-call hash map. The instance-id
+    // check below is cheap insurance against a future backend breaking that invariant, not a
+    // reason to keep the O(n) map around for the common case.
     std::vector<double> ordered;
     ordered.reserve(tasks.size());
-    for (const auto* task : tasks) {
-        const auto instIt = taskInstanceIds_.find(task->sourceId);
-        const auto found = valueByInstance.find(instIt->second);
-        if (found == valueByInstance.end()) {
-            throw std::runtime_error("A provider process omitted a requested contribution.");
+    for (std::size_t index = 0; index < results.size(); ++index) {
+        if (results[index].first != evaluations[index].first) {
+            throw std::runtime_error("A provider process returned contributions out of the requested order.");
         }
-        ordered.push_back(found->second);
+        ordered.push_back(results[index].second);
     }
     return ordered;
 }

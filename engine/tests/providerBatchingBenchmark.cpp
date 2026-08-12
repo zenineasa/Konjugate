@@ -118,6 +118,65 @@ std::chrono::nanoseconds timeBatched(konjugate::ProviderRuntime& runtime,
 
 }
 
+// Same shape (one node, N contributions each reading one localState symbol) and same math
+// (delta * 3) as buildSharedProviderNode()'s inline provider, so the two are a fair comparison
+// of "cost of one contribution" rather than an artifact of different amounts of work.
+konjugate::NodeExecutionPlan buildEquationNode(std::size_t instanceCount) {
+    konjugate::NodeExecutionPlan node;
+    node.stateIndexes = {0};
+    node.contributions.reserve(instanceCount);
+    for (std::size_t index = 0; index < instanceCount; ++index) {
+        konjugate::CompiledExpression deltaSymbol;
+        deltaSymbol.operation = konjugate::ExpressionOperation::symbol;
+        deltaSymbol.symbol = "delta";
+        deltaSymbol.symbolIndex = 0;
+
+        konjugate::CompiledExpression three;
+        three.operation = konjugate::ExpressionOperation::literal;
+        three.literal = 3.0;
+
+        konjugate::CompiledExpression product;
+        product.operation = konjugate::ExpressionOperation::multiply;
+        product.arguments = {deltaSymbol, three};
+
+        konjugate::ContributionTask task;
+        task.sequence = index;
+        task.sourceId = 2000 + index;
+        task.outputStateIndex = 0;
+        task.implementation = konjugate::ContributionImplementation::equation;
+        task.expression = std::move(product);
+
+        konjugate::CompiledBinding binding;
+        binding.symbol = "delta";
+        binding.source = konjugate::BindingSource::localState;
+        binding.valueIndex = 0;
+        task.bindings = {binding};
+
+        node.contributions.push_back(std::move(task));
+    }
+    return node;
+}
+
+double equationRoundTripMicros(std::size_t instanceCount, int repetitions) {
+    const auto node = buildEquationNode(instanceCount);
+    const konjugate::StateValues localStates = {300.0};
+    const konjugate::StateValues synchronizationSnapshot = {300.0};
+    const auto parameterValues = konjugate::resolveParameterValues(node, {});
+
+    for (int warmup = 0; warmup < 5; ++warmup) {
+        konjugate::evaluateContributionTasks(node, localStates, synchronizationSnapshot, parameterValues, 1.5, 0.01, nullptr);
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    for (int repetition = 0; repetition < repetitions; ++repetition) {
+        const auto evaluated = konjugate::evaluateContributionTasks(
+            node, localStates, synchronizationSnapshot, parameterValues, 1.5, 0.01, nullptr);
+        if (evaluated.size() != instanceCount) throw std::runtime_error("Unexpected equation result size.");
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    return std::chrono::duration<double, std::micro>(elapsed).count() / repetitions;
+}
+
 double batchedRoundTripMicros(konjugate::ProviderConfiguration config, const std::string& source,
                               std::size_t instanceCount, int repetitions) {
     konjugate::ExecutionPlan plan;
@@ -169,13 +228,17 @@ int main() {
                   << unbatchedRoundTripUs << ',' << batchedRoundTripUs << '\n';
     }
 
-    std::cout << "\ninstances,pipeRoundTripUs,sharedMemoryRoundTripUs,speedup\n";
+    std::cout << "\ninstances,pipeRoundTripUs,sharedMemoryRoundTripUs,inProcessRoundTripUs,equationRoundTripUs,inProcessVsEquation\n";
     auto sharedMemoryConfig = config;
     sharedMemoryConfig.executionMode = konjugate::ProviderExecutionMode::sharedMemoryWorker;
+    auto inProcessConfig = config;
+    inProcessConfig.executionMode = konjugate::ProviderExecutionMode::inProcess;
     for (const auto instanceCount : instanceCounts) {
         const auto pipeUs = batchedRoundTripMicros(config, source, instanceCount, repetitions);
         const auto sharedMemoryUs = batchedRoundTripMicros(sharedMemoryConfig, source, instanceCount, repetitions);
-        std::cout << instanceCount << ',' << pipeUs << ',' << sharedMemoryUs << ','
-                  << (sharedMemoryUs > 0 ? pipeUs / sharedMemoryUs : 0.0) << '\n';
+        const auto inProcessUs = batchedRoundTripMicros(inProcessConfig, source, instanceCount, repetitions);
+        const auto equationUs = equationRoundTripMicros(instanceCount, repetitions);
+        std::cout << instanceCount << ',' << pipeUs << ',' << sharedMemoryUs << ',' << inProcessUs << ',' << equationUs << ','
+                  << (equationUs > 0 ? inProcessUs / equationUs : 0.0) << '\n';
     }
 }

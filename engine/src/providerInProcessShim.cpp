@@ -31,6 +31,14 @@ struct ShimState {
     konjugate::sdk::v1::RelationshipDescription description;
     std::map<std::uint64_t, InstanceBinding> instanceBindings;
     std::string lastError;
+    // Both derived once from description, which is fixed after describe() returns, and reused
+    // across every evaluateInstance() call rather than rebuilt each time: with no IPC left to
+    // dwarf it, a per-call heap allocation here is no longer negligible the way it is for the
+    // pipe/shared-memory transports' equivalent per-evaluation bookkeeping. Reuse is safe
+    // because the engine already serializes calls into one provider object with a mutex (see
+    // InProcessProviderBackend::evaluateBatch), so at most one evaluate() is ever in flight.
+    std::vector<std::string_view> inputKeys;
+    std::vector<double> scratchValues;
 };
 
 ShimState& state(void* self) { return *static_cast<ShimState*>(self); }
@@ -44,6 +52,9 @@ void* create() {
             return nullptr;
         }
         shimState->description = shimState->provider->describe();
+        shimState->inputKeys.reserve(shimState->description.inputs.size());
+        for (const auto& input : shimState->description.inputs) shimState->inputKeys.push_back(input.key);
+        shimState->scratchValues.assign(shimState->description.inputs.size(), 0.0);
         return shimState.release();
     } catch (const std::exception& error) {
         g_createError = error.what();
@@ -100,16 +111,18 @@ bool evaluateInstance(void* self, std::uint64_t instanceId, double simulationTim
             throw std::runtime_error("In-process evaluation references an uninitialized instance.");
         }
         const auto& binding = found->second;
-        std::vector<double> orderedValues(shimState.description.inputs.size(), 0);
+        // Reused, not reallocated (see the ShimState fields' comment): a stale value from a
+        // previous call/instance could otherwise leak through for any index this instance's
+        // own binding doesn't touch, so unbound positions are explicitly reset to 0 first,
+        // matching the previous fresh-vector-per-call behavior exactly.
+        std::fill(shimState.scratchValues.begin(), shimState.scratchValues.end(), 0.0);
         for (std::size_t index = 0; index < binding.keyIndexes.size() && index < inputCountArg; ++index) {
-            orderedValues[binding.keyIndexes[index]] = inputs[index];
+            shimState.scratchValues[binding.keyIndexes[index]] = inputs[index];
         }
-        std::vector<std::string_view> keys;
-        keys.reserve(shimState.description.inputs.size());
-        for (const auto& input : shimState.description.inputs) keys.push_back(input.key);
 
         konjugate::sdk::v1::OutputCollector output;
-        shimState.provider->evaluate({simulationTime, stepSize, {orderedValues, keys}}, output);
+        shimState.provider->evaluate(
+            {simulationTime, stepSize, {shimState.scratchValues, shimState.inputKeys}}, output);
         *outValue = output.gradient();
         return true;
     } catch (const std::exception& error) {

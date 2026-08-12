@@ -447,6 +447,194 @@ void providerRuntimeSerializesConcurrentEvaluationsOverSharedMemory() {
         "Concurrent evaluation against a shared-memory provider worker produced a wrong result, hung, or corrupted the channel.");
 }
 
+void providerRuntimeCompilesAndExecutesAnInlineCppProviderInProcess() {
+    // Same fixture as the pipe/shared-memory versions, requesting the in-process transport
+    // instead: this is the one mode with no isolation and no fallback-on-platform-support-gap
+    // (it's attempted on every platform), so a clean pass here is a real dlopen/LoadLibrary +
+    // C-ABI round trip, not a fallback in disguise.
+    std::string cppImpl = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}
+        ],
+        "output": {"key": "gradient", "role": "target", "stateId": 12}
+    })json";
+
+    auto project = projectWithImplementation(cppImpl);
+    project.get_child("edges").begin()->second.put("implementation.source", cppInlineConductanceProviderSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto& node = plan.nodes.at(1);
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {290}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+
+    require(!evaluated.empty() && evaluated.front().value == 900,
+        "In-process C++ provider end-to-end evaluation failed.");
+
+    runtime.shutdown();
+}
+
+void providerRuntimeBatchesMultipleCppInstancesInProcessInOneRoundTrip() {
+    const auto plan = konjugate::compileExecutionPlan(sharedCppProviderSourceConvergingOnOneNodeProject());
+    const auto& node = plan.nodes.at(2);
+    require(node.contributions.size() == 2, "Test setup expected two provider contributions on the target node.");
+
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+
+    runtime.shutdown();
+
+    require(evaluated.size() == 2, "Expected one evaluated contribution per in-process shared-library instance.");
+    // cppInlineConductanceProviderSource() computes delta * 3.
+    bool sawSourceA = false;
+    bool sawSourceB = false;
+    for (const auto& contribution : evaluated) {
+        if (contribution.value == 900) sawSourceA = true;
+        if (contribution.value == 300) sawSourceB = true;
+    }
+    require(sawSourceA && sawSourceB,
+        "A single batched in-process call did not return correct, distinct values per instance.");
+}
+
+void providerRuntimeSerializesConcurrentEvaluationsInProcess() {
+    // Same intent as the pipe/shared-memory concurrency tests, but against
+    // InProcessProviderBackend: there is no IPC here to serialize by construction, so this is
+    // the test that actually proves the engine-side mutex does its job.
+    std::string cppImpl = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}
+        ],
+        "output": {"key": "gradient", "role": "target", "stateId": 12}
+    })json";
+    auto project = projectWithImplementation(cppImpl);
+    project.get_child("edges").begin()->second.put("implementation.source", cppInlineConductanceProviderSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto& node = plan.nodes.at(1);
+
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    std::atomic<bool> failed{false};
+    std::vector<std::thread> threads;
+    constexpr int threadCount = 8;
+    constexpr int iterationsPerThread = 50;
+    for (int t = 0; t < threadCount; ++t) {
+        threads.emplace_back([&] {
+            for (int i = 0; i < iterationsPerThread; ++i) {
+                try {
+                    const auto evaluated = konjugate::evaluateContributionTasks(
+                        node, {290}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+                    if (evaluated.empty() || evaluated.front().value != 900) failed = true;
+                } catch (...) {
+                    failed = true;
+                }
+            }
+        });
+    }
+    for (auto& thread : threads) thread.join();
+    runtime.shutdown();
+
+    require(!failed.load(),
+        "Concurrent evaluation against an in-process provider produced a wrong result, hung, or crashed.");
+}
+
+std::string cppInlineThrowingProviderSource() {
+    return R"cpp(
+#include <konjugate/relationshipProvider.hpp>
+#include <memory>
+#include <stdexcept>
+
+namespace {
+
+class ThrowingProvider final : public konjugate::sdk::v1::RelationshipProvider {
+public:
+    konjugate::sdk::v1::RelationshipDescription describe() const override {
+        return {"test.throwing", "Throwing",
+            {{"delta", "Temperature difference", "K"}},
+            {"gradient", "Temperature gradient", "K/s"}};
+    }
+
+    void evaluate(const konjugate::sdk::v1::EvaluationContext&,
+                  konjugate::sdk::v1::OutputCollector&) override {
+        throw std::runtime_error("intentional test failure");
+    }
+};
+
+}
+
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider() {
+    return std::make_unique<ThrowingProvider>();
+}
+)cpp";
+}
+
+void providerRuntimeInProcessSurfacesAProviderExceptionAcrossTheAbiBoundary() {
+    // providerInProcessAbi.hpp forbids C++ exceptions crossing the dlopen boundary; the shim
+    // must catch the provider's own throw and report it through lastError() instead. This
+    // verifies that round trip actually reconstructs a normal C++ exception on the engine side.
+    std::string cppImpl = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}
+        ],
+        "output": {"key": "gradient", "role": "target", "stateId": 12}
+    })json";
+
+    auto project = projectWithImplementation(cppImpl);
+    project.get_child("edges").begin()->second.put("implementation.source", cppInlineThrowingProviderSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto& node = plan.nodes.at(1);
+    bool threw = false;
+    std::string message;
+    try {
+        konjugate::evaluateContributionTasks(
+            node, {290}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+    } catch (const std::exception& error) {
+        threw = true;
+        message = error.what();
+    }
+
+    runtime.shutdown();
+
+    require(threw, "An in-process provider exception should surface as a C++ exception from evaluateBatch.");
+    require(message.find("intentional test failure") != std::string::npos,
+        "The in-process provider's exception message should propagate through lastError().");
+}
+
 boost::property_tree::ptree twoIndependentProviderEdgesProject() {
     std::istringstream json(R"json({
         "format": "konjugate",
@@ -773,6 +961,10 @@ int main() {
     providerRuntimeCompilesAndExecutesAnInlineCppProviderOverSharedMemory();
     providerRuntimeBatchesMultipleCppInstancesOverSharedMemoryInOneRoundTrip();
     providerRuntimeSerializesConcurrentEvaluationsOverSharedMemory();
+    providerRuntimeCompilesAndExecutesAnInlineCppProviderInProcess();
+    providerRuntimeBatchesMultipleCppInstancesInProcessInOneRoundTrip();
+    providerRuntimeSerializesConcurrentEvaluationsInProcess();
+    providerRuntimeInProcessSurfacesAProviderExceptionAcrossTheAbiBoundary();
     evaluateContributionTasksBatchesTasksSharingAProviderSource();
     providerRuntimeBatchesMultipleInstancesSharingAWorkerInOneRoundTrip();
     providerRuntimeResolvesTasksByStableSourceIdAcrossCollidingLocalSequences();

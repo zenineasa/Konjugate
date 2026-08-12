@@ -199,6 +199,24 @@
                 </div>
                 <p id="toolchainPythonStatus" class="assistantConfigurationStatus"></p>
             </section>
+            <section class="executionConfiguration">
+                <details id="providerExecutionModeAdvanced" class="executionAdvanced">
+                    <summary>Advanced: C++ provider execution mode</summary>
+                    <label><span>Mode</span>
+                        <select id="providerExecutionMode">
+                            <option value="">Automatic (recommended)</option>
+                            <option value="pipeWorker">Isolated process (safest, slowest)</option>
+                            <option value="sharedMemoryWorker">Shared memory (fast, still isolated)</option>
+                            <option value="inProcess">In-process (fastest, experimental)</option>
+                        </select>
+                    </label>
+                    <p id="providerExecutionModeWarning" class="assistantConfigurationStatus warning" role="alert" hidden>
+                        In-process mode runs relationship code directly inside Konjugate, with no isolation: a bug or
+                        crash in a relationship's own code will crash Konjugate itself, not just that simulation.
+                        Only choose this for provider code you trust.
+                    </p>
+                </details>
+            </section>
             <div class="passwordError" id="providerToolchainsError" role="alert"></div>
             <footer><button id="providerToolchainsCancel" type="button">Cancel</button><button id="providerToolchainsSave" class="doneButton" type="submit">Save</button></footer>
         </form>

@@ -22,7 +22,7 @@ import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
-import { createProviderToolchainStore } from './providerToolchainStore.mjs';
+import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
@@ -996,6 +996,22 @@ ipcMain.handle('providerToolchainBrowse', async (event, kind) => {
     return result.filePaths[0];
 });
 
+// Advanced/expert setting: how C++ relationship providers run relative to the engine process.
+// See ProviderExecutionMode in the engine for what each option actually does; '' ("Automatic")
+// leaves it to the engine's own default rather than persisting a specific choice, so a future
+// change to that default reaches users who never touched this setting.
+ipcMain.handle('providerExecutionModeGet', async (event) => {
+    requireMainWindow(event);
+    const settings = await providerToolchainStore.get();
+    return { executionMode: settings.executionMode, options: providerExecutionModes };
+});
+
+ipcMain.handle('providerExecutionModeSet', async (event, executionMode) => {
+    requireMainWindow(event);
+    const settings = await providerToolchainStore.set('executionMode', executionMode);
+    return { executionMode: settings.executionMode };
+});
+
 ipcMain.handle('aiListConfigurations', async (event) => {
     requireProjectWindow(event);
     const result = await aiConfigurationStore.list();
@@ -1088,13 +1104,15 @@ ipcMain.handle('aiCancelRequest', async (event, requestUuid) => {
 const engineOptions = async () => {
     const resolvedCpp = await resolveCppCompiler();
     const resolvedPython = await resolvePythonInterpreter();
+    const { executionMode } = await providerToolchainStore.get();
     return {
         applicationPath: app.getAppPath(),
         resourcesPath: process.resourcesPath,
         packaged: app.isPackaged,
         providerToolchains: {
             cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
-            python: { interpreterPath: resolvedPython ?? '' }
+            python: { interpreterPath: resolvedPython ?? '' },
+            executionMode
         }
     };
 };

@@ -126,7 +126,7 @@ set_target_properties(konjugateEngine PROPERTIES
     INSTALL_RPATH "$ORIGIN"
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads)
+target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads ${CMAKE_DL_LIBS})
 target_compile_definitions(konjugateEngine PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
 if(KONJUGATE_HAS_METIS)
     target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
@@ -138,14 +138,27 @@ add_library(konjugateProviderWorker STATIC
 )
 target_include_directories(konjugateProviderWorker PUBLIC include)
 
+# Compile-check only, same purpose as konjugateProviderWorker above: buildCppProvider() compiles
+# and links this against a user's inline source at run time, outside of CMake entirely, but
+# building it here as part of the ordinary CMake build catches a broken shim early.
+add_library(konjugateProviderInProcessShim STATIC
+    src/providerInProcessShim.cpp
+)
+target_include_directories(konjugateProviderInProcessShim PUBLIC include)
+
 install(TARGETS konjugateEngine RUNTIME DESTINATION .)
 # The C++/Python provider SDKs are source, not build output, but a packaged app still needs
 # them on disk: buildCppProvider() compiles inline C++ providers against the public header and
-# links them against providerWorker.cpp at run time, and Python providers need the konjugate
-# package on PYTHONPATH. See cppProviderSdkPath()/pythonProviderSdkPath() in engineAdapter.mjs,
-# which expect exactly this layout under the packaged resources directory.
+# links them against providerWorker.cpp (or, for ProviderExecutionMode::inProcess,
+# providerInProcessShim.cpp) at run time, and Python providers need the konjugate package on
+# PYTHONPATH. See cppProviderSdkPath()/pythonProviderSdkPath() in engineAdapter.mjs, which
+# expect exactly this layout under the packaged resources directory.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/konjugate" DESTINATION include)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp" DESTINATION src)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"
+    DESTINATION src
+)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sdk/python/konjugate" DESTINATION sdk/python
     PATTERN "__pycache__" EXCLUDE
 )
@@ -202,7 +215,7 @@ if(BUILD_TESTING)
         src/providerRuntime.cpp
     )
     target_include_directories(relationshipProviderTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-    target_link_libraries(relationshipProviderTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads)
+    target_link_libraries(relationshipProviderTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
     add_test(NAME relationshipProviderTests COMMAND relationshipProviderTests)
     # The test binary resolves provider sources/SDK paths (e.g. "../tests/...", cppSdkPath "..")
     # relative to engine/tests, and its Python-provider cases need the SDK on PYTHONPATH; ctest's
@@ -230,7 +243,7 @@ if(BUILD_TESTING)
         src/providerRuntime.cpp
     )
     target_include_directories(providerBatchingBenchmark PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-    target_link_libraries(providerBatchingBenchmark PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads)
+    target_link_libraries(providerBatchingBenchmark PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
 endif()
 
 if(MSVC)

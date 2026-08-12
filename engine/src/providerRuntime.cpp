@@ -3,6 +3,7 @@
 #include "providerRuntime.hpp"
 #include "relationshipProvider.pb.h"
 #include "konjugate/providerSharedMemoryChannel.hpp"
+#include "konjugate/providerInProcessAbi.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,7 @@ using ssize_t = intptr_t;
 using pid_t = int;
 #else
 #include <cerrno>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <semaphore.h>
 #include <sys/mman.h>
@@ -395,12 +397,20 @@ MsvcEnvironmentFlags getMsvcEnvironmentFlags(const std::string& compilerPath) {
 }
 #endif
 
-// Compiles an inline C++ relationship's source, together with the public SDK header and
-// Konjugate's worker wrapper, into a native provider executable. The build is cached on
-// disk by a hash of the source text, so repeated runs of the same inline implementation
-// only pay the compile cost once. This is a minimal first build pipeline: it does not yet
-// run declared conformance tests or record compiler identity/artifact hash in the project.
-std::string buildCppProvider(const std::string& source, const ProviderConfiguration& config) {
+// executable pairs the inline source with providerWorker.cpp into a standalone process (used
+// by the pipe and shared-memory transports); sharedLibrary pairs it with
+// providerInProcessShim.cpp into a dlopen()'d/LoadLibrary()'d plugin (used by the in-process
+// transport). Both live under the same source-hash build directory, just as different
+// filenames, so choosing a different mode for the same source never collides with a
+// previously-built artifact of the other kind.
+enum class CppProviderArtifactKind { executable, sharedLibrary };
+
+// Compiles an inline C++ relationship's source, together with the public SDK header and one of
+// Konjugate's glue wrappers, into a native provider artifact. The build is cached on disk by a
+// hash of the source text, so repeated runs of the same inline implementation only pay the
+// compile cost once. This is a minimal first build pipeline: it does not yet run declared
+// conformance tests or record compiler identity/artifact hash in the project.
+std::string buildCppProvider(const std::string& source, const ProviderConfiguration& config, CppProviderArtifactKind kind) {
     if (config.cppSdkPath.empty()) {
         throw std::runtime_error(
             "A C++ relationship provider requires providers.cpp.sdkPath to locate the Konjugate C++ SDK.");
@@ -411,13 +421,17 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
         ? std::filesystem::temp_directory_path() / "konjugateProviders"
         : std::filesystem::path(config.buildDirectory);
     const auto providerDirectory = buildRoot / hash;
+    const bool sharedLibrary = kind == CppProviderArtifactKind::sharedLibrary;
+    const std::string glueFile = sharedLibrary ? "providerInProcessShim.cpp" : "providerWorker.cpp";
 #ifdef _WIN32
-    const auto executablePath = providerDirectory / "provider.exe";
+    const auto artifactPath = providerDirectory / (sharedLibrary ? "provider.dll" : "provider.exe");
+#elif defined(__APPLE__)
+    const auto artifactPath = providerDirectory / (sharedLibrary ? "provider.dylib" : "provider");
 #else
-    const auto executablePath = providerDirectory / "provider";
+    const auto artifactPath = providerDirectory / (sharedLibrary ? "provider.so" : "provider");
 #endif
 
-    if (!std::filesystem::exists(executablePath)) {
+    if (!std::filesystem::exists(artifactPath)) {
         std::filesystem::create_directories(providerDirectory);
         const auto sourcePath = providerDirectory / "relationship.cpp";
         std::ofstream sourceFile(sourcePath, std::ios::trunc);
@@ -440,10 +454,11 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
                 "/EHsc",
                 "/nologo",
                 "/I" + (sdkRoot / "include").string(),
-                sourcePath.string(),
-                (sdkRoot / "src" / "providerWorker.cpp").string(),
-                "/Fe" + executablePath.string()
             };
+            if (sharedLibrary) arguments.push_back("/LD");
+            arguments.push_back(sourcePath.string());
+            arguments.push_back((sdkRoot / "src" / glueFile).string());
+            arguments.push_back("/Fe" + artifactPath.string());
 #ifdef _WIN32
             auto msvcFlags = getMsvcEnvironmentFlags(compiler);
             arguments.insert(arguments.end(), msvcFlags.includeFlags.begin(), msvcFlags.includeFlags.end());
@@ -454,11 +469,16 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
 #endif
         } else {
             arguments = {"-std=c++20", "-O1", "-I" + (sdkRoot / "include").string()};
+            if (sharedLibrary) {
+                arguments.push_back("-shared");
+                arguments.push_back("-fPIC");
+            }
 #ifndef _WIN32
-            // providerWorker.cpp's shared-memory fast path uses std::thread and POSIX
-            // semaphores; harmless to always pass this even for a build that ends up staying
-            // on the pipe transport.
-            arguments.push_back("-pthread");
+            if (!sharedLibrary) {
+                // Only providerWorker.cpp's shared-memory fast path uses std::thread and POSIX
+                // semaphores; the in-process shim needs neither.
+                arguments.push_back("-pthread");
+            }
 #endif
 #ifdef __APPLE__
             if (const auto sysroot = resolveAppleSdkSysroot(); !sysroot.empty()) {
@@ -467,24 +487,26 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
             }
 #endif
             arguments.push_back(sourcePath.string());
-            arguments.push_back((sdkRoot / "src" / "providerWorker.cpp").string());
+            arguments.push_back((sdkRoot / "src" / glueFile).string());
             arguments.push_back("-o");
-            arguments.push_back(executablePath.string());
+            arguments.push_back(artifactPath.string());
 #if !defined(_WIN32) && !defined(__APPLE__)
-            // shm_open/sem_open historically require linking librt on Linux (folded into libc
-            // only since glibc 2.34); passing -lrt is harmless on newer glibc too.
-            arguments.push_back("-lrt");
+            if (!sharedLibrary) {
+                // shm_open/sem_open historically require linking librt on Linux (folded into
+                // libc only since glibc 2.34); passing -lrt is harmless on newer glibc too.
+                arguments.push_back("-lrt");
+            }
 #endif
         }
 
         const auto result = runCppCompiler(compiler, arguments);
         if (!result.success) {
-            std::filesystem::remove(executablePath);
+            std::filesystem::remove(artifactPath);
             throw std::runtime_error("Failed to compile the C++ relationship provider:\n" + result.diagnostics);
         }
     }
 
-    return executablePath.string();
+    return artifactPath.string();
 }
 
 } // anonymous namespace
@@ -1031,24 +1053,172 @@ private:
 };
 #endif
 
-namespace {
-
-// SharedMemoryProviderBackend is only ever attempted for cppProvider tasks in
-// sharedMemoryWorker mode and only compiled on POSIX; any construction failure (including,
-// on Windows, the mode simply not being available) falls back to the always-available pipe
-// backend so a single unsupported/misconfigured host never blocks a whole run.
-std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, ContributionImplementation implementation,
-                                                        const std::string& launchPath, const ProviderConfiguration& config) {
-#ifndef _WIN32
-    if (implementation == ContributionImplementation::cppProvider &&
-        config.executionMode == ProviderExecutionMode::sharedMemoryWorker) {
-        try {
-            return std::make_unique<SharedMemoryProviderBackend>(key, implementation, launchPath, config);
-        } catch (const std::exception& error) {
-            std::cerr << "Falling back to the pipe provider transport for '" << key << "': " << error.what() << '\n';
+// Loads the provider directly into the engine process via dlopen()/LoadLibrary() and calls it
+// through the C ABI in providerInProcessAbi.hpp — no IPC, no worker process. This is the
+// fastest transport by a wide margin, but it gives up process isolation entirely: a crash,
+// hang, or stack overflow in the provider's own code takes the whole engine process with it,
+// so ProviderExecutionMode::inProcess is meant to stay an explicit opt-in for providers the
+// caller already trusts, never a default. Available on Windows too (LoadLibrary/GetProcAddress
+// carry none of SharedMemoryProviderBackend's cross-process-synchronization-primitive
+// portability concerns), so this is not POSIX-gated the way that backend is.
+class InProcessProviderBackend final : public ProviderBackend {
+public:
+    InProcessProviderBackend(std::string processKey, ContributionImplementation implementation,
+                             std::string libraryPath, const ProviderConfiguration& config)
+        : processKey_(std::move(processKey)) {
+        static_cast<void>(implementation);
+        static_cast<void>(config);
+        loadLibrary(libraryPath);
+        instance_ = vtable_->create();
+        if (!instance_) {
+            const std::string message = vtable_->lastError(nullptr);
+            unloadLibrary();
+            throw std::runtime_error("Failed to construct in-process provider '" + processKey_ + "': " + message);
         }
     }
+
+    ~InProcessProviderBackend() override { unload(); }
+
+    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
+        std::vector<std::string> keys;
+        keys.reserve(bindings.size());
+        for (const auto& binding : bindings) keys.push_back(binding.symbol);
+        pendingInstances_.emplace_back(instanceId, std::move(keys));
+    }
+
+    void sendInitialization() override {
+        for (const auto& [instanceId, keys] : pendingInstances_) {
+            std::vector<const char*> keyPointers;
+            keyPointers.reserve(keys.size());
+            for (const auto& key : keys) keyPointers.push_back(key.c_str());
+            if (!vtable_->initializeInstance(instance_, instanceId, keyPointers.data(),
+                                             static_cast<std::uint32_t>(keyPointers.size()))) {
+                throw std::runtime_error("In-process provider '" + processKey_ + "' failed to initialize an instance: " +
+                    std::string(vtable_->lastError(instance_)));
+            }
+        }
+        pendingInstances_.clear();
+    }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t sequence, double simulationTime, double stepSize,
+        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) override {
+        static_cast<void>(sequence);
+        // There is no IPC to serialize here, but user-authored provider code is not guaranteed
+        // thread-safe (e.g. it may hold mutable member state a real relationship implementation
+        // updates across calls); matching the concurrency guarantee the other two backends
+        // already give such code, calls stay serialized here too rather than silently imposing
+        // a new thread-safety requirement on existing provider implementations.
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::pair<std::uint64_t, double>> results;
+        results.reserve(evaluations.size());
+        for (const auto& [instanceId, inputs] : evaluations) {
+            double value = 0;
+            if (!vtable_->evaluateInstance(instance_, instanceId, simulationTime, stepSize,
+                                           inputs.data(), static_cast<std::uint32_t>(inputs.size()), &value)) {
+                throw std::runtime_error("In-process provider '" + processKey_ + "' evaluation failed: " +
+                    std::string(vtable_->lastError(instance_)));
+            }
+            results.emplace_back(instanceId, value);
+        }
+        return results;
+    }
+
+    void shutdown() noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        unload();
+    }
+
+private:
+    void loadLibrary(const std::string& path) {
+#ifdef _WIN32
+        handle_ = ::LoadLibraryA(path.c_str());
+        if (!handle_) throw std::runtime_error("Failed to load in-process provider library '" + path + "'.");
+        auto entryPoint = reinterpret_cast<KonjugateInProcessProviderV1Fn>(
+            ::GetProcAddress(handle_, kKonjugateInProcessProviderEntryPoint));
+#else
+        handle_ = ::dlopen(path.c_str(), RTLD_LOCAL | RTLD_NOW);
+        if (!handle_) {
+            throw std::runtime_error("Failed to load in-process provider library '" + path + "': " +
+                std::string(::dlerror()));
+        }
+        auto entryPoint = reinterpret_cast<KonjugateInProcessProviderV1Fn>(
+            ::dlsym(handle_, kKonjugateInProcessProviderEntryPoint));
 #endif
+        if (!entryPoint) {
+            unloadLibrary();
+            throw std::runtime_error("In-process provider library '" + path + "' is missing its entry point.");
+        }
+        vtable_ = entryPoint();
+        if (!vtable_) {
+            unloadLibrary();
+            throw std::runtime_error("In-process provider library '" + path + "' returned a null vtable.");
+        }
+    }
+
+    void unloadLibrary() noexcept {
+#ifdef _WIN32
+        if (handle_) { ::FreeLibrary(handle_); handle_ = nullptr; }
+#else
+        if (handle_) { ::dlclose(handle_); handle_ = nullptr; }
+#endif
+        vtable_ = nullptr;
+    }
+
+    void unload() noexcept {
+        if (instance_ && vtable_) {
+            vtable_->shutdownProvider(instance_);
+            vtable_->destroy(instance_);
+            instance_ = nullptr;
+        }
+        unloadLibrary();
+    }
+
+    std::string processKey_;
+    const KonjugateInProcessProviderV1* vtable_ = nullptr;
+    void* instance_ = nullptr;
+#ifdef _WIN32
+    HMODULE handle_ = nullptr;
+#else
+    void* handle_ = nullptr;
+#endif
+    std::vector<std::pair<std::uint64_t, std::vector<std::string>>> pendingInstances_;
+    std::mutex mutex_;
+};
+
+namespace {
+
+// Each tier is only attempted for cppProvider tasks in its matching (or a higher) execution
+// mode; any construction failure — including a mode simply not being available on this
+// platform — falls back down the chain (inProcess -> sharedMemoryWorker -> pipeWorker) so a
+// single unsupported/misconfigured host never blocks a whole run. Python providers always use
+// the pipe backend: neither faster transport has a story for an interpreted language.
+std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, ContributionImplementation implementation,
+                                                        const std::string& providerSource, const ProviderConfiguration& config) {
+    if (implementation == ContributionImplementation::cppProvider) {
+        if (config.executionMode == ProviderExecutionMode::inProcess) {
+            try {
+                const auto libraryPath = buildCppProvider(providerSource, config, CppProviderArtifactKind::sharedLibrary);
+                return std::make_unique<InProcessProviderBackend>(key, implementation, libraryPath, config);
+            } catch (const std::exception& error) {
+                std::cerr << "Falling back from the in-process provider transport for '" << key << "': " << error.what() << '\n';
+            }
+        }
+#ifndef _WIN32
+        if (config.executionMode == ProviderExecutionMode::inProcess ||
+            config.executionMode == ProviderExecutionMode::sharedMemoryWorker) {
+            try {
+                const auto executablePath = buildCppProvider(providerSource, config, CppProviderArtifactKind::executable);
+                return std::make_unique<SharedMemoryProviderBackend>(key, implementation, executablePath, config);
+            } catch (const std::exception& error) {
+                std::cerr << "Falling back to the pipe provider transport for '" << key << "': " << error.what() << '\n';
+            }
+        }
+#endif
+    }
+    const auto launchPath = implementation == ContributionImplementation::cppProvider
+        ? buildCppProvider(providerSource, config, CppProviderArtifactKind::executable)
+        : preparePythonProviderSource(providerSource, config);
     return std::make_unique<PipeProviderBackend>(key, implementation, launchPath, config);
 }
 
@@ -1071,10 +1241,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             const std::string key = providerProcessKey(task);
             auto& proc = processes_[key];
             if (!proc) {
-                const std::string launchPath = task.implementation == ContributionImplementation::cppProvider
-                    ? buildCppProvider(task.providerSource, configuration_)
-                    : preparePythonProviderSource(task.providerSource, configuration_);
-                proc = createProviderBackend(key, task.implementation, launchPath, configuration_);
+                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_);
             }
 
             const std::uint64_t instanceId = nextInstanceId_++;

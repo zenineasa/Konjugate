@@ -112,14 +112,18 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         pacing: initialPacing,
         providers: {
             ...configuration.providers,
-            // Internal engine-level lever (see ProviderExecutionMode), not a user-facing
-            // setting: defaults C++ provider processes onto the shared-memory transport, with
-            // an env var escape hatch for quickly reverting to the pipe transport if needed.
-            // ProviderRuntime already falls back to the pipe transport per-process on any
-            // shared-memory setup failure, so this is safe to default on.
+            // See ProviderExecutionMode in the engine. Precedence: an explicit per-run override
+            // (not currently set by anything in this app, but available to callers/tests) wins
+            // over a developer's session-scoped env var override, which wins over the user's
+            // own choice in the Provider Toolchains dialog's advanced section (empty string
+            // there means "Automatic" — deliberately falsy, so it falls through here), which
+            // falls back to sharedMemoryWorker as the default. ProviderRuntime already falls
+            // back to the pipe transport per-process on any higher-tier setup failure, so
+            // defaulting sharedMemoryWorker on is safe even for users who never touch this.
             executionMode: configuration.providers?.executionMode
-                ?? process.env.KONJUGATE_PROVIDER_EXECUTION_MODE
-                ?? 'sharedMemoryWorker',
+                || process.env.KONJUGATE_PROVIDER_EXECUTION_MODE
+                || options.providerToolchains?.executionMode
+                || 'sharedMemoryWorker',
             cpp: {
                 sdkPath: cppProviderSdkPath(options),
                 ...(options.providerToolchains?.cpp?.compilerPath ? { compiler: options.providerToolchains.cpp.compilerPath } : {}),

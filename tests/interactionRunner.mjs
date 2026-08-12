@@ -251,6 +251,42 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Updated numerical settings were not validated.');
     });
 
+    await run('advanced provider execution mode selector persists a choice and warns for in-process', async () => {
+        // Opening/saving this dialog awaits real IPC round trips before flipping dialog.open,
+        // so each step below waits for that observable state change rather than assuming a
+        // click's synchronous return means the async handler it triggered has finished.
+        await evaluate(window, `document.querySelector('#providerToolchainsButton').click()`);
+        await waitFor(window, `document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#providerExecutionMode').value`), '');
+        assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), false);
+
+        await evaluate(window, `(() => {
+            const select = document.querySelector('#providerExecutionMode');
+            select.value = 'inProcess';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), true);
+
+        await evaluate(window, `(() => {
+            const select = document.querySelector('#providerExecutionMode');
+            select.value = 'sharedMemoryWorker';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), false);
+        await evaluate(window, `document.querySelector('#providerToolchainsSave').click()`);
+        await waitFor(window, `!document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not close after saving.');
+
+        await evaluate(window, `document.querySelector('#providerToolchainsButton').click()`);
+        await waitFor(window, `document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not reopen.');
+        assert.equal(await evaluate(window, `document.querySelector('#providerExecutionMode').value`), 'sharedMemoryWorker');
+
+        // Reset to Automatic so this machine-global (not project-scoped) preference does not
+        // leak into later tests in this same run.
+        await evaluate(window, `document.querySelector('#providerExecutionMode').value = ''`);
+        await evaluate(window, `document.querySelector('#providerToolchainsSave').click()`);
+        await waitFor(window, `!document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not close after resetting.');
+    });
+
     await run('Run invokes the C++ simulation and displays state results', async () => {
         assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);

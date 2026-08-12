@@ -64,7 +64,11 @@ contextBridge.exposeInMainWorld('providerToolchains', {
     get: (kind) => ipcRenderer.invoke('providerToolchainGet', kind),
     set: (kind, path) => ipcRenderer.invoke('providerToolchainSet', { kind, path }),
     test: (kind, path) => ipcRenderer.invoke('providerToolchainTest', { kind, path }),
-    browse: (kind) => ipcRenderer.invoke('providerToolchainBrowse', kind)
+    browse: (kind) => ipcRenderer.invoke('providerToolchainBrowse', kind),
+    executionMode: {
+        get: () => ipcRenderer.invoke('providerExecutionModeGet'),
+        set: (executionMode) => ipcRenderer.invoke('providerExecutionModeSet', executionMode)
+    }
 });
 
 const graphClipboardFormat = 'application/x-konjugate-graph-fragment';

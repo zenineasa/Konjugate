@@ -6,14 +6,29 @@ import { join } from 'node:path';
 
 export const providerToolchainStoreVersion = 1;
 
+// '' means "automatic": let the engine pick (currently sharedMemoryWorker, see
+// ProviderExecutionMode in the engine). The other three mirror the engine's enum exactly.
+export const providerExecutionModes = ['', 'pipeWorker', 'sharedMemoryWorker', 'inProcess'];
+
 function defaultState() {
-    return { version: providerToolchainStoreVersion, cpp: { compilerPath: '' }, python: { interpreterPath: '' } };
+    return { version: providerToolchainStoreVersion, cpp: { compilerPath: '' }, python: { interpreterPath: '' }, executionMode: '' };
 }
 
 function validState(candidate) {
+    // executionMode is intentionally not required here: a toolchains.json written before this
+    // field existed must still validate, so its compiler/interpreter overrides survive an
+    // upgrade instead of being silently reset to defaultState(). normalizeState() below fills
+    // in a default for whatever this leaves out.
     return candidate?.version === providerToolchainStoreVersion &&
         typeof candidate.cpp?.compilerPath === 'string' &&
         typeof candidate.python?.interpreterPath === 'string';
+}
+
+function normalizeState(candidate) {
+    return {
+        ...candidate,
+        executionMode: providerExecutionModes.includes(candidate.executionMode) ? candidate.executionMode : ''
+    };
 }
 
 // Machine-local override paths for the C++ compiler and Python interpreter used to build and
@@ -40,7 +55,7 @@ export function createProviderToolchainStore({ directory, uuidFactory = randomUU
         await mkdir(directory, { recursive: true });
         try {
             const loaded = JSON.parse(await readFile(settingsPath, 'utf8'));
-            state = validState(loaded) ? loaded : defaultState();
+            state = validState(loaded) ? normalizeState(loaded) : defaultState();
         } catch (error) {
             if (error.code !== 'ENOENT') throw error;
             state = defaultState();
@@ -52,11 +67,19 @@ export function createProviderToolchainStore({ directory, uuidFactory = randomUU
             await initialize();
             return structuredClone(state);
         },
-        async set(kind, path) {
+        async set(kind, value) {
             await initialize();
-            const trimmed = (path ?? '').trim();
-            if (kind === 'python') state.python = { interpreterPath: trimmed };
-            else state.cpp = { compilerPath: trimmed };
+            if (kind === 'executionMode') {
+                const trimmed = (value ?? '').trim();
+                if (!providerExecutionModes.includes(trimmed)) {
+                    throw new Error(`Unsupported provider execution mode: "${trimmed}".`);
+                }
+                state.executionMode = trimmed;
+            } else {
+                const trimmed = (value ?? '').trim();
+                if (kind === 'python') state.python = { interpreterPath: trimmed };
+                else state.cpp = { compilerPath: trimmed };
+            }
             await persist();
             return structuredClone(state);
         }

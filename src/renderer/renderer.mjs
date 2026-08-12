@@ -3426,9 +3426,19 @@ async function browseToolchainField(kind) {
     if (path) toolchainFields(kind).path.value = path;
 }
 
+function updateProviderExecutionModeWarning() {
+    $('#providerExecutionModeWarning').hidden = $('#providerExecutionMode').value !== 'inProcess';
+}
+
+async function refreshProviderExecutionMode() {
+    const { executionMode } = await window.providerToolchains.executionMode.get();
+    $('#providerExecutionMode').value = executionMode;
+    updateProviderExecutionModeWarning();
+}
+
 $('#providerToolchainsButton').addEventListener('click', async () => {
     $('#providerToolchainsError').textContent = '';
-    await Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python')]);
+    await Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode()]);
     $('#providerToolchainsDialog').showModal();
 });
 $('#providerToolchainsCancel').addEventListener('click', () => $('#providerToolchainsDialog').close());
@@ -3436,6 +3446,7 @@ $('#toolchainCppBrowse').addEventListener('click', () => browseToolchainField('c
 $('#toolchainPythonBrowse').addEventListener('click', () => browseToolchainField('python'));
 $('#toolchainCppTest').addEventListener('click', () => testToolchainField('cpp'));
 $('#toolchainPythonTest').addEventListener('click', () => testToolchainField('python'));
+$('#providerExecutionMode').addEventListener('change', updateProviderExecutionModeWarning);
 $('#providerToolchainsDialog').addEventListener('submit', async (event) => {
     event.preventDefault();
     const error = $('#providerToolchainsError');
@@ -3443,6 +3454,7 @@ $('#providerToolchainsDialog').addEventListener('submit', async (event) => {
     try {
         await window.providerToolchains.set('cpp', $('#toolchainCppPath').value);
         await window.providerToolchains.set('python', $('#toolchainPythonPath').value);
+        await window.providerToolchains.executionMode.set($('#providerExecutionMode').value);
         $('#providerToolchainsDialog').close();
     } catch (submitError) {
         error.textContent = submitError.message;

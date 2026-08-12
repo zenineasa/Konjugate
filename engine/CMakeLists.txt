@@ -204,6 +204,14 @@ if(BUILD_TESTING)
     target_include_directories(relationshipProviderTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(relationshipProviderTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads)
     add_test(NAME relationshipProviderTests COMMAND relationshipProviderTests)
+    # The test binary resolves provider sources/SDK paths (e.g. "../tests/...", cppSdkPath "..")
+    # relative to engine/tests, and its Python-provider cases need the SDK on PYTHONPATH; ctest's
+    # default working directory is the build directory, not the source tree, so both must be set
+    # explicitly here (mirroring the pythonRelationshipProviderTest entry below).
+    set_tests_properties(relationshipProviderTests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
+    )
     if(Python3_Interpreter_FOUND)
         add_test(
             NAME pythonRelationshipProviderTest
@@ -212,6 +220,17 @@ if(BUILD_TESTING)
                 "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/pythonRelationshipProviderTest.py"
         )
     endif()
+
+    # A manual perf tool, not a pass/fail test: intentionally left out of add_test/ctest.
+    add_executable(providerBatchingBenchmark
+        tests/providerBatchingBenchmark.cpp
+        ${PROVIDER_PROTOCOL_SOURCES}
+        ${PROVIDER_PROTOCOL_HEADERS}
+        src/executionPlan.cpp
+        src/providerRuntime.cpp
+    )
+    target_include_directories(providerBatchingBenchmark PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(providerBatchingBenchmark PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads)
 endif()
 
 if(MSVC)

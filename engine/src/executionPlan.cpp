@@ -5,6 +5,7 @@
 #include <cmath>
 #include <numeric>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace konjugate {
@@ -316,6 +317,20 @@ std::vector<std::size_t> planTaskSubmissionOrder(const std::vector<NodeExecution
     return order;
 }
 
+std::string providerProcessKey(const ContributionTask& task) {
+    return (task.implementation == ContributionImplementation::pythonProvider ? "py:" : "cpp:") + task.providerSource;
+}
+
+namespace {
+
+double finalizeContribution(const ContributionTask& task, double contribution) {
+    if (task.negateOutput) contribution = -contribution;
+    if (!std::isfinite(contribution)) throw std::runtime_error("A contribution task produced a non-finite derivative.");
+    return contribution;
+}
+
+}
+
 std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeExecutionPlan& node,
     const StateValues& localStates,
@@ -326,9 +341,17 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     ProviderEvaluator* providerEvaluator) {
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
+
+    // Provider tasks are collected by process key rather than evaluated immediately, so every
+    // instance of a shared provider in this node can go out in a single evaluateBatch call
+    // instead of one round trip per contribution.
+    std::unordered_map<std::string, std::vector<std::size_t>> providerGroups;
+    std::vector<std::vector<double>> symbolsByTask(node.contributions.size());
+
     for (std::size_t taskIndex = 0; taskIndex < node.contributions.size(); ++taskIndex) {
         const auto& task = node.contributions[taskIndex];
-        std::vector<double> symbols(task.bindings.size());
+        auto& symbols = symbolsByTask[taskIndex];
+        symbols.resize(task.bindings.size());
         for (std::size_t index = 0; index < task.bindings.size(); ++index) {
             const auto& binding = task.bindings[index];
             if (binding.source == BindingSource::parameter) {
@@ -336,15 +359,37 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueIndex);
             else symbols[index] = synchronizationSnapshot.at(binding.valueIndex);
         }
-        auto contribution = task.implementation == ContributionImplementation::equation
-            ? task.expression.evaluate(symbols)
-            : (providerEvaluator
-                ? providerEvaluator->evaluate(task, symbols, simulationTime, stepSize)
-                : throw std::runtime_error("A programmable relationship requires an initialized provider runtime."));
-        if (task.negateOutput) contribution = -contribution;
-        if (!std::isfinite(contribution)) throw std::runtime_error("A contribution task produced a non-finite derivative.");
-        evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
+
+        if (task.implementation == ContributionImplementation::equation) {
+            const auto contribution = finalizeContribution(task, task.expression.evaluate(symbols));
+            evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
+        } else {
+            providerGroups[providerProcessKey(task)].push_back(taskIndex);
+        }
     }
+
+    for (const auto& [key, taskIndexes] : providerGroups) {
+        if (!providerEvaluator) throw std::runtime_error("A programmable relationship requires an initialized provider runtime.");
+
+        std::vector<const ContributionTask*> tasks;
+        std::vector<std::vector<double>> inputs;
+        tasks.reserve(taskIndexes.size());
+        inputs.reserve(taskIndexes.size());
+        for (const auto taskIndex : taskIndexes) {
+            tasks.push_back(&node.contributions[taskIndex]);
+            inputs.push_back(symbolsByTask[taskIndex]);
+        }
+
+        const auto results = providerEvaluator->evaluateBatch(tasks, inputs, simulationTime, stepSize);
+        if (results.size() != tasks.size()) {
+            throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
+        }
+        for (std::size_t index = 0; index < tasks.size(); ++index) {
+            const auto& task = *tasks[index];
+            evaluated.push_back({task.sequence, task.outputStateIndex, finalizeContribution(task, results[index])});
+        }
+    }
+
     return evaluated;
 }
 

@@ -76,18 +76,48 @@ bool hasIssue(const konjugate::ValidationResult& result, const std::string& code
 
 class RecordingEvaluator final : public konjugate::ProviderEvaluator {
 public:
-    double evaluate(const konjugate::ContributionTask& task,
-                    const std::vector<double>& inputs,
-                    double simulationTime,
-                    double stepSize) override {
+    std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>& tasks,
+                                      const std::vector<std::vector<double>>& inputs,
+                                      double simulationTime,
+                                      double stepSize) override {
+        require(tasks.size() == 1, "This test expects exactly one provider task in the batch.");
+        const auto& task = *tasks.front();
+        const auto& taskInputs = inputs.front();
         require(task.providerOutputKey == "targetTemperatureGradient", "The evaluator received the wrong provider task.");
-        require(inputs == std::vector<double>({300, 2}), "The evaluator received incorrectly resolved provider inputs.");
+        require(taskInputs == std::vector<double>({300, 2}), "The evaluator received incorrectly resolved provider inputs.");
         require(simulationTime == 4.5 && stepSize == 0.01, "The evaluator received incorrect substep timing.");
         called = true;
-        return inputs[1] * inputs[0];
+        return {taskInputs[1] * taskInputs[0]};
     }
 
     bool called = false;
+};
+
+// Counts how many evaluateBatch calls a node's provider tasks produce, and how large each
+// batch was, without spawning real worker processes — used to test evaluateContributionTasks'
+// grouping logic in isolation from ProviderRuntime/the pipe transport.
+class CountingEvaluator final : public konjugate::ProviderEvaluator {
+public:
+    std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>& tasks,
+                                      const std::vector<std::vector<double>>& inputs,
+                                      double simulationTime,
+                                      double stepSize) override {
+        static_cast<void>(simulationTime);
+        static_cast<void>(stepSize);
+        ++callCount;
+        batchSizes.push_back(tasks.size());
+        std::vector<double> results;
+        results.reserve(tasks.size());
+        for (const auto& taskInputs : inputs) {
+            double sum = 0;
+            for (const auto value : taskInputs) sum += value;
+            results.push_back(sum);
+        }
+        return results;
+    }
+
+    int callCount = 0;
+    std::vector<std::size_t> batchSizes;
 };
 
 class ConductanceProvider final : public konjugate::sdk::v1::RelationshipProvider {
@@ -265,6 +295,158 @@ void providerRuntimeCompilesAndExecutesAnInlineCppProviderEndToEnd() {
     runtime.shutdown();
 }
 
+void providerRuntimeCompilesAndExecutesAnInlineCppProviderOverSharedMemory() {
+    // Same fixture as providerRuntimeCompilesAndExecutesAnInlineCppProviderEndToEnd, but
+    // requesting the shared-memory transport: on POSIX this exercises SharedMemoryProviderBackend
+    // end to end; on Windows (or if shared memory setup fails for any other reason)
+    // ProviderRuntime transparently falls back to the pipe backend, so this still passes there.
+    std::string cppImpl = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}
+        ],
+        "output": {"key": "gradient", "role": "target", "stateId": 12}
+    })json";
+
+    auto project = projectWithImplementation(cppImpl);
+    project.get_child("edges").begin()->second.put("implementation.source", cppInlineConductanceProviderSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::sharedMemoryWorker;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto& node = plan.nodes.at(1);
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {290}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+
+    require(!evaluated.empty() && evaluated.front().value == 900,
+        "Compiled C++ provider process end-to-end evaluation over shared memory failed.");
+
+    runtime.shutdown();
+}
+
+boost::property_tree::ptree sharedCppProviderSourceConvergingOnOneNodeProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "nodes": [
+            {"id": 1, "name": "SourceA", "states": [{"id": 11, "name": "Temperature", "symbol": "temperature", "initialValue": 300}], "sourceTerms": []},
+            {"id": 2, "name": "SourceB", "states": [{"id": 21, "name": "Temperature", "symbol": "temperature", "initialValue": 100}], "sourceTerms": []},
+            {"id": 3, "name": "Target", "states": [{"id": 31, "name": "Temperature", "symbol": "temperature", "initialValue": 0}], "sourceTerms": []}
+        ],
+        "edges": [
+            {
+                "id": 101, "name": "AtoTarget", "source": {"nodeId": 1}, "target": {"nodeId": 3}, "parameters": [],
+                "implementation": {
+                    "kind": "cpp", "providerApiVersion": 1,
+                    "source": "placeholder-replaced-below",
+                    "bindings": [{"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}],
+                    "output": {"key": "gradient", "role": "target", "stateId": 31}
+                }
+            },
+            {
+                "id": 102, "name": "BtoTarget", "source": {"nodeId": 2}, "target": {"nodeId": 3}, "parameters": [],
+                "implementation": {
+                    "kind": "cpp", "providerApiVersion": 1,
+                    "source": "placeholder-replaced-below",
+                    "bindings": [{"key": "delta", "kind": "state", "nodeId": 2, "stateId": 21}],
+                    "output": {"key": "gradient", "role": "target", "stateId": 31}
+                }
+            }
+        ]
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    const auto source = cppInlineConductanceProviderSource();
+    for (auto& edge : project.get_child("edges")) edge.second.put("implementation.source", source);
+    return project;
+}
+
+void providerRuntimeBatchesMultipleCppInstancesOverSharedMemoryInOneRoundTrip() {
+    const auto plan = konjugate::compileExecutionPlan(sharedCppProviderSourceConvergingOnOneNodeProject());
+    const auto& node = plan.nodes.at(2);
+    require(node.contributions.size() == 2, "Test setup expected two provider contributions on the target node.");
+
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::sharedMemoryWorker;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+
+    runtime.shutdown();
+
+    require(evaluated.size() == 2, "Expected one evaluated contribution per shared-worker instance.");
+    // cppInlineConductanceProviderSource() computes delta * 3.
+    bool sawSourceA = false;
+    bool sawSourceB = false;
+    for (const auto& contribution : evaluated) {
+        if (contribution.value == 900) sawSourceA = true;
+        if (contribution.value == 300) sawSourceB = true;
+    }
+    require(sawSourceA && sawSourceB,
+        "A single batched shared-memory round trip did not return correct, distinct values per instance.");
+}
+
+void providerRuntimeSerializesConcurrentEvaluationsOverSharedMemory() {
+    // Same intent as providerRuntimeSerializesConcurrentEvaluationsOnASharedWorker, but against
+    // SharedMemoryProviderBackend: many threads hammering one shared-memory channel must not
+    // interleave requests/responses or corrupt the shared struct.
+    std::string cppImpl = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}
+        ],
+        "output": {"key": "gradient", "role": "target", "stateId": 12}
+    })json";
+    auto project = projectWithImplementation(cppImpl);
+    project.get_child("edges").begin()->second.put("implementation.source", cppInlineConductanceProviderSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto& node = plan.nodes.at(1);
+
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::sharedMemoryWorker;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    std::atomic<bool> failed{false};
+    std::vector<std::thread> threads;
+    constexpr int threadCount = 8;
+    constexpr int iterationsPerThread = 50;
+    for (int t = 0; t < threadCount; ++t) {
+        threads.emplace_back([&] {
+            for (int i = 0; i < iterationsPerThread; ++i) {
+                try {
+                    const auto evaluated = konjugate::evaluateContributionTasks(
+                        node, {290}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+                    if (evaluated.empty() || evaluated.front().value != 900) failed = true;
+                } catch (...) {
+                    failed = true;
+                }
+            }
+        });
+    }
+    for (auto& thread : threads) thread.join();
+    runtime.shutdown();
+
+    require(!failed.load(),
+        "Concurrent evaluation against a shared-memory provider worker produced a wrong result, hung, or corrupted the channel.");
+}
+
 boost::property_tree::ptree twoIndependentProviderEdgesProject() {
     std::istringstream json(R"json({
         "format": "konjugate",
@@ -298,6 +480,89 @@ boost::property_tree::ptree twoIndependentProviderEdgesProject() {
     boost::property_tree::ptree project;
     boost::property_tree::read_json(json, project);
     return project;
+}
+
+boost::property_tree::ptree sharedProviderSourceConvergingOnOneNodeProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "nodes": [
+            {"id": 1, "name": "SourceA", "states": [{"id": 11, "name": "Temperature", "symbol": "temperature", "initialValue": 300}], "sourceTerms": []},
+            {"id": 2, "name": "SourceB", "states": [{"id": 21, "name": "Temperature", "symbol": "temperature", "initialValue": 100}], "sourceTerms": []},
+            {"id": 3, "name": "Target", "states": [{"id": 31, "name": "Temperature", "symbol": "temperature", "initialValue": 0}], "sourceTerms": []}
+        ],
+        "edges": [
+            {
+                "id": 101, "name": "AtoTarget", "source": {"nodeId": 1}, "target": {"nodeId": 3}, "parameters": [],
+                "implementation": {
+                    "kind": "python", "providerApiVersion": 1,
+                    "source": "../tests/pythonRelationshipProviderTest.py",
+                    "bindings": [{"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}],
+                    "output": {"key": "gradient", "role": "target", "stateId": 31}
+                }
+            },
+            {
+                "id": 102, "name": "BtoTarget", "source": {"nodeId": 2}, "target": {"nodeId": 3}, "parameters": [],
+                "implementation": {
+                    "kind": "python", "providerApiVersion": 1,
+                    "source": "../tests/pythonRelationshipProviderTest.py",
+                    "bindings": [{"key": "delta", "kind": "state", "nodeId": 2, "stateId": 21}],
+                    "output": {"key": "gradient", "role": "target", "stateId": 31}
+                }
+            }
+        ]
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+void evaluateContributionTasksBatchesTasksSharingAProviderSource() {
+    // Both edges below use the identical inline provider source, so they resolve to the same
+    // providerProcessKey() and should go out in a single evaluateBatch call rather than two.
+    const auto plan = konjugate::compileExecutionPlan(sharedProviderSourceConvergingOnOneNodeProject());
+    const auto& node = plan.nodes.at(2);
+    require(node.contributions.size() == 2, "Test setup expected two provider contributions on the target node.");
+    require(konjugate::providerProcessKey(node.contributions[0]) == konjugate::providerProcessKey(node.contributions[1]),
+        "Test setup expected both edges to share the same provider process key.");
+
+    CountingEvaluator evaluator;
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &evaluator);
+
+    require(evaluator.callCount == 1,
+        "Two contributions sharing a provider source should batch into a single evaluateBatch call.");
+    require(evaluator.batchSizes == std::vector<std::size_t>({2}),
+        "The single evaluateBatch call should have covered both shared-source instances.");
+    require(evaluated.size() == 2, "Both contributions should still produce a result each.");
+}
+
+void providerRuntimeBatchesMultipleInstancesSharingAWorkerInOneRoundTrip() {
+    const auto plan = konjugate::compileExecutionPlan(sharedProviderSourceConvergingOnOneNodeProject());
+    const auto& node = plan.nodes.at(2);
+    require(node.contributions.size() == 2, "Test setup expected two provider contributions on the target node.");
+
+    konjugate::ProviderConfiguration config;
+    config.pythonInterpreter = "python3";
+    ::setenv("PYTHONPATH", "../sdk/python", 1);
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+
+    runtime.shutdown();
+
+    require(evaluated.size() == 2, "Expected one evaluated contribution per shared-worker instance.");
+    bool sawSourceA = false;
+    bool sawSourceB = false;
+    for (const auto& contribution : evaluated) {
+        if (contribution.value == 600) sawSourceA = true;
+        if (contribution.value == 200) sawSourceB = true;
+    }
+    require(sawSourceA && sawSourceB,
+        "A single batched round trip to a shared worker did not return correct, distinct values per instance.");
 }
 
 void providerRuntimeResolvesTasksByStableSourceIdAcrossCollidingLocalSequences() {
@@ -505,6 +770,11 @@ int main() {
     executionDelegatesResolvedScalarsWithoutChangingCadence();
     providerRuntimeExecutesPythonWorkerEndToEnd();
     providerRuntimeCompilesAndExecutesAnInlineCppProviderEndToEnd();
+    providerRuntimeCompilesAndExecutesAnInlineCppProviderOverSharedMemory();
+    providerRuntimeBatchesMultipleCppInstancesOverSharedMemoryInOneRoundTrip();
+    providerRuntimeSerializesConcurrentEvaluationsOverSharedMemory();
+    evaluateContributionTasksBatchesTasksSharingAProviderSource();
+    providerRuntimeBatchesMultipleInstancesSharingAWorkerInOneRoundTrip();
     providerRuntimeResolvesTasksByStableSourceIdAcrossCollidingLocalSequences();
     providerRuntimeSerializesConcurrentEvaluationsOnASharedWorker();
     validatorAndExecutionPlanAcceptAProgrammableSourceTerm();

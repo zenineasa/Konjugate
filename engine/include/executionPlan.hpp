@@ -83,13 +83,21 @@ struct ContributionTask {
     bool negateOutput = false;
 };
 
+// Contributions sharing the same (implementation, providerSource) run in the same worker
+// process/library, so callers group tasks by this key before batching them into one
+// evaluateBatch call rather than one round trip per contribution.
+std::string providerProcessKey(const ContributionTask& task);
+
 class ProviderEvaluator {
 public:
     virtual ~ProviderEvaluator() = default;
-    virtual double evaluate(const ContributionTask& task,
-                            const std::vector<double>& inputs,
-                            double simulationTime,
-                            double stepSize) = 0;
+    // Every task in a single call must share the same providerProcessKey(); the caller
+    // (evaluateContributionTasks) is responsible for grouping them that way. Results are
+    // returned in the same order as tasks/inputs.
+    virtual std::vector<double> evaluateBatch(const std::vector<const ContributionTask*>& tasks,
+                                              const std::vector<std::vector<double>>& inputs,
+                                              double simulationTime,
+                                              double stepSize) = 0;
 };
 
 struct NodeExecutionPlan {

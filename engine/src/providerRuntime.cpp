@@ -2,9 +2,11 @@
 
 #include "providerRuntime.hpp"
 #include "relationshipProvider.pb.h"
+#include "konjugate/providerSharedMemoryChannel.hpp"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +27,10 @@
 using ssize_t = intptr_t;
 using pid_t = int;
 #else
+#include <cerrno>
+#include <fcntl.h>
+#include <semaphore.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -448,6 +454,12 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
 #endif
         } else {
             arguments = {"-std=c++20", "-O1", "-I" + (sdkRoot / "include").string()};
+#ifndef _WIN32
+            // providerWorker.cpp's shared-memory fast path uses std::thread and POSIX
+            // semaphores; harmless to always pass this even for a build that ends up staying
+            // on the pipe transport.
+            arguments.push_back("-pthread");
+#endif
 #ifdef __APPLE__
             if (const auto sysroot = resolveAppleSdkSysroot(); !sysroot.empty()) {
                 arguments.push_back("-isysroot");
@@ -458,6 +470,11 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
             arguments.push_back((sdkRoot / "src" / "providerWorker.cpp").string());
             arguments.push_back("-o");
             arguments.push_back(executablePath.string());
+#if !defined(_WIN32) && !defined(__APPLE__)
+            // shm_open/sem_open historically require linking librt on Linux (folded into libc
+            // only since glibc 2.34); passing -lrt is harmless on newer glibc too.
+            arguments.push_back("-lrt");
+#endif
         }
 
         const auto result = runCppCompiler(compiler, arguments);
@@ -472,32 +489,42 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
 
 } // anonymous namespace
 
-class ProviderProcess {
+class ProviderBackend {
 public:
-    ProviderProcess(std::string processKey, ContributionImplementation impl,
-                    std::string sourcePath, const ProviderConfiguration& config)
-        : processKey_(std::move(processKey)), implementation_(impl), sourcePath_(std::move(sourcePath)) {
-        spawn(config);
+    virtual ~ProviderBackend() = default;
+    virtual void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) = 0;
+    virtual void sendInitialization() = 0;
+    virtual std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t sequence, double simulationTime, double stepSize,
+        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) = 0;
+    virtual void shutdown() noexcept = 0;
+};
+
+// Owns one spawned provider process's control pipe: spawn, protocol handshake, the initialize
+// round trip, the pipe evaluateBatch round trip (the hot path for PipeProviderBackend; used by
+// SharedMemoryProviderBackend only for handshake/initialize/shutdown, never for evaluation),
+// and shutdown. Both backends below compose one of these rather than duplicating process
+// lifecycle handling.
+class ProviderControlChannel {
+public:
+    ProviderControlChannel(std::string processKey, ContributionImplementation implementation,
+                           std::string sourcePath, const ProviderConfiguration& config,
+                           std::vector<std::pair<std::string, std::string>> extraEnvironment = {})
+        : processKey_(std::move(processKey)), implementation_(implementation), sourcePath_(std::move(sourcePath)) {
+        spawn(config, extraEnvironment);
         performHandshake();
     }
 
-    ~ProviderProcess() {
-        shutdown();
-    }
+    ~ProviderControlChannel() { close(); }
+    ProviderControlChannel(const ProviderControlChannel&) = delete;
+    ProviderControlChannel& operator=(const ProviderControlChannel&) = delete;
 
-    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) {
-        auto* inst = initializeReq_.add_instances();
-        inst->set_instance_id(instanceId);
-        for (const auto& binding : bindings) {
-            inst->add_input_keys(binding.symbol);
-        }
-        instanceIds_.push_back(instanceId);
-    }
+    const std::string& processKey() const noexcept { return processKey_; }
 
-    void sendInitialization() {
-        if (instanceIds_.empty()) return;
+    void sendInitialize(const InitializeRequest& request) {
+        if (request.instances_size() == 0) return;
         EngineToProvider msg;
-        *msg.mutable_initialize() = initializeReq_;
+        *msg.mutable_initialize() = request;
         writeFramed(stdinFd_, msg);
 
         ProviderToEngine resp;
@@ -512,14 +539,9 @@ public:
         }
     }
 
-    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatchOverPipe(
         std::uint64_t sequence, double simulationTime, double stepSize,
         const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) {
-        // Multiple relationship instances sharing this worker may be evaluated from
-        // different execution-plan threads in the same synchronization step; the pipe
-        // round-trip below is not reentrant, so concurrent callers must be serialized here.
-        std::lock_guard<std::mutex> lock(mutex_);
-
         EngineToProvider msg;
         auto* batch = msg.mutable_evaluate_batch();
         batch->set_sequence(sequence);
@@ -552,8 +574,7 @@ public:
         return results;
     }
 
-    void shutdown() noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
+    void close() noexcept {
 #ifdef _WIN32
         if (hProcess_ == NULL) return;
 #else
@@ -587,7 +608,7 @@ public:
 
 private:
 #ifdef _WIN32
-    void spawn(const ProviderConfiguration& config) {
+    void spawn(const ProviderConfiguration& config, const std::vector<std::pair<std::string, std::string>>& extraEnvironment) {
         HANDLE hChildStd_IN_Rd = NULL;
         HANDLE hChildStd_IN_Wr = NULL;
         HANDLE hChildStd_OUT_Rd = NULL;
@@ -620,14 +641,19 @@ private:
             throw std::runtime_error("Failed to set handle info for stdin pipe.");
         }
 
+        // CreateProcessA below passes a NULL environment block, which inherits this process's
+        // environment, so setting variables here (rather than building an explicit block) is
+        // sufficient for both PYTHONPATH and any shared-memory channel names a backend needs.
+        for (const auto& [name, value] : extraEnvironment) {
+            SetEnvironmentVariableA(name.c_str(), value.c_str());
+        }
+
         std::string commandLine;
         if (implementation_ == ContributionImplementation::pythonProvider) {
             std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
             // The resolved python3 may be a distribution (Anaconda, a pyenv shim, ...) with no
             // knowledge of Konjugate's SDK; put it on PYTHONPATH explicitly rather than relying on
-            // the package being installed into whichever interpreter is found. CreateProcessA below
-            // passes a NULL environment block, which inherits this process's environment, so setting
-            // it here (rather than building an explicit block) is sufficient.
+            // the package being installed into whichever interpreter is found.
             if (!config.pythonSdkPath.empty()) {
                 char existingPythonPath[32768];
                 const auto existingLength = GetEnvironmentVariableA("PYTHONPATH", existingPythonPath, sizeof(existingPythonPath));
@@ -696,7 +722,7 @@ private:
         pid_ = static_cast<pid_t>(piProcInfo.dwProcessId);
     }
 #else
-    void spawn(const ProviderConfiguration& config) {
+    void spawn(const ProviderConfiguration& config, const std::vector<std::pair<std::string, std::string>>& extraEnvironment) {
         int inPipe[2];
         int outPipe[2];
         if (::pipe(inPipe) != 0 || ::pipe(outPipe) != 0) {
@@ -714,6 +740,8 @@ private:
             ::dup2(outPipe[1], STDOUT_FILENO);
             ::close(inPipe[0]); ::close(inPipe[1]);
             ::close(outPipe[0]); ::close(outPipe[1]);
+
+            for (const auto& [name, value] : extraEnvironment) ::setenv(name.c_str(), value.c_str(), 1);
 
             if (implementation_ == ContributionImplementation::pythonProvider) {
                 std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
@@ -785,10 +813,246 @@ private:
 #endif
     int stdinFd_ = -1;
     int stdoutFd_ = -1;
+};
+
+class PipeProviderBackend final : public ProviderBackend {
+public:
+    PipeProviderBackend(std::string processKey, ContributionImplementation implementation,
+                        std::string sourcePath, const ProviderConfiguration& config)
+        : channel_(std::move(processKey), implementation, std::move(sourcePath), config) {}
+
+    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
+        auto* inst = initializeReq_.add_instances();
+        inst->set_instance_id(instanceId);
+        for (const auto& binding : bindings) inst->add_input_keys(binding.symbol);
+    }
+
+    void sendInitialization() override { channel_.sendInitialize(initializeReq_); }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t sequence, double simulationTime, double stepSize,
+        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) override {
+        // Multiple relationship instances sharing this worker may be evaluated from
+        // different execution-plan threads in the same synchronization step; the pipe
+        // round-trip is not reentrant, so concurrent callers must be serialized here.
+        std::lock_guard<std::mutex> lock(mutex_);
+        return channel_.evaluateBatchOverPipe(sequence, simulationTime, stepSize, evaluations);
+    }
+
+    void shutdown() noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        channel_.close();
+    }
+
+private:
+    ProviderControlChannel channel_;
     InitializeRequest initializeReq_;
-    std::vector<std::uint64_t> instanceIds_;
     std::mutex mutex_;
 };
+
+#ifndef _WIN32
+// Uses shared memory plus a pair of named POSIX semaphores for the hot evaluateBatch path
+// instead of the pipe, cutting the fixed per-round-trip cost (a syscall pair plus a scheduler
+// wake) that dominates when many contributions share one provider process. Handshake,
+// initialize and shutdown still go over the same pipe-based control channel as
+// PipeProviderBackend: those are rare, so there is nothing to gain by moving them, and reusing
+// the existing protocol there keeps this class small. POSIX-only: this mode is never selected
+// on Windows, where ProviderRuntime falls back to PipeProviderBackend.
+class SharedMemoryProviderBackend final : public ProviderBackend {
+public:
+    SharedMemoryProviderBackend(std::string processKey, ContributionImplementation implementation,
+                                std::string sourcePath, const ProviderConfiguration& config)
+        : resources_(processKey),
+          channel_(std::move(processKey), implementation, std::move(sourcePath), config, resources_.environment()) {}
+
+    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
+        auto* inst = initializeReq_.add_instances();
+        inst->set_instance_id(instanceId);
+        for (const auto& binding : bindings) inst->add_input_keys(binding.symbol);
+    }
+
+    void sendInitialization() override { channel_.sendInitialize(initializeReq_); }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t sequence, double simulationTime, double stepSize,
+        const std::vector<std::pair<std::uint64_t, std::vector<double>>>& evaluations) override {
+        static_cast<void>(sequence);
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        std::vector<std::pair<std::uint64_t, double>> results;
+        results.reserve(evaluations.size());
+
+        // The channel's slot array has a fixed size, so a batch larger than that capacity is
+        // sent as multiple round trips rather than growing the shared struct without bound.
+        for (std::size_t offset = 0; offset < evaluations.size(); offset += provider::sharedmem::kMaxSlots) {
+            const auto count = std::min(provider::sharedmem::kMaxSlots, evaluations.size() - offset);
+            auto* channel = resources_.channel;
+            channel->slotCount = static_cast<std::uint32_t>(count);
+            channel->simulationTime = simulationTime;
+            channel->stepSize = stepSize;
+            channel->failed = false;
+
+            for (std::size_t index = 0; index < count; ++index) {
+                const auto& [instanceId, inputs] = evaluations[offset + index];
+                if (inputs.size() > provider::sharedmem::kMaxInputsPerSlot) {
+                    throw std::runtime_error(
+                        "A provider input list exceeds the shared-memory transport's fixed capacity.");
+                }
+                auto& slot = channel->slots[index];
+                slot.instanceId = instanceId;
+                slot.inputCount = static_cast<std::uint32_t>(inputs.size());
+                std::copy(inputs.begin(), inputs.end(), slot.inputs);
+            }
+
+            if (::sem_post(resources_.requestSemaphore) != 0) {
+                throw std::runtime_error("Failed to signal provider process " + channel_.processKey() + " for evaluation.");
+            }
+            while (::sem_wait(resources_.responseSemaphore) != 0) {
+                if (errno != EINTR) {
+                    throw std::runtime_error("Failed waiting on provider process " + channel_.processKey() + " for a result.");
+                }
+            }
+
+            if (channel->failed) {
+                throw std::runtime_error("Provider process " + channel_.processKey() +
+                    " failed during shared-memory evaluation: " + std::string(channel->errorMessage));
+            }
+            for (std::size_t index = 0; index < count; ++index) {
+                results.emplace_back(channel->slots[index].instanceId, channel->slots[index].output);
+            }
+        }
+        return results;
+    }
+
+    void shutdown() noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        channel_.close();
+    }
+
+private:
+    // Owns the shared-memory region and the two named semaphores used to hand evaluation
+    // requests/responses across the process boundary. Declared before channel_ so it is
+    // constructed first (the worker needs these names as environment variables at spawn time)
+    // and destroyed last: member destruction runs in reverse declaration order, so channel_'s
+    // shutdown (which waits for the worker's shutdown acknowledgement over the pipe, sent only
+    // after the worker has stopped touching shared memory) always completes before this tears
+    // the mapping down.
+    struct SharedResources {
+        std::string shmName;
+        std::string requestSemaphoreName;
+        std::string responseSemaphoreName;
+        int shmFd = -1;
+        provider::sharedmem::Channel* channel = nullptr;
+        sem_t* requestSemaphore = SEM_FAILED;
+        sem_t* responseSemaphore = SEM_FAILED;
+
+        explicit SharedResources(const std::string& processKey) { create(processKey); }
+        ~SharedResources() { destroy(); }
+        SharedResources(const SharedResources&) = delete;
+        SharedResources& operator=(const SharedResources&) = delete;
+
+        std::vector<std::pair<std::string, std::string>> environment() const {
+            return {
+                {provider::sharedmem::kSharedMemoryEnvVar, shmName},
+                {provider::sharedmem::kRequestSemaphoreEnvVar, requestSemaphoreName},
+                {provider::sharedmem::kResponseSemaphoreEnvVar, responseSemaphoreName},
+            };
+        }
+
+        void create(const std::string& processKey) {
+            static std::atomic<std::uint64_t> counter{0};
+            static_cast<void>(processKey);
+            // macOS enforces a short (31-character, including the slash) limit on sem_open()
+            // names, so these stay compact rather than embedding the process key.
+            const auto token = std::to_string(::getpid()) + "_" +
+                std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+            shmName = "/kjs" + token;
+            requestSemaphoreName = "/kjq" + token;
+            responseSemaphoreName = "/kjr" + token;
+
+            shmFd = ::shm_open(shmName.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+            if (shmFd < 0) throw std::runtime_error("Failed to create a shared-memory provider channel.");
+            if (::ftruncate(shmFd, sizeof(provider::sharedmem::Channel)) != 0) {
+                destroy();
+                throw std::runtime_error("Failed to size a shared-memory provider channel.");
+            }
+            void* mapped = ::mmap(nullptr, sizeof(provider::sharedmem::Channel),
+                                  PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0);
+            if (mapped == MAP_FAILED) {
+                destroy();
+                throw std::runtime_error("Failed to map a shared-memory provider channel.");
+            }
+            // shm_open + ftruncate zero-fills new POSIX shared memory, which already matches
+            // Channel's intended default state, so no placement-new is needed: both this
+            // process and the worker just reinterpret the mapping as a Channel*. (There is no
+            // fully portable way to construct a C++ object shared across address spaces;
+            // treating the mapping as plain, semaphore-guarded POD bytes sidesteps that.)
+            channel = reinterpret_cast<provider::sharedmem::Channel*>(mapped);
+
+            requestSemaphore = ::sem_open(requestSemaphoreName.c_str(), O_CREAT | O_EXCL, 0600, 0);
+            if (requestSemaphore == SEM_FAILED) {
+                destroy();
+                throw std::runtime_error("Failed to create a shared-memory provider request semaphore.");
+            }
+            responseSemaphore = ::sem_open(responseSemaphoreName.c_str(), O_CREAT | O_EXCL, 0600, 0);
+            if (responseSemaphore == SEM_FAILED) {
+                destroy();
+                throw std::runtime_error("Failed to create a shared-memory provider response semaphore.");
+            }
+        }
+
+        void destroy() noexcept {
+            if (requestSemaphore != SEM_FAILED) {
+                ::sem_close(requestSemaphore);
+                ::sem_unlink(requestSemaphoreName.c_str());
+                requestSemaphore = SEM_FAILED;
+            }
+            if (responseSemaphore != SEM_FAILED) {
+                ::sem_close(responseSemaphore);
+                ::sem_unlink(responseSemaphoreName.c_str());
+                responseSemaphore = SEM_FAILED;
+            }
+            if (channel) {
+                ::munmap(channel, sizeof(provider::sharedmem::Channel));
+                channel = nullptr;
+            }
+            if (shmFd >= 0) {
+                ::close(shmFd);
+                shmFd = -1;
+            }
+            if (!shmName.empty()) ::shm_unlink(shmName.c_str());
+        }
+    };
+
+    SharedResources resources_;
+    ProviderControlChannel channel_;
+    InitializeRequest initializeReq_;
+    std::mutex mutex_;
+};
+#endif
+
+namespace {
+
+// SharedMemoryProviderBackend is only ever attempted for cppProvider tasks in
+// sharedMemoryWorker mode and only compiled on POSIX; any construction failure (including,
+// on Windows, the mode simply not being available) falls back to the always-available pipe
+// backend so a single unsupported/misconfigured host never blocks a whole run.
+std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, ContributionImplementation implementation,
+                                                        const std::string& launchPath, const ProviderConfiguration& config) {
+#ifndef _WIN32
+    if (implementation == ContributionImplementation::cppProvider &&
+        config.executionMode == ProviderExecutionMode::sharedMemoryWorker) {
+        try {
+            return std::make_unique<SharedMemoryProviderBackend>(key, implementation, launchPath, config);
+        } catch (const std::exception& error) {
+            std::cerr << "Falling back to the pipe provider transport for '" << key << "': " << error.what() << '\n';
+        }
+    }
+#endif
+    return std::make_unique<PipeProviderBackend>(key, implementation, launchPath, config);
+}
+
+} // namespace
 
 ProviderRuntime::ProviderRuntime(ProviderConfiguration configuration)
     : configuration_(std::move(configuration)) {}
@@ -804,17 +1068,16 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
         for (const auto& task : node.contributions) {
             if (task.implementation == ContributionImplementation::equation) continue;
 
-            const std::string key = (task.implementation == ContributionImplementation::pythonProvider ? "py:" : "cpp:") + task.providerSource;
+            const std::string key = providerProcessKey(task);
             auto& proc = processes_[key];
             if (!proc) {
                 const std::string launchPath = task.implementation == ContributionImplementation::cppProvider
                     ? buildCppProvider(task.providerSource, configuration_)
                     : preparePythonProviderSource(task.providerSource, configuration_);
-                proc = std::make_unique<ProviderProcess>(key, task.implementation, launchPath, configuration_);
+                proc = createProviderBackend(key, task.implementation, launchPath, configuration_);
             }
 
             const std::uint64_t instanceId = nextInstanceId_++;
-            taskProcessKeys_[task.sourceId] = key;
             taskInstanceIds_[task.sourceId] = instanceId;
 
             proc->addInstance(instanceId, task.bindings);
@@ -828,25 +1091,59 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
     initialized_ = true;
 }
 
-double ProviderRuntime::evaluate(const ContributionTask& task,
-                                const std::vector<double>& inputs,
-                                double simulationTime,
-                                double stepSize) {
-    const auto keyIt = taskProcessKeys_.find(task.sourceId);
-    if (keyIt == taskProcessKeys_.end()) {
+std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const ContributionTask*>& tasks,
+                                                    const std::vector<std::vector<double>>& inputs,
+                                                    double simulationTime,
+                                                    double stepSize) {
+    if (tasks.empty()) return {};
+    if (tasks.size() != inputs.size()) {
+        throw std::runtime_error("A provider batch evaluation received mismatched tasks and inputs.");
+    }
+
+    const auto& key = providerProcessKey(*tasks.front());
+    auto processIt = processes_.find(key);
+    if (processIt == processes_.end()) {
         throw std::runtime_error("Task not registered in ProviderRuntime.");
     }
-    const auto instIt = taskInstanceIds_.find(task.sourceId);
-    auto& proc = processes_.at(keyIt->second);
+    auto& proc = processIt->second;
 
     std::vector<std::pair<std::uint64_t, std::vector<double>>> evaluations;
-    evaluations.emplace_back(instIt->second, inputs);
-
-    const auto results = proc->evaluateBatch(task.sequence, simulationTime, stepSize, evaluations);
-    if (results.empty()) {
-        throw std::runtime_error("No contribution returned from provider evaluation.");
+    evaluations.reserve(tasks.size());
+    for (std::size_t index = 0; index < tasks.size(); ++index) {
+        const auto* task = tasks[index];
+        // Every task passed to a single call is expected to share the same provider process;
+        // evaluateContributionTasks groups them that way before calling in, and re-deriving the
+        // key here is cheap insurance against a future caller breaking that invariant.
+        if (providerProcessKey(*task) != key) {
+            throw std::runtime_error("A provider batch evaluation mixed tasks from different provider processes.");
+        }
+        const auto instIt = taskInstanceIds_.find(task->sourceId);
+        if (instIt == taskInstanceIds_.end()) {
+            throw std::runtime_error("Task not registered in ProviderRuntime.");
+        }
+        evaluations.emplace_back(instIt->second, inputs[index]);
     }
-    return results.front().second;
+
+    const auto results = proc->evaluateBatch(tasks.front()->sequence, simulationTime, stepSize, evaluations);
+    if (results.size() != tasks.size()) {
+        throw std::runtime_error("A provider process returned a different number of contributions than requested.");
+    }
+
+    std::unordered_map<std::uint64_t, double> valueByInstance;
+    valueByInstance.reserve(results.size());
+    for (const auto& [instanceId, value] : results) valueByInstance[instanceId] = value;
+
+    std::vector<double> ordered;
+    ordered.reserve(tasks.size());
+    for (const auto* task : tasks) {
+        const auto instIt = taskInstanceIds_.find(task->sourceId);
+        const auto found = valueByInstance.find(instIt->second);
+        if (found == valueByInstance.end()) {
+            throw std::runtime_error("A provider process omitted a requested contribution.");
+        }
+        ordered.push_back(found->second);
+    }
+    return ordered;
 }
 
 void ProviderRuntime::shutdown() noexcept {

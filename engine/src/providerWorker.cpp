@@ -1,17 +1,27 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "konjugate/relationshipProvider.hpp"
+#include "konjugate/providerSharedMemoryChannel.hpp"
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 #if defined(_WIN32) || defined(_MSC_VER)
 #include <fcntl.h>
 #include <io.h>
+#else
+#include <atomic>
+#include <cerrno>
+#include <fcntl.h>
+#include <semaphore.h>
+#include <sys/mman.h>
+#include <thread>
 #endif
 
 namespace {
@@ -330,6 +340,113 @@ void buildInstanceBinding(const ProviderInstance& instance,
     instanceBindings[instance.instanceId] = std::move(binding);
 }
 
+#ifndef _WIN32
+struct SharedMemoryWorkerChannel {
+    konjugate::provider::sharedmem::Channel* channel = nullptr;
+    sem_t* requestSemaphore = SEM_FAILED;
+    sem_t* responseSemaphore = SEM_FAILED;
+    int shmFd = -1;
+};
+
+// std::nullopt means the engine spawned this worker in ordinary pipe mode (the common case);
+// a thrown exception means the environment variables were present but opening the channel they
+// name failed, which the caller reports as a handshake failure rather than silently continuing
+// in pipe mode, since the engine side has already committed to shared memory for this process
+// and has no pipe-evaluateBatch fallback of its own to drop back to.
+std::optional<SharedMemoryWorkerChannel> openSharedMemoryWorkerChannel() {
+    const char* shmName = std::getenv(konjugate::provider::sharedmem::kSharedMemoryEnvVar);
+    const char* requestSemaphoreName = std::getenv(konjugate::provider::sharedmem::kRequestSemaphoreEnvVar);
+    const char* responseSemaphoreName = std::getenv(konjugate::provider::sharedmem::kResponseSemaphoreEnvVar);
+    if (!shmName || !requestSemaphoreName || !responseSemaphoreName) return std::nullopt;
+
+    SharedMemoryWorkerChannel result;
+    result.shmFd = ::shm_open(shmName, O_RDWR, 0600);
+    if (result.shmFd < 0) throw std::runtime_error("Failed to open the shared-memory provider channel.");
+
+    void* mapped = ::mmap(nullptr, sizeof(konjugate::provider::sharedmem::Channel),
+                          PROT_READ | PROT_WRITE, MAP_SHARED, result.shmFd, 0);
+    if (mapped == MAP_FAILED) throw std::runtime_error("Failed to map the shared-memory provider channel.");
+    result.channel = reinterpret_cast<konjugate::provider::sharedmem::Channel*>(mapped);
+
+    result.requestSemaphore = ::sem_open(requestSemaphoreName, 0);
+    if (result.requestSemaphore == SEM_FAILED) {
+        throw std::runtime_error("Failed to open the shared-memory provider request semaphore.");
+    }
+    result.responseSemaphore = ::sem_open(responseSemaphoreName, 0);
+    if (result.responseSemaphore == SEM_FAILED) {
+        throw std::runtime_error("Failed to open the shared-memory provider response semaphore.");
+    }
+    return result;
+}
+
+// Runs on a dedicated thread started only after the pipe-based "initialize" message has been
+// fully handled on the main thread, so instanceBindings is already populated and that
+// construction is visible here via std::thread's happens-before guarantee (no separate lock is
+// needed for a map that is otherwise never written after this point). The main thread continues
+// to own the control pipe (handshake/initialize/shutdown); this loop only ever touches shared
+// memory and the provider's evaluate() path.
+void runSharedMemoryEvalLoop(konjugate::sdk::v1::RelationshipProvider& provider,
+                             const konjugate::sdk::v1::RelationshipDescription& description,
+                             konjugate::provider::sharedmem::Channel* channel,
+                             sem_t* requestSemaphore, sem_t* responseSemaphore,
+                             std::atomic<bool>& stopRequested) {
+    std::vector<std::string_view> keys;
+    keys.reserve(description.inputs.size());
+    for (const auto& input : description.inputs) keys.push_back(input.key);
+    std::vector<double> orderedValues(description.inputs.size(), 0);
+
+    while (true) {
+        int waitResult = 0;
+        do {
+            waitResult = ::sem_wait(requestSemaphore);
+        } while (waitResult != 0 && errno == EINTR);
+        if (waitResult != 0) return;
+        // A wake with no real request pending only happens when the main thread is asking this
+        // loop to exit during shutdown; nothing is waiting on responseSemaphore in that case.
+        if (stopRequested.load()) return;
+
+        try {
+            for (std::uint32_t index = 0; index < channel->slotCount; ++index) {
+                auto& slot = channel->slots[index];
+                const auto bindingIt = instanceBindings.find(slot.instanceId);
+                if (bindingIt == instanceBindings.end()) {
+                    throw std::runtime_error("Shared-memory evaluation references an uninitialized instance.");
+                }
+                std::fill(orderedValues.begin(), orderedValues.end(), 0.0);
+                const auto& binding = bindingIt->second;
+                for (std::size_t i = 0; i < binding.keyIndexes.size() && i < slot.inputCount; ++i) {
+                    orderedValues[binding.keyIndexes[i]] = slot.inputs[i];
+                }
+                konjugate::sdk::v1::OutputCollector output;
+                provider.evaluate({channel->simulationTime, channel->stepSize, {orderedValues, keys}}, output);
+                slot.output = output.gradient();
+            }
+            channel->failed = false;
+        } catch (const std::exception& error) {
+            channel->failed = true;
+            const std::string message = error.what();
+            const auto copyLength = std::min(message.size(), konjugate::provider::sharedmem::kMaxErrorMessageLength - 1);
+            std::memcpy(channel->errorMessage, message.data(), copyLength);
+            channel->errorMessage[copyLength] = '\0';
+            ::sem_post(responseSemaphore);
+            // Matches the pipe path: an unexpected provider exception is fatal to this worker
+            // (see the outer try/catch in main()), so die immediately rather than risk
+            // continuing to call evaluate() on a provider object that may be in an unknown
+            // state after throwing mid-evaluation.
+            std::_Exit(1);
+        }
+        ::sem_post(responseSemaphore);
+    }
+}
+
+void stopSharedMemoryEvalThread(std::thread& evalThread, std::atomic<bool>& stopRequested, sem_t* requestSemaphore) {
+    if (!evalThread.joinable()) return;
+    stopRequested = true;
+    if (requestSemaphore && requestSemaphore != SEM_FAILED) ::sem_post(requestSemaphore);
+    evalThread.join();
+}
+#endif
+
 } // anonymous namespace
 
 int main() {
@@ -356,6 +473,18 @@ int main() {
     bool initialized = false;
     bool shutdownReceived = false;
 
+#ifndef _WIN32
+    std::optional<SharedMemoryWorkerChannel> sharedMemory;
+    try {
+        sharedMemory = openSharedMemoryWorkerChannel();
+    } catch (const std::exception& error) {
+        writeFramed(encodeProviderFailure(0, "sharedMemorySetupFailed", error.what(), true));
+        return 1;
+    }
+    std::thread evalThread;
+    std::atomic<bool> stopRequested{false};
+#endif
+
     auto runLoop = [&]() {
         IncomingMessage message;
         while (readFramedMessage(message)) {
@@ -377,6 +506,13 @@ int main() {
                         initializedIds.push_back(instance.instanceId);
                     }
                     initialized = true;
+#ifndef _WIN32
+                    if (sharedMemory && !evalThread.joinable()) {
+                        evalThread = std::thread(runSharedMemoryEvalLoop, std::ref(*provider), std::cref(description),
+                            sharedMemory->channel, sharedMemory->requestSemaphore, sharedMemory->responseSemaphore,
+                            std::ref(stopRequested));
+                    }
+#endif
                     writeFramed(encodeInitializeResponse(initializedIds));
                     break;
                 }
@@ -414,6 +550,10 @@ int main() {
                 }
                 case MessageKind::shutdown: {
                     shutdownReceived = true;
+#ifndef _WIN32
+                    stopSharedMemoryEvalThread(evalThread, stopRequested,
+                        sharedMemory ? sharedMemory->requestSemaphore : nullptr);
+#endif
                     provider->shutdown();
                     writeFramed(encodeShutdownResponse());
                     return 0;
@@ -425,10 +565,16 @@ int main() {
 
     try {
         const auto result = runLoop();
+#ifndef _WIN32
+        stopSharedMemoryEvalThread(evalThread, stopRequested, sharedMemory ? sharedMemory->requestSemaphore : nullptr);
+#endif
         if (!shutdownReceived) provider->shutdown();
         return result;
     } catch (const std::exception& error) {
         writeFramed(encodeProviderFailure(0, "workerFailure", error.what(), true));
+#ifndef _WIN32
+        stopSharedMemoryEvalThread(evalThread, stopRequested, sharedMemory ? sharedMemory->requestSemaphore : nullptr);
+#endif
         try { provider->shutdown(); } catch (...) {}
         return 1;
     }

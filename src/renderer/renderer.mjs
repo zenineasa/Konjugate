@@ -693,9 +693,11 @@ function createNodeLabel(definition, geometry) {
         event.preventDefault();
         event.stopPropagation();
         if (activeResult) return;
-        const node = nodeObjects.get(definition.id);
-        if (!(selectedNodeIds.size > 1 && selectedNodeIds.has(definition.id))) selectNode(node);
-        openNodeContextMenu(event.clientX, event.clientY);
+        stageContextMenuAction(() => {
+            const node = nodeObjects.get(definition.id);
+            if (!(selectedNodeIds.size > 1 && selectedNodeIds.has(definition.id))) selectNode(node);
+            openNodeContextMenu(event.clientX, event.clientY);
+        });
     });
 
     const label = new CSS2DObject(wrapper);
@@ -3501,14 +3503,16 @@ function createRelationshipBundleOverlay(key) {
         event.preventDefault();
         event.stopPropagation();
         if (activeResult) return;
-        const row = event.target.closest('.relationshipRow');
-        const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
-        const definition = row
-            ? model.relationships.find((relationship) => relationship.id === Number(row.dataset.relationship))
-            : bundle?.relationships[0];
-        if (!definition) return;
-        selectRelationship(definition);
-        openEdgeContextMenu(event.clientX, event.clientY);
+        stageContextMenuAction(() => {
+            const row = event.target.closest('.relationshipRow');
+            const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
+            const definition = row
+                ? model.relationships.find((relationship) => relationship.id === Number(row.dataset.relationship))
+                : bundle?.relationships[0];
+            if (!definition) return;
+            selectRelationship(definition);
+            openEdgeContextMenu(event.clientX, event.clientY);
+        });
     });
     $('.collapseBundle', element).addEventListener('click', (event) => {
         event.stopPropagation();
@@ -4505,6 +4509,31 @@ window.addEventListener('pointerup', (event) => {
     if (hits.length) $('#statusText').textContent = `${selectedNodeIds.size} node${selectedNodeIds.size === 1 ? '' : 's'} selected`;
 });
 
+// OrbitControls' default right-drag pans the camera, and on macOS `contextmenu` fires practically
+// on mousedown -- before any drag distance exists to measure and before the eventual `pointerup`
+// even happens, let alone reports where it happens. So instead of deciding at `contextmenu` time,
+// each handler below only *stages* what it would open; the actual opening is deferred until the
+// right button is released, at which point the total pointerdown-to-pointerup travel decides
+// whether this was a click (stage the action) or a drag that panned the camera (discard it).
+// Listeners live on `window` in the capture phase (rather than on renderer.domElement) so they
+// also see drags that start on a CSS2D label/overlay, which stop propagation to the canvas on
+// their own pointerdown.
+let rightPointerDown = null;
+let stagedContextMenuAction = null;
+window.addEventListener('pointerdown', (event) => {
+    if (event.button === 2) { rightPointerDown = { x: event.clientX, y: event.clientY }; stagedContextMenuAction = null; }
+}, { capture: true });
+window.addEventListener('pointerup', (event) => {
+    if (event.button !== 2 || !rightPointerDown) return;
+    const dragged = Math.hypot(event.clientX - rightPointerDown.x, event.clientY - rightPointerDown.y) > 4;
+    rightPointerDown = null;
+    if (!dragged) stagedContextMenuAction?.();
+    stagedContextMenuAction = null;
+}, { capture: true });
+function stageContextMenuAction(action) {
+    stagedContextMenuAction = action;
+}
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || transformControls.dragging) return;
     setPointerFromEvent(event);
@@ -4571,20 +4600,26 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
     const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
 
     if (node) {
-        if (activeResult) { selectNode(node); return; }
-        if (!(selectedNodeIds.size > 1 && selectedNodeIds.has(node.userData.id))) selectNode(node);
-        openNodeContextMenu(event.clientX, event.clientY);
+        stageContextMenuAction(() => {
+            if (activeResult) { selectNode(node); return; }
+            if (!(selectedNodeIds.size > 1 && selectedNodeIds.has(node.userData.id))) selectNode(node);
+            openNodeContextMenu(event.clientX, event.clientY);
+        });
         return;
     }
 
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
-        selectRelationship(relationshipHit.object.userData.definition);
-        if (!activeResult) openEdgeContextMenu(event.clientX, event.clientY);
+        stageContextMenuAction(() => {
+            selectRelationship(relationshipHit.object.userData.definition);
+            if (!activeResult) openEdgeContextMenu(event.clientX, event.clientY);
+        });
         return;
     }
 
-    if (!activeResult) openAddPalette(event.clientX, event.clientY);
+    stageContextMenuAction(() => {
+        if (!activeResult) openAddPalette(event.clientX, event.clientY);
+    });
 });
 
 $$('[data-close-card]').forEach((button) => {

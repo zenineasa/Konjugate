@@ -980,6 +980,28 @@ export async function runInteractionTests(window) {
         window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1 });
     });
 
+    await run('right-click-drag pans without opening a context menu, but a stationary right-click still does', async () => {
+        const start = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + bounds.width * 0.7), y: Math.round(bounds.top + 40) }; })()`);
+        const end = { x: start.x + 60, y: start.y + 40 };
+
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...start });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'right', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...end });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...end, button: 'right', clickCount: 1 });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.equal(await evaluate(window, `document.querySelector('#addPalette').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeContextMenu').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextMenu').classList.contains('hidden')`), true);
+
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...start });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'right', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...start, button: 'right', clickCount: 1 });
+        await waitFor(window, `!document.querySelector('#addPalette').classList.contains('hidden')`, 'A stationary right-click did not open the add palette.');
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...start });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'left', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...start, button: 'left', clickCount: 1 });
+    });
+
     await run('node creation closes its dialog and supports undo and redo', async () => {
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
         await evaluate(window, `(() => {

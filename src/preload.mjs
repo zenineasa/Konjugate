@@ -54,6 +54,10 @@ contextBridge.exposeInMainWorld('shapeLibrary', {
     load: (id) => ipcRenderer.invoke('shapeLibraryLoad', id)
 });
 
+contextBridge.exposeInMainWorld('componentLibrary', {
+    list: () => ipcRenderer.invoke('componentLibraryList')
+});
+
 contextBridge.exposeInMainWorld('providerEditor', {
     openWindow: (payload) => ipcRenderer.invoke('providerEditorOpenWindow', payload),
     onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload)),

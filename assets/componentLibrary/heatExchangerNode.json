@@ -1,0 +1,14 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "heatExchangerNode",
+    "kind": "node",
+    "name": "Heat exchanger",
+    "domains": ["thermal", "fluid"],
+    "description": "A node coupling a fluid pressure state with a temperature state, for models spanning both domains.",
+    "shape": "cylinder",
+    "color": "#c47d3f",
+    "states": [
+        { "symbol": "temperature", "label": "Temperature", "initialValue": 293.15, "unit": "K" },
+        { "symbol": "pressure", "label": "Pressure", "initialValue": 101325, "unit": "Pa" }
+    ]
+}

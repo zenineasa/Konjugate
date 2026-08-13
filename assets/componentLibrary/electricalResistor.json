@@ -1,0 +1,14 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "electricalResistor",
+    "kind": "edge",
+    "name": "Resistor",
+    "domains": ["electrical"],
+    "description": "Current proportional to the voltage difference between two electrical nodes, by Ohm's law.",
+    "color": "#3f7dc4",
+    "ports": { "source": "voltage", "target": "voltage" },
+    "latex": "\\frac{\\mathrm{sourceVoltage} - \\mathrm{targetVoltage}}{\\mathrm{resistance}}",
+    "parameters": [
+        { "name": "Resistance", "symbol": "resistance", "value": 100, "unit": "Ω", "mode": "constant" }
+    ]
+}

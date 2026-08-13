@@ -572,6 +572,63 @@ async function shapeLibraryManifest() {
 
 ipcMain.handle('shapeLibraryList', async () => shapeLibraryManifest());
 
+const componentTemplateIdPattern = /^[a-zA-Z][\w-]*$/;
+
+// Validates a bundled or user-saved node/edge template. Deliberately hand-rolled like
+// validateAddonManifest rather than a schema library -- the shape is small and stable.
+function validateComponentTemplate(template) {
+    if (!template || (template.kind !== 'node' && template.kind !== 'edge')) throw new Error('A template must have kind "node" or "edge".');
+    if (!componentTemplateIdPattern.test(template.id ?? '')) throw new Error('A template needs a valid id.');
+    if (!template.name) throw new Error('A template needs a name.');
+    const domains = template.domains ?? [];
+    if (!Array.isArray(domains) || !domains.length || !domains.every((domain) => typeof domain === 'string' && domain)) {
+        throw new Error('A template needs a non-empty domains array.');
+    }
+    if (template.kind === 'node') {
+        if (!Array.isArray(template.states) || !template.states.length) throw new Error('A node template needs at least one state.');
+        template.states.forEach((state) => {
+            if (!componentTemplateIdPattern.test(state.symbol ?? '') || !state.label) throw new Error('A node template state needs a label and symbol.');
+        });
+    } else {
+        if (!template.ports || !componentTemplateIdPattern.test(template.ports.source ?? '') || !componentTemplateIdPattern.test(template.ports.target ?? '')) {
+            throw new Error('An edge template needs source and target port symbols.');
+        }
+        if (!template.latex) throw new Error('An edge template needs a latex expression.');
+        (template.parameters ?? []).forEach((parameter) => {
+            if (!componentTemplateIdPattern.test(parameter.symbol ?? '') || !parameter.name) throw new Error('An edge template parameter needs a name and symbol.');
+        });
+    }
+    return structuredClone(template);
+}
+
+const componentLibraryRegistry = new Map();
+
+async function discoverComponentLibrary() {
+    componentLibraryRegistry.clear();
+    const componentLibraryRoots = [
+        join(currentDir, '..', 'assets', 'componentLibrary'),
+        join(app.getPath('userData'), 'componentLibrary')
+    ];
+    for (const componentLibraryDirectory of componentLibraryRoots) {
+        const entries = await readdir(componentLibraryDirectory, { withFileTypes: true }).catch(() => []);
+        for (const entry of entries) {
+            if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+            try {
+                const template = validateComponentTemplate(JSON.parse(await readFile(join(componentLibraryDirectory, entry.name), 'utf8')));
+                if (componentLibraryRegistry.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
+                componentLibraryRegistry.set(template.id, template);
+            } catch (error) {
+                console.warn(`Skipping component template ${entry.name}: ${error.message}`);
+            }
+        }
+    }
+}
+
+ipcMain.handle('componentLibraryList', async () => {
+    await discoverComponentLibrary();
+    return [...componentLibraryRegistry.values()];
+});
+
 ipcMain.handle('shapeLibraryLoad', async (_event, id) => {
     const shape = (await shapeLibraryManifest()).find((candidate) => candidate.id === id);
     if (!shape) throw new Error('That shape is not available.');

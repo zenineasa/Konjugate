@@ -266,6 +266,7 @@
     <nav class="toolstrip" aria-label="Model tools">
         <div class="toolGroup createToolGroup" role="group" aria-label="Create">
             <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
+            <button id="componentLibraryButton" class="toolButton" type="button" aria-expanded="false" aria-controls="componentLibraryPanel"><span>▤</span> Library</button>
         </div>
         <div class="toolGroup" role="group" aria-label="History">
             <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
@@ -304,6 +305,16 @@
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>
         </div>
+        <aside id="componentLibraryPanel" class="componentLibraryPanel" aria-label="Component library" hidden>
+            <header><div><span class="contextKicker">Reusable components</span><strong>Component library</strong></div><button id="closeComponentLibraryPanel" type="button" aria-label="Close component library">×</button></header>
+            <input id="componentLibrarySearch" type="search" placeholder="Search nodes and edges…" autocomplete="off">
+            <div id="componentLibraryTypeChips" class="componentLibraryChips" role="group" aria-label="Filter by type"></div>
+            <div id="componentLibraryDomainChips" class="componentLibraryChips" role="group" aria-label="Filter by domain"></div>
+            <div id="componentLibraryResults" class="componentLibraryResults"></div>
+            <p id="componentLibraryEmpty" class="emptyEditorState" hidden>No components match your search.</p>
+            <p id="componentLibraryHint" class="componentLibraryHint" hidden></p>
+        </aside>
+
         <aside id="assistantPanel" class="assistantPanel" aria-labelledby="assistantPanelTitle" hidden>
             <header id="assistantPanelHeader">
                 <div><span class="contextKicker">Model assistant</span><strong id="assistantPanelTitle">Describe a model change</strong><small id="assistantCollapsedStatus">Your model remains unchanged</small></div>

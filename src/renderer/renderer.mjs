@@ -373,6 +373,9 @@ let currentView = 'orbit';
 let activeEndpointPick = null;
 let endpointPickRestoreCard = null;
 let endpointPickMaterialState = new Map();
+// Set by applyEdgeTemplate to pick both endpoints from scratch (no node pre-selected) by chaining
+// two single-endpoint picks -- the endpoint-pick mechanism itself is otherwise untouched.
+let endpointPickContinuation = null;
 let cameraAnimation = null;
 let pendingImportedGeometry = null;
 let pendingGeometryFileName = '';
@@ -2171,6 +2174,179 @@ async function applyLibraryShape(id) {
     $('#shapeLibraryDialog').close();
 }
 
+let componentLibraryEntries = null;
+let componentLibraryDomains = new Set();
+let componentLibraryType = 'all';
+let componentLibraryPlacementCount = 0;
+
+function renderComponentLibraryItem(template) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'componentLibraryItem';
+    button.dataset.templateId = template.id;
+    button.title = template.description ?? '';
+    button.innerHTML = `<span class="componentLibrarySwatch" style="background:${escapeHtml(template.color ?? '#42c9bc')}"></span><span><b>${escapeHtml(template.name)}</b><small>${template.kind === 'node' ? 'Node' : 'Edge'} · ${escapeHtml(template.domains.map(domainLabel).join(', '))}</small></span>`;
+    button.addEventListener('click', () => applyComponentTemplate(template));
+    return button;
+}
+
+function renderComponentLibraryResults() {
+    const query = $('#componentLibrarySearch').value.trim().toLowerCase();
+    const matches = componentLibraryEntries.filter((template) => {
+        if (componentLibraryType !== 'all' && template.kind !== componentLibraryType) return false;
+        if (componentLibraryDomains.size && !template.domains.some((domain) => componentLibraryDomains.has(domain))) return false;
+        if (!query) return true;
+        const haystack = [template.name, template.description ?? '', ...template.domains].join(' ').toLowerCase();
+        return haystack.includes(query);
+    });
+    const container = $('#componentLibraryResults');
+    if (query || componentLibraryDomains.size) {
+        container.replaceChildren(...matches.map(renderComponentLibraryItem));
+    } else {
+        const domains = [...new Set(componentLibraryEntries.flatMap((template) => template.domains))].sort();
+        container.replaceChildren(...domains.map((domain) => {
+            const items = matches.filter((template) => template.domains.includes(domain));
+            if (!items.length) return null;
+            const section = document.createElement('div');
+            section.className = 'componentLibrarySection';
+            section.innerHTML = `<h3>${escapeHtml(domainLabel(domain))}</h3>`;
+            items.forEach((template) => section.appendChild(renderComponentLibraryItem(template)));
+            return section;
+        }).filter(Boolean));
+    }
+    $('#componentLibraryEmpty').hidden = matches.length > 0;
+}
+
+function renderComponentLibraryChips() {
+    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges']];
+    $('#componentLibraryTypeChips').replaceChildren(...types.map(([type, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.classList.toggle('active', type === componentLibraryType);
+        button.addEventListener('click', () => {
+            componentLibraryType = type;
+            $$('#componentLibraryTypeChips button').forEach((chip) => chip.classList.toggle('active', chip === button));
+            renderComponentLibraryResults();
+        });
+        return button;
+    }));
+    const domains = [...new Set(componentLibraryEntries.flatMap((template) => template.domains))].sort();
+    $('#componentLibraryDomainChips').replaceChildren(...domains.map((domain) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = domainLabel(domain);
+        button.classList.toggle('active', componentLibraryDomains.has(domain));
+        button.addEventListener('click', () => {
+            if (componentLibraryDomains.has(domain)) componentLibraryDomains.delete(domain);
+            else componentLibraryDomains.add(domain);
+            button.classList.toggle('active', componentLibraryDomains.has(domain));
+            renderComponentLibraryResults();
+        });
+        return button;
+    }));
+}
+
+async function openComponentLibraryPanel() {
+    componentLibraryEntries = await window.componentLibrary.list();
+    componentLibraryDomains = new Set();
+    componentLibraryType = 'all';
+    $('#componentLibrarySearch').value = '';
+    renderComponentLibraryChips();
+    renderComponentLibraryResults();
+    $('#componentLibraryPanel').hidden = false;
+    $('#componentLibraryButton').classList.add('active');
+    $('#componentLibraryButton').ariaExpanded = 'true';
+}
+
+function closeComponentLibraryPanel() {
+    $('#componentLibraryPanel').hidden = true;
+    $('#componentLibraryButton').classList.remove('active');
+    $('#componentLibraryButton').ariaExpanded = 'false';
+}
+
+// Places the new node with a small, deterministic per-application offset so repeated placements
+// from the sidebar don't stack exactly on top of one another -- there is no drag-to-position
+// interaction yet (see docs/proposals/componentLibrary.md), so this mirrors "Add node"'s own
+// fixed-position default as closely as possible while staying usable for several placements in a row.
+function applyNodeTemplate(template) {
+    const id = allocateModelEntityId();
+    const resolvedStates = template.states.map((state) => ({
+        id: allocateModelEntityId(),
+        label: state.label,
+        symbol: state.symbol,
+        initialValue: state.initialValue,
+        unit: state.unit ?? '',
+        value: `${state.initialValue}${state.unit ? ` ${state.unit}` : ''}`
+    }));
+    componentLibraryPlacementCount += 1;
+    const definition = {
+        id,
+        title: template.name,
+        type: 'Custom node',
+        shape: template.shape ?? 'box',
+        importedGeometry: null,
+        geometryFileName: null,
+        // Biased toward positive X: the component library sidebar docks over the left side of the
+        // canvas while it's open, so placing new nodes there would put them behind it on screen.
+        position: [1.5 + ((componentLibraryPlacementCount - 1) % 5) * 1.6, -0.7, 0],
+        subsystemId: activeSubsystemId,
+        deleted: false,
+        enabled: true,
+        color: Number.parseInt((template.color ?? '#34727a').replace('#', ''), 16),
+        states: resolvedStates,
+        sourceTerms: [],
+        substepsPerGlobalStep: 1
+    };
+    hideCards();
+    model.nodes.push(definition);
+    createNode(definition);
+    updateModelStatus();
+    selectNode(nodeObjects.get(id));
+    recordHistory({
+        undo: () => setNodeVisibility(id, false),
+        redo: () => setNodeVisibility(id, true)
+    });
+}
+
+// Arms the existing endpoint-pick flow for both endpoints in sequence (no node needs to be
+// pre-selected), pre-loading the builder with the template's equation and parameters first. Binding
+// is automatic: the latex already references role-prefixed state symbols (e.g. sourceTemperature),
+// so reconcileEquationBindings/normalizeEdgeEquationModel resolve it exactly like a hand-typed
+// equation would -- a state named differently just leaves that symbol unresolved, which the builder's
+// own live diagnostics and the model validator already surface, with no separate binding step to build.
+function applyEdgeTemplate(template) {
+    openEdgeBuilder();
+    $('#newEdgeName').value = template.name;
+    if (template.color) $('#newEdgeColor').value = template.color;
+    $('#edgeParameterRows').replaceChildren();
+    (template.parameters ?? []).forEach((parameter) => addEdgeParameterRow(parameter));
+    $('#edgeEquation').value = template.latex;
+    $('#edgeMathField').setValue(template.latex, { silenceNotifications: true });
+    renderBuilderEquationDiagnostics();
+    const hint = $('#componentLibraryHint');
+    hint.textContent = `Pick a source and target node for "${template.name}". States named "${template.ports.source}"/"${template.ports.target}" bind automatically; anything else is left for you to fix afterward.`;
+    hint.hidden = false;
+    startEndpointPick('source');
+    endpointPickContinuation = () => {
+        startEndpointPick('target');
+        endpointPickContinuation = () => { hint.hidden = true; };
+    };
+}
+
+function applyComponentTemplate(template) {
+    if (activeResult) return;
+    if (template.kind === 'node') applyNodeTemplate(template);
+    else applyEdgeTemplate(template);
+}
+
+$('#componentLibraryButton').addEventListener('click', () => {
+    if ($('#componentLibraryPanel').hidden) openComponentLibraryPanel();
+    else closeComponentLibraryPanel();
+});
+$('#closeComponentLibraryPanel').addEventListener('click', closeComponentLibraryPanel);
+$('#componentLibrarySearch').addEventListener('input', renderComponentLibraryResults);
+
 function stateVariablesFromBuilder() {
     return $$('.stateVariableRow').map((row) => ({
         name: $('[data-field="name"]', row).value.trim(),
@@ -2332,6 +2508,8 @@ function refreshEndpointOptions() {
 
 function finishEndpointPick() {
     activeEndpointPick = null;
+    endpointPickContinuation = null;
+    $('#componentLibraryHint').hidden = true;
     canvas.classList.remove('pickingEndpoint');
     $('#endpointPickBanner').hidden = true;
     $$('[data-pick-endpoint]').forEach((button) => button.classList.remove('active'));
@@ -2358,7 +2536,10 @@ function chooseEndpointNode(nodeId) {
     if (nodeId === otherEndpoint) return;
     $(`#edge${activeEndpointPick[0].toUpperCase()}${activeEndpointPick.slice(1)}`).value = nodeId;
     refreshStateReferences();
+    const continuation = endpointPickContinuation;
+    endpointPickContinuation = null;
     finishEndpointPick();
+    continuation?.();
 }
 
 function startEndpointPick(endpoint) {
@@ -2725,6 +2906,8 @@ function applyInspectorReadOnly() {
 function setResultModeLocked(locked) {
     canvas.classList.toggle('resultModeLocked', locked);
     $('#addButton').disabled = locked;
+    $('#componentLibraryButton').disabled = locked;
+    if (locked) closeComponentLibraryPanel();
     $('#assistantButton').disabled = locked;
     $('[data-action="delete"]').disabled = locked;
     $('[data-tool="move"]').disabled = locked;

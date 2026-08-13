@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "thermalMass",
+    "kind": "node",
+    "name": "Thermal mass",
+    "domains": ["thermal"],
+    "description": "A lumped thermal capacity with a single temperature state.",
+    "shape": "box",
+    "color": "#c46a3f",
+    "states": [
+        { "symbol": "temperature", "label": "Temperature", "initialValue": 293.15, "unit": "K" }
+    ]
+}

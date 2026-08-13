@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "fluidReservoir",
+    "kind": "node",
+    "name": "Fluid reservoir",
+    "domains": ["fluid"],
+    "description": "A fluid volume with a single pressure state.",
+    "shape": "cylinder",
+    "color": "#3fa9c4",
+    "states": [
+        { "symbol": "pressure", "label": "Pressure", "initialValue": 101325, "unit": "Pa" }
+    ]
+}

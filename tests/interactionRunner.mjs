@@ -1258,5 +1258,67 @@ export async function runInteractionTests(window) {
         assert.equal(Math.round((await evaluate(window, `window.uiZoom.get()`)) * 10) / 10, 1);
     });
 
+    await run('component library places node templates and connects them with an auto-bound edge template', async () => {
+        await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+        await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'Component library panel did not open.');
+        await waitFor(window, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
+        assert.ok(await evaluate(window, `[...document.querySelectorAll('.componentLibrarySection h3')].some((h) => h.textContent === 'Thermal')`), 'Templates were not sectioned by domain when idle.');
+
+        // Multi-select domain chips: filtering to "Fluid" alone should hide the thermal-only edge
+        // template but keep the fluid one, and collapse from sectioned to a flat filtered list.
+        await evaluate(window, `[...document.querySelectorAll('#componentLibraryDomainChips button')].find((b) => b.textContent === 'Fluid').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('[data-template-id="thermalConductor"]')`), null);
+        assert.notEqual(await evaluate(window, `document.querySelector('[data-template-id="fluidRestrictor"]')`), null);
+        await evaluate(window, `[...document.querySelectorAll('#componentLibraryDomainChips button')].find((b) => b.textContent === 'Fluid').click()`);
+
+        const nodesBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
+        const relationshipsBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`);
+
+        // Two instances of the same node template, so the edge template below has a guaranteed
+        // exact-symbol match on both ends without depending on the bundled example's own state names.
+        await evaluate(window, `document.querySelector('[data-template-id="thermalMass"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Thermal mass')).length === 1`, 'The first thermal mass node template was not placed.');
+        await evaluate(window, `document.querySelector('[data-template-id="thermalMass"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Thermal mass')).length === 2`, 'The second thermal mass node template was not placed.');
+        assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
+        assert.equal(await evaluate(window, `!document.querySelector('#componentLibraryPanel').hidden`), true, 'The library panel closed itself after placing a node.');
+
+        await evaluate(window, `document.querySelector('[data-template-id="thermalConductor"]').click()`);
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the edge template did not arm endpoint picking.');
+        assert.match(await evaluate(window, `document.querySelector('#componentLibraryHint').textContent`), /Thermal conductor/);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true, 'The edge builder should stay out of the way during the chained endpoint pick.');
+
+        // Endpoint picking is wired to the CSS2D label's own click listener (not 3D raycasting),
+        // so a plain .click() reaches it directly -- the same approach every other test in this
+        // file already uses for .objectLabel, and it sidesteps CSS2DRenderer position/timing
+        // entirely rather than needing real screen coordinates.
+        const clickThermalMass = async (index) => {
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Thermal mass'))[${index}].click()`);
+        };
+
+        await clickThermalMass(0);
+        await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain from the source to the target endpoint after the first click.');
+        await clickThermalMass(1);
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked.');
+        assert.equal(await evaluate(window, `document.querySelector('#componentLibraryHint').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#newEdgeName').value`), 'Thermal conductor');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeParameterRows .parameterRow [data-field="symbol"]').value`), 'conductance');
+        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true, 'The name-matched ports did not auto-bind to a valid equation.');
+
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the templated edge did not close the builder.');
+        assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
+
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`), true);
+
+        // Undo the edge and both placed nodes so this test leaves the baseline model unchanged.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

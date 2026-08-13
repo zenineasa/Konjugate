@@ -8,6 +8,21 @@ Konjugate add-on API version 1 is experimental. It currently supports one add-on
 
 An add-on is self-contained. Konjugate discovers its manifest, creates its toolstrip contribution, opens its entry page in a separate sandboxed window, and supplies a permission-controlled bridge. Adding another compatible visualizer does not require modifying Konjugate's main process, preload, renderer, or HTML files.
 
+## Add-ons vs. plugins
+
+Konjugate uses two deliberately separate extension concepts. Confusing them is the most common mistake when reasoning about what an extension can do — this document is only about the first one.
+
+| | Add-on (this document) | Plugin |
+| --- | --- | --- |
+| Layer | Electron application and presentation | Native engine and numerical execution |
+| Status | Implemented (API version 1, `resultVisualizer` kind only) | Proposed, not yet implemented |
+| Examples | Result visualizer, dashboard, modelling interface | Relationship provider, computational node, external-system adapter |
+| Runs where | A separate sandboxed Electron window, host-supplied bridge | Resolved and supervised by the native engine |
+| Model access | None — "no ability to edit the active model through API version 1" | Declared inputs/outputs only, no ambient authority |
+| Consequence of failure | The optional interface closes or becomes unavailable | A dependent model cannot run, or the active run fails |
+
+The two systems intentionally retain separate manifests, registries, permission models, API versions and runtime hosts, and installing or trusting one must never grant authority to the other. See [Interaction providers](interactionProviders.md#add-ons-and-plugins) for the plugin side — including the long-term contribution kinds it's expected to support (`relationshipProvider`, `nodeProvider`, `connector`, `validator`) and the "inline code → reusable plugin" promotion path. What ships today, and what this document describes, is the C++/Python inline `relationshipProvider` execution engine plus this add-on system — not a plugin packaging/registry/trust layer, which remains future work.
+
 ## Installation and discovery
 
 An add-on is a directory containing `addon.json` and every file it needs at runtime:

@@ -1,0 +1,14 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "thermalConductor",
+    "kind": "edge",
+    "name": "Thermal conductor",
+    "domains": ["thermal"],
+    "description": "Heat flow proportional to the temperature difference between two thermal masses.",
+    "color": "#c46a3f",
+    "ports": { "source": "temperature", "target": "temperature" },
+    "latex": "\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)",
+    "parameters": [
+        { "name": "Conductance", "symbol": "conductance", "value": 1, "unit": "W/K", "mode": "constant" }
+    ]
+}

@@ -4,9 +4,9 @@
     "kind": "node",
     "name": "Thermal mass",
     "domains": ["thermal"],
-    "description": "A lumped thermal capacity with a single temperature state.",
+    "description": "A lumped thermal capacity with a single temperature state, as used for the room, tank and body nodes throughout the bundled examples.",
     "shape": "box",
-    "color": "#c46a3f",
+    "color": "#c9603f",
     "states": [
         { "symbol": "temperature", "label": "Temperature", "initialValue": 293.15, "unit": "K" }
     ]

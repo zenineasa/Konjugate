@@ -586,8 +586,13 @@ function validateComponentTemplate(template) {
     }
     if (template.kind === 'node') {
         if (!Array.isArray(template.states) || !template.states.length) throw new Error('A node template needs at least one state.');
+        const stateSymbols = new Set();
         template.states.forEach((state) => {
             if (!componentTemplateIdPattern.test(state.symbol ?? '') || !state.label) throw new Error('A node template state needs a label and symbol.');
+            stateSymbols.add(state.symbol);
+        });
+        (template.sourceTerms ?? []).forEach((term) => {
+            if (!stateSymbols.has(term.state) || !term.expression) throw new Error('A node template source term needs a state matching one of its own states and an expression.');
         });
     } else {
         if (!template.ports || !componentTemplateIdPattern.test(template.ports.source ?? '') || !componentTemplateIdPattern.test(template.ports.target ?? '')) {
@@ -597,6 +602,9 @@ function validateComponentTemplate(template) {
         (template.parameters ?? []).forEach((parameter) => {
             if (!componentTemplateIdPattern.test(parameter.symbol ?? '') || !parameter.name) throw new Error('An edge template parameter needs a name and symbol.');
         });
+        if (template.output && (!['source', 'target'].includes(template.output.role) || !componentTemplateIdPattern.test(template.output.state ?? ''))) {
+            throw new Error('An edge template output must name a role ("source" or "target") and a state symbol.');
+        }
     }
     return structuredClone(template);
 }

@@ -2,13 +2,14 @@
     "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
     "id": "thermalConductor",
     "kind": "edge",
-    "name": "Thermal conductor",
+    "name": "Conduction",
     "domains": ["thermal"],
-    "description": "Heat flow proportional to the temperature difference between two thermal masses.",
-    "color": "#c46a3f",
+    "description": "Heat conduction between two thermal masses, normalized by the target's own thermal capacitance -- the same equation shape used by every conduction edge in the bundled examples (thermalEquilibrium, heatedWaterTank, twoRoomBuilding, thermalManagement).",
+    "color": "#9c83c4",
     "ports": { "source": "temperature", "target": "temperature" },
-    "latex": "\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)",
+    "latex": "\\frac{\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)}{\\mathrm{thermalCapacitance}}",
     "parameters": [
-        { "name": "Conductance", "symbol": "conductance", "value": 1, "unit": "W/K", "mode": "constant" }
+        { "name": "Conductance", "symbol": "conductance", "value": 50, "unit": "W/K", "mode": "constant" },
+        { "name": "Thermal capacitance", "symbol": "thermalCapacitance", "value": 1000, "unit": "J/K", "mode": "constant" }
     ]
 }

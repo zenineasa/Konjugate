@@ -1264,12 +1264,12 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
         assert.ok(await evaluate(window, `[...document.querySelectorAll('.componentLibrarySection h3')].some((h) => h.textContent === 'Thermal')`), 'Templates were not sectioned by domain when idle.');
 
-        // Multi-select domain chips: filtering to "Fluid" alone should hide the thermal-only edge
-        // template but keep the fluid one, and collapse from sectioned to a flat filtered list.
-        await evaluate(window, `[...document.querySelectorAll('#componentLibraryDomainChips button')].find((b) => b.textContent === 'Fluid').click()`);
+        // Multi-select domain chips: filtering to "Mechanical" alone should hide the thermal-only
+        // edge template but keep the mechanical one, and collapse from sectioned to a flat filtered list.
+        await evaluate(window, `[...document.querySelectorAll('#componentLibraryDomainChips button')].find((b) => b.textContent === 'Mechanical').click()`);
         assert.equal(await evaluate(window, `document.querySelector('[data-template-id="thermalConductor"]')`), null);
-        assert.notEqual(await evaluate(window, `document.querySelector('[data-template-id="fluidRestrictor"]')`), null);
-        await evaluate(window, `[...document.querySelectorAll('#componentLibraryDomainChips button')].find((b) => b.textContent === 'Fluid').click()`);
+        assert.notEqual(await evaluate(window, `document.querySelector('[data-template-id="spring"]')`), null);
+        await evaluate(window, `[...document.querySelectorAll('#componentLibraryDomainChips button')].find((b) => b.textContent === 'Mechanical').click()`);
 
         const nodesBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
         const relationshipsBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`);
@@ -1285,7 +1285,7 @@ export async function runInteractionTests(window) {
 
         await evaluate(window, `document.querySelector('[data-template-id="thermalConductor"]').click()`);
         await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the edge template did not arm endpoint picking.');
-        assert.match(await evaluate(window, `document.querySelector('#componentLibraryHint').textContent`), /Thermal conductor/);
+        assert.match(await evaluate(window, `document.querySelector('#componentLibraryHint').textContent`), /Conduction/);
         assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true, 'The edge builder should stay out of the way during the chained endpoint pick.');
 
         // Endpoint picking is wired to the CSS2D label's own click listener (not 3D raycasting),
@@ -1301,7 +1301,7 @@ export async function runInteractionTests(window) {
         await clickThermalMass(1);
         await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked.');
         assert.equal(await evaluate(window, `document.querySelector('#componentLibraryHint').hidden`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#newEdgeName').value`), 'Thermal conductor');
+        assert.equal(await evaluate(window, `document.querySelector('#newEdgeName').value`), 'Conduction');
         assert.equal(await evaluate(window, `document.querySelector('#edgeParameterRows .parameterRow [data-field="symbol"]').value`), 'conductance');
         assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true, 'The name-matched ports did not auto-bind to a valid equation.');
 
@@ -1309,10 +1309,48 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the templated edge did not close the builder.');
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
 
+        // Undo the edge and both placed nodes so this scenario leaves the baseline model unchanged
+        // before the next one starts.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
+
+        // Second scenario: a node template with a self-referencing source term (Mechanical mass),
+        // and an edge template with an explicit non-default output (Spring updates velocity, not
+        // the target's first state, displacement) -- covers the two schema additions the thermal
+        // scenario above doesn't exercise.
+        await evaluate(window, `document.querySelector('[data-template-id="mechanicalMass"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Mechanical mass')).length === 1`, 'The first mechanical mass node template was not placed.');
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Mechanical mass')).click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The placed mechanical mass node did not open its editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorSourceTerms .sourceTermPreview')?.textContent`), 'Updates displacement', "The template's self-referencing source term was not applied to the placed node.");
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+
+        await evaluate(window, `document.querySelector('[data-template-id="mechanicalMass"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Mechanical mass')).length === 2`, 'The second mechanical mass node template was not placed.');
+
+        await evaluate(window, `document.querySelector('[data-template-id="spring"]').click()`);
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the spring edge template did not arm endpoint picking.');
+        const clickMechanicalMass = async (index) => {
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Mechanical mass'))[${index}].click()`);
+        };
+        await clickMechanicalMass(0);
+        await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain to the target endpoint for the spring template.');
+        await clickMechanicalMass(1);
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked for the spring template.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`),
+            'target.velocity', "The explicit output override did not select velocity over the target's default first state, displacement.");
+        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true);
+
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the spring edge did not close the builder.');
+        assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
+
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`), true);
 
-        // Undo the edge and both placed nodes so this test leaves the baseline model unchanged.
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);

@@ -1,0 +1,14 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "heatInjection",
+    "kind": "edge",
+    "name": "Heat injection",
+    "domains": ["thermal"],
+    "description": "Feeds a heat source's flow rate into a thermal mass's temperature, normalized by that mass's thermal capacitance -- the same pattern as the heater input edge in heatedWaterTank.",
+    "color": "#d98b54",
+    "ports": { "source": "qDot", "target": "temperature" },
+    "latex": "\\frac{\\mathrm{sourceQDot}}{\\mathrm{thermalCapacitance}}",
+    "parameters": [
+        { "name": "Thermal capacitance", "symbol": "thermalCapacitance", "value": 1000, "unit": "J/K", "mode": "constant" }
+    ]
+}

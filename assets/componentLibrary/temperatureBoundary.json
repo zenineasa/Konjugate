@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "temperatureBoundary",
+    "kind": "node",
+    "name": "Temperature boundary",
+    "domains": ["thermal"],
+    "description": "A fixed ambient temperature reference, as used for the outdoor air and ambient air nodes in the bundled examples. Structurally identical to a thermal mass -- the distinction is in how it's used, not how it's shaped.",
+    "shape": "sphere",
+    "color": "#52727a",
+    "states": [
+        { "symbol": "temperature", "label": "Temperature", "initialValue": 293.15, "unit": "K" }
+    ]
+}

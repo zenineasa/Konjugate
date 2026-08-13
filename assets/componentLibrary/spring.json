@@ -1,0 +1,16 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "spring",
+    "kind": "edge",
+    "name": "Spring",
+    "domains": ["mechanical"],
+    "description": "A restoring force proportional to the displacement difference between two mechanical nodes, feeding the target's velocity -- the same equation and output shape as the spring force edge in springMassDamper.",
+    "color": "#d6a14f",
+    "ports": { "source": "displacement", "target": "displacement" },
+    "output": { "role": "target", "state": "velocity" },
+    "latex": "\\frac{\\mathrm{stiffness} \\cdot \\left(\\mathrm{sourceDisplacement} - \\mathrm{targetDisplacement}\\right)}{\\mathrm{mass}}",
+    "parameters": [
+        { "name": "Spring stiffness", "symbol": "stiffness", "value": 4, "unit": "N/m", "mode": "constant" },
+        { "name": "Mass", "symbol": "mass", "value": 1, "unit": "kg", "mode": "constant" }
+    ]
+}

@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "heatSource",
+    "kind": "node",
+    "name": "Heat source",
+    "domains": ["thermal"],
+    "description": "A fixed heat generation rate, as used for the electric heater and electrical loss nodes in the bundled examples. Pair with a Heat injection edge to feed it into a thermal mass.",
+    "shape": "sphere",
+    "color": "#c16f55",
+    "states": [
+        { "symbol": "qDot", "label": "Heat flow", "initialValue": 100, "unit": "W" }
+    ]
+}

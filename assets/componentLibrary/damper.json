@@ -1,0 +1,16 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "damper",
+    "kind": "edge",
+    "name": "Damper",
+    "domains": ["mechanical"],
+    "description": "A drag force proportional to the velocity difference between two mechanical nodes, feeding the target's velocity -- the same equation and output shape as the damper force edge in springMassDamper.",
+    "color": "#9c83c4",
+    "ports": { "source": "velocity", "target": "velocity" },
+    "output": { "role": "target", "state": "velocity" },
+    "latex": "\\frac{\\mathrm{dampingCoefficient} \\cdot \\left(\\mathrm{sourceVelocity} - \\mathrm{targetVelocity}\\right)}{\\mathrm{mass}}",
+    "parameters": [
+        { "name": "Damping coefficient", "symbol": "dampingCoefficient", "value": 0.4, "unit": "N·s/m", "mode": "constant" },
+        { "name": "Mass", "symbol": "mass", "value": 1, "unit": "kg", "mode": "constant" }
+    ]
+}

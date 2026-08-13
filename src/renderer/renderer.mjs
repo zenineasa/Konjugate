@@ -2298,6 +2298,15 @@ function applyNodeTemplate(template) {
         sourceTerms: [],
         substepsPerGlobalStep: 1
     };
+    // Built against `definition` after its states are resolved, via the same function the node
+    // editor's own source term UI uses -- a self-referencing coupling (e.g. displacement's rate
+    // equals velocity) needs no cross-node binding, just a symbol match against this node's own states.
+    definition.sourceTerms = (template.sourceTerms ?? []).map((term) => {
+        const built = { id: allocateModelEntityId(), state: term.state, expression: term.expression };
+        built.expressionModel = normalizeSourceTermExpressionModel(definition, built);
+        built.expression = built.expressionModel.latex;
+        return built;
+    });
     hideCards();
     model.nodes.push(definition);
     createNode(definition);
@@ -2330,7 +2339,19 @@ function applyEdgeTemplate(template) {
     startEndpointPick('source');
     endpointPickContinuation = () => {
         startEndpointPick('target');
-        endpointPickContinuation = () => { hint.hidden = true; };
+        endpointPickContinuation = () => {
+            hint.hidden = true;
+            // Most templates are happy with the builder's own default output (the target's first
+            // state), but one whose relevant state isn't the target's first -- e.g. Spring/Damper
+            // update velocity while displacement is declared first, to match the state order used
+            // in springMassDamper -- names it explicitly instead.
+            if (template.output) {
+                const roleNode = model.nodes.find((node) => node.id === Number($(`#edge${template.output.role[0].toUpperCase()}${template.output.role.slice(1)}`).value));
+                const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
+                const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === `${template.output.role}:${state.id}`);
+                if (option) $('#edgeEquationOutput').value = option.value;
+            }
+        };
     };
 }
 

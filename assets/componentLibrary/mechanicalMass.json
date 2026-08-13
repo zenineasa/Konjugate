@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "mechanicalMass",
+    "kind": "node",
+    "name": "Mechanical mass",
+    "domains": ["mechanical"],
+    "description": "A point mass with displacement and velocity states, as used for the suspended mass in springMassDamper. Includes the same self-referencing source term that example uses to integrate velocity into displacement.",
+    "shape": "box",
+    "color": "#5d7885",
+    "states": [
+        { "symbol": "displacement", "label": "Displacement", "initialValue": 0, "unit": "m" },
+        { "symbol": "velocity", "label": "Velocity", "initialValue": 0, "unit": "m/s" }
+    ],
+    "sourceTerms": [
+        { "state": "displacement", "expression": "\\mathrm{velocity}" }
+    ]
+}

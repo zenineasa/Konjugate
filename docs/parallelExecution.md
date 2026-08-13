@@ -4,6 +4,8 @@
 
 Konjugate can execute a simulation with a serial loop, a shared thread pool or communication-aware partitions. The selected backend changes how independent node work is scheduled. It does not change the model equations, timestep, node substeps, pacing or deterministic synchronization semantics.
 
+This is a different axis from [Provider execution transports](providerExecution.md), which is about how one programmable (C++/Python) relationship's own code runs relative to the engine process, independent of how its containing node was scheduled.
+
 ## Selecting a backend
 
 Execution settings belong to the active run configuration. In the application:

@@ -30,6 +30,16 @@ LaTeX is never executed directly. Multiple relationships targeting the same stat
 
 Source terms use the same structure under `expressionModel`: integer-ID-backed local-state bindings, an output state, editable LaTeX, and executable MathJSON. Source terms and relationships targeting the same state are summed before each integration step.
 
+An edge or source term may be programmable instead of an equation: it carries an `implementation` object (in place of `equationModel`/`expressionModel`) and its own top-level `expression`/`equation` field is left empty. `implementation` contains:
+
+- `kind`: `cpp` or `python`.
+- `providerApiVersion`: integer, currently `1`.
+- `source`: the inline C++ or Python source text the user authored in the Provider Editor, or (for Python) a path to a standalone script.
+- `bindings`: an array naming the provider's own port keys. A state binding is `{ key, kind: "state", nodeId, stateId }`; an edge may also bind `{ key, kind: "parameter", parameterId }`. No `role` is needed on a binding (unlike `equationModel`/`expressionModel` bindings) — it just names which state or parameter feeds that port key, for either a source term's one local side or either of an edge's two endpoints.
+- `output`: `{ key, stateId }` for a source term, or `{ key, role, stateId }` for an edge — the port key the provider's `addGradient()` call fills, mapped to the state receiving the contribution (`role` disambiguates a bidirectional edge's two endpoints, exactly as it does for `equationModel`'s output).
+
+At run time, the engine compiles `source` (for `cpp`) into a native provider artifact and evaluates it out-of-process or in-process depending on the configured transport; see [Provider execution transports](providerExecution.md). The C++ authoring API lives in `engine/include/konjugate/relationshipProvider.hpp`.
+
 Projects may contain named numerical `runConfigurations` and an `activeRunConfigurationId`. A numerical configuration contains `globalTimeStep` and `outputInterval` in seconds; output interval is an integer multiple of the global timestep. It may also contain the `execution` settings described in [Parallel execution](parallelExecution.md). Target time and pacing belong to the transient launch request rather than the model. Pacing selects `fastest`, `realTime`, or `limitedRatio`; limited pacing also supplies a positive `simulationSecondsPerWallSecond`. Pacing limits wall-clock execution and does not alter numerical timesteps. During each global step, every node advances with `globalTimeStep / substepsPerGlobalStep`. References to the advancing node use its latest local state; references to other nodes use the frozen state snapshot from the start of the global step. Nodes synchronize at the global boundary.
 
 Engine results distinguish display `samples` from restart `checkpoints`. Each checkpoint has a UUID, simulation time, complete state vector, and solver identity. Explicit Euler currently has no additional hidden solver state; future integrators extend the checkpoint record rather than treating plot samples as restart data.

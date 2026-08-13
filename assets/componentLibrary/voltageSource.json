@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "voltageSource",
+    "kind": "node",
+    "name": "Voltage source",
+    "domains": ["electrical"],
+    "description": "A fixed supply voltage, as used for the DC supply in dcMotor.",
+    "shape": "box",
+    "color": "#4d6c85",
+    "states": [
+        { "symbol": "voltage", "label": "Voltage", "initialValue": 24, "unit": "V" }
+    ]
+}

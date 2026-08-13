@@ -7,6 +7,7 @@
     "description": "Heat conduction between two thermal masses, normalized by the target's own thermal capacitance -- the same equation shape used by every conduction edge in the bundled examples (thermalEquilibrium, heatedWaterTank, twoRoomBuilding, thermalManagement).",
     "color": "#9c83c4",
     "ports": { "source": "temperature", "target": "temperature" },
+    "output": { "role": "target", "state": "temperature" },
     "latex": "\\frac{\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)}{\\mathrm{thermalCapacitance}}",
     "parameters": [
         { "name": "Conductance", "symbol": "conductance", "value": 50, "unit": "W/K", "mode": "constant" },

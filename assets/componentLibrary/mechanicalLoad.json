@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "mechanicalLoad",
+    "kind": "node",
+    "name": "Mechanical load",
+    "domains": ["mechanical"],
+    "description": "A resisting load torque, as used for the mechanical load in dcMotor. Pair with a Shaft dynamics edge to a DC motor.",
+    "shape": "sphere",
+    "color": "#9a6c59",
+    "states": [
+        { "symbol": "torque", "label": "Load torque", "initialValue": 0.1, "unit": "N·m" }
+    ]
+}

@@ -2334,7 +2334,8 @@ function applyEdgeTemplate(template) {
     $('#edgeMathField').setValue(template.latex, { silenceNotifications: true });
     renderBuilderEquationDiagnostics();
     const hint = $('#componentLibraryHint');
-    hint.textContent = `Pick a source and target node for "${template.name}". States named "${template.ports.source}"/"${template.ports.target}" bind automatically; anything else is left for you to fix afterward.`;
+    const portList = (port) => [port].flat().map((symbol) => `"${symbol}"`).join('/');
+    hint.textContent = `Pick a source and target node for "${template.name}". States named ${portList(template.ports.source)} (source) and ${portList(template.ports.target)} (target) bind automatically; anything else is left for you to fix afterward.`;
     hint.hidden = false;
     startEndpointPick('source');
     endpointPickContinuation = () => {

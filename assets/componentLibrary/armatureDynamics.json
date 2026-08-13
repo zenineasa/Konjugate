@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "armatureDynamics",
+    "kind": "edge",
+    "name": "Armature dynamics",
+    "domains": ["electrical"],
+    "description": "Drives a motor's armature current from a supply voltage, opposed by resistive drop and back-EMF -- the electrical half of the coupled motor equations in dcMotor. Connect from a Voltage source to a DC motor.",
+    "color": "#68a9cc",
+    "ports": { "source": "voltage", "target": ["current", "angularVelocity"] },
+    "output": { "role": "target", "state": "current" },
+    "latex": "\\frac{\\mathrm{sourceVoltage} - \\mathrm{resistance} \\cdot \\mathrm{targetCurrent} - \\mathrm{backEmfConstant} \\cdot \\mathrm{targetAngularVelocity}}{\\mathrm{inductance}}",
+    "parameters": [
+        { "name": "Armature resistance", "symbol": "resistance", "value": 2, "unit": "Ω", "mode": "constant" },
+        { "name": "Back EMF constant", "symbol": "backEmfConstant", "value": 0.1, "unit": "V·s/rad", "mode": "constant" },
+        { "name": "Armature inductance", "symbol": "inductance", "value": 0.5, "unit": "H", "mode": "constant" }
+    ]
+}

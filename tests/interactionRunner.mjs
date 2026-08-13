@@ -1304,6 +1304,11 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#newEdgeName').value`), 'Conduction');
         assert.equal(await evaluate(window, `document.querySelector('#edgeParameterRows .parameterRow [data-field="symbol"]').value`), 'conductance');
         assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true, 'The name-matched ports did not auto-bind to a valid equation.');
+        // Regression check: the builder's own default output (target's first state) is not
+        // reliable across a chained two-endpoint pick -- see the explicit `output` field on every
+        // bundled edge template -- so this specifically verifies the override actually lands on
+        // target.temperature rather than getting stuck on an implicit source-side selection.
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`), 'target.temperature');
 
         await evaluate(window, `document.querySelector('#createEdge').click()`);
         await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the templated edge did not close the builder.');
@@ -1348,12 +1353,63 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the spring edge did not close the builder.');
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
 
+        // Undo the edge and both placed nodes so this scenario leaves the baseline model unchanged
+        // before the next one starts.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
+
+        // Third scenario: a cross-domain node (DC motor, tagged both electrical and mechanical)
+        // and two edge templates whose ports declare more than one expected symbol on the same
+        // side (target: current AND angularVelocity) -- covers the array-valued ports the thermal
+        // and spring/damper scenarios above only exercise with a single symbol per role.
+        await evaluate(window, `document.querySelector('[data-template-id="dcMotor"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((l) => l.textContent.includes('DC motor'))`, 'The DC motor node template was not placed.');
+        await evaluate(window, `document.querySelector('[data-template-id="voltageSource"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((l) => l.textContent.includes('Voltage source'))`, 'The voltage source node template was not placed.');
+        await evaluate(window, `document.querySelector('[data-template-id="mechanicalLoad"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((l) => l.textContent.includes('Mechanical load'))`, 'The mechanical load node template was not placed.');
+        assert.equal(await evaluate(window, `Number.parseInt(document.querySelectorAll('.modelStatus span')[0].textContent, 10)`),
+            Number.parseInt(nodesBefore, 10) + 3, 'Placing the three node templates did not add exactly three nodes.');
+
+        const clickLabelContaining = async (text) => {
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes(${JSON.stringify(text)})).click()`);
+        };
+
+        await evaluate(window, `document.querySelector('[data-template-id="armatureDynamics"]').click()`);
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the armature dynamics edge template did not arm endpoint picking.');
+        assert.match(await evaluate(window, `document.querySelector('#componentLibraryHint').textContent`),
+            /"current"\/"angularVelocity"/, 'The hint did not list both target port symbols for a multi-symbol port.');
+        await clickLabelContaining('Voltage source');
+        await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain to the target endpoint for armature dynamics.');
+        await clickLabelContaining('DC motor');
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked for armature dynamics.');
+        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true,
+            'A latex expression referencing two states on the same side did not auto-bind to a valid equation.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`), 'target.current');
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the armature dynamics edge did not close the builder.');
+        assert.equal(await evaluate(window, `Number.parseInt(document.querySelectorAll('.modelStatus span')[0].textContent, 10)`),
+            Number.parseInt(nodesBefore, 10) + 3, 'Creating the armature dynamics edge unexpectedly changed the node count.');
+
+        await evaluate(window, `document.querySelector('[data-template-id="shaftDynamics"]').click()`);
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the shaft dynamics edge template did not arm endpoint picking.');
+        await clickLabelContaining('Mechanical load');
+        await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain to the target endpoint for shaft dynamics.');
+        await clickLabelContaining('DC motor');
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked for shaft dynamics.');
+        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`),
+            'target.angularVelocity', 'Shaft dynamics did not override the default output to angularVelocity.');
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the shaft dynamics edge did not close the builder.');
+
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`), true);
 
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        for (let undo = 0; undo < 5; undo += 1) await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
     });

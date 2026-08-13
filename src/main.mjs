@@ -595,15 +595,25 @@ function validateComponentTemplate(template) {
             if (!stateSymbols.has(term.state) || !term.expression) throw new Error('A node template source term needs a state matching one of its own states and an expression.');
         });
     } else {
-        if (!template.ports || !componentTemplateIdPattern.test(template.ports.source ?? '') || !componentTemplateIdPattern.test(template.ports.target ?? '')) {
+        // A port is usually one expected state symbol per role, but an edge whose equation
+        // couples more than one state on the same side (e.g. a motor's current and angular
+        // velocity, both referenced from the same "target" role) needs to declare more than one.
+        const validPort = (port) => port !== undefined && (Array.isArray(port) ? port.length : true) &&
+            [port].flat().every((symbol) => componentTemplateIdPattern.test(symbol ?? ''));
+        if (!template.ports || !validPort(template.ports.source) || !validPort(template.ports.target)) {
             throw new Error('An edge template needs source and target port symbols.');
         }
         if (!template.latex) throw new Error('An edge template needs a latex expression.');
         (template.parameters ?? []).forEach((parameter) => {
             if (!componentTemplateIdPattern.test(parameter.symbol ?? '') || !parameter.name) throw new Error('An edge template parameter needs a name and symbol.');
         });
-        if (template.output && (!['source', 'target'].includes(template.output.role) || !componentTemplateIdPattern.test(template.output.state ?? ''))) {
-            throw new Error('An edge template output must name a role ("source" or "target") and a state symbol.');
+        // Required, not just validated-if-present: the builder's own "no explicit output yet"
+        // default is the target's first state, but that default is unreliable once an edge template
+        // arms a chained two-endpoint pick (refreshStateReferences briefly runs source-only, which
+        // leaves an implicit selection that then survives once the target is picked too) -- so a
+        // template can never safely rely on it and must always say which state it means to update.
+        if (!template.output || !['source', 'target'].includes(template.output.role) || !componentTemplateIdPattern.test(template.output.state ?? '')) {
+            throw new Error('An edge template needs an output naming a role ("source" or "target") and a state symbol.');
         }
     }
     return structuredClone(template);

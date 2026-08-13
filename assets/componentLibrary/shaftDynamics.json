@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "shaftDynamics",
+    "kind": "edge",
+    "name": "Shaft dynamics",
+    "domains": ["mechanical"],
+    "description": "Drives a motor's angular velocity from armature current, opposed by viscous friction and a load torque -- the mechanical half of the coupled motor equations in dcMotor. Connect from a Mechanical load to a DC motor.",
+    "color": "#c78dbf",
+    "ports": { "source": "torque", "target": ["current", "angularVelocity"] },
+    "output": { "role": "target", "state": "angularVelocity" },
+    "latex": "\\frac{\\mathrm{torqueConstant} \\cdot \\mathrm{targetCurrent} - \\mathrm{viscousFriction} \\cdot \\mathrm{targetAngularVelocity} - \\mathrm{sourceTorque}}{\\mathrm{rotorInertia}}",
+    "parameters": [
+        { "name": "Torque constant", "symbol": "torqueConstant", "value": 0.1, "unit": "N·m/A", "mode": "constant" },
+        { "name": "Viscous friction", "symbol": "viscousFriction", "value": 0.02, "unit": "N·m·s/rad", "mode": "constant" },
+        { "name": "Rotor inertia", "symbol": "rotorInertia", "value": 0.01, "unit": "kg·m²", "mode": "constant" }
+    ]
+}

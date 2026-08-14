@@ -1430,5 +1430,116 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
     });
 
+    await run('Pose Visualizer add-on auto-detects and renders a 6-DOF free body node', async () => {
+        await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+        await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'Component library panel did not open.');
+        await waitFor(window, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
+        await evaluate(window, `document.querySelector('[data-template-id="freeBody"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Free body')).length === 1`, 'The first free body node template was not placed.');
+        await evaluate(window, `document.querySelector('[data-template-id="freeBody"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Free body')).length === 2`, 'The second free body node template was not placed.');
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+
+        // A manual edge between the two free bodies (rather than a component-library template,
+        // none of which connect two freeBody nodes) so the add-on's edge-line/label feature has
+        // a real connection to render -- the equation's content is irrelevant here, only that
+        // sourceNodeId/targetNodeId land on two detected 6-DOF bodies.
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        await evaluate(window, `(() => {
+            const options = (selector) => [...document.querySelector(selector).options].filter((option) => option.textContent === 'Free body');
+            const source = document.querySelector('#edgeSource');
+            source.value = options('#edgeSource')[0].value;
+            source.dispatchEvent(new Event('change', { bubbles: true }));
+            const target = document.querySelector('#edgeTarget');
+            target.value = options('#edgeTarget')[1].value;
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#newEdgeName').value = 'Pose link';
+            const field = document.querySelector('#edgeMathField');
+            field.setValue('\\\\mathrm{sourceX}');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true);
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the Pose link edge did not close the builder.');
+
+        await evaluate(window, `document.querySelector('#runButton').click()`);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `document.querySelector('.resultMode b').textContent === 'Results'`, 'Offline run did not complete.', 15000);
+
+        await waitFor(window, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.poseVisualizer"][data-command-id="openPoseVisualizer"]:not([hidden])'))`, 'Pose Visualizer toolstrip command did not appear.');
+        const windowIdsBeforeOpen = new Set(BrowserWindow.getAllWindows().map((item) => item.id));
+        await evaluate(window, `document.querySelector('.addonTool[data-addon-id="konjugate.poseVisualizer"][data-command-id="openPoseVisualizer"]').click()`);
+        const poseWindow = await (async () => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 5000) {
+                const candidate = BrowserWindow.getAllWindows().find((item) => !windowIdsBeforeOpen.has(item.id) && !item.isDestroyed());
+                if (candidate) return candidate;
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            throw new Error('Pose Visualizer add-on window did not open.');
+        })();
+
+        const consoleMessages = await captureConsoleMessages(poseWindow, async () => {
+            await waitFor(poseWindow, `Boolean(document.querySelector('.konjugateAddonTitlebar'))`, 'Host titlebar was not added to the Pose Visualizer window.');
+            assert.equal(await evaluate(poseWindow, `document.querySelector('.konjugateAddonIdentity b').textContent`), 'Pose Visualizer');
+            await waitFor(poseWindow, `getComputedStyle(document.querySelector('.konjugateAddonTitlebar')).position === 'fixed'`, 'Host titlebar styles did not load.');
+            await waitFor(poseWindow, `document.querySelectorAll('.bodyOption').length === 2`, 'Pose Visualizer did not detect both free body nodes.');
+            assert.match(await evaluate(poseWindow, `document.querySelector('.bodyOption b').textContent`), /Free body/);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('.sceneWorkspace').classList.contains('hasBodies')`), true);
+            assert.ok(await evaluate(poseWindow, `document.querySelector('#scene').clientWidth`) > 0);
+            assert.equal(await evaluate(poseWindow, `typeof require === 'undefined'`), true);
+
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#edgeLabels').children.length`), 0);
+            await evaluate(poseWindow, `document.querySelector('#showConnections').click()`);
+            await waitFor(poseWindow, `document.querySelector('#edgeLabels').children.length === 1`, 'Enabling connections did not draw the edge line/label.');
+            assert.equal(await evaluate(poseWindow, `document.querySelector('.edgeLabel').textContent`), 'Pose link');
+            await evaluate(poseWindow, `document.querySelector('#showConnections').click()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#edgeLabels').children.length`), 0);
+
+            await evaluate(poseWindow, `document.querySelector('#useEditorShapes').click()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#useEditorShapes').checked`), true);
+            await evaluate(poseWindow, `document.querySelector('#useEditorShapes').click()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#useEditorShapes').checked`), false);
+
+            await evaluate(poseWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = String(Number(timeline.max) / 2); timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await waitFor(window, `document.querySelector('#resultCurrentTime').value !== '0 s'`, 'Visualizer seek did not synchronize to the project window.');
+
+            await evaluate(poseWindow, `document.querySelector('.bodyOption input').click()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('.bodyOption input').checked`), false);
+
+            await waitFor(poseWindow, `document.querySelector('#runLifecycle').textContent === 'Completed'`, 'Pose Visualizer did not report the run as completed.');
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#playPause').disabled`), false);
+            await evaluate(poseWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await waitFor(window, `document.querySelector('#resultCurrentTime').value === '0 s'`, 'Resetting the add-on timeline to zero did not synchronize.');
+            await evaluate(poseWindow, `document.querySelector('#playPause').click()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#playPause').textContent`), '❚❚');
+            await waitFor(poseWindow, `document.querySelector('#playPause').textContent === '▶'`, 'Add-on-driven playback did not reach the end and stop.', 5000);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#timeline').value`), await evaluate(poseWindow, `document.querySelector('#timeline').max`));
+            await waitFor(window, `document.querySelector('#resultCurrentTime').value === '1 s'`, 'Main window did not sync to the end of add-on-driven playback.');
+
+            await evaluate(poseWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(poseWindow, `document.querySelector('#playPause').click()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#playPause').textContent`), '❚❚');
+            await evaluate(poseWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0.5'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            assert.equal(await evaluate(poseWindow, `document.querySelector('#playPause').textContent`), '▶', 'Manually scrubbing the timeline did not stop playback.');
+        });
+        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+
+        poseWindow.close();
+        for (let attempt = 0; attempt < 100 && !poseWindow.isDestroyed(); attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        assert.equal(poseWindow.isDestroyed(), true);
+
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+        await waitFor(window, `document.querySelector('#addButton') && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Free body'))?.click()`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Free body'))?.click()`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

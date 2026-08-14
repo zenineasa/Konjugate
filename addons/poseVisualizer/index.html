@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    <title>Pose Visualizer</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="viewer.mjs"></script>
+</head>
+<body>
+    <header class="poseHeader">
+        <div class="runIdentity"><strong id="projectName">—</strong><span id="runName">—</span></div>
+        <span id="runLifecycle" class="readOnlyBadge">Completed</span>
+    </header>
+    <main>
+        <section class="sceneWorkspace">
+            <canvas id="scene"></canvas>
+            <div id="edgeLabels"></div>
+            <div id="emptyScene"><strong>No 6-DOF bodies found</strong><span>This visualizer looks for nodes with x, y, z, roll, pitch and yaw states, named exactly that, on the same node.</span></div>
+        </section>
+        <aside class="bodyList">
+            <header><span>Detected bodies</span><strong>Pose Visualizer</strong></header>
+            <div class="viewOptions">
+                <label class="viewToggle"><input id="useEditorShapes" type="checkbox">Editor shapes &amp; colors</label>
+                <label class="viewToggle"><input id="showConnections" type="checkbox">Show connections</label>
+            </div>
+            <div id="bodies"></div>
+            <p id="noBodies" hidden>No node in this result has all six of x, y, z, roll, pitch and yaw as its own states.</p>
+        </aside>
+    </main>
+    <footer class="poseTimeline">
+        <button id="playPause" type="button" aria-label="Play">▶</button>
+        <output id="currentTime">0 s</output>
+        <input id="timeline" type="range" min="0" max="0" value="0" step="any" aria-label="Simulation time">
+        <output id="targetTime">0 s</output>
+        <select id="playbackRate" aria-label="Playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option></select>
+    </footer>
+</body>
+</html>

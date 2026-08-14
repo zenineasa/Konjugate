@@ -3354,7 +3354,20 @@ function createAddonContext(contextNames) {
             nodes: model.nodes.map((node) => ({
                 id: node.id,
                 title: node.title,
+                shape: node.shape,
+                color: node.color,
+                mesh: node.importedGeometry ? {
+                    position: Array.from(node.importedGeometry.getAttribute('position').array),
+                    normal: node.importedGeometry.getAttribute('normal') ? Array.from(node.importedGeometry.getAttribute('normal').array) : null,
+                    index: node.importedGeometry.getIndex() ? Array.from(node.importedGeometry.getIndex().array) : null
+                } : null,
                 states: node.states.map(({ id, label, symbol, unit }) => ({ id, label, symbol, unit }))
+            })),
+            edges: model.relationships.filter((edge) => edge.enabled && !edge.deleted).map((edge) => ({
+                id: edge.id,
+                title: edge.title,
+                sourceNodeId: edge.source,
+                targetNodeId: edge.target
             })),
             selectedNodeId: selectedNode?.userData.id ?? null,
             time: activeResult.samples[activeResultSampleIndex]?.time ?? 0

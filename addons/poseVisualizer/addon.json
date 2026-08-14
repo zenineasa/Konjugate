@@ -1,0 +1,27 @@
+{
+    "addonId": "konjugate.poseVisualizer",
+    "name": "Pose Visualizer",
+    "version": "0.1.0",
+    "apiVersion": 1,
+    "kind": "resultVisualizer",
+    "entry": "index.html",
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "permissions": [
+        "results.read",
+        "results.live.read",
+        "timeline.read",
+        "timeline.seek",
+        "selection.read",
+        "simulation.status.read"
+    ],
+    "contributes": {
+        "toolstrip": [{
+            "commandId": "openPoseVisualizer",
+            "label": "Pose",
+            "tooltip": "Open Pose Visualizer",
+            "symbol": "◈",
+            "when": "resultsActive",
+            "contexts": ["resultSession"]
+        }]
+    }
+}

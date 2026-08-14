@@ -1,0 +1,47 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { display: grid; grid-template-rows: 58px minmax(0, 1fr) 48px; color: #aebfc7; background: #081119; }
+button, input, select { font: inherit; }
+.poseHeader { display: flex; align-items: center; gap: 24px; padding: 0 18px; background: #0c1922; border-bottom: 1px solid #263943; }
+.poseHeader > div:first-child { display: grid; gap: 2px; }
+.poseHeader span { color: #647b86; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.poseHeader strong { color: #d3e0e5; font-size: 13px; }
+.runIdentity { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+.runIdentity strong { overflow: hidden; max-width: 280px; text-overflow: ellipsis; white-space: nowrap; }
+.runIdentity span { text-transform: none; }
+.poseHeader .readOnlyBadge { padding: 5px 8px; margin-left: auto; color: #7ed4cc; background: rgb(66 201 188 / 9%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 12px; }
+main { display: grid; min-height: 0; grid-template-columns: minmax(0, 1fr) 220px; }
+.sceneWorkspace { position: relative; min-width: 0; min-height: 0; }
+#scene { display: block; width: 100%; height: 100%; }
+#emptyScene { position: absolute; inset: 12px; display: grid; place-content: center; gap: 6px; color: #5e747d; text-align: center; pointer-events: none; }
+#emptyScene strong { color: #91a5ae; font-size: 13px; }
+#emptyScene span { max-width: 280px; font-size: 9px; }
+.sceneWorkspace.hasBodies #emptyScene { display: none; }
+#edgeLabels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.edgeLabel { position: absolute; padding: 2px 6px; color: #d8c39a; font-size: 8px; white-space: nowrap; background: rgb(8 17 25 / 78%); border: 1px solid rgb(224 164 88 / 35%); border-radius: 3px; transform: translate(-50%, -50%); }
+.bodyList { min-height: 0; padding: 14px; overflow: auto; background: #0b1720; border-left: 1px solid #263943; }
+.bodyList > header { margin-bottom: 12px; }
+.bodyList > header span { display: block; color: #627985; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
+.bodyList > header strong { display: block; margin-top: 2px; color: #c3d1d7; font-size: 11px; }
+.viewOptions { display: grid; gap: 4px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid #1c2e38; }
+.viewToggle { display: flex; align-items: center; gap: 6px; color: #91a5ae; font-size: 9px; cursor: pointer; }
+.viewToggle input { width: 12px; height: 12px; accent-color: #42c9bc; }
+.bodyOption { display: grid; grid-template-columns: 12px minmax(0, 1fr); align-items: start; gap: 8px; padding: 7px 6px; border-radius: 4px; cursor: pointer; }
+.bodyOption:hover { background: #11222c; }
+.bodyOption.selectedEntity { background: #132a33; box-shadow: inset 2px 0 0 var(--body-color, #42c9bc); }
+.bodyOption input { width: 12px; height: 12px; margin-top: 2px; accent-color: var(--body-color, #42c9bc); }
+.bodyOption span { display: grid; gap: 1px; min-width: 0; }
+.bodyOption b { overflow: hidden; color: #aebfc7; font-size: 9px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.bodySwatch { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 2px; vertical-align: middle; }
+.bodyOption small { color: #5f747e; font-size: 8px; }
+#noBodies { padding: 8px 6px; color: #5e747d; font-size: 9px; line-height: 1.5; }
+.poseTimeline { display: grid; grid-template-columns: auto 64px minmax(120px, 1fr) 64px auto; align-items: center; gap: 10px; padding: 0 18px; background: #0c1922; border-top: 1px solid #2a3d47; }
+.poseTimeline input { width: 100%; accent-color: #42c9bc; }
+.poseTimeline output { color: #758b95; font-size: 9px; text-align: center; }
+.poseTimeline select { padding: 3px 4px; color: #aebfc7; background: #0f1e28; border: 1px solid #263943; border-radius: 4px; }
+#playPause { width: 26px; height: 26px; color: #aebfc7; background: #11222c; border: 1px solid #263943; border-radius: 50%; cursor: pointer; }
+#playPause:hover { background: #162934; }
+#playPause:disabled { color: #4a5c65; cursor: not-allowed; }

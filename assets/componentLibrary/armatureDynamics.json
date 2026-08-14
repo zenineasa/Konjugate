@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Armature dynamics",
     "domains": ["electrical"],
-    "description": "Drives a motor's armature current from a supply voltage, opposed by resistive drop and back-EMF -- the electrical half of the coupled motor equations in dcMotor. Connect from a Voltage source to a DC motor.",
+    "description": "Drives a motor's armature current from a supply voltage, opposed by resistive drop and back-EMF. Connect from a Voltage source or a Battery (both expose a voltage state) to a Motor.",
     "color": "#68a9cc",
     "ports": { "source": "voltage", "target": ["current", "angularVelocity"] },
     "output": { "role": "target", "state": "current" },

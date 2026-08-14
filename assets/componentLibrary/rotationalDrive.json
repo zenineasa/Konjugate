@@ -1,0 +1,16 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "rotationalDrive",
+    "kind": "edge",
+    "name": "Rotational drive",
+    "domains": ["mechanical"],
+    "description": "Drives a link's angular velocity directly from a motor's current, against the link's own moment of inertia -- simpler than Shaft dynamics, with no separate friction/disturbance modeling. Connect from a Motor to a Rotational link when you want to track the link's own angle (e.g. to feed a controller), not just the motor's internal speed.",
+    "color": "#7d9dc7",
+    "ports": { "source": "current", "target": "angularVelocity" },
+    "output": { "role": "target", "state": "angularVelocity" },
+    "latex": "\\frac{\\mathrm{torqueConstant} \\cdot \\mathrm{sourceCurrent}}{\\mathrm{momentOfInertia}}",
+    "parameters": [
+        { "name": "Torque constant", "symbol": "torqueConstant", "value": 0.1, "unit": "N·m/A", "mode": "constant" },
+        { "name": "Moment of inertia", "symbol": "momentOfInertia", "value": 0.01, "unit": "kg·m²", "mode": "constant" }
+    ]
+}

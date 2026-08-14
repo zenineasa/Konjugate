@@ -1,13 +1,14 @@
 {
     "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
-    "id": "thermalConductor",
+    "id": "conduction",
     "kind": "edge",
     "name": "Conduction",
     "domains": ["thermal"],
-    "description": "Heat conduction between two thermal masses, normalized by the target's own thermal capacitance -- the same equation shape used by every conduction edge in the bundled examples (thermalEquilibrium, heatedWaterTank, twoRoomBuilding, thermalManagement).",
+    "description": "Heat conduction between two thermal masses, normalized by the target's own thermal capacitance. Bidirectional: the same computed value is applied with the sign flipped to both sides, so heat leaving one body exactly equals heat entering the other -- energy-conserving by construction, not just approximately balanced.",
     "color": "#9c83c4",
     "ports": { "source": "temperature", "target": "temperature" },
     "output": { "role": "target", "state": "temperature" },
+    "bidirectional": true,
     "latex": "\\frac{\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)}{\\mathrm{thermalCapacitance}}",
     "parameters": [
         { "name": "Conductance", "symbol": "conductance", "value": 50, "unit": "W/K", "mode": "constant" },

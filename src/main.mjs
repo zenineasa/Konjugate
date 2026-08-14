@@ -615,6 +615,9 @@ function validateComponentTemplate(template) {
         if (!template.output || !['source', 'target'].includes(template.output.role) || !componentTemplateIdPattern.test(template.output.state ?? '')) {
             throw new Error('An edge template needs an output naming a role ("source" or "target") and a state symbol.');
         }
+        if (template.bidirectional !== undefined && typeof template.bidirectional !== 'boolean') {
+            throw new Error('An edge template\'s bidirectional flag must be a boolean.');
+        }
     }
     return structuredClone(template);
 }

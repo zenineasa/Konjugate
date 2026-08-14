@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Voltage source",
     "domains": ["electrical"],
-    "description": "A fixed supply voltage, as used for the DC supply in dcMotor.",
+    "description": "A supply voltage for a motor. Its state doesn't have to stay fixed -- Position control drives it directly, turning it into a commanded rather than a constant supply.",
     "shape": "box",
     "color": "#4d6c85",
     "states": [

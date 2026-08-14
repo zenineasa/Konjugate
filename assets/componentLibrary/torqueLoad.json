@@ -1,10 +1,10 @@
 {
     "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
-    "id": "mechanicalLoad",
+    "id": "torqueLoad",
     "kind": "node",
-    "name": "Mechanical load",
+    "name": "Torque load",
     "domains": ["mechanical"],
-    "description": "A resisting load torque, as used for the mechanical load in dcMotor. Pair with a Shaft dynamics edge to a DC motor.",
+    "description": "A fixed external resisting torque -- bearing friction, a held payload, gravity on an arm. Pair with Shaft dynamics against a motor's own rotor inertia.",
     "shape": "sphere",
     "color": "#9a6c59",
     "states": [

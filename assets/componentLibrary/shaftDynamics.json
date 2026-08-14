@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Shaft dynamics",
     "domains": ["mechanical"],
-    "description": "Drives a motor's angular velocity from armature current, opposed by viscous friction and a load torque -- the mechanical half of the coupled motor equations in dcMotor. Connect from a Mechanical load to a DC motor.",
+    "description": "Drives a motor's own angular velocity from armature current, opposed by viscous friction and an external load torque. Connect from a Torque load to a Motor. Use this (rather than Rotational drive) when you want to model the motor's rotor fighting a known disturbance, not swinging a separately-tracked link.",
     "color": "#c78dbf",
     "ports": { "source": "torque", "target": ["current", "angularVelocity"] },
     "output": { "role": "target", "state": "angularVelocity" },

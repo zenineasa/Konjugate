@@ -1,0 +1,16 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "resistiveHeating",
+    "kind": "edge",
+    "name": "Resistive heating",
+    "domains": ["thermal"],
+    "description": "I²R heating: converts a motor's current draw into a heat injection rate on a thermal mass (its housing), normalized by that mass's thermal capacitance. Connect from a Motor to a Thermal mass.",
+    "color": "#d98b54",
+    "ports": { "source": "current", "target": "temperature" },
+    "output": { "role": "target", "state": "temperature" },
+    "latex": "\\frac{\\mathrm{resistance} \\cdot \\mathrm{sourceCurrent}^{2}}{\\mathrm{thermalCapacitance}}",
+    "parameters": [
+        { "name": "Winding resistance", "symbol": "resistance", "value": 2, "unit": "Ω", "mode": "constant" },
+        { "name": "Thermal capacitance", "symbol": "thermalCapacitance", "value": 50, "unit": "J/K", "mode": "constant" }
+    ]
+}

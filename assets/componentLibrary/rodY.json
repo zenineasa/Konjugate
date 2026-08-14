@@ -1,0 +1,18 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "rodY",
+    "kind": "edge",
+    "name": "Rod Y",
+    "domains": ["mechanical"],
+    "description": "The Y-axis component of the same rigid-rod approximation as Rod X -- see that template for the full explanation of the technique and its simplifications. Apply alongside Rod X (and Rod Z, for out-of-plane motion) between the same pair of Free bodies.",
+    "color": "#c4915d",
+    "ports": { "source": ["x", "y", "z", "vy"], "target": ["x", "y", "z", "vy"] },
+    "output": { "role": "target", "state": "vy" },
+    "latex": "\\frac{\\mathrm{stiffness} \\cdot \\left(\\mathrm{restLength} - \\sqrt{\\left(\\mathrm{targetX}-\\mathrm{sourceX}\\right)^{2}+\\left(\\mathrm{targetY}-\\mathrm{sourceY}\\right)^{2}+\\left(\\mathrm{targetZ}-\\mathrm{sourceZ}\\right)^{2}}\\right) \\cdot \\left(\\mathrm{targetY}-\\mathrm{sourceY}\\right)}{\\sqrt{\\left(\\mathrm{targetX}-\\mathrm{sourceX}\\right)^{2}+\\left(\\mathrm{targetY}-\\mathrm{sourceY}\\right)^{2}+\\left(\\mathrm{targetZ}-\\mathrm{sourceZ}\\right)^{2}} \\cdot \\mathrm{mass}} - \\frac{\\mathrm{damping} \\cdot \\left(\\mathrm{targetVy}-\\mathrm{sourceVy}\\right)}{\\mathrm{mass}}",
+    "parameters": [
+        { "name": "Rest length", "symbol": "restLength", "value": 1, "unit": "m", "mode": "constant" },
+        { "name": "Stiffness", "symbol": "stiffness", "value": 500, "unit": "N/m", "mode": "constant" },
+        { "name": "Damping", "symbol": "damping", "value": 10, "unit": "N·s/m", "mode": "constant" },
+        { "name": "Mass", "symbol": "mass", "value": 0.5, "unit": "kg", "mode": "constant" }
+    ]
+}

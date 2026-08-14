@@ -1,0 +1,15 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "crankDriveX",
+    "kind": "edge",
+    "name": "Crank drive X",
+    "domains": ["mechanical"],
+    "description": "Drives the X component of uniform circular motion about a fixed center, at a live angular rate -- the standard identity d/dt[r cos(theta)] = -omega*(y-y0) for a point rotating at constant omega, which needs no separate angle state to track. Connect from a fixed Free body (the pivot) to another Free body (the crank pin); pair with Crank drive Y for the Y component. The radius is whatever the initial distance between the two happens to be -- preserved by the motion itself, not set as a parameter.",
+    "color": "#d6a14f",
+    "ports": { "source": ["x", "y"], "target": ["x", "y"] },
+    "output": { "role": "target", "state": "x" },
+    "latex": "-\\mathrm{angularVelocity} \\cdot \\left(\\mathrm{targetY} - \\mathrm{sourceY}\\right)",
+    "parameters": [
+        { "name": "Angular velocity", "symbol": "angularVelocity", "value": 1, "unit": "rad/s", "mode": "live", "control": { "minimum": -6.28, "maximum": 6.28, "step": 0.1 } }
+    ]
+}

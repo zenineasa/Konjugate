@@ -1,0 +1,15 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "discharge",
+    "kind": "edge",
+    "name": "Discharge",
+    "domains": ["electrical"],
+    "description": "Depletes a battery's state of charge in proportion to the current a motor draws from it. Connect from a Motor to a Battery.",
+    "color": "#c46a6a",
+    "ports": { "source": "current", "target": "stateOfCharge" },
+    "output": { "role": "target", "state": "stateOfCharge" },
+    "latex": "-\\mathrm{dischargeCoefficient} \\cdot \\mathrm{sourceCurrent}",
+    "parameters": [
+        { "name": "Discharge coefficient", "symbol": "dischargeCoefficient", "value": 0.05, "unit": "%/(A·s)", "mode": "constant" }
+    ]
+}

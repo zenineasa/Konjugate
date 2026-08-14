@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "rotationalLink",
+    "kind": "node",
+    "name": "Rotational link",
+    "domains": ["mechanical"],
+    "description": "A rigid body free to rotate about a joint, with its own angle and angular velocity -- unlike a Torque load, it's a genuine moving body you can track and feed back into a controller, not just a fixed disturbance. Includes the self-referencing source term that integrates angular velocity into angle. Pair with Rotational drive.",
+    "shape": "box",
+    "color": "#5d7885",
+    "states": [
+        { "symbol": "angle", "label": "Angle", "initialValue": 0, "unit": "rad" },
+        { "symbol": "angularVelocity", "label": "Angular velocity", "initialValue": 0, "unit": "rad/s" }
+    ],
+    "sourceTerms": [
+        { "state": "angle", "expression": "\\mathrm{angularVelocity}" }
+    ]
+}

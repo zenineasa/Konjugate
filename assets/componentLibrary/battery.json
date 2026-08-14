@@ -3,12 +3,13 @@
     "id": "battery",
     "kind": "node",
     "name": "Battery",
-    "domains": ["thermal", "electrical"],
-    "description": "A battery module with temperature and state-of-charge states, as used for the battery module in thermalManagement -- spans both domains, since it's a thermal mass that also tracks stored energy.",
+    "domains": ["electrical", "thermal"],
+    "description": "A supply voltage that depletes with current draw and heats up over its own thermal mass -- spans both domains, since a real battery's electrical and thermal behavior are coupled. Pair with Armature dynamics, Discharge and Conduction.",
     "shape": "box",
     "color": "#2f6970",
     "states": [
-        { "symbol": "temperature", "label": "Temperature", "initialValue": 293.15, "unit": "K" },
-        { "symbol": "stateOfCharge", "label": "State of charge", "initialValue": 100, "unit": "%" }
+        { "symbol": "voltage", "label": "Voltage", "initialValue": 24, "unit": "V" },
+        { "symbol": "stateOfCharge", "label": "State of charge", "initialValue": 100, "unit": "%" },
+        { "symbol": "temperature", "label": "Temperature", "initialValue": 293.15, "unit": "K" }
     ]
 }

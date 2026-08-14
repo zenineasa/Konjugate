@@ -1,0 +1,26 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "freeBody",
+    "kind": "node",
+    "name": "Free body",
+    "domains": ["mechanical"],
+    "description": "A point with full 6-DOF pose (x, y, z, roll, pitch, yaw) and linear velocity (vx, vy, vz), with the self-referencing source terms that integrate velocity into position on each axis. Orientation states are present but undriven here -- nothing in the rod/crank templates constrains rotation, only distance. The same node plays three roles purely by which edges you attach: a fixed pivot (nothing connected), a kinematically-driven point (Crank drive), or a body that responds to constraints (Rod X/Y).",
+    "shape": "sphere",
+    "color": "#5d7885",
+    "states": [
+        { "symbol": "x", "label": "X position", "initialValue": 0, "unit": "m" },
+        { "symbol": "y", "label": "Y position", "initialValue": 0, "unit": "m" },
+        { "symbol": "z", "label": "Z position", "initialValue": 0, "unit": "m" },
+        { "symbol": "roll", "label": "Roll", "initialValue": 0, "unit": "rad" },
+        { "symbol": "pitch", "label": "Pitch", "initialValue": 0, "unit": "rad" },
+        { "symbol": "yaw", "label": "Yaw", "initialValue": 0, "unit": "rad" },
+        { "symbol": "vx", "label": "X velocity", "initialValue": 0, "unit": "m/s" },
+        { "symbol": "vy", "label": "Y velocity", "initialValue": 0, "unit": "m/s" },
+        { "symbol": "vz", "label": "Z velocity", "initialValue": 0, "unit": "m/s" }
+    ],
+    "sourceTerms": [
+        { "state": "x", "expression": "\\mathrm{vx}" },
+        { "state": "y", "expression": "\\mathrm{vy}" },
+        { "state": "z", "expression": "\\mathrm{vz}" }
+    ]
+}

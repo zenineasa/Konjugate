@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Temperature boundary",
     "domains": ["thermal"],
-    "description": "A fixed ambient temperature reference, as used for the outdoor air and ambient air nodes in the bundled examples. Structurally identical to a thermal mass -- the distinction is in how it's used, not how it's shaped.",
+    "description": "A fixed ambient temperature reference. Structurally identical to a Thermal mass -- the distinction is in how it's used (nothing feeds heat into it), not how it's shaped.",
     "shape": "sphere",
     "color": "#52727a",
     "states": [

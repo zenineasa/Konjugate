@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "positionControl",
+    "kind": "edge",
+    "name": "Position control",
+    "domains": ["mechanical"],
+    "description": "An integral position controller with rate feedback: voltage accumulates for as long as the link's angle differs from the live setpoint (the integral term), while a rate term opposes the link's own angular velocity (damping, the same role a derivative term plays in a standard PID). Pure integral action alone is not enough here -- driving a plant with two more integrators (current and angular velocity feeding into angle) through a third pure integrator (voltage) is a fourth-order loop with no inherent damping, and is unstable for any positive gain, not just a large one. The rate term is what actually closes the loop safely. Connect from a Rotational link to a Voltage source, then scrub the setpoint live during a run.",
+    "color": "#9c83c4",
+    "ports": { "source": ["angle", "angularVelocity"], "target": "voltage" },
+    "output": { "role": "target", "state": "voltage" },
+    "latex": "\\mathrm{gain} \\cdot \\left(\\mathrm{setpointAngle} - \\mathrm{sourceAngle}\\right) - \\mathrm{rateGain} \\cdot \\mathrm{sourceAngularVelocity}",
+    "parameters": [
+        { "name": "Gain", "symbol": "gain", "value": 5, "unit": "V/(rad·s)", "mode": "constant" },
+        { "name": "Rate gain", "symbol": "rateGain", "value": 10, "unit": "V·s/rad", "mode": "constant" },
+        { "name": "Setpoint angle", "symbol": "setpointAngle", "value": 1, "unit": "rad", "mode": "live", "control": { "minimum": -3.14, "maximum": 3.14, "step": 0.05 } }
+    ]
+}

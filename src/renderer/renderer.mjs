@@ -2178,6 +2178,7 @@ let componentLibraryEntries = null;
 let componentLibraryDomains = new Set();
 let componentLibraryType = 'all';
 let componentLibraryPlacementCount = 0;
+let pendingBidirectionalTemplate = null;
 
 function renderComponentLibraryItem(template) {
     const button = document.createElement('button');
@@ -2343,15 +2344,15 @@ function applyEdgeTemplate(template) {
         endpointPickContinuation = () => {
             hint.hidden = true;
             // Most templates are happy with the builder's own default output (the target's first
-            // state), but one whose relevant state isn't the target's first -- e.g. Spring/Damper
-            // update velocity while displacement is declared first, to match the state order used
-            // in springMassDamper -- names it explicitly instead.
-            if (template.output) {
-                const roleNode = model.nodes.find((node) => node.id === Number($(`#edge${template.output.role[0].toUpperCase()}${template.output.role.slice(1)}`).value));
-                const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
-                const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === `${template.output.role}:${state.id}`);
-                if (option) $('#edgeEquationOutput').value = option.value;
-            }
+            // state), but one whose relevant state isn't the target's first -- e.g. a rod's
+            // correction lands on velocity while position is declared first -- names it explicitly
+            // instead. Required on every template (see validateComponentTemplate), since that
+            // default is not reliable across a chained two-endpoint pick to begin with.
+            const roleNode = model.nodes.find((node) => node.id === Number($(`#edge${template.output.role[0].toUpperCase()}${template.output.role.slice(1)}`).value));
+            const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
+            const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === `${template.output.role}:${state.id}`);
+            if (option) $('#edgeEquationOutput').value = option.value;
+            if (template.bidirectional) pendingBidirectionalTemplate = template;
         };
     };
 }
@@ -4616,6 +4617,7 @@ function openNodeBuilder(clientX, clientY) {
 function openEdgeBuilder(clientX, clientY) {
     const builder = $('#edgeBuilder');
     hideCards(builder);
+    pendingBidirectionalTemplate = null;
     $('#newEdgeName').value = 'New relationship';
     $('#newEdgeColor').value = '#9c83c4';
     $('#edgeImplementationKind').value = 'equation';
@@ -5895,6 +5897,24 @@ $('#createEdge').addEventListener('click', () => {
         undo: () => setRelationshipVisibility(definition.id, false),
         redo: () => setRelationshipVisibility(definition.id, true)
     });
+});
+
+// The builder's own "Create relationship" above always makes a directed edge -- bidirectional is
+// only exposed post-creation, in the edge editor. A template that needs it (e.g. Conduction, where
+// energy leaving one side must equal energy entering the other) sets pendingBidirectionalTemplate;
+// this listener, registered after the one above so it runs after the real creation completes,
+// applies it via the same setRelationshipDirectionality the editor itself uses.
+$('#createEdge').addEventListener('click', () => {
+    if (!pendingBidirectionalTemplate || !$('#edgeBuilder').classList.contains('hidden')) return;
+    const template = pendingBidirectionalTemplate;
+    pendingBidirectionalTemplate = null;
+    const definition = selectedRelationship;
+    if (!definition) return;
+    setRelationshipDirectionality(definition, 'bidirectional');
+    const otherRole = template.output.role === 'source' ? 'target' : 'source';
+    const otherNode = model.nodes.find((node) => node.id === definition[otherRole]);
+    const otherState = otherNode?.states.find((candidate) => candidate.symbol === template.output.state);
+    if (otherState) definition[otherRole === 'source' ? 'sourceStateId' : 'targetStateId'] = otherState.id;
 });
 
 function setLabelDetail(detail, expanded) {

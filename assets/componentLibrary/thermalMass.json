@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Thermal mass",
     "domains": ["thermal"],
-    "description": "A lumped thermal capacity with a single temperature state, as used for the room, tank and body nodes throughout the bundled examples.",
+    "description": "A lumped thermal capacity with a single temperature state -- a motor housing, a battery pack, anything that heats up and cools down. Pair with Conduction (to a boundary) and Resistive heating (from a motor's current draw).",
     "shape": "box",
     "color": "#c9603f",
     "states": [

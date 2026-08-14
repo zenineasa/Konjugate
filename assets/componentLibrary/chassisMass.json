@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "chassisMass",
+    "kind": "node",
+    "name": "Chassis mass",
+    "domains": ["mechanical"],
+    "description": "A body free to translate along one axis, with position and velocity states and the self-referencing source term that integrates one into the other. Pair with Traction, driven by a motor's wheel.",
+    "shape": "box",
+    "color": "#6b7f8c",
+    "states": [
+        { "symbol": "position", "label": "Position", "initialValue": 0, "unit": "m" },
+        { "symbol": "velocity", "label": "Velocity", "initialValue": 0, "unit": "m/s" }
+    ],
+    "sourceTerms": [
+        { "state": "position", "expression": "\\mathrm{velocity}" }
+    ]
+}

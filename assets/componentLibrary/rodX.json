@@ -1,0 +1,18 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "rodX",
+    "kind": "edge",
+    "name": "Rod X",
+    "domains": ["mechanical"],
+    "description": "Approximates a rigid rod of fixed length as a stiff spring-damper along its axis -- there's no hard constraint solver here, so this is the standard penalty technique real-time physics engines use for the same problem. Damping is applied per-axis rather than strictly along the rod's instantaneous direction, a small simplification that doesn't affect the settled shape, only how quickly it gets there. One of three axis components (with Rod Y, Rod Z) since an edge can only update one state -- apply the pair that matter for your rod's plane of motion. Connect between two Free bodies; for a body whose position is otherwise undriven (a passive joint), this alone is enough to hold it at a fixed distance from the other end.",
+    "color": "#c4915d",
+    "ports": { "source": ["x", "y", "z", "vx"], "target": ["x", "y", "z", "vx"] },
+    "output": { "role": "target", "state": "vx" },
+    "latex": "\\frac{\\mathrm{stiffness} \\cdot \\left(\\mathrm{restLength} - \\sqrt{\\left(\\mathrm{targetX}-\\mathrm{sourceX}\\right)^{2}+\\left(\\mathrm{targetY}-\\mathrm{sourceY}\\right)^{2}+\\left(\\mathrm{targetZ}-\\mathrm{sourceZ}\\right)^{2}}\\right) \\cdot \\left(\\mathrm{targetX}-\\mathrm{sourceX}\\right)}{\\sqrt{\\left(\\mathrm{targetX}-\\mathrm{sourceX}\\right)^{2}+\\left(\\mathrm{targetY}-\\mathrm{sourceY}\\right)^{2}+\\left(\\mathrm{targetZ}-\\mathrm{sourceZ}\\right)^{2}} \\cdot \\mathrm{mass}} - \\frac{\\mathrm{damping} \\cdot \\left(\\mathrm{targetVx}-\\mathrm{sourceVx}\\right)}{\\mathrm{mass}}",
+    "parameters": [
+        { "name": "Rest length", "symbol": "restLength", "value": 1, "unit": "m", "mode": "constant" },
+        { "name": "Stiffness", "symbol": "stiffness", "value": 500, "unit": "N/m", "mode": "constant" },
+        { "name": "Damping", "symbol": "damping", "value": 10, "unit": "N·s/m", "mode": "constant" },
+        { "name": "Mass", "symbol": "mass", "value": 0.5, "unit": "kg", "mode": "constant" }
+    ]
+}

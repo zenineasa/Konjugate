@@ -1,0 +1,15 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "crankDriveY",
+    "kind": "edge",
+    "name": "Crank drive Y",
+    "domains": ["mechanical"],
+    "description": "The Y component of the same circular-motion drive as Crank drive X -- see that template for the full explanation. Apply alongside it, between the same pivot and crank pin, with matching angularVelocity values (this app has no shared/linked parameters across edges, so keeping the two in sync is a modeling responsibility, not something enforced automatically).",
+    "color": "#d6a14f",
+    "ports": { "source": ["x", "y"], "target": ["x", "y"] },
+    "output": { "role": "target", "state": "y" },
+    "latex": "\\mathrm{angularVelocity} \\cdot \\left(\\mathrm{targetX} - \\mathrm{sourceX}\\right)",
+    "parameters": [
+        { "name": "Angular velocity", "symbol": "angularVelocity", "value": 1, "unit": "rad/s", "mode": "live", "control": { "minimum": -6.28, "maximum": 6.28, "step": 0.1 } }
+    ]
+}

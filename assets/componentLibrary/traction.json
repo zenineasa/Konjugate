@@ -1,0 +1,17 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "traction",
+    "kind": "edge",
+    "name": "Traction",
+    "domains": ["mechanical"],
+    "description": "Converts a driven wheel's motor current into chassis acceleration via the wheel radius -- the rotational-to-translational conversion at the heart of a wheeled robot's drivetrain. Connect from a Motor to a Chassis mass.",
+    "color": "#7dc79d",
+    "ports": { "source": "current", "target": "velocity" },
+    "output": { "role": "target", "state": "velocity" },
+    "latex": "\\frac{\\mathrm{torqueConstant} \\cdot \\mathrm{sourceCurrent}}{\\mathrm{wheelRadius} \\cdot \\mathrm{chassisMass}}",
+    "parameters": [
+        { "name": "Torque constant", "symbol": "torqueConstant", "value": 0.1, "unit": "N·m/A", "mode": "constant" },
+        { "name": "Wheel radius", "symbol": "wheelRadius", "value": 0.05, "unit": "m", "mode": "constant" },
+        { "name": "Chassis mass", "symbol": "chassisMass", "value": 2, "unit": "kg", "mode": "constant" }
+    ]
+}

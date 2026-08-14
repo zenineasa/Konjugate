@@ -1,10 +1,10 @@
 {
     "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
-    "id": "dcMotor",
+    "id": "motor",
     "kind": "node",
-    "name": "DC motor",
+    "name": "Motor",
     "domains": ["electrical", "mechanical"],
-    "description": "An electromechanical actuator with armature current and angular velocity states, as used for the DC motor in dcMotor -- spans both domains, since it converts an electrical drive into mechanical rotation. Pair with Armature dynamics (to a voltage source) and Shaft dynamics (to a mechanical load) to drive both states.",
+    "description": "An electromechanical actuator with armature current and angular velocity states -- spans both domains, since it converts one into the other. Pair with Armature dynamics (from a voltage source) and either Shaft dynamics (against an external load) or Rotational drive (swinging a link directly).",
     "shape": "cylinder",
     "color": "#397b86",
     "states": [

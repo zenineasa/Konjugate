@@ -3969,7 +3969,8 @@ async function loadProjectDocument(document, {
     documentController.reset({ saved });
     updateDocumentTitle();
     updateEncryptionControls();
-    setCameraView('orbit');
+    setCameraView('orbit', false);
+    fitCurrentView();
     if (embeddedResult) {
         activeEngineJobId = embeddedResult.sessionId;
         activeResultPersistedInProject = true;
@@ -6053,6 +6054,14 @@ function setCameraCorner(direction) {
 }
 
 function fitCurrentView() {
+    // A camera view reset (e.g. the default view a freshly loaded example resets to) animates
+    // over 650ms via cameraAnimation/updateCameraAnimation, which keeps overwriting camera.position
+    // on every subsequent render frame until it finishes. Fitting the view while that's still
+    // in flight -- e.g. clicking Fit right after a model loads -- would have this function's own
+    // direct position write immediately clobbered by the still-running animation, landing on
+    // the animation's stale destination instead of the freshly computed fit.
+    cameraAnimation = null;
+    orbitControls.enabled = true;
     const bounds = new THREE.Box3();
     nodeObjects.forEach((object) => {
         if (object.visible) bounds.expandByObject(object);

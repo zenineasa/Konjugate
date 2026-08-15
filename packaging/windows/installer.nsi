@@ -34,7 +34,10 @@
 Name "${APP_NAME}"
 OutFile "${OUTPUT_FILE}"
 Unicode true
-SetCompressor /SOLID lzma
+; Avoid solid compression here: the bundled Electron `app.asar` file causes NSIS to fail
+; while creating a single mmap for the whole package. Standard per-file LZMA compression
+; keeps installer output small without the GitHub Windows runner crash.
+SetCompressor lzma
 RequestExecutionLevel admin
 
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
@@ -66,13 +69,7 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 Zenin Easa Panthakkalakath"
 
 Section "-Application" SecApp
   SetOutPath "$INSTDIR"
-  ; Electron's bundled app.asar can trigger NSIS "failed creating mmap" errors when the
-  ; recursive file copy runs with LZMA compression enabled. Disable compression while
-  ; staging the packaged app tree, then restore the default compressor for the rest of
-  ; the installer metadata.
-  SetCompress off
   File /r "${SOURCE_DIR}\*.*"
-  SetCompressor /SOLID lzma
 
   WriteRegStr HKLM "Software\${APP_ID}" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"

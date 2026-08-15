@@ -24,6 +24,12 @@ jobs:
                   cache: npm
             - uses: ilammy/msvc-dev-cmd@v1
               if: runner.os == 'Windows'
+            - name: Install macOS METIS
+              if: runner.os == 'macOS'
+              # engine/CMakeLists.txt refuses to configure if METIS resolves to vcpkg's static
+              # build on macOS (a combination that previously corrupted the live simulation event
+              # stream at runtime instead of failing at build time) -- it must come from Homebrew.
+              run: brew install metis
             - name: Install Linux Electron prerequisites
               if: runner.os == 'Linux'
               run: sudo apt-get update && sudo apt-get install -y libgtk-3-0 libnss3 libasound2t64

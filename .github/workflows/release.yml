@@ -33,12 +33,22 @@ jobs:
               if: runner.os == 'Windows'
             - name: Install macOS packaging prerequisites
               if: runner.os == 'macOS'
-              run: brew install librsvg
+              # metis specifically: engine/CMakeLists.txt refuses to configure if METIS resolves
+              # to vcpkg's static build on macOS (a combination that previously corrupted the
+              # live simulation event stream at runtime instead of failing at build time) -- it
+              # must come from Homebrew, found via its own explicit /opt/homebrew|/usr/local search.
+              run: brew install librsvg metis
             - name: Install Windows packaging prerequisites
               if: runner.os == 'Windows'
-              # Least-certain step here -- if the rsvg-convert package name has changed on
-              # Chocolatey, this is the first place to look on a failed run.
-              run: choco install rsvg-convert nsis -y
+              # rsvg-convert is the least-certain package name here -- if this step fails on
+              # that specifically, that's the first place to look. make is required because this
+              # Makefile uses GNU-only syntax (ifeq, pattern rules) that nmake can't parse, and
+              # nothing else on this runner puts a GNU make on PATH. The Chocolatey nsis package
+              # is a known offender for not shimming makensis.exe onto PATH for later steps, so
+              # its install directory is added to $GITHUB_PATH explicitly rather than trusting that.
+              run: |
+                  choco install rsvg-convert nsis make -y
+                  echo "C:\Program Files (x86)\NSIS" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
             - name: Install Linux packaging prerequisites
               if: runner.os == 'Linux'
               run: |

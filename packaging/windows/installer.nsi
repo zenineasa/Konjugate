@@ -66,7 +66,13 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 Zenin Easa Panthakkalakath"
 
 Section "-Application" SecApp
   SetOutPath "$INSTDIR"
+  ; Electron's bundled app.asar can trigger NSIS "failed creating mmap" errors when the
+  ; recursive file copy runs with LZMA compression enabled. Disable compression while
+  ; staging the packaged app tree, then restore the default compressor for the rest of
+  ; the installer metadata.
+  SetCompress off
   File /r "${SOURCE_DIR}\*.*"
+  SetCompressor /SOLID lzma
 
   WriteRegStr HKLM "Software\${APP_ID}" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"

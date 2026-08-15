@@ -12,6 +12,12 @@ on:
 
 env:
     VCPKG_DISABLE_METRICS: 1
+    # Caches vcpkg's built dependency binaries (boost, protobuf, openssl, metis) in GitHub's own
+    # Actions cache instead of rebuilding all of them from source on every run -- by far the
+    # biggest cost on Windows specifically, since MSVC compiles noticeably slower than clang/gcc
+    # for the same code. The first run after this is added still populates the cache from cold;
+    # every run after that should reuse it.
+    VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
 
 jobs:
     build:
@@ -31,6 +37,23 @@ jobs:
                   python-version: '3.x'
             - uses: ilammy/msvc-dev-cmd@v1
               if: runner.os == 'Windows'
+            # Required for VCPKG_BINARY_SOURCES' x-gha provider to authenticate against GitHub's
+            # own Actions cache backend -- these two variables aren't populated into the
+            # environment by default the way GITHUB_TOKEN is.
+            - name: Export GitHub Actions cache environment variables
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+                      core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            - name: Exclude build directories from Windows Defender
+              if: runner.os == 'Windows'
+              # Real-time scanning of every .obj/.pdb write during compilation is a documented
+              # slowdown source for this project (docs/developmentSetup.md); GitHub's Windows
+              # runners have Defender active by default.
+              run: |
+                  Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\out"
+                  Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\.tools"
             - name: Install macOS packaging prerequisites
               if: runner.os == 'macOS'
               # metis specifically: engine/CMakeLists.txt refuses to configure if METIS resolves
@@ -43,12 +66,28 @@ jobs:
               # rsvg-convert is the least-certain package name here -- if this step fails on
               # that specifically, that's the first place to look. make is required because this
               # Makefile uses GNU-only syntax (ifeq, pattern rules) that nmake can't parse, and
-              # nothing else on this runner puts a GNU make on PATH. The Chocolatey nsis package
-              # is a known offender for not shimming makensis.exe onto PATH for later steps, so
-              # its install directory is added to $GITHUB_PATH explicitly rather than trusting that.
+              # nothing else on this runner puts a GNU make on PATH. ninja is for CMAKE_GENERATOR
+              # below. choco install is retried -- Chocolatey's community package feed has been
+              # observed to return a transient 504 on individual packages (seen for nsis
+              # specifically), which fails only that one package while the command as a whole
+              # keeps going, so it isn't caught by $LASTEXITCODE on the combined install alone.
+              # Both makensis.exe and ninja.exe's locations are searched for rather than assumed,
+              # since neither's actual install path is reliably its traditional default.
               run: |
-                  choco install rsvg-convert nsis make -y
-                  echo "C:\Program Files (x86)\NSIS" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+                  $installed = $false
+                  for ($attempt = 1; $attempt -le 3; $attempt++) {
+                      choco install rsvg-convert nsis make ninja -y
+                      $makensis = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter makensis.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      $ninja = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter ninja.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      if ($makensis -and $ninja) { $installed = $true; break }
+                      Write-Host "makensis.exe and/or ninja.exe not found after attempt $attempt/3, retrying choco install..."
+                      Start-Sleep -Seconds 20
+                  }
+                  if (-not $installed) { Write-Error "makensis.exe and/or ninja.exe not found anywhere after 3 install attempts."; exit 1 }
+                  Write-Host "Found makensis at $($makensis.DirectoryName)"
+                  Add-Content -Path $env:GITHUB_PATH -Value $makensis.DirectoryName
+                  Write-Host "Found ninja at $($ninja.DirectoryName)"
+                  Add-Content -Path $env:GITHUB_PATH -Value $ninja.DirectoryName
             - name: Install Linux packaging prerequisites
               if: runner.os == 'Linux'
               run: |
@@ -59,8 +98,13 @@ jobs:
             - run: npm ci
             - name: Build distributable
               # Unsigned for now -- macSignIdentity/appleNotaryProfile are left unset, which the
-              # Makefile treats as an intentional opt-out rather than an error.
+              # Makefile treats as an intentional opt-out rather than an error. CMAKE_GENERATOR is
+              # set to Ninja on Windows only -- the development CMake preset doesn't specify a
+              # generator, so it otherwise falls back to the slower MSBuild/Visual Studio default
+              # there (docs/developmentSetup.md already recommends Ninja for this same reason).
               run: make distributable
+              env:
+                  CMAKE_GENERATOR: ${{ runner.os == 'Windows' && 'Ninja' || '' }}
             - uses: actions/upload-artifact@v4
               with:
                   name: release-${{ runner.os }}

@@ -11,7 +11,18 @@ appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
 enginePackageDir := out/packageResources/engine
-packageIgnore := --ignore='[/\\](out|vcpkg_installed|\.tools|engine|\.git|\.github|\.vscode|\.claude|tests|docs|packaging)([/\\]|$$)'
+packageIgnore := \
+	--ignore="[/\\]out([/\\]|$$)" \
+	--ignore="[/\\]vcpkg_installed([/\\]|$$)" \
+	--ignore="[/\\]\.tools([/\\]|$$)" \
+	--ignore="[/\\]engine([/\\]|$$)" \
+	--ignore="[/\\]\.git([/\\]|$$)" \
+	--ignore="[/\\]\.github([/\\]|$$)" \
+	--ignore="[/\\]\.vscode([/\\]|$$)" \
+	--ignore="[/\\]\.claude([/\\]|$$)" \
+	--ignore="[/\\]tests([/\\]|$$)" \
+	--ignore="[/\\]docs([/\\]|$$)" \
+	--ignore="[/\\]packaging([/\\]|$$)"
 ifeq ($(OS),Windows_NT)
 	hostSystem := Windows
 	ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)

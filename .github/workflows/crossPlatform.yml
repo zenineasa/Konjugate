@@ -44,37 +44,15 @@ jobs:
               # build on macOS (a combination that previously corrupted the live simulation event
               # stream at runtime instead of failing at build time) -- it must come from Homebrew.
               run: brew install metis
-            - name: Install Windows Ninja
-              if: runner.os == 'Windows'
-              # For CMAKE_GENERATOR below. Ninja ships pre-installed on this runner image, so
-              # PATH is checked first (via Get-Command) before falling back to a filesystem
-              # search or a choco install -- same reasoning as release.yml's equivalent step.
-              run: |
-                  function Find-ToolDir($exeName) {
-                      $onPath = Get-Command $exeName -ErrorAction SilentlyContinue
-                      if ($onPath) { return Split-Path $onPath.Source -Parent }
-                      $found = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter $exeName -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                      if ($found) { return $found.DirectoryName }
-                      return $null
-                  }
-                  $ninjaDir = Find-ToolDir 'ninja.exe'
-                  for ($attempt = 1; $attempt -le 3 -and -not $ninjaDir; $attempt++) {
-                      choco install ninja -y
-                      $ninjaDir = Find-ToolDir 'ninja.exe'
-                      if (-not $ninjaDir) {
-                          Write-Host "ninja.exe not found after attempt $attempt/3, retrying choco install..."
-                          Start-Sleep -Seconds 20
-                      }
-                  }
-                  if (-not $ninjaDir) { Write-Error "ninja.exe not found anywhere after 3 install attempts."; exit 1 }
-                  Add-Content -Path $env:GITHUB_PATH -Value $ninjaDir
             - name: Install Linux Electron prerequisites
               if: runner.os == 'Linux'
               run: sudo apt-get update && sudo apt-get install -y libgtk-3-0 libnss3 libasound2t64
             - run: npm ci
+            # Deliberately not using the Ninja generator on Windows -- see release.yml's Build
+            # distributable step for why (compiler auto-detection under Ninja picked up this
+            # runner's preinstalled MinGW-w64 ahead of MSVC, and this codebase is MSVC-only on
+            # Windows by design). The Visual Studio generator default sidesteps that entirely.
             - run: npm run setup
-              env:
-                  CMAKE_GENERATOR: ${{ runner.os == 'Windows' && 'Ninja' || '' }}
             - run: npm test
             - run: npm run test:engine
             - name: Install package engine layout
@@ -90,8 +68,6 @@ jobs:
               if: runner.os == 'Linux'
               run: xvfb-run -a npm run test:interaction
             - run: npm run build:engine:no-metis
-              env:
-                  CMAKE_GENERATOR: ${{ runner.os == 'Windows' && 'Ninja' || '' }}
             - name: Test dependency-free partitioner
               working-directory: engine
               run: ctest --preset development-no-metis

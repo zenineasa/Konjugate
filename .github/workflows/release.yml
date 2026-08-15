@@ -66,14 +66,11 @@ jobs:
               # rsvg-convert is the least-certain package name here -- if this step fails on
               # that specifically, that's the first place to look. make is required because this
               # Makefile uses GNU-only syntax (ifeq, pattern rules) that nmake can't parse, and
-              # nothing else on this runner puts a GNU make on PATH. ninja is for CMAKE_GENERATOR
-              # below -- it ships pre-installed on this runner image, so PATH is checked first
-              # (via Get-Command) before falling back to a filesystem search, rather than assuming
-              # it must live wherever this specific choco install put it. choco install itself is
+              # nothing else on this runner puts a GNU make on PATH. choco install itself is
               # retried with real patience (6 attempts, 30s apart) -- Chocolatey's community
               # package feed has been observed to have outages lasting past a short retry window,
               # failing some or all of the packages that actually need installing while reporting
-              # a nonzero overall exit code that doesn't say which ones. All four tools are
+              # a nonzero overall exit code that doesn't say which ones. All three tools are
               # checked individually rather than just the ones a previous failure happened to hit,
               # so a partial success on a later attempt can't be mistaken for a full one.
               run: |
@@ -86,12 +83,11 @@ jobs:
                   }
                   $tools = @{}
                   for ($attempt = 1; $attempt -le 6; $attempt++) {
-                      choco install rsvg-convert nsis make ninja -y
+                      choco install rsvg-convert nsis make -y
                       $tools = @{
                           'rsvg-convert.exe' = Find-ToolDir 'rsvg-convert.exe'
                           'makensis.exe' = Find-ToolDir 'makensis.exe'
                           'make.exe' = Find-ToolDir 'make.exe'
-                          'ninja.exe' = Find-ToolDir 'ninja.exe'
                       }
                       $missing = $tools.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object { $_.Key }
                       if (-not $missing) { break }
@@ -114,13 +110,17 @@ jobs:
             - run: npm ci
             - name: Build distributable
               # Unsigned for now -- macSignIdentity/appleNotaryProfile are left unset, which the
-              # Makefile treats as an intentional opt-out rather than an error. CMAKE_GENERATOR is
-              # set to Ninja on Windows only -- the development CMake preset doesn't specify a
-              # generator, so it otherwise falls back to the slower MSBuild/Visual Studio default
-              # there (docs/developmentSetup.md already recommends Ninja for this same reason).
+              # Makefile treats as an intentional opt-out rather than an error.
+              #
+              # Deliberately NOT using the Ninja generator here despite docs/developmentSetup.md's
+              # own speed recommendation: with no generator pinned, the development CMake preset's
+              # compiler auto-detection under Ninja picked up this runner's preinstalled MinGW-w64
+              # (C:\mingw64) ahead of MSVC's cl.exe, and this codebase is MSVC-only on Windows by
+              # design (its pid_t shim collides with MinGW's own). The Visual Studio generator
+              # sidesteps this entirely since it's inherently tied to MSVC, no auto-detection
+              # involved. Ninja could work here too with CMAKE_C_COMPILER/CMAKE_CXX_COMPILER
+              # explicitly pinned to cl, but that's unverified -- revisit deliberately, not blindly.
               run: make distributable
-              env:
-                  CMAKE_GENERATOR: ${{ runner.os == 'Windows' && 'Ninja' || '' }}
             - uses: actions/upload-artifact@v4
               with:
                   name: release-${{ runner.os }}

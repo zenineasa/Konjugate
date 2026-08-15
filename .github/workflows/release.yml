@@ -67,27 +67,43 @@ jobs:
               # that specifically, that's the first place to look. make is required because this
               # Makefile uses GNU-only syntax (ifeq, pattern rules) that nmake can't parse, and
               # nothing else on this runner puts a GNU make on PATH. ninja is for CMAKE_GENERATOR
-              # below. choco install is retried -- Chocolatey's community package feed has been
-              # observed to return a transient 504 on individual packages (seen for nsis
-              # specifically), which fails only that one package while the command as a whole
-              # keeps going, so it isn't caught by $LASTEXITCODE on the combined install alone.
-              # Both makensis.exe and ninja.exe's locations are searched for rather than assumed,
-              # since neither's actual install path is reliably its traditional default.
+              # below -- it ships pre-installed on this runner image, so PATH is checked first
+              # (via Get-Command) before falling back to a filesystem search, rather than assuming
+              # it must live wherever this specific choco install put it. choco install itself is
+              # retried with real patience (6 attempts, 30s apart) -- Chocolatey's community
+              # package feed has been observed to have outages lasting past a short retry window,
+              # failing some or all of the packages that actually need installing while reporting
+              # a nonzero overall exit code that doesn't say which ones. All four tools are
+              # checked individually rather than just the ones a previous failure happened to hit,
+              # so a partial success on a later attempt can't be mistaken for a full one.
               run: |
-                  $installed = $false
-                  for ($attempt = 1; $attempt -le 3; $attempt++) {
-                      choco install rsvg-convert nsis make ninja -y
-                      $makensis = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter makensis.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                      $ninja = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter ninja.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                      if ($makensis -and $ninja) { $installed = $true; break }
-                      Write-Host "makensis.exe and/or ninja.exe not found after attempt $attempt/3, retrying choco install..."
-                      Start-Sleep -Seconds 20
+                  function Find-ToolDir($exeName) {
+                      $onPath = Get-Command $exeName -ErrorAction SilentlyContinue
+                      if ($onPath) { return Split-Path $onPath.Source -Parent }
+                      $found = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter $exeName -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      if ($found) { return $found.DirectoryName }
+                      return $null
                   }
-                  if (-not $installed) { Write-Error "makensis.exe and/or ninja.exe not found anywhere after 3 install attempts."; exit 1 }
-                  Write-Host "Found makensis at $($makensis.DirectoryName)"
-                  Add-Content -Path $env:GITHUB_PATH -Value $makensis.DirectoryName
-                  Write-Host "Found ninja at $($ninja.DirectoryName)"
-                  Add-Content -Path $env:GITHUB_PATH -Value $ninja.DirectoryName
+                  $tools = @{}
+                  for ($attempt = 1; $attempt -le 6; $attempt++) {
+                      choco install rsvg-convert nsis make ninja -y
+                      $tools = @{
+                          'rsvg-convert.exe' = Find-ToolDir 'rsvg-convert.exe'
+                          'makensis.exe' = Find-ToolDir 'makensis.exe'
+                          'make.exe' = Find-ToolDir 'make.exe'
+                          'ninja.exe' = Find-ToolDir 'ninja.exe'
+                      }
+                      $missing = $tools.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object { $_.Key }
+                      if (-not $missing) { break }
+                      Write-Host "Still missing after attempt $attempt/6: $($missing -join ', '); retrying choco install..."
+                      Start-Sleep -Seconds 30
+                  }
+                  $stillMissing = $tools.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object { $_.Key }
+                  if ($stillMissing) { Write-Error "Never found: $($stillMissing -join ', ')"; exit 1 }
+                  foreach ($tool in $tools.GetEnumerator()) {
+                      Write-Host "Found $($tool.Key) at $($tool.Value)"
+                      Add-Content -Path $env:GITHUB_PATH -Value $tool.Value
+                  }
             - name: Install Linux packaging prerequisites
               if: runner.os == 'Linux'
               run: |

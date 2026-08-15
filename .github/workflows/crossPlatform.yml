@@ -46,20 +46,28 @@ jobs:
               run: brew install metis
             - name: Install Windows Ninja
               if: runner.os == 'Windows'
-              # For CMAKE_GENERATOR below. Retried and location-searched for the same reasons as
-              # release.yml's Windows prerequisites step (transient Chocolatey feed failures, and
-              # an install path that isn't reliably on PATH for later steps).
+              # For CMAKE_GENERATOR below. Ninja ships pre-installed on this runner image, so
+              # PATH is checked first (via Get-Command) before falling back to a filesystem
+              # search or a choco install -- same reasoning as release.yml's equivalent step.
               run: |
-                  $installed = $false
-                  for ($attempt = 1; $attempt -le 3; $attempt++) {
-                      choco install ninja -y
-                      $ninja = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter ninja.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                      if ($ninja) { $installed = $true; break }
-                      Write-Host "ninja.exe not found after attempt $attempt/3, retrying choco install..."
-                      Start-Sleep -Seconds 20
+                  function Find-ToolDir($exeName) {
+                      $onPath = Get-Command $exeName -ErrorAction SilentlyContinue
+                      if ($onPath) { return Split-Path $onPath.Source -Parent }
+                      $found = Get-ChildItem -Path 'C:\Program Files*', 'C:\ProgramData\chocolatey' -Filter $exeName -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                      if ($found) { return $found.DirectoryName }
+                      return $null
                   }
-                  if (-not $installed) { Write-Error "ninja.exe not found anywhere after 3 install attempts."; exit 1 }
-                  Add-Content -Path $env:GITHUB_PATH -Value $ninja.DirectoryName
+                  $ninjaDir = Find-ToolDir 'ninja.exe'
+                  for ($attempt = 1; $attempt -le 3 -and -not $ninjaDir; $attempt++) {
+                      choco install ninja -y
+                      $ninjaDir = Find-ToolDir 'ninja.exe'
+                      if (-not $ninjaDir) {
+                          Write-Host "ninja.exe not found after attempt $attempt/3, retrying choco install..."
+                          Start-Sleep -Seconds 20
+                      }
+                  }
+                  if (-not $ninjaDir) { Write-Error "ninja.exe not found anywhere after 3 install attempts."; exit 1 }
+                  Add-Content -Path $env:GITHUB_PATH -Value $ninjaDir
             - name: Install Linux Electron prerequisites
               if: runner.os == 'Linux'
               run: sudo apt-get update && sudo apt-get install -y libgtk-3-0 libnss3 libasound2t64

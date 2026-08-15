@@ -11,6 +11,7 @@ appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
 enginePackageDir := out/packageResources/engine
+packageIgnore := --ignore='[/\\](out|vcpkg_installed|\.tools|engine|\.git|\.github|\.vscode|\.claude|tests|docs|packaging)([/\\]|$$)'
 ifeq ($(OS),Windows_NT)
 	hostSystem := Windows
 	ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
@@ -223,17 +224,7 @@ packageMacos: checkPackaging iconsMacos engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
-		--ignore="^/out($$|/)" \
-		--ignore="^/\.tools($$|/)" \
-		--ignore="^/vcpkg_installed($$|/)" \
-		--ignore="^/engine($$|/)" \
-		--ignore="^/\.git($$|/)" \
-		--ignore="^/\.github($$|/)" \
-		--ignore="^/\.vscode($$|/)" \
-		--ignore="^/\.claude($$|/)" \
-		--ignore="^/tests($$|/)" \
-		--ignore="^/docs($$|/)" \
-		--ignore="^/packaging($$|/)" \
+		$(packageIgnore) \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -249,17 +240,7 @@ packageWindows: checkPackaging iconsWindows engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
-		--ignore="^/out($$|/)" \
-		--ignore="^/\.tools($$|/)" \
-		--ignore="^/vcpkg_installed($$|/)" \
-		--ignore="^/engine($$|/)" \
-		--ignore="^/\.git($$|/)" \
-		--ignore="^/\.github($$|/)" \
-		--ignore="^/\.vscode($$|/)" \
-		--ignore="^/\.claude($$|/)" \
-		--ignore="^/tests($$|/)" \
-		--ignore="^/docs($$|/)" \
-		--ignore="^/packaging($$|/)" \
+		$(packageIgnore) \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -275,17 +256,7 @@ packageLinux: checkPackaging iconsPng engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
-		--ignore="^/out($$|/)" \
-		--ignore="^/\.tools($$|/)" \
-		--ignore="^/vcpkg_installed($$|/)" \
-		--ignore="^/engine($$|/)" \
-		--ignore="^/\.git($$|/)" \
-		--ignore="^/\.github($$|/)" \
-		--ignore="^/\.vscode($$|/)" \
-		--ignore="^/\.claude($$|/)" \
-		--ignore="^/tests($$|/)" \
-		--ignore="^/docs($$|/)" \
-		--ignore="^/packaging($$|/)" \
+		$(packageIgnore) \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true

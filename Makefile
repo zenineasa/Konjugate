@@ -223,8 +223,17 @@ packageMacos: checkPackaging iconsMacos engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
-		--ignore="^/out($|/)" \
-		--ignore="^/\.tools($|/)" \
+		--ignore="^/out($$|/)" \
+		--ignore="^/\.tools($$|/)" \
+		--ignore="^/vcpkg_installed($$|/)" \
+		--ignore="^/engine($$|/)" \
+		--ignore="^/\.git($$|/)" \
+		--ignore="^/\.github($$|/)" \
+		--ignore="^/\.vscode($$|/)" \
+		--ignore="^/\.claude($$|/)" \
+		--ignore="^/tests($$|/)" \
+		--ignore="^/docs($$|/)" \
+		--ignore="^/packaging($$|/)" \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -240,8 +249,17 @@ packageWindows: checkPackaging iconsWindows engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
-		--ignore="^/out($|/)" \
-		--ignore="^/\.tools($|/)" \
+		--ignore="^/out($$|/)" \
+		--ignore="^/\.tools($$|/)" \
+		--ignore="^/vcpkg_installed($$|/)" \
+		--ignore="^/engine($$|/)" \
+		--ignore="^/\.git($$|/)" \
+		--ignore="^/\.github($$|/)" \
+		--ignore="^/\.vscode($$|/)" \
+		--ignore="^/\.claude($$|/)" \
+		--ignore="^/tests($$|/)" \
+		--ignore="^/docs($$|/)" \
+		--ignore="^/packaging($$|/)" \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true
@@ -257,8 +275,17 @@ packageLinux: checkPackaging iconsPng engine
 		--extra-resource=$(enginePackageDir) \
 		--extra-resource=thirdPartyNotices.md \
 		--extra-resource=thirdPartyLicenses \
-		--ignore="^/out($|/)" \
-		--ignore="^/\.tools($|/)" \
+		--ignore="^/out($$|/)" \
+		--ignore="^/\.tools($$|/)" \
+		--ignore="^/vcpkg_installed($$|/)" \
+		--ignore="^/engine($$|/)" \
+		--ignore="^/\.git($$|/)" \
+		--ignore="^/\.github($$|/)" \
+		--ignore="^/\.vscode($$|/)" \
+		--ignore="^/\.claude($$|/)" \
+		--ignore="^/tests($$|/)" \
+		--ignore="^/docs($$|/)" \
+		--ignore="^/packaging($$|/)" \
 		--out=$(packageDir) \
 		--overwrite \
 		--prune=true

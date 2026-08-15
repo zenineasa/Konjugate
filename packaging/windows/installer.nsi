@@ -34,10 +34,7 @@
 Name "${APP_NAME}"
 OutFile "${OUTPUT_FILE}"
 Unicode true
-; Avoid solid compression here: the bundled Electron `app.asar` file causes NSIS to fail
-; while creating a single mmap for the whole package. Standard per-file LZMA compression
-; keeps installer output small without the GitHub Windows runner crash.
-SetCompressor lzma
+SetCompressor /SOLID lzma
 RequestExecutionLevel admin
 
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
@@ -68,8 +65,10 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 Zenin Easa Panthakkalakath"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 
 Section "-Application" SecApp
+  SetRegView 64
+  SetShellVarContext all
   SetOutPath "$INSTDIR"
-  File /r "${SOURCE_DIR}\*.*"
+  File /r "${SOURCE_DIR}\*"
 
   WriteRegStr HKLM "Software\${APP_ID}" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -83,13 +82,15 @@ Section "-Application" SecApp
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Zenin Easa Panthakkalakath"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\${APP_NAME}.exe"
-  WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
+  SetRegView 64
+  SetShellVarContext all
   RMDir /r "$INSTDIR"
   Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
   Delete "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk"

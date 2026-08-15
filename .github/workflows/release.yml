@@ -1,0 +1,76 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
+name: Release
+
+# Deliberately not triggered on every push -- only an explicit version tag (or a manual run)
+# produces and publishes DMG/EXE/AppImage builds. `crossPlatform.yml` remains the separate,
+# cheaper verification workflow; this one's job is packaging and publishing, not testing.
+on:
+    push:
+        tags: ['v*']
+    workflow_dispatch:
+
+env:
+    VCPKG_DISABLE_METRICS: 1
+
+jobs:
+    build:
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, ubuntu-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22.12.0
+                  cache: npm
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.x'
+            - uses: ilammy/msvc-dev-cmd@v1
+              if: runner.os == 'Windows'
+            - name: Install macOS packaging prerequisites
+              if: runner.os == 'macOS'
+              run: brew install librsvg
+            - name: Install Windows packaging prerequisites
+              if: runner.os == 'Windows'
+              # Least-certain step here -- if the rsvg-convert package name has changed on
+              # Chocolatey, this is the first place to look on a failed run.
+              run: choco install rsvg-convert nsis -y
+            - name: Install Linux packaging prerequisites
+              if: runner.os == 'Linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y librsvg2-bin
+                  curl -L -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+                  chmod +x /usr/local/bin/appimagetool
+            - run: npm ci
+            - name: Build distributable
+              # Unsigned for now -- macSignIdentity/appleNotaryProfile are left unset, which the
+              # Makefile treats as an intentional opt-out rather than an error.
+              run: make distributable
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: release-${{ runner.os }}
+                  path: out/release/*
+                  if-no-files-found: error
+
+    release:
+        needs: build
+        # Manual (workflow_dispatch) runs only build and upload artifacts for inspection -- only
+        # an actual tag push publishes a GitHub Release.
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  path: out/release
+                  merge-multiple: true
+            - uses: softprops/action-gh-release@v2
+              with:
+                  files: out/release/*
+                  generate_release_notes: true

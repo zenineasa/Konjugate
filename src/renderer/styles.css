@@ -557,6 +557,7 @@ input, select { user-select: text; }
 .builderCard footer { display: flex; justify-content: flex-end; gap: 7px; padding: 10px 12px; }
 .builderCard footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 8px; }
 .endpointGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.vectorGrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .endpointField > div { display: grid; grid-template-columns: 1fr auto; }
 .endpointField select { border-radius: 4px 0 0 4px; }
 .endpointField button { padding: 0 7px; color: #73bdb7; background: #13242c; border: 1px solid #2b4650; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; }

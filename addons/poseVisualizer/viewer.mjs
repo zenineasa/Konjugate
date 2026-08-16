@@ -189,17 +189,28 @@ function normalizedGeometry(geometry) {
 
 function bodyGeometryAndColor(body) {
     const node = useEditorShapes ? nodesById.get(body.entityId) : null;
-    if (!node) return { geometry: new THREE.BoxGeometry(0.3, 0.18, 0.42), color: body.color };
+    if (!node) return { geometry: new THREE.BoxGeometry(0.3, 0.18, 0.42), color: body.color, rotation: [0, 0, 0], scale: [1, 1, 1] };
     const meshGeometry = node.mesh ? geometryFromMeshDocument(node.mesh) : null;
     const geometry = meshGeometry ? normalizedGeometry(meshGeometry) : primitiveGeometry(node.shape).scale(targetBodyExtent, targetBodyExtent, targetBodyExtent);
-    return { geometry, color: node.color };
+    return { geometry, color: node.color, rotation: node.rotation ?? [0, 0, 0], scale: node.scale ?? [1, 1, 1] };
 }
 
+// The node's editor-authored rotation/scale is a cosmetic *local* offset -- how the shape sits
+// and sizes relative to its own origin on the main canvas -- not part of the live simulated
+// pose. It's authored directly in the main canvas's own three.js (Y-up) scene, the same
+// convention this add-on's scene already uses, so it composes as a nested child group rather
+// than going through the model-space-to-three.js remap that applyPose uses for the live pose:
+// the outer group carries the live position/orientation, this inner group carries the static
+// editor offset.
 function buildBodyObject(body) {
     const group = new THREE.Group();
-    const { geometry, color } = bodyGeometryAndColor(body);
+    const { geometry, color, rotation, scale } = bodyGeometryAndColor(body);
     const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.1 });
-    group.add(new THREE.Mesh(geometry, material));
+    const shape = new THREE.Group();
+    shape.rotation.fromArray(rotation);
+    shape.scale.fromArray(scale);
+    shape.add(new THREE.Mesh(geometry, material));
+    group.add(shape);
     group.add(new THREE.AxesHelper(0.4));
     scene.add(group);
     body.material = material;
@@ -498,5 +509,16 @@ window.konjugateVisualizer.onSelectionChange((nodeId) => {
     applySelection(nodeId);
 });
 window.konjugateVisualizer.onSessionChange(loadSession);
+
+// Permanent test hook (mirrors window.__debugTransform in the main renderer) -- exposes the
+// editor-authored rotation/scale actually applied to a body's shape sub-group, so interaction
+// tests can verify it without reaching into three.js internals ad hoc.
+window.__debugPoseVisualizer = {
+    shapeTransform: (entityId) => {
+        const body = bodies.find((candidate) => candidate.entityId === entityId);
+        const shape = body?.object3D?.children[0];
+        return shape ? { rotation: [shape.rotation.x, shape.rotation.y, shape.rotation.z], scale: [shape.scale.x, shape.scale.y, shape.scale.z] } : null;
+    }
+};
 
 loadSession();

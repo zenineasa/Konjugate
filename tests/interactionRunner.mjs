@@ -1442,6 +1442,7 @@ export async function runInteractionTests(window) {
     });
 
     await run('Pose Visualizer add-on auto-detects and renders a 6-DOF free body node', async () => {
+        const idsBeforeBodies = new Set(await evaluate(window, `window.__debugTransform.allNodeIds()`));
         await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
         await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'Component library panel did not open.');
         await waitFor(window, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
@@ -1450,6 +1451,21 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('[data-template-id="freeBody"]').click()`);
         await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Free body')).length === 2`, 'The second free body node template was not placed.');
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+
+        // Give the first free body a known editor rotation/scale (must happen before the run
+        // below locks the transform tools in result mode) so the add-on's "Editor shapes,
+        // colors & transforms" toggle has a real, non-identity transform to verify downstream.
+        const bodyIds = (await evaluate(window, `window.__debugTransform.allNodeIds()`)).filter((id) => !idsBeforeBodies.has(id));
+        assert.equal(bodyIds.length, 2, 'Expected exactly two new free body nodes.');
+        const [firstBodyId] = bodyIds;
+        const selectFirstBody = `document.querySelector('.node-label-container[data-node="${firstBodyId}"] .objectLabel').click()`;
+        await evaluate(window, selectFirstBody);
+        await evaluate(window, `document.querySelector('[data-tool="rotate"]').click()`);
+        await evaluate(window, `window.__debugTransform.simulateDragTo(0.4, 0, 0)`);
+        await evaluate(window, selectFirstBody);
+        await evaluate(window, `document.querySelector('[data-tool="scale"]').click()`);
+        await evaluate(window, `window.__debugTransform.simulateDragTo(2, 1, 1)`);
+        await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
 
         // A manual edge between the two free bodies (rather than a component-library template,
         // none of which connect two freeBody nodes) so the add-on's edge-line/label feature has
@@ -1509,8 +1525,14 @@ export async function runInteractionTests(window) {
 
             await evaluate(poseWindow, `document.querySelector('#useEditorShapes').click()`);
             assert.equal(await evaluate(poseWindow, `document.querySelector('#useEditorShapes').checked`), true);
+            const editorShapeTransform = await evaluate(poseWindow, `window.__debugPoseVisualizer.shapeTransform(${firstBodyId})`);
+            assert.ok(editorShapeTransform, 'Pose Visualizer did not build a shape sub-group for the rotated/scaled body.');
+            assert.deepEqual(editorShapeTransform.rotation.map((v) => Math.round(v * 100) / 100), [0.4, 0, 0]);
+            assert.deepEqual(editorShapeTransform.scale, [2, 1, 1]);
             await evaluate(poseWindow, `document.querySelector('#useEditorShapes').click()`);
             assert.equal(await evaluate(poseWindow, `document.querySelector('#useEditorShapes').checked`), false);
+            const defaultShapeTransform = await evaluate(poseWindow, `window.__debugPoseVisualizer.shapeTransform(${firstBodyId})`);
+            assert.deepEqual(defaultShapeTransform, { rotation: [0, 0, 0], scale: [1, 1, 1] });
 
             await evaluate(poseWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = String(Number(timeline.max) / 2); timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
             await waitFor(window, `document.querySelector('#resultCurrentTime').value !== '0 s'`, 'Visualizer seek did not synchronize to the project window.');
@@ -1583,6 +1605,164 @@ export async function runInteractionTests(window) {
         assert.ok(await evaluate(window, `[...document.querySelectorAll('#shapeLibraryDomains button')].some((b) => b.textContent === 'User uploaded')`), 'No "User uploaded" domain chip appeared.');
         assert.ok(await evaluate(window, `[...document.querySelectorAll('.shapeLibraryItem b')].some((b) => b.textContent === 'uploadTest')`), 'Uploaded shape did not appear in the library grid.');
         await evaluate(window, `document.querySelector('#shapeLibraryCancel').click()`);
+    });
+
+    await run('rotate and scale tools transform a node with undo/redo and persist through copy/paste', async () => {
+        await waitFor(window, `document.querySelectorAll('.objectLabel').length > 0`, 'No node available to select.');
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        const nodeId = await evaluate(window, `window.__debugTransform.selectedId()`);
+        assert.ok(nodeId, 'No node was selected.');
+
+        // --- Rotate ---
+        await evaluate(window, `document.querySelector('[data-tool="rotate"]').click()`);
+        assert.equal(await evaluate(window, `window.__debugTransform.mode()`), 'rotate');
+        assert.equal(await evaluate(window, `window.__debugTransform.attachedId()`), nodeId);
+        await evaluate(window, `window.__debugTransform.simulateDragTo(0.3, 0.5, 0.7)`);
+        let rotation = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'rotation')`);
+        assert.deepEqual(rotation.map((v) => Math.round(v * 100) / 100), [0.3, 0.5, 0.7]);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        rotation = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'rotation')`);
+        assert.deepEqual(rotation, [0, 0, 0]);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, shiftKey: true, bubbles: true }))`);
+        rotation = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'rotation')`);
+        assert.deepEqual(rotation.map((v) => Math.round(v * 100) / 100), [0.3, 0.5, 0.7]);
+
+        // --- Scale ---
+        // undo()/redo() unconditionally clearSelection() before replaying (renderer.mjs) -- an
+        // existing, intentional app behavior, not specific to rotate/scale -- so the node needs
+        // reselecting here regardless of which tool is active.
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        await evaluate(window, `document.querySelector('[data-tool="scale"]').click()`);
+        assert.equal(await evaluate(window, `window.__debugTransform.mode()`), 'scale');
+        assert.equal(await evaluate(window, `window.__debugTransform.attachedId()`), nodeId);
+        await evaluate(window, `window.__debugTransform.simulateDragTo(2, 1.5, 3)`);
+        let scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, [2, 1.5, 3]);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, [1, 1, 1]);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, shiftKey: true, bubbles: true }))`);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, [2, 1.5, 3]);
+
+        // --- Appearance tab: precise rotation/scale number inputs ---
+        // The scale redo just above clears selection/closes the editor (same undo()/redo()
+        // clearSelection() behavior noted earlier), so the node needs reselecting before its
+        // Appearance tab fields can be read or edited.
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
+        let rotationDegrees = await evaluate(window, `[document.querySelector('#editNodeRotationX').value, document.querySelector('#editNodeRotationY').value, document.querySelector('#editNodeRotationZ').value].map(Number)`);
+        assert.deepEqual(rotationDegrees.map((v) => Math.round(v)), [17, 29, 40]);
+        let scaleFields = await evaluate(window, `[document.querySelector('#editNodeScaleX').value, document.querySelector('#editNodeScaleY').value, document.querySelector('#editNodeScaleZ').value].map(Number)`);
+        assert.deepEqual(scaleFields, [2, 1.5, 3]);
+
+        // Typing a precise value commits it, going through the same node-object mutation and
+        // undo history as a gizmo drag.
+        await evaluate(window, `(() => { const input = document.querySelector('#editNodeRotationX'); input.value = '90'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        rotation = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'rotation')`);
+        assert.deepEqual(rotation.map((v) => Math.round(v * 100) / 100), [1.57, 0.5, 0.7]);
+
+        // Live gizmo drags refresh the open Appearance tab fields too, not just typed edits.
+        await evaluate(window, `document.querySelector('[data-tool="scale"]').click()`);
+        await evaluate(window, `window.__debugTransform.simulateDragTo(4, 1.5, 3)`);
+        scaleFields = await evaluate(window, `[document.querySelector('#editNodeScaleX').value, document.querySelector('#editNodeScaleY').value, document.querySelector('#editNodeScaleZ').value].map(Number)`);
+        assert.deepEqual(scaleFields, [4, 1.5, 3]);
+
+        // Zero/negative scale is rejected (would collapse or invert the geometry) and the field
+        // snaps back to the last valid value instead of committing.
+        await evaluate(window, `(() => { const input = document.querySelector('#editNodeScaleY'); input.value = '0'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        scaleFields = await evaluate(window, `[document.querySelector('#editNodeScaleX').value, document.querySelector('#editNodeScaleY').value, document.querySelector('#editNodeScaleZ').value].map(Number)`);
+        assert.deepEqual(scaleFields, [4, 1.5, 3]);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, [4, 1.5, 3]);
+
+        // Undo back through the gizmo scale-drag and the typed rotation edit (the rejected
+        // scale never recorded history) to restore what the earlier gizmo section left behind,
+        // so the copy/paste assertions below still see [0.3, 0.5, 0.7] / [2, 1.5, 3].
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        rotation = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'rotation')`);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(rotation.map((v) => Math.round(v * 100) / 100), [0.3, 0.5, 0.7]);
+        assert.deepEqual(scale, [2, 1.5, 3]);
+
+        // --- Persistence through copy/paste, which round-trips via the same
+        // serializeProjectDocument -> hydrateProjectDocument path a real save/reload would. ---
+        await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        const nodeCountBefore = await evaluate(window, `document.querySelectorAll('.node-label-container').length`);
+        // Diffing the node-ID set (rather than matching on a " copy" title suffix) avoids
+        // mistaking this for some unrelated leftover "X copy" node other tests earlier in the
+        // full suite may have already created and left on the canvas.
+        const idsBefore = new Set(await evaluate(window, `window.__debugTransform.allNodeIds()`));
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === ${nodeCountBefore + 1}`, 'Paste did not create a new node.');
+        const idsAfter = await evaluate(window, `window.__debugTransform.allNodeIds()`);
+        const pastedId = idsAfter.find((id) => !idsBefore.has(id));
+        assert.ok(pastedId, 'Could not find the pasted node.');
+        const pastedRotation = await evaluate(window, `window.__debugTransform.nodeTransform(${pastedId}, 'rotation')`);
+        const pastedScale = await evaluate(window, `window.__debugTransform.nodeTransform(${pastedId}, 'scale')`);
+        assert.deepEqual(pastedRotation.map((v) => Math.round(v * 100) / 100), [0.3, 0.5, 0.7]);
+        assert.deepEqual(pastedScale, [2, 1.5, 3]);
+
+        // Cleanup: undo the paste and the scale/rotate changes so this test doesn't leave the
+        // canvas mutated for whatever runs after it.
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+    });
+
+    await run('shift held during a scale drag forces uniform scaling, even mid-drag', async () => {
+        // window.__debugTransform.scaleDrag drives the real objectChange handler's Shift-uniform
+        // override step by step (mouseDown / move / mouseUp), letting a test toggle Shift
+        // between movement steps the same way a real drag would -- rather than real screen
+        // coordinates raycast against the gizmo's 3D handle geometry, `move` sets the object's
+        // scale directly to stand in for whatever a real per-axis drag would have produced, and
+        // sets TransformControls' own pointStart/pointEnd (all uniformScaleFactorForDrag reads)
+        // for the Shift-held steps.
+        await waitFor(window, `document.querySelectorAll('.objectLabel').length > 0`, 'No node available to select.');
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        const nodeId = await evaluate(window, `window.__debugTransform.selectedId()`);
+        assert.ok(nodeId, 'No node was selected.');
+        await evaluate(window, `document.querySelector('[data-tool="scale"]').click()`);
+        assert.equal(await evaluate(window, `window.__debugTransform.mode()`), 'scale');
+        const startScale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+
+        await evaluate(window, `window.__debugTransform.scaleDrag.mouseDown()`);
+
+        // Without Shift, a normal (non-uniform) per-axis drag is left untouched.
+        let scale = await evaluate(window, `window.__debugTransform.scaleDrag.move({ manualScale: [2, 1, 1], shiftHeld: false })`);
+        assert.deepEqual(scale, [2, 1, 1]);
+
+        // Pressing Shift mid-drag immediately snaps to uniform scaling, computed from the drag's
+        // *original* start scale (captured at mouseDown, not the intermediate value above) and
+        // the pointStart/pointEnd distance ratio TransformControls' own centre-handle math uses
+        // -- this is the actual scenario that was reported broken (Shift pressed mid-drag).
+        scale = await evaluate(window, `window.__debugTransform.scaleDrag.move({ pointStart: [1, 0, 0], pointEnd: [2, 0, 0], shiftHeld: true })`);
+        assert.deepEqual(scale, startScale.map((value) => value * 2));
+
+        // Releasing Shift mid-drag resumes normal per-axis behaviour.
+        scale = await evaluate(window, `window.__debugTransform.scaleDrag.move({ manualScale: [3, 1, 1], shiftHeld: false })`);
+        assert.deepEqual(scale, [3, 1, 1]);
+
+        await evaluate(window, `window.__debugTransform.scaleDrag.mouseUp()`);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, [3, 1, 1]);
+
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, startScale);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, shiftKey: true, bubbles: true }))`);
+        scale = await evaluate(window, `window.__debugTransform.nodeTransform(${nodeId}, 'scale')`);
+        assert.deepEqual(scale, [3, 1, 1]);
+
+        // Cleanup: undo back to the starting scale so this test doesn't leave the canvas
+        // mutated for whatever runs after it.
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
     });
 
     console.log(`Interaction tests passed: ${passed}`);

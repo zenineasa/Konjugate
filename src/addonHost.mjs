@@ -86,7 +86,7 @@ export function createVisualizerSession({ sessionId, projectName, result, nodes,
         // Structural model metadata (appearance, topology) -- static for the life of the
         // session, unlike signals/samples, so it's read once here rather than through a
         // separate time-varying endpoint.
-        nodes: nodes.map(({ id, title, shape, color, mesh }) => ({ id, title, shape, color, mesh })),
+        nodes: nodes.map(({ id, title, shape, color, rotation, scale, mesh }) => ({ id, title, shape, color, rotation, scale, mesh })),
         edges: edges.map(({ id, title, sourceNodeId, targetNodeId }) => ({ id, title, sourceNodeId, targetNodeId })),
         samples: structuredClone(result.samples),
         selectedNodeId,

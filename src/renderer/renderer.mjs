@@ -252,6 +252,8 @@ function hydrateProjectDocument(document) {
             type: node.type || 'Custom node',
             shape: importedGeometry ? 'imported' : appearance.shape || 'box',
             position: node.position?.length === 3 ? node.position : [0, 0, 0],
+            rotation: node.rotation?.length === 3 ? node.rotation : [0, 0, 0],
+            scale: node.scale?.length === 3 ? node.scale : [1, 1, 1],
             color: Number.parseInt(String(appearance.color ?? '#34727a').replace('#', ''), 16),
             importedGeometry,
             geometryFileName: appearance.fileName ?? null,
@@ -546,46 +548,172 @@ scene.add(transformControls.getHelper());
 transformControls.addEventListener('dragging-changed', (event) => {
     orbitControls.enabled = !event.value;
 });
+// Tracks live Shift state from real pointer events (TransformControls' own objectChange event
+// carries no native browser event to read .shiftKey from). An earlier attempt intercepted
+// TransformControls' *hover* handling instead, forcing its internal `axis` to 'XYZ' (the name
+// of its own centre-cube uniform-scale handle) whenever Shift was held while hovering a scale
+// handle. That looked right in isolation, but broke for two real reasons: TransformControls
+// re-resolves `axis` from a fresh raycast on pointerdown itself, not only on hover, silently
+// reverting the override right as a drag started and leaving its internal drag-plane
+// orientation stale against the axis it reverted to (Shift-before-click did nothing useful);
+// and since the override only ran on hover, Shift pressed after a drag had already begun was
+// never picked up at all (Shift-during-drag did nothing). Reading Shift fresh on every drag
+// movement instead, and computing the uniform scale here rather than steering
+// TransformControls' own internal state, works regardless of which handle started the drag or
+// when Shift is pressed or released during it.
+let shiftKeyHeld = false;
+renderer.domElement.addEventListener('pointermove', (event) => {
+    shiftKeyHeld = event.shiftKey;
+});
+// Same distance-ratio formula TransformControls' own centre-cube 'XYZ' handle uses internally
+// (pointStart/pointEnd are the local-space drag-start and current pointer positions it already
+// maintains for whichever handle was actually grabbed), so a Shift-held drag feels the same as
+// dragging that handle directly, whatever handle the pointer is actually on.
+function uniformScaleFactorForDrag() {
+    const startLength = transformControls.pointStart.length();
+    if (startLength === 0) return 1;
+    const factor = transformControls.pointEnd.length() / startLength;
+    return transformControls.pointEnd.dot(transformControls.pointStart) < 0 ? -factor : factor;
+}
+// position and scale are THREE.Vector3 (support clone/add/sub/equals/copy directly); rotation is
+// a THREE.Euler, which doesn't share that API. Reading/writing through plain [x,y,z] arrays lets
+// the same drag-tracking code below work for whichever of the three the active tool drives,
+// rather than duplicating this whole start/drag/commit sequence three times.
+const transformPropertyForTool = { move: 'position', rotate: 'rotation', scale: 'scale' };
+function readXYZ(vectorLike) {
+    return [vectorLike.x, vectorLike.y, vectorLike.z];
+}
+
+function changeNodeTransform(node, property, values) {
+    if (activeResult) return;
+    const before = readXYZ(node[property]);
+    if (before.every((value, index) => value === values[index])) return;
+    const applyValues = (value) => {
+        node[property].set(...value);
+        updateRelationships();
+        updateSelectionOutline();
+    };
+    applyValues(values);
+    recordHistory({ undo: () => applyValues(before), redo: () => applyValues(values) });
+}
+
+// Keeps the Appearance tab's rotation/scale number inputs in sync with the live mesh -- called
+// both when the node editor opens and continuously while a rotate/scale gizmo drag is in
+// progress, so the two ways of setting these values (precise typing vs. dragging) never show
+// stale numbers to each other.
+function refreshNodeTransformFields(node) {
+    const [rx, ry, rz] = readXYZ(node.rotation).map((radians) => Math.round(THREE.MathUtils.radToDeg(radians) * 100) / 100);
+    $('#editNodeRotationX').value = rx;
+    $('#editNodeRotationY').value = ry;
+    $('#editNodeRotationZ').value = rz;
+    const [sx, sy, sz] = readXYZ(node.scale);
+    $('#editNodeScaleX').value = sx;
+    $('#editNodeScaleY').value = sy;
+    $('#editNodeScaleZ').value = sz;
+}
+
 transformControls.addEventListener('objectChange', () => {
     const object = transformControls.object;
-    if (object && transformLastPosition && selectedNodeIds.size > 1) {
-        const delta = object.position.clone().sub(transformLastPosition);
+    const property = transformPropertyForTool[currentTool] ?? 'position';
+    if (object && property === 'scale' && shiftKeyHeld) {
+        const start = transformStartValues?.get(object.userData.id);
+        if (start) {
+            const factor = uniformScaleFactorForDrag();
+            object.scale.set(start[0] * factor, start[1] * factor, start[2] * factor);
+        }
+    }
+    if (object && transformLastValue && selectedNodeIds.size > 1) {
+        const current = readXYZ(object[property]);
+        const delta = current.map((value, index) => value - transformLastValue[index]);
         selectedNodeIds.forEach((id) => {
-            if (id !== object.userData.id) nodeObjects.get(id)?.position.add(delta);
+            if (id === object.userData.id) return;
+            const other = nodeObjects.get(id)?.[property];
+            if (other) other.set(...readXYZ(other).map((value, index) => value + delta[index]));
         });
-        transformLastPosition.copy(object.position);
+        transformLastValue = current;
     }
     updateRelationships();
     updateSelectionOutline();
+    if (object && object === selectedNode && !$('#nodeEditor').classList.contains('hidden')) refreshNodeTransformFields(object);
 });
-let transformStartPositions = null;
-let transformLastPosition = null;
+let transformStartValues = null;
+let transformLastValue = null;
 transformControls.addEventListener('mouseDown', () => {
     const object = transformControls.object;
-    transformStartPositions = object ? new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()])) : null;
-    transformLastPosition = object?.position.clone() ?? null;
+    const property = transformPropertyForTool[currentTool] ?? 'position';
+    transformStartValues = object ? new Map([...selectedNodeIds].map((id) => [id, readXYZ(nodeObjects.get(id)[property])])) : null;
+    transformLastValue = object ? readXYZ(object[property]) : null;
 });
 transformControls.addEventListener('mouseUp', () => {
     const object = transformControls.object;
-    if (!object || !transformStartPositions || object.position.equals(transformStartPositions.get(object.userData.id))) {
-        transformStartPositions = null;
-        transformLastPosition = null;
+    const property = transformPropertyForTool[currentTool] ?? 'position';
+    const startValue = object && transformStartValues?.get(object.userData.id);
+    const endValue = object && readXYZ(object[property]);
+    if (!object || !startValue || startValue.every((value, index) => value === endValue[index])) {
+        transformStartValues = null;
+        transformLastValue = null;
         return;
     }
-    const from = new Map([...transformStartPositions].map(([id, position]) => [id, position.clone()]));
-    const to = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
-    const applyPositions = (positions) => {
-        positions.forEach((position, id) => nodeObjects.get(id)?.position.copy(position));
+    const from = new Map(transformStartValues);
+    const to = new Map([...selectedNodeIds].map((id) => [id, readXYZ(nodeObjects.get(id)[property])]));
+    const applyValues = (values) => {
+        values.forEach((value, id) => nodeObjects.get(id)?.[property].set(...value));
         updateRelationships();
         updateSelectionOutline();
     };
     recordHistory({
-        undo: () => applyPositions(from),
-        redo: () => applyPositions(to)
+        undo: () => applyValues(from),
+        redo: () => applyValues(to)
     });
-    transformStartPositions = null;
-    transformLastPosition = null;
+    transformStartValues = null;
+    transformLastValue = null;
 });
+
+// Debug/test hook only; not part of the app's public surface (same pattern as
+// window.__relationshipScreenPoint further down). Exposes the transform-tool state and a way
+// to simulate a gizmo drag by dispatching
+// TransformControls' own mouseDown/objectChange/mouseUp events directly, so interaction tests
+// can exercise the rotate/scale/move commit-and-undo path without needing real pointer
+// coordinates on the 3D gizmo's own handle geometry.
+window.__debugTransform = {
+    mode: () => transformControls.getMode(),
+    attachedId: () => transformControls.object?.userData.id ?? null,
+    selectedId: () => selectedNode?.userData.id ?? null,
+    simulateDragTo: (x, y, z) => {
+        transformControls.dispatchEvent({ type: 'mouseDown' });
+        transformControls.object[transformPropertyForTool[currentTool] ?? 'position'].set(x, y, z);
+        transformControls.dispatchEvent({ type: 'objectChange' });
+        transformControls.dispatchEvent({ type: 'mouseUp' });
+    },
+    nodeTransform: (id, property) => {
+        const object = nodeObjects.get(id);
+        return object ? [object[property].x, object[property].y, object[property].z] : null;
+    },
+    allNodeIds: () => [...nodeObjects.keys()],
+    // A lower-level, multi-step alternative to simulateDragTo for exercising the real
+    // Shift-uniform-scale override in objectChange: mouseDown captures transformStartValues as
+    // usual, then each move step can set the object's scale directly (standing in for whatever
+    // per-axis math a real single-axis or corner-handle drag would have produced) and/or set
+    // TransformControls' own pointStart/pointEnd (which is all uniformScaleFactorForDrag reads)
+    // before dispatching objectChange with a chosen Shift state -- so a test can drive multiple
+    // movement steps with Shift toggled on or off between them, the same way a real drag would,
+    // without needing real screen coordinates raycast against the gizmo's handle geometry.
+    scaleDrag: {
+        mouseDown: () => transformControls.dispatchEvent({ type: 'mouseDown' }),
+        move: ({ manualScale, pointStart, pointEnd, shiftHeld = false } = {}) => {
+            if (manualScale) transformControls.object.scale.set(...manualScale);
+            if (pointStart) transformControls.pointStart.set(...pointStart);
+            if (pointEnd) transformControls.pointEnd.set(...pointEnd);
+            shiftKeyHeld = shiftHeld;
+            transformControls.dispatchEvent({ type: 'objectChange' });
+            return readXYZ(transformControls.object.scale);
+        },
+        mouseUp: () => {
+            transformControls.dispatchEvent({ type: 'mouseUp' });
+            shiftKeyHeld = false;
+        }
+    }
+};
 
 scene.add(new THREE.HemisphereLight(0xbfe4f2, 0x16212a, 2.25));
 
@@ -712,6 +840,8 @@ function createNodeLabel(definition, geometry) {
 function createNode(definition) {
     const mesh = new THREE.Mesh(geometryFor(definition), materialFor(definition));
     mesh.position.fromArray(definition.position);
+    mesh.rotation.fromArray(definition.rotation ?? [0, 0, 0]);
+    mesh.scale.fromArray(definition.scale ?? [1, 1, 1]);
     mesh.userData = {
         kind: 'node',
         id: definition.id,
@@ -1181,7 +1311,7 @@ function selectNode(node, { additive = false } = {}) {
     updateRelationshipSelection();
     updateSelectionOutline();
     if (additive && selectedNodeIds.size !== 1) hideCards();
-    if (!activeResult && currentTool === 'move' && transformControls.object &&
+    if (!activeResult && currentTool in transformPropertyForTool && transformControls.object &&
         !selectedNodeIds.has(transformControls.object.userData.id)) {
         if (selectedNode) transformControls.attach(selectedNode);
         else transformControls.detach();
@@ -1631,6 +1761,7 @@ function openNodeEditor(definition, clientX, clientY) {
     $('#editNodeGeometryFile').value = '';
     $('#editGeometryStatus').textContent = definition.geometryFileName ?? 'Choose a CAD or mesh file, or browse the bundled library';
     $('#editGeometryStatus').classList.remove('loading', 'error');
+    refreshNodeTransformFields(node);
     $('#toggleNodeEnabled').textContent = definition.enabled === false ? 'Enable node' : 'Disable node';
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
@@ -2951,6 +3082,8 @@ function setResultModeLocked(locked) {
     $('#assistantButton').disabled = locked;
     $('[data-action="delete"]').disabled = locked;
     $('[data-tool="move"]').disabled = locked;
+    $('[data-tool="rotate"]').disabled = locked;
+    $('[data-tool="scale"]').disabled = locked;
     $('#runConfigurationButton').disabled = locked;
     $('#runButton').disabled = locked || simulationRunning || !currentValidation.valid;
     $('#exportCsvButton').disabled = !locked;
@@ -3368,18 +3501,23 @@ function createAddonContext(contextNames) {
             projectName: filenameStem(currentProjectFilename),
             engineJobId: activeEngineJobId,
             result: activeResult,
-            nodes: model.nodes.map((node) => ({
-                id: node.id,
-                title: node.title,
-                shape: node.shape,
-                color: node.color,
-                mesh: node.importedGeometry ? {
-                    position: Array.from(node.importedGeometry.getAttribute('position').array),
-                    normal: node.importedGeometry.getAttribute('normal') ? Array.from(node.importedGeometry.getAttribute('normal').array) : null,
-                    index: node.importedGeometry.getIndex() ? Array.from(node.importedGeometry.getIndex().array) : null
-                } : null,
-                states: node.states.map(({ id, label, symbol, unit }) => ({ id, label, symbol, unit }))
-            })),
+            nodes: model.nodes.map((node) => {
+                const object = nodeObjects.get(node.id);
+                return {
+                    id: node.id,
+                    title: node.title,
+                    shape: node.shape,
+                    color: node.color,
+                    rotation: object ? [object.rotation.x, object.rotation.y, object.rotation.z] : [0, 0, 0],
+                    scale: object ? [object.scale.x, object.scale.y, object.scale.z] : [1, 1, 1],
+                    mesh: node.importedGeometry ? {
+                        position: Array.from(node.importedGeometry.getAttribute('position').array),
+                        normal: node.importedGeometry.getAttribute('normal') ? Array.from(node.importedGeometry.getAttribute('normal').array) : null,
+                        index: node.importedGeometry.getIndex() ? Array.from(node.importedGeometry.getIndex().array) : null
+                    } : null,
+                    states: node.states.map(({ id, label, symbol, unit }) => ({ id, label, symbol, unit }))
+                };
+            }),
             edges: model.relationships.filter((edge) => edge.enabled && !edge.deleted).map((edge) => ({
                 id: edge.id,
                 title: edge.title,
@@ -3850,6 +3988,13 @@ function serializeProjectDocument() {
                 enabled: node.enabled !== false,
                 numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep },
                 position: object.position.toArray(),
+                // Omitted when at the identity value, like subsystemId above -- keeps a node
+                // that was never rotated/scaled serializing exactly as it did before these
+                // fields existed, rather than growing every node's JSON with inert zeros/ones.
+                ...(object.rotation.x === 0 && object.rotation.y === 0 && object.rotation.z === 0
+                    ? {} : { rotation: object.rotation.toArray().slice(0, 3) }),
+                ...(object.scale.x === 1 && object.scale.y === 1 && object.scale.z === 1
+                    ? {} : { scale: object.scale.toArray() }),
                 states: node.states.map((state) => ({
                     id: state.id ?? allocateModelEntityId(),
                     name: state.label,
@@ -4804,7 +4949,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
             return;
         }
         nodePointerDown = { id: node.userData.id, x: event.clientX, y: event.clientY, wasSelected };
-        if (!activeResult && currentTool === 'move' && selectedNodeIds.has(node.userData.id)) transformControls.attach(node);
+        if (!activeResult && currentTool in transformPropertyForTool && selectedNodeIds.has(node.userData.id)) transformControls.attach(node);
         return;
     }
 
@@ -5319,6 +5464,22 @@ $('#editBrowseShapeLibrary').addEventListener('click', () => {
     if (!selectedNode) return;
     openShapeLibrary('editor');
 });
+
+$$('#editNodeRotationX, #editNodeRotationY, #editNodeRotationZ').forEach((input) => input.addEventListener('change', () => {
+    if (!selectedNode) return;
+    const degrees = [$('#editNodeRotationX'), $('#editNodeRotationY'), $('#editNodeRotationZ')].map((field) => Number(field.value) || 0);
+    changeNodeTransform(selectedNode, 'rotation', degrees.map((value) => THREE.MathUtils.degToRad(value)));
+    refreshNodeTransformFields(selectedNode);
+}));
+$$('#editNodeScaleX, #editNodeScaleY, #editNodeScaleZ').forEach((input) => input.addEventListener('change', () => {
+    if (!selectedNode) return;
+    const values = [$('#editNodeScaleX'), $('#editNodeScaleY'), $('#editNodeScaleZ')].map((field) => Number(field.value));
+    // Zero, negative or unparsable scale would collapse or invert the node's geometry --
+    // reject it and snap the fields back to the last valid (live) values instead.
+    if (values.some((value) => !(value > 0))) { refreshNodeTransformFields(selectedNode); return; }
+    changeNodeTransform(selectedNode, 'scale', values);
+    refreshNodeTransformFields(selectedNode);
+}));
 
 $('#shapeLibrarySearch').addEventListener('input', renderShapeLibraryResults);
 $('#shapeLibraryResults').addEventListener('click', (event) => {
@@ -5877,7 +6038,7 @@ $('#createNode').addEventListener('click', () => {
     pendingGeometryFileName = '';
     updateModelStatus();
     selectNode(nodeObjects.get(id));
-    if (currentTool === 'move') transformControls.attach(nodeObjects.get(id));
+    if (currentTool in transformPropertyForTool) transformControls.attach(nodeObjects.get(id));
     recordHistory({
         undo: () => setNodeVisibility(id, false),
         redo: () => setNodeVisibility(id, true)
@@ -6026,11 +6187,12 @@ function setTool(tool) {
     $('#selectionRectangle').hidden = true;
     currentTool = tool;
     dragControls.enabled = !activeResult && tool === 'select';
-    transformControls.enabled = !activeResult && tool === 'move';
+    transformControls.enabled = !activeResult && tool in transformPropertyForTool;
     orbitControls.enabled = tool !== 'rectangleSelect';
 
-    if (tool !== 'move') transformControls.detach();
-    if (tool === 'move' && selectedNode) transformControls.attach(selectedNode);
+    if (tool in transformPropertyForTool) transformControls.setMode(tool === 'move' ? 'translate' : tool);
+    if (!(tool in transformPropertyForTool)) transformControls.detach();
+    if (tool in transformPropertyForTool && selectedNode) transformControls.attach(selectedNode);
 }
 
 $$('.toolstrip [data-tool]').forEach((button) => {
@@ -6256,6 +6418,8 @@ function hydrateFragmentNode(node) {
         type: node.type || 'Custom node',
         shape: importedGeometry ? 'imported' : appearance.shape || 'box',
         position: node.position?.length === 3 ? node.position : [0, 0, 0],
+        rotation: node.rotation?.length === 3 ? node.rotation : [0, 0, 0],
+        scale: node.scale?.length === 3 ? node.scale : [1, 1, 1],
         color: Number.parseInt(String(appearance.color ?? '#34727a').replace('#', ''), 16),
         importedGeometry,
         geometryFileName: appearance.fileName ?? null,
@@ -6318,7 +6482,7 @@ function pasteGraph() {
         };
         clearSelection();
         nodeIds.forEach((id) => selectNode(nodeObjects.get(id), { additive: selectedNodeIds.size > 0 }));
-        if (currentTool === 'move' && selectedNode) transformControls.attach(selectedNode);
+        if (currentTool in transformPropertyForTool && selectedNode) transformControls.attach(selectedNode);
         recordHistory({ undo: () => applyVisible(false), redo: () => applyVisible(true) });
         updateRelationships();
         updateModelStatus();

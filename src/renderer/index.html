@@ -298,6 +298,8 @@
             <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
             <button class="squareTool rectangleSelectTool" data-tool="rectangleSelect" type="button" aria-label="Select nodes in a rectangle" data-tooltip="Rectangle select">▱</button>
             <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
+            <button class="squareTool" data-tool="rotate" type="button" aria-label="Rotate around a precise axis" data-tooltip="Rotate · Precise axis">⟳</button>
+            <button class="squareTool" data-tool="scale" type="button" aria-label="Scale along a precise axis, or hold Shift to scale all axes together" data-tooltip="Scale · Precise axis · Shift for uniform">⤢</button>
         </div>
         <div class="toolGroup" role="group" aria-label="Selection actions">
             <button id="createSubsystem" class="squareTool" type="button" aria-label="Create subsystem from selected nodes" data-tooltip="Create subsystem" disabled>▤</button>
@@ -423,6 +425,20 @@
                         <button id="editBrowseShapeLibrary" class="geometrySourceButton" type="button">⌕ Shape library</button>
                     </div>
                     <small id="editGeometryStatus" class="geometrySourceStatus">Choose a CAD or mesh file, or browse the bundled library</small>
+                    <label class="editorField"><span>Rotation (°)</span>
+                        <div class="vectorGrid">
+                            <input id="editNodeRotationX" type="number" step="1" aria-label="Rotation X">
+                            <input id="editNodeRotationY" type="number" step="1" aria-label="Rotation Y">
+                            <input id="editNodeRotationZ" type="number" step="1" aria-label="Rotation Z">
+                        </div>
+                    </label>
+                    <label class="editorField"><span>Scale</span>
+                        <div class="vectorGrid">
+                            <input id="editNodeScaleX" type="number" step="0.1" min="0.001" aria-label="Scale X">
+                            <input id="editNodeScaleY" type="number" step="0.1" min="0.001" aria-label="Scale Y">
+                            <input id="editNodeScaleZ" type="number" step="0.1" min="0.001" aria-label="Scale Z">
+                        </div>
+                    </label>
                 </section>
             </div>
             <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="toggleNodeEnabled" type="button">Disable node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>

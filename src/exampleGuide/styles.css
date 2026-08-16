@@ -21,4 +21,4 @@ ul { padding-left: 21px; }
 code { padding: 2px 5px; color: #83d7cf; background: #10242b; border-radius: 4px; }
 pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243944; border-radius: 7px; }
 .inlineMath { display: inline-block; padding: 0 2px; color: #d3e7e8; font-size: 1em; vertical-align: -.15em; }
-.equation { display: flex; width: 100%; min-height: 48px; margin: 16px 0; padding: 14px; align-items: center; justify-content: center; overflow-x: auto; color: #d3e7e8; background: rgb(66 201 188 / 6%); border-left: 2px solid #42c9bc; font-size: 17px; }
+.equation { display: flex; width: 100%; min-height: 48px; margin: 16px 0; padding: 14px; align-items: center; justify-content: safe center; overflow-x: auto; color: #d3e7e8; background: rgb(66 201 188 / 6%); border-left: 2px solid #42c9bc; font-size: 17px; }

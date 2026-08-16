@@ -34,7 +34,10 @@
 Name "${APP_NAME}"
 OutFile "${OUTPUT_FILE}"
 Unicode true
-SetCompressor /SOLID lzma
+; Solid compression requires NSIS to map the complete Electron payload and has
+; repeatedly failed on GitHub's Windows runner while processing app.asar.
+; Per-file LZMA avoids that large mmap while retaining compression.
+SetCompressor lzma
 RequestExecutionLevel admin
 
 InstallDir "$PROGRAMFILES64\${APP_NAME}"

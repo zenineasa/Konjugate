@@ -11,18 +11,6 @@ appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
 enginePackageDir := out/packageResources/engine
-packageIgnore := \
-	--ignore="[/\\]out([/\\]|$$)" \
-	--ignore="[/\\]vcpkg_installed([/\\]|$$)" \
-	--ignore="[/\\]\.tools([/\\]|$$)" \
-	--ignore="[/\\]engine([/\\]|$$)" \
-	--ignore="[/\\]\.git([/\\]|$$)" \
-	--ignore="[/\\]\.github([/\\]|$$)" \
-	--ignore="[/\\]\.vscode([/\\]|$$)" \
-	--ignore="[/\\]\.claude([/\\]|$$)" \
-	--ignore="[/\\]tests([/\\]|$$)" \
-	--ignore="[/\\]docs([/\\]|$$)" \
-	--ignore="[/\\]packaging([/\\]|$$)"
 ifeq ($(OS),Windows_NT)
 	hostSystem := Windows
 	ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
@@ -226,51 +214,17 @@ verifyPackagedInteraction: packageApp
 verifyPackage: verifyPackagedEngine verifyPackagedInteraction
 
 packageMacos: checkPackaging iconsMacos engine
-	npx electron-packager . $(appName) \
-		--platform=darwin \
-		--arch=$(hostArch) \
-		--app-bundle-id=$(appId) \
-		--app-version=$(appVersion) \
-		--icon=$(iconDir)/app.icns \
-		--extra-resource=$(enginePackageDir) \
-		--extra-resource=thirdPartyNotices.md \
-		--extra-resource=thirdPartyLicenses \
-		$(packageIgnore) \
-		--out=$(packageDir) \
-		--overwrite \
-		--prune=true
+	node scripts/packageElectron.mjs darwin $(hostArch) $(appVersion) $(iconDir)/app.icns $(appName) $(appId)
 	node scripts/verifyPackagingNotices.mjs \
 		$(packageDir)/$(appName)-darwin-$(hostArch)/$(appName).app/Contents/Resources
 
 packageWindows: checkPackaging iconsWindows engine
-	npx electron-packager . $(appName) \
-		--platform=win32 \
-		--arch=$(hostArch) \
-		--app-version=$(appVersion) \
-		--icon=$(iconDir)/app.ico \
-		--extra-resource=$(enginePackageDir) \
-		--extra-resource=thirdPartyNotices.md \
-		--extra-resource=thirdPartyLicenses \
-		$(packageIgnore) \
-		--out=$(packageDir) \
-		--overwrite \
-		--prune=true
+	node scripts/packageElectron.mjs win32 $(hostArch) $(appVersion) $(iconDir)/app.ico $(appName)
 	node scripts/verifyPackagingNotices.mjs \
 		$(packageDir)/$(appName)-win32-$(hostArch)/resources
 
 packageLinux: checkPackaging iconsPng engine
-	npx electron-packager . $(appName) \
-		--platform=linux \
-		--arch=$(hostArch) \
-		--app-version=$(appVersion) \
-		--icon=$(iconDir)/app.png \
-		--extra-resource=$(enginePackageDir) \
-		--extra-resource=thirdPartyNotices.md \
-		--extra-resource=thirdPartyLicenses \
-		$(packageIgnore) \
-		--out=$(packageDir) \
-		--overwrite \
-		--prune=true
+	node scripts/packageElectron.mjs linux $(hostArch) $(appVersion) $(iconDir)/app.png $(appName)
 	node scripts/verifyPackagingNotices.mjs \
 		$(packageDir)/$(appName)-linux-$(hostArch)/resources
 

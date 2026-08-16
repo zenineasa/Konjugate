@@ -1552,5 +1552,38 @@ export async function runInteractionTests(window) {
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
     });
 
+    await run('importing a node shape file also saves it into the user shape library', async () => {
+        // Deliberately operates on whatever node is already on the canvas at this point in the
+        // suite, rather than loading a fresh example -- by now the document is dirty from many
+        // earlier tests, and loading a new example would raise a native "Discard changes?"
+        // dialog that executeJavaScript can't click. The specific project content is irrelevant
+        // to what's under test here (the upload-to-library wiring), so any node will do.
+        await waitFor(window, `document.querySelectorAll('.objectLabel').length > 0`, 'No node available to select for the upload test.');
+        await evaluate(window, `document.querySelector('.objectLabel').click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Node editor did not open.');
+        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
+        await waitFor(window, `!document.querySelector('[data-node-panel="appearance"]').hidden`, 'Appearance tab did not open.');
+
+        const stlContent = 'solid uploadTest\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid uploadTest\n';
+        await evaluate(window, `(() => {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(new File([${JSON.stringify(stlContent)}], 'uploadTest.stl', { type: 'model/stl' }));
+            const input = document.querySelector('#editNodeGeometryFile');
+            input.files = dataTransfer.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await waitFor(window, `document.querySelector('#editGeometryStatus').textContent.includes('saved to shape library')`, 'Upload did not report being saved to the shape library.');
+
+        const shapes = await evaluate(window, `window.shapeLibrary.list()`);
+        const uploaded = shapes.find((shape) => shape.domain === 'userUploaded' && shape.name === 'uploadTest');
+        assert.ok(uploaded, `Expected an uploaded shape library entry, got: ${JSON.stringify(shapes.map((s) => s.id))}`);
+
+        await evaluate(window, `document.querySelector('#editBrowseShapeLibrary').click()`);
+        await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library dialog did not open.');
+        assert.ok(await evaluate(window, `[...document.querySelectorAll('#shapeLibraryDomains button')].some((b) => b.textContent === 'User uploaded')`), 'No "User uploaded" domain chip appeared.');
+        assert.ok(await evaluate(window, `[...document.querySelectorAll('.shapeLibraryItem b')].some((b) => b.textContent === 'uploadTest')`), 'Uploaded shape did not appear in the library grid.');
+        await evaluate(window, `document.querySelector('#shapeLibraryCancel').click()`);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

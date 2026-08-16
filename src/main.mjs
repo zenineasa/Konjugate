@@ -4,7 +4,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } fr
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -605,12 +605,50 @@ ipcMain.handle('projectOpenExampleGuide', async (event, id) => {
 });
 
 const shapesDir = join(currentDir, '..', 'assets', 'shapes');
+const userShapesDir = join(app.getPath('userData'), 'shapes');
+const shapeFormatPattern = /\.(stl|step|stp)$/i;
 
+// Mirrors discoverComponentLibrary's bundled-plus-writable-userData split: the bundled manifest
+// is hand-curated (name/domain/tags), while every user upload gets a self-describing entry
+// synthesized directly from its filename -- there's no separate manifest to keep in sync for
+// something that's supposed to "just show up" the moment a file is saved into userShapesDir.
 async function shapeLibraryManifest() {
-    return JSON.parse(await readFile(join(shapesDir, 'manifest.json'), 'utf8')).shapes;
+    const bundled = (JSON.parse(await readFile(join(shapesDir, 'manifest.json'), 'utf8')).shapes)
+        .map((shape) => ({ ...shape, source: 'bundled' }));
+    const uploadedEntries = await readdir(userShapesDir, { withFileTypes: true }).catch(() => []);
+    const uploaded = uploadedEntries
+        .filter((entry) => entry.isFile() && shapeFormatPattern.test(entry.name))
+        .map((entry) => {
+            const format = entry.name.split('.').pop().toLowerCase();
+            return {
+                id: `userUploaded/${entry.name}`,
+                name: entry.name.slice(0, -(format.length + 1)),
+                domain: 'userUploaded',
+                format,
+                file: entry.name,
+                tags: [],
+                source: 'user'
+            };
+        });
+    return [...bundled, ...uploaded];
 }
 
 ipcMain.handle('shapeLibraryList', async () => shapeLibraryManifest());
+
+ipcMain.handle('shapeLibrarySaveUpload', async (_event, { fileName, data }) => {
+    const format = fileName.split('.').pop()?.toLowerCase();
+    if (!['stl', 'step', 'stp'].includes(format)) {
+        throw new Error('Only STL, STEP, or STP files can be saved to the shape library.');
+    }
+    await mkdir(userShapesDir, { recursive: true });
+    const stem = basename(fileName, `.${format}`).replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'shape';
+    let candidateName = `${stem}.${format}`;
+    for (let counter = 1; existsSync(join(userShapesDir, candidateName)); counter += 1) {
+        candidateName = `${stem} (${counter}).${format}`;
+    }
+    await writeFile(join(userShapesDir, candidateName), Buffer.from(data));
+    return { id: `userUploaded/${candidateName}` };
+});
 
 const componentTemplateIdPattern = /^[a-zA-Z][\w-]*$/;
 
@@ -693,7 +731,8 @@ ipcMain.handle('componentLibraryList', async () => {
 ipcMain.handle('shapeLibraryLoad', async (_event, id) => {
     const shape = (await shapeLibraryManifest()).find((candidate) => candidate.id === id);
     if (!shape) throw new Error('That shape is not available.');
-    return { ...shape, data: await readFile(join(shapesDir, shape.file)) };
+    const baseDir = shape.source === 'user' ? userShapesDir : shapesDir;
+    return { ...shape, data: await readFile(join(baseDir, shape.file)) };
 });
 
 ipcMain.handle('projectOpen', async (event) => {

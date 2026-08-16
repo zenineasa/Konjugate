@@ -51,7 +51,8 @@ contextBridge.exposeInMainWorld('projectFiles', {
 
 contextBridge.exposeInMainWorld('shapeLibrary', {
     list: () => ipcRenderer.invoke('shapeLibraryList'),
-    load: (id) => ipcRenderer.invoke('shapeLibraryLoad', id)
+    load: (id) => ipcRenderer.invoke('shapeLibraryLoad', id),
+    saveUpload: (fileName, data) => ipcRenderer.invoke('shapeLibrarySaveUpload', { fileName, data })
 });
 
 contextBridge.exposeInMainWorld('componentLibrary', {

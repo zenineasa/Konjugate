@@ -2092,6 +2092,22 @@ async function importNodeGeometry(file) {
     return geometryFromBytes(await file.arrayBuffer(), extension);
 }
 
+// Persists a successfully-imported shape file into the user's own shape library (userData/shapes,
+// separate from the read-only bundled one) so it's reusable on other nodes without re-uploading --
+// a File's arrayBuffer() can be read more than once, so this doesn't disturb the geometry import
+// that already consumed it. Deliberately non-fatal: failing to save to the library shouldn't
+// undo an otherwise-successful shape import, so this only ever appends to the status text.
+async function saveUploadToShapeLibrary(file, status) {
+    try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        await window.shapeLibrary.saveUpload(file.name, bytes);
+        shapeLibraryEntries = null;
+        status.textContent += ' · saved to shape library';
+    } catch (error) {
+        console.error(error);
+    }
+}
+
 async function importLibraryShape(id) {
     const shape = await window.shapeLibrary.load(id);
     // shape.data crosses the IPC boundary as a plain Uint8Array (structured clone), not a
@@ -2107,6 +2123,7 @@ let shapeLibraryTarget = null;
 let shapeLibraryDomain = 'all';
 
 function domainLabel(domain) {
+    if (domain === 'userUploaded') return 'User uploaded';
     return `${domain.charAt(0).toUpperCase()}${domain.slice(1)}`;
 }
 
@@ -5285,6 +5302,7 @@ $('#editNodeGeometryFile').addEventListener('change', async (event) => {
         geometry.dispose();
         $('#editNodeShape').value = '';
         status.textContent = `${file.name} applied`;
+        await saveUploadToShapeLibrary(file, status);
     } catch (error) {
         status.classList.add('error');
         status.textContent = error.message;
@@ -5763,6 +5781,7 @@ $('#nodeGeometryFile').addEventListener('change', async (event) => {
         pendingGeometryFileName = file.name;
         $('#newNodeShape').value = 'imported';
         status.textContent = `${file.name} ready`;
+        await saveUploadToShapeLibrary(file, status);
     } catch (error) {
         pendingImportedGeometry?.dispose();
         pendingImportedGeometry = null;

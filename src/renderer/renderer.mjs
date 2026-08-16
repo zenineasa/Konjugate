@@ -5437,26 +5437,15 @@ async function loadExample(id) {
         console.error(error);
         $('#statusText').textContent = `Example failed · ${error.message}`;
     } finally {
-        closeExampleMenu();
+        // .close() on an already-closed <dialog> is a harmless no-op, so this is safe even if
+        // loadExample is ever invoked from somewhere other than the explorer's own Open button.
+        $('#examplesExplorerDialog').close();
     }
 }
 
 $('#exampleGuideButton').addEventListener('click', () => {
     if (activeExampleId) window.projectFiles.openExampleGuide(activeExampleId);
 });
-
-function closeExampleMenu() {
-    $('#exampleMenu').hidden = true;
-    $('#exampleButton').ariaExpanded = 'false';
-}
-
-function toggleExampleMenu() {
-    const menu = $('#exampleMenu');
-    const opening = menu.hidden;
-    menu.hidden = !opening;
-    $('#exampleButton').ariaExpanded = String(opening);
-    if (opening) $('button', menu)?.focus();
-}
 
 function requestProjectPassword({
     confirm = false,
@@ -5528,22 +5517,75 @@ function requestProjectPassword({
     });
 }
 
-async function populateExamples() {
-    try {
-        const examples = await window.projectFiles.listExamples();
-        const menu = $('#exampleMenu');
-        menu.replaceChildren(...examples.map((example) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.role = 'menuitem';
-            button.textContent = example.label;
-            button.addEventListener('click', () => loadExample(example.id));
-            return button;
-        }));
-    } catch (error) {
-        console.error(error);
-        $('#exampleButton').disabled = true;
+let examplesExplorerEntries = null;
+let examplesExplorerDomain = 'all';
+let examplesExplorerSelectedId = null;
+
+function renderExamplesExplorerResults() {
+    const query = $('#examplesExplorerSearch').value.trim().toLowerCase();
+    const matches = examplesExplorerEntries.filter((example) => {
+        if (examplesExplorerDomain !== 'all' && !example.domains.includes(examplesExplorerDomain)) return false;
+        if (!query) return true;
+        const haystack = [example.label, example.description, ...example.domains].join(' ').toLowerCase();
+        return haystack.includes(query);
+    });
+    $('#examplesExplorerResults').replaceChildren(...matches.map((example) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'examplesExplorerItem';
+        button.dataset.exampleId = example.id;
+        button.classList.toggle('selected', example.id === examplesExplorerSelectedId);
+        const thumb = example.thumbnailUrl
+            ? `<img class="examplesExplorerThumb" src="${escapeHtml(example.thumbnailUrl)}" alt="">`
+            : '<span class="examplesExplorerThumbPlaceholder">No preview</span>';
+        button.innerHTML = `${thumb}<b>${escapeHtml(example.label)}</b>`;
+        return button;
+    }));
+    $('#examplesExplorerEmpty').hidden = matches.length > 0;
+}
+
+function renderExamplesExplorerDetail() {
+    const example = examplesExplorerEntries.find((entry) => entry.id === examplesExplorerSelectedId);
+    $('#examplesExplorerDetailEmpty').hidden = Boolean(example);
+    $('#examplesExplorerDetailContent').hidden = !example;
+    if (!example) return;
+    const thumbnail = $('#examplesExplorerDetailThumbnail');
+    thumbnail.hidden = !example.thumbnailUrl;
+    thumbnail.src = example.thumbnailUrl ?? '';
+    $('#examplesExplorerDetailTitle').textContent = example.label;
+    $('#examplesExplorerDetailDescription').textContent = example.description || 'No description available.';
+}
+
+async function openExamplesExplorer() {
+    if (!examplesExplorerEntries) {
+        try {
+            examplesExplorerEntries = await window.projectFiles.listExamples();
+        } catch (error) {
+            console.error(error);
+            $('#exampleButton').disabled = true;
+            return;
+        }
     }
+    examplesExplorerDomain = 'all';
+    examplesExplorerSelectedId = null;
+    $('#examplesExplorerSearch').value = '';
+    const domains = ['all', ...new Set(examplesExplorerEntries.flatMap((example) => example.domains))];
+    $('#examplesExplorerDomains').replaceChildren(...domains.map((domain) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = domain === 'all' ? 'All' : domainLabel(domain);
+        button.classList.toggle('active', domain === examplesExplorerDomain);
+        button.addEventListener('click', () => {
+            examplesExplorerDomain = domain;
+            $$('#examplesExplorerDomains button').forEach((chip) => chip.classList.toggle('active', chip === button));
+            renderExamplesExplorerResults();
+        });
+        return button;
+    }));
+    renderExamplesExplorerResults();
+    renderExamplesExplorerDetail();
+    $('#examplesExplorerDialog').showModal();
+    $('#examplesExplorerSearch').focus();
 }
 
 $('#newButton').addEventListener('click', newProject);
@@ -5621,15 +5663,19 @@ window.addEventListener('pointerdown', (event) => {
         $('#diagnosticsPanel').classList.add('hidden');
     }
 });
-$('#exampleButton').addEventListener('click', (event) => {
-    event.stopPropagation();
-    toggleExampleMenu();
+$('#exampleButton').addEventListener('click', openExamplesExplorer);
+$('#examplesExplorerSearch').addEventListener('input', renderExamplesExplorerResults);
+$('#examplesExplorerResults').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-example-id]');
+    if (!button) return;
+    examplesExplorerSelectedId = button.dataset.exampleId;
+    $$('#examplesExplorerResults .examplesExplorerItem').forEach((item) => item.classList.toggle('selected', item === button));
+    renderExamplesExplorerDetail();
 });
-$('#exampleMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
-window.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest('.examplePicker')) closeExampleMenu();
+$('#examplesExplorerLoad').addEventListener('click', () => {
+    if (examplesExplorerSelectedId) loadExample(examplesExplorerSelectedId);
 });
-populateExamples();
+$('#examplesExplorerCancel').addEventListener('click', () => $('#examplesExplorerDialog').close());
 
 $$('[data-add-kind]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -6416,11 +6462,6 @@ $('[data-action="select-all"]').addEventListener('click', () => {
     selectAllNodes();
 });
 window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !$('#exampleMenu').hidden) {
-        closeExampleMenu();
-        $('#exampleButton').focus();
-        return;
-    }
     if (event.key === 'Escape' && activeEndpointPick) {
         finishEndpointPick();
         return;

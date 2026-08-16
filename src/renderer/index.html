@@ -54,12 +54,9 @@
                 <button id="exportCsvButton" type="button" aria-label="Export results as CSV" data-tooltip="Export results as CSV" disabled>
                     <img class="documentActionIcon" src="../../assets/exportCsv.svg" alt="">
                 </button>
-                <span class="examplePicker">
-                    <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="menu" aria-expanded="false">
-                        <span>Examples</span><i aria-hidden="true"></i>
-                    </button>
-                    <span id="exampleMenu" class="exampleMenu" role="menu" hidden></span>
-                </span>
+                <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="dialog">
+                    <span>Examples</span><i aria-hidden="true"></i>
+                </button>
                 <button id="exampleGuideButton" class="exampleGuideButton" type="button" aria-label="About this example" data-tooltip="About this example" hidden>?</button>
             </div>
         </div>
@@ -171,6 +168,31 @@
             <div id="shapeLibraryResults" class="shapeLibraryResults"></div>
             <p id="shapeLibraryEmpty" class="emptyEditorState" hidden>No shapes match your search.</p>
             <footer><button id="shapeLibraryCancel" type="button">Cancel</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="examplesExplorerDialog" class="passwordDialog examplesExplorerDialog">
+        <form method="dialog">
+            <span class="contextKicker">Bundled projects</span>
+            <strong>Examples</strong>
+            <input id="examplesExplorerSearch" type="search" placeholder="Search examples…" autocomplete="off">
+            <div id="examplesExplorerDomains" class="shapeLibraryDomains"></div>
+            <div class="examplesExplorerBody">
+                <div class="examplesExplorerBrowse">
+                    <div id="examplesExplorerResults" class="examplesExplorerResults"></div>
+                    <p id="examplesExplorerEmpty" class="emptyEditorState" hidden>No examples match your search.</p>
+                </div>
+                <div class="examplesExplorerDetail">
+                    <p id="examplesExplorerDetailEmpty" class="examplesExplorerDetailEmpty">Select an example to preview it here.</p>
+                    <div id="examplesExplorerDetailContent" hidden>
+                        <img id="examplesExplorerDetailThumbnail" class="examplesExplorerDetailThumbnail" alt="">
+                        <strong id="examplesExplorerDetailTitle"></strong>
+                        <p id="examplesExplorerDetailDescription"></p>
+                        <button id="examplesExplorerLoad" class="doneButton" type="button">Open this example</button>
+                    </div>
+                </div>
+            </div>
+            <footer><button id="examplesExplorerCancel" type="button">Close</button></footer>
         </form>
     </dialog>
 

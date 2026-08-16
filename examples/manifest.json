@@ -1,0 +1,12 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "examples": [
+        { "id": "singleJointActuator", "domains": ["electrical", "mechanical"] },
+        { "id": "twoLinkArm", "domains": ["electrical", "mechanical"] },
+        { "id": "wheeledRobotDrivetrain", "domains": ["electrical", "mechanical"] },
+        { "id": "batteryPoweredJoint", "domains": ["electrical", "mechanical", "thermal"] },
+        { "id": "positionControlledJoint", "domains": ["electrical", "mechanical"] },
+        { "id": "fourBarLinkage", "domains": ["mechanical"] },
+        { "id": "thermalManagement", "domains": ["thermal", "electrical"] }
+    ]
+}

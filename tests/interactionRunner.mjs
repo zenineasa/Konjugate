@@ -83,12 +83,23 @@ export async function runInteractionTests(window) {
         }
     };
 
-    await run('example menu loads a project copy', async () => {
+    await run('examples explorer loads a project copy', async () => {
         await evaluate(window, `document.querySelector('#exampleButton').click()`);
-        await waitFor(window, `Boolean([...document.querySelectorAll('#exampleMenu button')].find((button) => button.textContent === 'Thermal Management'))`, 'Example menu did not populate.');
-        await evaluate(window, `[...document.querySelectorAll('#exampleMenu button')].find((button) => button.textContent === 'Thermal Management').click()`);
+        await waitFor(window, `document.querySelector('#examplesExplorerDialog').open`, 'Examples explorer did not open.');
+        await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management'))`, 'Examples explorer did not populate.');
+        await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management').click()`);
+        await waitFor(window, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Thermal Management'`, 'Selecting the example did not populate the detail preview.');
+        assert.equal(await evaluate(window, `document.querySelector('#examplesExplorerDetailContent').hidden`), false);
+        assert.match(await evaluate(window, `document.querySelector('#examplesExplorerDetailDescription').textContent`), /enclosed-air volume/i);
+        await evaluate(window, `document.querySelector('#examplesExplorerLoad').click()`);
+        // loadExample()'s click handler isn't awaited by the caller, and closing the dialog
+        // happens in its `finally` block after the (also awaited-inside-loadExample) guide
+        // window IPC round trip -- so the dialog can still be open for a moment after the model
+        // itself has already finished loading. Wait for the actual close rather than the model
+        // load alone, to avoid a race against that same handler's own tail end.
         await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'Thermal example did not load.');
         assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'thermalManagement');
+        await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open`, 'Examples explorer did not close after loading the example.');
     });
 
     await run('example selection opens its companion guide', async () => {

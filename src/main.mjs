@@ -27,7 +27,7 @@ import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 
-if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_USER_DATA) {
+if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
 }
 
@@ -131,6 +131,18 @@ function createWindow() {
             try {
                 const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
                 await runInteractionTests(mainWindow);
+                app.exit(0);
+            } catch (error) {
+                console.error(error);
+                app.exit(1);
+            }
+        });
+    }
+    if (process.argv.includes('--generate-example-thumbnails')) {
+        mainWindow.webContents.once('did-finish-load', async () => {
+            try {
+                const { generateExampleThumbnails } = await import('../tests/generateExampleThumbnails.mjs');
+                await generateExampleThumbnails(mainWindow);
                 app.exit(0);
             } catch (error) {
                 console.error(error);
@@ -548,11 +560,39 @@ function exampleLabel(fileName) {
     return `${stem.charAt(0).toUpperCase()}${stem.slice(1)}`.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 }
 
-ipcMain.handle('projectListExamples', async () => (await exampleFiles()).map((fileName) => ({
-    id: fileName,
-    label: exampleLabel(fileName),
-    suggestedFilename: fileName
-})));
+let examplesManifestCache = null;
+async function examplesManifest() {
+    if (!examplesManifestCache) {
+        const parsed = JSON.parse(await readFile(join(examplesDir, 'manifest.json'), 'utf8'));
+        examplesManifestCache = new Map(parsed.examples.map((entry) => [entry.id, entry]));
+    }
+    return examplesManifestCache;
+}
+
+// The guide's own "## Overview" paragraph doubles as the explorer card's description, rather
+// than duplicating it by hand in the manifest -- every example guide already opens with exactly
+// this structure (see docs/examples restructuring), so it stays in sync with the guide for free.
+async function exampleDescription(stem) {
+    const markdown = await readFile(join(examplesDir, `${stem}.md`), 'utf8').catch(() => '');
+    const match = markdown.match(/## Overview\r?\n\r?\n([\s\S]+?)(?=\r?\n##\s|\r?\n*$)/);
+    return match ? match[1].trim() : '';
+}
+
+ipcMain.handle('projectListExamples', async () => {
+    const manifest = await examplesManifest();
+    return Promise.all((await exampleFiles()).map(async (fileName) => {
+        const stem = fileName.replace(/\.kjt$/, '');
+        const thumbnailPath = join(examplesDir, `${stem}.png`);
+        return {
+            id: fileName,
+            label: exampleLabel(fileName),
+            suggestedFilename: fileName,
+            domains: manifest.get(stem)?.domains ?? [],
+            description: await exampleDescription(stem),
+            thumbnailUrl: existsSync(thumbnailPath) ? pathToFileURL(thumbnailPath).href : null
+        };
+    }));
+});
 
 ipcMain.handle('projectLoadExample', async (_event, id) => {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');

@@ -30,6 +30,7 @@
         "setup": "node scripts/setupDevelopment.mjs",
         "test": "node --test",
         "test:interaction": "npm run build:engine && node scripts/runInteractionTests.mjs",
+        "generate:example-thumbnails": "npm run build:engine && node scripts/generateExampleThumbnails.mjs",
         "test:all": "npm test && npm run test:interaction",
         "build:engine": "node scripts/buildEngine.mjs",
         "build:engine:no-metis": "node scripts/buildEngine.mjs --no-metis",

@@ -583,6 +583,19 @@ const transformPropertyForTool = { move: 'position', rotate: 'rotation', scale: 
 function readXYZ(vectorLike) {
     return [vectorLike.x, vectorLike.y, vectorLike.z];
 }
+// Rotating a multi-node selection also needs to capture/restore each other node's position
+// (revolved around the pivot -- see the objectChange handler below), on top of whichever
+// property the active tool itself drives. Applied uniformly to every selected node including
+// the dragged one is harmless: the dragged node's own position never changes during a rotate
+// drag (TransformControls' rotate mode only ever touches quaternion), so its captured start and
+// end position are always identical.
+function capturedProperties(property) {
+    return property === 'rotation' && selectedNodeIds.size > 1 ? [property, 'position'] : [property];
+}
+function snapshotNode(id, properties) {
+    const node = nodeObjects.get(id);
+    return Object.fromEntries(properties.map((prop) => [prop, readXYZ(node[prop])]));
+}
 
 function changeNodeTransform(node, property, values) {
     if (activeResult) return;
@@ -616,13 +629,34 @@ transformControls.addEventListener('objectChange', () => {
     const object = transformControls.object;
     const property = transformPropertyForTool[currentTool] ?? 'position';
     if (object && property === 'scale' && shiftKeyHeld) {
-        const start = transformStartValues?.get(object.userData.id);
+        const start = transformStartValues?.get(object.userData.id)?.scale;
         if (start) {
             const factor = uniformScaleFactorForDrag();
             object.scale.set(start[0] * factor, start[1] * factor, start[2] * factor);
         }
     }
-    if (object && transformLastValue && selectedNodeIds.size > 1) {
+    if (object && property === 'rotation' && transformLastQuaternion && selectedNodeIds.size > 1) {
+        // Revolve each other selected node's position around the pivot (the dragged node's own
+        // position, fixed for the whole drag -- TransformControls' rotate mode only ever
+        // touches quaternion, never position) by this frame's incremental rotation, and spin
+        // its own orientation by the same amount, so the whole selection turns together as a
+        // rigid body instead of each node spinning in place around its own centre. Derived from
+        // the actual change in the dragged node's quaternion between frames, rather than
+        // approximated from Euler-angle deltas the way the position/scale broadcast below does,
+        // since that stays exact however many Euler components a given drag ends up touching at
+        // once, and composes correctly across many frames without drifting.
+        const deltaQuaternion = object.quaternion.clone().multiply(transformLastQuaternion.clone().invert());
+        const pivot = object.position;
+        selectedNodeIds.forEach((id) => {
+            if (id === object.userData.id) return;
+            const other = nodeObjects.get(id);
+            if (!other) return;
+            const offset = other.position.clone().sub(pivot).applyQuaternion(deltaQuaternion);
+            other.position.copy(pivot).add(offset);
+            other.quaternion.premultiply(deltaQuaternion);
+        });
+        transformLastQuaternion.copy(object.quaternion);
+    } else if (object && transformLastValue && selectedNodeIds.size > 1) {
         const current = readXYZ(object[property]);
         const delta = current.map((value, index) => value - transformLastValue[index]);
         selectedNodeIds.forEach((id) => {
@@ -638,26 +672,35 @@ transformControls.addEventListener('objectChange', () => {
 });
 let transformStartValues = null;
 let transformLastValue = null;
+let transformLastQuaternion = null;
 transformControls.addEventListener('mouseDown', () => {
     const object = transformControls.object;
     const property = transformPropertyForTool[currentTool] ?? 'position';
-    transformStartValues = object ? new Map([...selectedNodeIds].map((id) => [id, readXYZ(nodeObjects.get(id)[property])])) : null;
+    const properties = capturedProperties(property);
+    transformStartValues = object ? new Map([...selectedNodeIds].map((id) => [id, snapshotNode(id, properties)])) : null;
     transformLastValue = object ? readXYZ(object[property]) : null;
+    transformLastQuaternion = object && property === 'rotation' ? object.quaternion.clone() : null;
 });
 transformControls.addEventListener('mouseUp', () => {
     const object = transformControls.object;
     const property = transformPropertyForTool[currentTool] ?? 'position';
-    const startValue = object && transformStartValues?.get(object.userData.id);
+    const startValue = object && transformStartValues?.get(object.userData.id)?.[property];
     const endValue = object && readXYZ(object[property]);
     if (!object || !startValue || startValue.every((value, index) => value === endValue[index])) {
         transformStartValues = null;
         transformLastValue = null;
+        transformLastQuaternion = null;
         return;
     }
+    const properties = capturedProperties(property);
     const from = new Map(transformStartValues);
-    const to = new Map([...selectedNodeIds].map((id) => [id, readXYZ(nodeObjects.get(id)[property])]));
-    const applyValues = (values) => {
-        values.forEach((value, id) => nodeObjects.get(id)?.[property].set(...value));
+    const to = new Map([...selectedNodeIds].map((id) => [id, snapshotNode(id, properties)]));
+    const applyValues = (snapshotMap) => {
+        snapshotMap.forEach((snapshot, id) => {
+            const node = nodeObjects.get(id);
+            if (!node) return;
+            Object.entries(snapshot).forEach(([prop, value]) => node[prop].set(...value));
+        });
         updateRelationships();
         updateSelectionOutline();
     };
@@ -667,6 +710,7 @@ transformControls.addEventListener('mouseUp', () => {
     });
     transformStartValues = null;
     transformLastValue = null;
+    transformLastQuaternion = null;
 });
 
 // Debug/test hook only; not part of the app's public surface (same pattern as
@@ -690,6 +734,15 @@ window.__debugTransform = {
         return object ? [object[property].x, object[property].y, object[property].z] : null;
     },
     allNodeIds: () => [...nodeObjects.keys()],
+    // Adds a node to the selection the same way a real Shift-click does (selectNode's own
+    // additive path), without needing a real screen-coordinate mouse event -- which handle or
+    // label ends up under the cursor for a Shift-click is a real-mouse/CSS2D-layout concern the
+    // existing multi-selection copy/paste test already covers; this app's own group-transform
+    // math is what a multi-select rotate/scale test actually needs a multi-selection *for*.
+    selectAdditive: (id) => {
+        const node = nodeObjects.get(id);
+        if (node) selectNode(node, { additive: true });
+    },
     // A lower-level, multi-step alternative to simulateDragTo for exercising the real
     // Shift-uniform-scale override in objectChange: mouseDown captures transformStartValues as
     // usual, then each move step can set the object's scale directly (standing in for whatever

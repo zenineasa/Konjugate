@@ -1765,5 +1765,106 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
     });
 
+    await run('rotate tool revolves a multi-node selection around the pivot as a rigid group', async () => {
+        // Fresh nodes, not nodes already on the canvas, so both start at a guaranteed identity
+        // rotation -- letting the revolve math below be checked with plain 2D rotation
+        // trigonometry instead of needing to account for whatever pre-existing orientation an
+        // example project's nodes might carry.
+        const idsBefore = new Set(await evaluate(window, `window.__debugTransform.allNodeIds()`));
+        await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+        await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'Component library panel did not open.');
+        await waitFor(window, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
+        await evaluate(window, `document.querySelector('[data-template-id="freeBody"]').click()`);
+        await evaluate(window, `document.querySelector('[data-template-id="freeBody"]').click()`);
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+        const newIds = (await evaluate(window, `window.__debugTransform.allNodeIds()`)).filter((id) => !idsBefore.has(id));
+        assert.equal(newIds.length, 2, 'Expected exactly two new free body nodes.');
+        const [pivotId, otherId] = newIds;
+        const selectPivot = `document.querySelector('.node-label-container[data-node="${pivotId}"] .objectLabel').click()`;
+        const selectOther = `document.querySelector('.node-label-container[data-node="${otherId}"] .objectLabel').click()`;
+
+        // Earlier tests in the suite pan and zoom the camera and never reset it, so by this
+        // point it can be framed anywhere -- fit it to the model first so both freshly-placed
+        // nodes are reliably on screen and clickable for the real mouse clicks below, rather
+        // than landing wherever a prior test happened to leave the view.
+        await evaluate(window, `document.querySelector('[data-nav-action="fit"]').click()`);
+
+        assert.deepEqual(await evaluate(window, `window.__debugTransform.nodeTransform(${pivotId}, 'rotation')`), [0, 0, 0]);
+        assert.deepEqual(await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'rotation')`), [0, 0, 0]);
+        const pivotPosition = await evaluate(window, `window.__debugTransform.nodeTransform(${pivotId}, 'position')`);
+
+        // Give the second node a known, meaningful offset from the pivot first, so the revolve
+        // assertions below check real, non-trivial movement rather than however the component
+        // library happened to place these two nodes relative to each other.
+        await evaluate(window, selectOther);
+        await evaluate(window, `document.querySelector('[data-tool="move"]').click()`);
+        await evaluate(window, `window.__debugTransform.simulateDragTo(${pivotPosition[0] + 2}, ${pivotPosition[1]}, ${pivotPosition[2]})`);
+        const otherStartPosition = await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'position')`);
+        assert.deepEqual(otherStartPosition, [pivotPosition[0] + 2, pivotPosition[1], pivotPosition[2]]);
+
+        // Select the pivot and switch to the rotate tool first, so the gizmo attaches to it --
+        // then add the other node to the selection via window.__debugTransform.selectAdditive
+        // (selectNode's own additive path, the same one a real Shift-click drives) rather than a
+        // real screen-coordinate Shift-click. Whether a Shift-click lands on the right on-screen
+        // label is a real-mouse/CSS2D-layout concern the existing multi-selection copy/paste
+        // test already covers; what this test needs a multi-selection *for* is the group-rotate
+        // math below, so establishing it directly keeps the test focused on that and avoids
+        // depending on wherever this point in the full suite happens to leave the camera framed.
+        // selectNode() reassigns the "primary" selectedNode to whichever node was added last
+        // (needed so the node editor tracks it), but only reattaches the gizmo when the
+        // currently-attached node has fallen out of the selection -- since the pivot stays
+        // selected throughout, the gizmo (and this drag's pivot) stays on it rather than jumping
+        // to the other node.
+        await evaluate(window, selectPivot);
+        await evaluate(window, `document.querySelector('[data-tool="rotate"]').click()`);
+        assert.equal(await evaluate(window, `window.__debugTransform.attachedId()`), pivotId);
+        await evaluate(window, `window.__debugTransform.selectAdditive(${otherId})`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
+        assert.equal(await evaluate(window, `window.__debugTransform.attachedId()`), pivotId, 'The gizmo should stay on the originally-selected node.');
+
+        // A pure 90 degree rotation around Z, so the other node's expected revolved position can
+        // be checked with plain 2D rotation trigonometry.
+        await evaluate(window, `window.__debugTransform.simulateDragTo(0, 0, Math.PI / 2)`);
+
+        // The `|| 0` normalizes -0 to 0 -- quaternion-to-Euler conversion can legitimately land
+        // on -0 for a component that's mathematically exactly zero (e.g. via an internal
+        // atan2(-0, 1)), which is numerically harmless but would otherwise fail a strict
+        // deepEqual against a literal 0 below.
+        const round2 = (values) => values.map((v) => Math.round(v * 100) / 100 || 0);
+        const round3 = (values) => values.map((v) => Math.round(v * 1000) / 1000 || 0);
+
+        const pivotEndPosition = await evaluate(window, `window.__debugTransform.nodeTransform(${pivotId}, 'position')`);
+        assert.deepEqual(pivotEndPosition, pivotPosition, "The pivot node's own position must not move during a rotate drag.");
+        const pivotEndRotation = round2(await evaluate(window, `window.__debugTransform.nodeTransform(${pivotId}, 'rotation')`));
+        assert.deepEqual(pivotEndRotation, [0, 0, 1.57]);
+        const otherEndRotation = round2(await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'rotation')`));
+        assert.deepEqual(otherEndRotation, pivotEndRotation, "Every selected node's own orientation should spin by the same amount.");
+
+        // Rotating (1, 0, 0) by 90 degrees around Z gives (0, 1, 0): the other node, 2 units
+        // along X from the pivot, should end up 2 units along Y from the pivot instead of
+        // staying put and just spinning in place around its own centre.
+        const expectedOtherPosition = round3([pivotPosition[0], pivotPosition[1] + 2, pivotPosition[2]]);
+        const otherEndPosition = round3(await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'position')`));
+        assert.deepEqual(otherEndPosition, expectedOtherPosition, 'The other selected node should revolve around the pivot, not spin in place.');
+
+        // Undo restores both nodes' position and rotation together in one step; redo re-applies
+        // the whole group rotation again.
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        assert.deepEqual(await evaluate(window, `window.__debugTransform.nodeTransform(${pivotId}, 'rotation')`), [0, 0, 0]);
+        assert.deepEqual(await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'rotation')`), [0, 0, 0]);
+        assert.deepEqual(await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'position')`), otherStartPosition);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, shiftKey: true, bubbles: true }))`);
+        const otherRedoPosition = round3(await evaluate(window, `window.__debugTransform.nodeTransform(${otherId}, 'position')`));
+        assert.deepEqual(otherRedoPosition, expectedOtherPosition);
+
+        // Cleanup: delete both newly-created nodes so this test doesn't leave the canvas
+        // mutated for whatever runs after it.
+        await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
+        await evaluate(window, selectPivot);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+        await evaluate(window, selectOther);
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

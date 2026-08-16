@@ -139,6 +139,11 @@ input, select { user-select: text; }
 .examplesExplorerDetailThumbnail { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #060d12; border-radius: 4px; }
 .examplesExplorerDetailThumbnail[hidden] { display: none; }
 #examplesExplorerDetailTitle { color: #d8e4e9; font-size: 10px; }
+/* Sized and shaped like the toolstrip's Run button (its .doneButton class already matches its
+   accent color/weight) rather than the smaller dialog-footer buttons its plain <button> markup
+   would otherwise inherit, since this is the dialog's own primary action. */
+#examplesExplorerLoad { display: flex; align-items: center; justify-content: center; height: 32px; margin-top: 4px; border-radius: 5px; font-size: 11px; }
+#examplesExplorerLoad:hover { background: var(--accent-bright) !important; }
 #examplesExplorerDetailDescription { margin: 0; color: #8199a3; font-size: 8px; line-height: 1.6; }
 
 .componentLibraryPanel {

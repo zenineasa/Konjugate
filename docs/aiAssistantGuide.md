@@ -8,6 +8,12 @@ Konjugate's model assistant converts a natural-language request into a structure
 
 The assistant does not edit the model immediately. Konjugate validates the proposal, shows its assumptions and proposed changes, then waits for the user to apply or discard it. Applying a proposal creates one undoable model transaction.
 
+When a request is ambiguous or missing information the assistant needs, it can ask a clarifying question instead of guessing, sometimes with suggested answers shown as buttons. Selecting a suggestion fills in the prompt rather than sending it immediately, so it can still be edited before the reply is sent.
+
+## Conversation memory
+
+The assistant panel keeps a scrollable transcript of the last five exchanges. That history is sent along with every new request, so a reply to a clarifying question, or a follow-up like "make it 10 K warmer instead," is understood in context rather than as an unrelated new request. History is not cleared by applying, discarding or closing the panel — only the **New conversation** button (or switching to a different model configuration, since a different model has no memory of what was said to the previous one) starts a fresh transcript.
+
 ## Model configurations
 
 The selector below the assistant prompt chooses the active model configuration. The adjacent configuration button opens the model manager.
@@ -68,7 +74,7 @@ API keys are handled by Electron's main process. Saved keys are encrypted throug
 
 A key entered while discovering models or testing a draft configuration remains transient. It is persisted only when **Save configuration** is selected. Leaving the key field blank while editing a saved configuration preserves and securely reuses the existing key.
 
-When an online provider is selected, the request and a summary of the active model are sent to that provider. Users should not send confidential model information to a service they are not authorised to use. Ollama remains local when its endpoint points to localhost; changing it to a remote endpoint changes that privacy boundary.
+When an online provider is selected, the request, a summary of the active model, and the conversation history described above are sent to that provider. Users should not send confidential model information to a service they are not authorised to use. Ollama remains local when its endpoint points to localhost; changing it to a remote endpoint changes that privacy boundary.
 
 Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback addresses such as `127.0.0.1` and `localhost`.
 
@@ -76,14 +82,15 @@ Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback addres
 
 The assistant workflow is:
 
-1. Konjugate prepares a compact summary of the current model.
-2. The provider generates a versioned operation proposal.
-3. Konjugate validates the proposal structure.
-4. Correctable output errors are returned to the provider for a bounded number of repair attempts.
-5. Konjugate prepares the resulting model without modifying the active document.
-6. The native validator checks the prepared model.
-7. The user reviews the summary, assumptions and individual changes.
-8. The user applies or discards the proposal.
+1. Konjugate prepares a compact summary of the current model and recent conversation history.
+2. The provider generates either a versioned operation proposal or a clarifying-question response.
+3. If it's a clarifying question, Konjugate shows it (with any suggestions) and waits for a reply — it never reaches validation or the active model.
+4. Otherwise, Konjugate validates the proposal structure.
+5. Correctable output errors are returned to the provider for a bounded number of repair attempts.
+6. Konjugate prepares the resulting model without modifying the active document.
+7. The native validator checks the prepared model.
+8. The user reviews the summary, assumptions and individual changes.
+9. The user applies or discards the proposal.
 
 Invalid intermediate proposals are never applied. Authentication failures, connection failures and timeouts remain visible because repeating the same request cannot normally correct them.
 

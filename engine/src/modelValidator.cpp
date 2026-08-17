@@ -1,6 +1,8 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "modelValidator.hpp"
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <regex>
 #include <cstdlib>
@@ -109,18 +111,34 @@ std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
     if (const auto parameters = edge.get_child_optional("parameters")) for (const auto& item : *parameters) knownSymbols.insert(value(item.second, "symbol"));
     if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& item : *bindings) knownSymbols.insert(value(item.second, "symbol"));
 
+    // \operatorname{Word} is standard LaTeX for an unfamiliar function name -- a common shape
+    // for AI-generated equations even when the prompt is steered toward the shorter \max/\min
+    // form. Accept it when Word names a real operator (case-insensitively) and strip the whole
+    // construct before the general command/identifier scans below, so neither "operatorname"
+    // nor the operator word itself get flagged again by those broader, name-agnostic checks.
+    const std::set<std::string> operatorNames = {
+        "abs", "cos", "exp", "ln", "log", "max", "min", "negate", "sin", "tan"
+    };
+    const std::regex operatornameExpression(R"(\\operatorname\{([A-Za-z]+)\})");
+    for (auto match = std::sregex_iterator(latex.begin(), latex.end(), operatornameExpression); match != std::sregex_iterator(); ++match) {
+        auto name = (*match)[1].str();
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (!operatorNames.contains(name)) errors.push_back("\\operatorname{} does not name a supported function: " + (*match)[1].str() + ".");
+    }
+    const auto latexWithoutOperatorname = std::regex_replace(latex, operatornameExpression, " ");
+
     const std::set<std::string> supportedCommands = {
         "cdot", "cos", "exp", "frac", "left", "ln", "log", "max", "min", "mathrm", "right", "sin", "sqrt", "tan"
     };
     const std::regex commandExpression(R"(\\([A-Za-z]+))");
-    for (auto match = std::sregex_iterator(latex.begin(), latex.end(), commandExpression); match != std::sregex_iterator(); ++match) {
+    for (auto match = std::sregex_iterator(latexWithoutOperatorname.begin(), latexWithoutOperatorname.end(), commandExpression); match != std::sregex_iterator(); ++match) {
         const auto command = (*match)[1].str();
         if (!supportedCommands.contains(command)) errors.push_back("Unsupported LaTeX command: \\" + command + ".");
     }
 
     // Remove command names before scanning identifiers. Their arguments remain,
     // so both plain symbols and symbols rendered as \mathrm{symbol} are checked.
-    const auto expressionWithoutCommands = std::regex_replace(latex, commandExpression, " ");
+    const auto expressionWithoutCommands = std::regex_replace(latexWithoutOperatorname, commandExpression, " ");
     const std::regex identifierExpression(R"([A-Za-z][A-Za-z0-9]*)");
     std::set<std::string> unknownSymbols;
     for (auto match = std::sregex_iterator(expressionWithoutCommands.begin(), expressionWithoutCommands.end(), identifierExpression);

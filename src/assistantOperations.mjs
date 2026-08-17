@@ -85,6 +85,23 @@ export function validateAssistantProposal(proposal) {
     return true;
 }
 
+// A clarification is never applied to the document -- it only ever produces a follow-up prompt
+// -- so it deliberately doesn't share validateAssistantProposal's operation-schema checks.
+export function validateAssistantClarification(clarification) {
+    if (!clarification || typeof clarification !== 'object' || Array.isArray(clarification)) {
+        throw new AssistantProposalError('A clarification must be an object.');
+    }
+    if (typeof clarification.question !== 'string' || !clarification.question.trim()) {
+        throw new AssistantProposalError('A clarification requires a question.');
+    }
+    if (clarification.suggestions !== undefined) {
+        const validSuggestions = Array.isArray(clarification.suggestions) &&
+            clarification.suggestions.every((suggestion) => typeof suggestion === 'string' && suggestion.trim());
+        if (!validSuggestions) throw new AssistantProposalError('suggestions must be an array of non-empty strings.');
+    }
+    return true;
+}
+
 export function applyAssistantProposal(projectDocument, proposal, options = {}) {
     validateAssistantProposal(proposal);
     if (projectDocument?.format !== 'konjugate' || projectDocument.version !== 1 ||

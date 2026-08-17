@@ -343,10 +343,12 @@
             <header id="assistantPanelHeader">
                 <div><span class="contextKicker">Model assistant</span><strong id="assistantPanelTitle">Describe a model change</strong><small id="assistantCollapsedStatus">Your model remains unchanged</small></div>
                 <span class="assistantWindowActions">
+                    <button id="newAssistantConversation" type="button" aria-label="Start a new conversation and clear its memory of this exchange" title="New conversation (clears memory)">+</button>
                     <button id="collapseAssistantPanel" type="button" aria-label="Collapse model assistant" aria-expanded="true">−</button>
                     <button id="closeAssistantPanel" type="button" aria-label="Close model assistant">×</button>
                 </span>
             </header>
+            <ol id="assistantTranscript" class="assistantTranscript" hidden></ol>
             <form id="assistantPromptForm" class="assistantPromptForm">
                 <label for="assistantPrompt">What should change?</label>
                 <textarea id="assistantPrompt" rows="4" placeholder="Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K."></textarea>
@@ -356,6 +358,11 @@
                 <span aria-hidden="true">✦</span>
                 <strong>Your model remains unchanged</strong>
                 <p>The assistant will prepare a structured proposal, explain its assumptions and run native validation before you can apply it.</p>
+            </div>
+            <div id="assistantClarification" hidden>
+                <section class="assistantSummary"><strong>The assistant needs more detail</strong><p id="assistantClarificationQuestion"></p></section>
+                <div id="assistantClarificationOptions" class="assistantClarificationOptions" hidden></div>
+                <footer><button id="dismissAssistantClarification" type="button">Dismiss</button></footer>
             </div>
             <div id="assistantProposal" hidden>
                 <section class="assistantSummary"><strong id="assistantProposalSummary">Proposed model changes</strong><p id="assistantProposalStatus">Checking the proposal…</p></section>

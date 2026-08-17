@@ -412,6 +412,14 @@ let addonToolstripContributions = [];
 let pendingAssistantProposal = null;
 let assistantPreviewRevision = 0;
 let assistantGenerationController = null;
+// Bounded conversation memory for the assistant panel: a compact { request, outcome } summary
+// per turn (never the raw proposal JSON, to keep the payload small), capped at 5 and sent on
+// every generateProposal call so "Revise proposal" and clarification replies have real context.
+// pendingAssistantTurnRecord tracks (by reference, not index, so a later cap-trim can't shift
+// it) the turn awaiting an outcome -- asked-but-not-answered, proposed-but-not-applied -- so its
+// summary can be corrected in place once the user acts, rather than adding a second entry.
+let assistantTurnHistory = [];
+let pendingAssistantTurnRecord = null;
 let assistantHasBeenPositioned = false;
 let activeAssistantConfigurationUuid = null;
 let assistantConfigurationCatalog = { configurations: [], providers: [], credentialStorage: null };
@@ -4317,6 +4325,7 @@ function installAssistantDragging() {
 
 function renderAssistantProposal(proposal, prepared) {
     $('#assistantEmpty').hidden = true;
+    $('#assistantClarification').hidden = true;
     $('#assistantProposal').hidden = false;
     $('#assistantProposalSummary').textContent = proposal.summary?.trim() || 'Proposed model changes';
     const assumptions = Array.isArray(proposal.assumptions) ? proposal.assumptions.filter((item) => typeof item === 'string' && item.trim()) : [];
@@ -4370,6 +4379,72 @@ function formatAssistantValue(value) {
     return String(value);
 }
 
+function renderAssistantTranscript() {
+    const transcript = $('#assistantTranscript');
+    transcript.hidden = assistantTurnHistory.length === 0;
+    transcript.replaceChildren(...assistantTurnHistory.map((turn) => {
+        const item = document.createElement('li');
+        item.className = 'assistantTranscriptTurn';
+        const you = document.createElement('p');
+        you.className = 'assistantTranscriptYou';
+        you.textContent = turn.request;
+        const outcome = document.createElement('p');
+        outcome.className = 'assistantTranscriptOutcome';
+        outcome.textContent = turn.outcome;
+        item.append(you, outcome);
+        return item;
+    }));
+    // Keep the most recent exchange in view rather than wherever the scroll position happened
+    // to be left (replaceChildren doesn't move it on its own), the same way a chat log would.
+    transcript.scrollTop = transcript.scrollHeight;
+}
+
+function pushAssistantTurn(request, outcome) {
+    const record = { request, outcome };
+    assistantTurnHistory = [...assistantTurnHistory, record].slice(-5);
+    renderAssistantTranscript();
+    return record;
+}
+
+function updateAssistantTurnOutcome(record, outcome) {
+    if (!record || !assistantTurnHistory.includes(record)) return;
+    record.outcome = outcome;
+    renderAssistantTranscript();
+}
+
+function resetAssistantConversation() {
+    assistantTurnHistory = [];
+    pendingAssistantTurnRecord = null;
+    renderAssistantTranscript();
+}
+
+function renderAssistantClarification(response) {
+    $('#assistantEmpty').hidden = true;
+    $('#assistantProposal').hidden = true;
+    $('#assistantClarification').hidden = false;
+    $('#assistantClarificationQuestion').textContent = response.question;
+    const suggestions = Array.isArray(response.suggestions) ? response.suggestions : [];
+    $('#assistantClarificationOptions').hidden = !suggestions.length;
+    $('#assistantClarificationOptions').replaceChildren(...suggestions.map((suggestion) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'assistantClarificationOption';
+        button.textContent = suggestion;
+        button.dataset.suggestion = suggestion;
+        return button;
+    }));
+    updateAssistantCollapsedStatus('Needs clarification');
+}
+
+function dismissAssistantClarification() {
+    updateAssistantTurnOutcome(pendingAssistantTurnRecord, 'You did not answer.');
+    pendingAssistantTurnRecord = null;
+    $('#assistantClarification').hidden = true;
+    $('#assistantEmpty').hidden = false;
+    $('#generateAssistantProposal').textContent = 'Generate proposal';
+    updateAssistantCollapsedStatus('Your model remains unchanged');
+}
+
 function inspectAssistantEntity(entityId) {
     const node = nodeObjects.get(entityId);
     if (node?.visible) {
@@ -4419,20 +4494,28 @@ async function previewAssistantProposal(proposal) {
         if (revision !== assistantPreviewRevision) return { valid: false, superseded: true };
         pendingAssistantProposal = null;
         $('#assistantEmpty').hidden = true;
+        $('#assistantClarification').hidden = true;
         $('#assistantProposal').hidden = false;
         $('#assistantProposalStatus').className = '';
         $('#assistantProposalStatus').textContent = 'Proposal rejected';
         $('#assistantError').textContent = error.message;
         $('#assistantError').hidden = false;
         $('#applyAssistantProposal').disabled = true;
+        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${error.message}`);
+        pendingAssistantTurnRecord = null;
         return { valid: false, error: error.message };
     }
 }
 
+// General "back to the empty state" reset, used both for an explicit Discard click and whenever
+// something else (switching model configuration, a hard generation error) needs to clear
+// whatever the panel was showing -- proposal or clarification -- without assuming which.
 function discardAssistantProposal() {
     assistantPreviewRevision += 1;
     pendingAssistantProposal = null;
+    pendingAssistantTurnRecord = null;
     $('#assistantProposal').hidden = true;
+    $('#assistantClarification').hidden = true;
     $('#assistantEmpty').hidden = false;
     $('#generateAssistantProposal').textContent = 'Generate proposal';
     updateAssistantCollapsedStatus('Your model remains unchanged');
@@ -4450,6 +4533,7 @@ function commitAssistantProposal() {
     }
     const before = currentDocument;
     const after = structuredClone(pendingAssistantProposal.document);
+    updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Applied: ${pendingAssistantProposal.proposal.summary?.trim() || 'the proposed changes'}`);
     replaceModelContents(after);
     recordHistory({
         undo: () => replaceModelContents(before),
@@ -4682,7 +4766,10 @@ async function discoverAssistantModels() {
 
 function renderAssistantGenerationError(message) {
     pendingAssistantProposal = null;
+    updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Error: ${message}`);
+    pendingAssistantTurnRecord = null;
     $('#assistantEmpty').hidden = true;
+    $('#assistantClarification').hidden = true;
     $('#assistantProposal').hidden = false;
     $('#assistantProposalSummary').textContent = 'No proposal generated';
     $('#assistantProposalStatus').className = '';
@@ -4711,12 +4798,24 @@ async function requestAssistantProposal() {
     updateAssistantCollapsedStatus('Preparing proposal…');
     $('#assistantEmpty').hidden = false;
     $('#assistantProposal').hidden = true;
+    $('#assistantClarification').hidden = true;
     try {
-        const proposal = await window.aiProviders.generateProposal(
-            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary()
+        const response = await window.aiProviders.generateProposal(
+            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantTurnHistory
         );
         if (controller.signal.aborted) return { valid: false, cancelled: true };
-        return await previewAssistantProposal(proposal);
+        // Clear the prompt only once a response has actually arrived, not before sending --
+        // losing what was typed to a network hiccup or timeout would be worse than a stale
+        // textarea. Still empties for a clarification exactly as it would for a proposal, so a
+        // reply is always typed fresh rather than editing the question back down to an answer.
+        $('#assistantPrompt').value = '';
+        if (response.responseKind === 'clarification') {
+            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`);
+            renderAssistantClarification(response);
+            return { valid: false, clarification: response };
+        }
+        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`);
+        return await previewAssistantProposal(response);
     } catch (error) {
         if (controller.signal.aborted || error.name === 'AbortError') return { valid: false, cancelled: true };
         renderAssistantGenerationError(error.message);
@@ -4725,7 +4824,9 @@ async function requestAssistantProposal() {
         if (assistantGenerationController === controller) {
             assistantGenerationController = null;
             button.disabled = false;
-            button.textContent = pendingAssistantProposal ? 'Revise proposal' : 'Generate proposal';
+            button.textContent = pendingAssistantProposal ? 'Revise proposal'
+                : !$('#assistantClarification').hidden ? 'Answer'
+                    : 'Generate proposal';
         }
     }
 }
@@ -4738,11 +4839,30 @@ $('#closeAssistantPanel').addEventListener('click', hideAssistantPanel);
 $('#collapseAssistantPanel').addEventListener('click', () => {
     setAssistantCollapsed(!$('#assistantPanel').classList.contains('collapsed'));
 });
-$('#discardAssistantProposal').addEventListener('click', discardAssistantProposal);
+$('#discardAssistantProposal').addEventListener('click', () => {
+    if (pendingAssistantProposal) {
+        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Discarded: ${pendingAssistantProposal.proposal.summary?.trim() || 'a proposed change'}`);
+    }
+    discardAssistantProposal();
+});
 $('#applyAssistantProposal').addEventListener('click', commitAssistantProposal);
 $('#assistantChanges').addEventListener('click', (event) => {
     const control = event.target.closest('[data-focus-entity]');
     if (control) inspectAssistantEntity(Number(control.dataset.focusEntity));
+});
+$('#dismissAssistantClarification').addEventListener('click', dismissAssistantClarification);
+$('#assistantClarificationOptions').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-suggestion]');
+    if (!button) return;
+    $('#assistantPrompt').value = button.dataset.suggestion;
+    $('#assistantPrompt').focus();
+});
+$('#newAssistantConversation').addEventListener('click', () => {
+    const hasSomethingToLose = assistantTurnHistory.length > 0 || Boolean(pendingAssistantProposal) || !$('#assistantClarification').hidden;
+    if (hasSomethingToLose && !window.confirm('Start a new conversation? This clears the assistant’s memory of this exchange and cannot be undone.')) return;
+    assistantGenerationController?.abort();
+    discardAssistantProposal();
+    resetAssistantConversation();
 });
 $('#assistantPromptForm').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -4752,6 +4872,7 @@ $('#assistantConfiguration').addEventListener('change', async () => {
     activeAssistantConfigurationUuid = $('#assistantConfiguration').value;
     assistantGenerationController?.abort();
     discardAssistantProposal();
+    resetAssistantConversation();
     await window.aiProviders.setActiveConfiguration(activeAssistantConfigurationUuid).catch((error) => renderAssistantGenerationError(error.message));
 });
 $('#manageAssistantConfigurations').addEventListener('click', openAssistantConfigurationDialog);
@@ -4821,7 +4942,10 @@ window.konjugateAssistant = Object.freeze({
     requestProposal: requestAssistantProposal,
     previewProposal: previewAssistantProposal,
     applyProposal: commitAssistantProposal,
-    discardProposal: discardAssistantProposal
+    discardProposal: discardAssistantProposal,
+    dismissClarification: dismissAssistantClarification,
+    getTurnHistory: () => structuredClone(assistantTurnHistory),
+    resetConversation: resetAssistantConversation
 });
 
 function openNodeBuilder(clientX, clientY) {

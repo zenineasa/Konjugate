@@ -306,10 +306,24 @@ input, select { user-select: text; }
 .assistantPromptForm .assistantManageConfigurations { min-width: 28px; width: 28px; padding: 0; color: #78909a; background: #172630; border: 1px solid #30444e; }
 .assistantPromptForm button { min-width: 100px; height: 28px; padding: 0 10px; color: #09201e; background: var(--accent); border: 0; border-radius: 4px; font-size: 8px; font-weight: 700; }
 .assistantPromptForm button:disabled { color: #647780; background: #24343d; cursor: default; }
+.assistantTranscript { display: grid; gap: 8px; max-height: 160px; padding: 10px 13px; overflow-y: auto; list-style: none; border-bottom: 1px solid #263742; }
+.assistantTranscript[hidden] { display: none; }
+.assistantTranscriptTurn { display: grid; gap: 3px; padding-bottom: 8px; border-bottom: 1px solid #1a2830; font-size: 8px; line-height: 1.5; }
+.assistantTranscriptTurn:last-child { padding-bottom: 0; border-bottom: 0; }
+.assistantTranscriptYou, .assistantTranscriptOutcome { margin: 0; overflow-wrap: anywhere; }
+.assistantTranscriptYou { color: #b8c7ce; }
+.assistantTranscriptYou::before { margin-right: 4px; color: #4c8e8a; font-weight: 650; content: 'You:'; }
+.assistantTranscriptOutcome { color: #8ea1aa; }
+.assistantTranscriptOutcome::before { margin-right: 4px; color: #6e828e; font-weight: 650; content: 'Assistant:'; }
 .assistantEmpty { display: grid; min-height: 205px; place-content: center; justify-items: center; gap: 8px; padding: 34px; color: #607681; text-align: center; }
+.assistantEmpty[hidden] { display: none; }
 .assistantEmpty > span { display: grid; width: 38px; height: 38px; place-items: center; margin-bottom: 4px; color: #83d9d1; background: rgb(66 201 188 / 10%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 50%; font-size: 18px; }
 .assistantEmpty strong { color: #aabdc5; font-size: 10px; }
 .assistantEmpty p { max-width: 260px; font-size: 8px; line-height: 1.6; }
+.assistantClarificationOptions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 13px 13px; }
+.assistantClarificationOptions[hidden] { display: none; }
+.assistantClarificationOption { padding: 6px 10px; color: #83d9d1; background: rgb(66 201 188 / 8%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 14px; font-size: 8px; }
+.assistantClarificationOption:hover { background: rgb(66 201 188 / 16%); border-color: rgb(66 201 188 / 45%); }
 .assistantPanel section { padding: 13px; border-bottom: 1px solid #263742; }
 .assistantPanel section h3 { margin-bottom: 8px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
 .assistantSummary strong { color: #d4e1e5; font-size: 11px; }

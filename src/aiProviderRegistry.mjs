@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { generateAssistantProposal, localAssistantProvider } from './assistantProviders.mjs';
-import { AssistantProposalError, validateAssistantProposal } from './assistantOperations.mjs';
+import { AssistantProposalError, validateAssistantClarification, validateAssistantProposal } from './assistantOperations.mjs';
 
 const maximumRepairAttempts = 2;
 
@@ -36,16 +36,16 @@ export function createAIProviderRegistry(providers = [localAssistantProvider]) {
             if (!provider.listModels) return [];
             return provider.listModels({ configuration, credential, signal });
         },
-        async generate({ configuration, credential, context, request, signal }) {
+        async generate({ configuration, credential, context, request, history, signal }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             try {
                 let repair = null;
                 for (let attempt = 0; attempt <= maximumRepairAttempts; attempt += 1) {
-                    let proposal;
+                    let response;
                     try {
-                        proposal = await generateAssistantProposal(provider, {
-                            configuration, credential, context, request, repair, signal
+                        response = await generateAssistantProposal(provider, {
+                            configuration, credential, context, request, history, repair, signal
                         });
                     } catch (error) {
                         const recoverableOutputError = ['invalidProposalJson', 'invalidProviderResponse'].includes(error.code);
@@ -53,15 +53,23 @@ export function createAIProviderRegistry(providers = [localAssistantProvider]) {
                         repair = { error: error.message, proposal: null };
                         continue;
                     }
-                    if (JSON.stringify(proposal).length > 1_000_000) {
+                    if (JSON.stringify(response).length > 1_000_000) {
                         throw new AIProviderRegistryError('The provider response is too large.', 'responseTooLarge');
                     }
+                    // A clarification isn't something to repair against the operations schema --
+                    // it never reaches applyAssistantProposal/native validation either -- so it
+                    // skips the repair loop and returns as soon as its own light shape check
+                    // passes.
+                    if (response?.responseKind === 'clarification') {
+                        validateAssistantClarification(response);
+                        return response;
+                    }
                     try {
-                        validateAssistantProposal(proposal);
-                        return proposal;
+                        validateAssistantProposal(response);
+                        return response;
                     } catch (error) {
                         if (!(error instanceof AssistantProposalError) || attempt === maximumRepairAttempts) throw error;
-                        repair = { error: error.message, proposal };
+                        repair = { error: error.message, proposal: response };
                     }
                 }
             } catch (error) {

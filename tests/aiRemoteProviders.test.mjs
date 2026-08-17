@@ -58,6 +58,39 @@ test('Gemini adapter uses API-key authentication and JSON generation config', as
     assert.deepEqual(JSON.parse(call.options.body).generationConfig, { responseMimeType: 'application/json' });
 });
 
+test('OpenAI-compatible adapters expand conversation history into real prior messages', async () => {
+    let call;
+    const adapter = provider('openAi', async (url, options) => {
+        call = { url, options };
+        return jsonResponse({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    });
+    const history = [{ request: 'Earlier request', outcome: 'Applied something.' }];
+    await adapter.generateProposal(input('openAi', { history }));
+    const messages = JSON.parse(call.options.body).messages;
+    assert.deepEqual(messages[1], { role: 'user', content: 'Earlier request' });
+    assert.deepEqual(messages[2], { role: 'assistant', content: 'Applied something.' });
+    assert.match(messages[3].content, /USER REQUEST/);
+});
+
+test('Ollama and Gemini adapters prepend conversation history as text', async () => {
+    const history = [{ request: 'Earlier request', outcome: 'Applied something.' }];
+    let ollamaBody;
+    const ollamaAdapter = provider('ollama', async (url, options) => {
+        if (url.endsWith('/api/chat')) ollamaBody = JSON.parse(options.body);
+        return jsonResponse({ models: [] , message: { content: JSON.stringify(proposal) } });
+    });
+    await ollamaAdapter.generateProposal(input('ollama', { history }));
+    assert.match(ollamaBody.messages[0].content, /CONVERSATION SO FAR:\nUser: Earlier request\nAssistant: Applied something\./);
+
+    let geminiBody;
+    const geminiAdapter = provider('gemini', async (url, options) => {
+        geminiBody = JSON.parse(options.body);
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(proposal) }] } }] });
+    });
+    await geminiAdapter.generateProposal(input('gemini', { history }));
+    assert.match(geminiBody.contents[0].parts[0].text, /CONVERSATION SO FAR:\nUser: Earlier request\nAssistant: Applied something\./);
+});
+
 test('remote adapters reject insecure non-local endpoints and missing credentials', async () => {
     const adapter = provider('openAi', async () => jsonResponse({}));
     await assert.rejects(() => adapter.generateProposal(input('openAi', {

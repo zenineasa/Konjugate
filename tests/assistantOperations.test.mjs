@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
     applyAssistantProposal,
     AssistantProposalError,
+    validateAssistantClarification,
     validateAssistantProposal
 } from '../src/assistantOperations.mjs';
 
@@ -20,10 +21,26 @@ const idFactory = () => {
 
 test('assistant operation schema is valid JSON and describes proposal version 1', async () => {
     const schema = JSON.parse(await readFile(new URL('../schemas/assistantOperations.schema.json', import.meta.url), 'utf8'));
-    assert.equal(schema.properties.proposalVersion.const, 1);
+    assert.equal(schema.$defs.proposal.properties.proposalVersion.const, 1);
     assert.equal(schema.$defs.addNode.properties.kind.const, 'addNode');
     assert.equal(schema.$defs.updateNode.properties.enabled.type, 'boolean');
     assert.equal(schema.$defs.updateEdge.properties.enabled.type, 'boolean');
+});
+
+test('assistant operation schema also describes a clarification response', async () => {
+    const schema = JSON.parse(await readFile(new URL('../schemas/assistantOperations.schema.json', import.meta.url), 'utf8'));
+    assert.equal(schema.$defs.clarification.properties.responseKind.const, 'clarification');
+    assert.equal(schema.$defs.clarification.required.includes('question'), true);
+});
+
+test('validateAssistantClarification accepts a question with optional suggestions and rejects malformed ones', () => {
+    assert.equal(validateAssistantClarification({ question: 'Which node?' }), true);
+    assert.equal(validateAssistantClarification({ question: 'Which node?', suggestions: ['Battery module', 'Enclosed air'] }), true);
+    assert.throws(() => validateAssistantClarification(null), AssistantProposalError);
+    assert.throws(() => validateAssistantClarification({}), AssistantProposalError);
+    assert.throws(() => validateAssistantClarification({ question: '  ' }), AssistantProposalError);
+    assert.throws(() => validateAssistantClarification({ question: 'Which node?', suggestions: 'Battery module' }), AssistantProposalError);
+    assert.throws(() => validateAssistantClarification({ question: 'Which node?', suggestions: [42] }), AssistantProposalError);
 });
 
 test('builds a model from ordered temporary-reference operations without mutating the source', () => {

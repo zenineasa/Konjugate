@@ -1218,11 +1218,16 @@ ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential)
         (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
 
-ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context }) => {
+ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history }) => {
     requireProjectWindow(event);
     if (typeof requestUuid !== 'string' || requestUuid.length > 100) throw new Error('A valid AI request identifier is required.');
     if (typeof request !== 'string' || !request.trim() || request.length > 8000) throw new Error('The AI request must contain between 1 and 8,000 characters.');
     if (!context || typeof context !== 'object' || JSON.stringify(context).length > 1_000_000) throw new Error('The model context is invalid or too large.');
+    if (history !== undefined) {
+        const validHistory = Array.isArray(history) && history.length <= 5 &&
+            history.every((turn) => turn && typeof turn.request === 'string' && typeof turn.outcome === 'string');
+        if (!validHistory || JSON.stringify(history).length > 20_000) throw new Error('The conversation history is invalid or too large.');
+    }
     const key = aiRequestKey(event.sender, requestUuid);
     activeAIRequests.get(key)?.controller.abort();
     const resolved = await aiConfigurationStore.resolve(configurationUuid);
@@ -1234,7 +1239,7 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
     }, resolved.configuration.timeoutSeconds * 1000);
     activeAIRequests.set(key, { owner: event.sender, controller });
     try {
-        const proposal = await aiProviderRegistry.generate({ ...resolved, context, request: request.trim(), signal: controller.signal });
+        const proposal = await aiProviderRegistry.generate({ ...resolved, context, request: request.trim(), history, signal: controller.signal });
         return { ok: true, proposal };
     } catch (error) {
         const message = timedOut

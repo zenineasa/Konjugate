@@ -216,6 +216,91 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     });
 
+    await run('local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion', async () => {
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        // Reset first: earlier assistant tests in this suite already left turns in the bounded
+        // conversation history (it deliberately survives an apply/discard/panel close, only an
+        // explicit reset clears it), and this test wants a known, empty starting transcript.
+        await evaluate(window, `window.konjugateAssistant.resetConversation()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantTranscript').hidden`), true);
+
+        const temperatureNodeNames = await evaluate(window, `window.konjugateAssistant.getModelSummary().nodes
+            .filter((node) => node.states.some((state) => state.symbol === 'temperature' || state.name.toLowerCase().includes('temperature')))
+            .map((node) => node.name)`);
+        assert.ok(temperatureNodeNames.length >= 2, `Expected at least two temperature-bearing nodes, found: ${temperatureNodeNames.join(', ')}`);
+
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = 'Set the temperature to 310 K.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#assistantClarification').hidden`, 'The assistant did not ask a clarifying question for an ambiguous request.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').value`), '', 'The prompt should be cleared once a response has arrived.');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#assistantEmpty')).display`), 'none', "The empty-state placeholder must not render behind the clarification (regression: .assistantEmpty's own display:grid was overriding [hidden]).");
+        assert.equal(await evaluate(window, `document.querySelector('#generateAssistantProposal').textContent`), 'Answer');
+        assert.match(await evaluate(window, `document.querySelector('#assistantClarificationQuestion').textContent`), /which node/i);
+        const suggestionTexts = await evaluate(window, `[...document.querySelectorAll('.assistantClarificationOption')].map((button) => button.textContent)`);
+        assert.deepEqual([...suggestionTexts].sort(), [...temperatureNodeNames].sort());
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn').length`), 1);
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptOutcome').textContent`), /Asked:/);
+
+        // Clicking a suggestion must only prefill the prompt, never submit it on its own.
+        const firstSuggestion = await evaluate(window, `document.querySelector('.assistantClarificationOption').textContent`);
+        await evaluate(window, `document.querySelector('.assistantClarificationOption').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').value`), firstSuggestion);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantClarification').hidden`), false);
+
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = ${JSON.stringify(`${firstSuggestion}, 310 K`)};
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The clarification reply did not resolve into an appliable proposal.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalSummary').textContent`), new RegExp(firstSuggestion));
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn').length`), 2);
+        assert.match(await evaluate(window, `document.querySelectorAll('.assistantTranscriptOutcome')[1].textContent`), /Proposed:/);
+
+        assert.equal(await evaluate(window, `window.konjugateAssistant.applyProposal()`), true);
+        await waitFor(window, `document.querySelectorAll('.assistantTranscriptOutcome')[1]?.textContent.includes('Applied:')`, 'Applying did not update the transcript turn in place.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn').length`), 2, 'Applying should update the existing turn, not add a new one.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    });
+
+    await run('dismissing a clarification and starting a new conversation both clear it without submitting', async () => {
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await evaluate(window, `window.konjugateAssistant.resetConversation()`);
+        const temperatureNodeNames = await evaluate(window, `window.konjugateAssistant.getModelSummary().nodes
+            .filter((node) => node.states.some((state) => state.symbol === 'temperature' || state.name.toLowerCase().includes('temperature')))
+            .map((node) => node.name)`);
+        assert.ok(temperatureNodeNames.length >= 2, `Expected at least two temperature-bearing nodes, found: ${temperatureNodeNames.join(', ')}`);
+
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = 'Set the temperature to 310 K.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#assistantClarification').hidden`, 'The assistant did not ask a clarifying question.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').value`), '', 'The prompt should be cleared once a response (a clarifying question) has arrived.');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#assistantEmpty')).display`), 'none', "The empty-state placeholder must not render behind the clarification (regression: .assistantEmpty's own display:grid was overriding [hidden]).");
+        assert.equal(await evaluate(window, `document.querySelector('#generateAssistantProposal').textContent`), 'Answer');
+        await evaluate(window, `document.querySelector('#dismissAssistantClarification').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantClarification').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantEmpty').hidden`), false);
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#assistantEmpty')).display`), 'grid');
+        assert.equal(await evaluate(window, `document.querySelector('#generateAssistantProposal').textContent`), 'Generate proposal');
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptOutcome').textContent`), /did not answer/i);
+        assert.equal(await evaluate(window, `window.konjugateAssistant.getTurnHistory().length`), 1);
+
+        // There's a turn in history to lose, so this must ask for confirmation first.
+        await evaluate(window, `window.confirm = () => true; document.querySelector('#newAssistantConversation').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantTranscript').hidden`), true);
+        assert.equal(await evaluate(window, `window.konjugateAssistant.getTurnHistory().length`), 0);
+
+        // Nothing left to lose now -- clicking it again must not block on a confirmation dialog
+        // (this call deliberately does not stub window.confirm, so it would hang/timeout if the
+        // implementation asked for confirmation here).
+        await evaluate(window, `document.querySelector('#newAssistantConversation').click()`);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    });
+
     await run('model configurations expose all provider adapters without renderer credential access', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [
@@ -700,6 +785,39 @@ export async function runInteractionTests(window) {
         })()`);
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationSummary').classList.contains('error')`, 'Unknown equation symbols were not rejected by the C++ validator.');
         assert.match(await evaluate(window, `document.querySelector('#validationIssues').textContent`), /randomCharacters/);
+        await evaluate(window, `(() => {
+            const field = document.querySelector('#editEdgeMathField');
+            field.setValue(${JSON.stringify(originalEquation)});
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('error')`, 'Restoring the valid equation did not clear its validation error.');
+    });
+
+    await run('C++ validation accepts \\operatorname{} LaTeX for named functions like Max', async () => {
+        // Regression test: an AI-generated equation once used \operatorname{Max}(...) --
+        // standard LaTeX for an unfamiliar function name, and a reasonable thing for a model to
+        // write even after being steered toward the shorter \max(...) form -- which the engine's
+        // validator rejected as both an unsupported command and (since only the backslash+word
+        // token was stripped, leaving "{Max}" behind) an unknown symbol.
+        const originalEquation = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
+        await evaluate(window, `(() => {
+            const field = document.querySelector('#editEdgeMathField');
+            field.setValue(${JSON.stringify('\\operatorname{Max}(1, 2)')});
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Engine validation did not run.');
+        assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('error')`), false, '\\operatorname{Max}(...) should be accepted the same as \\max(...).');
+
+        // A name \operatorname{} doesn't recognize must still be rejected clearly, so this isn't
+        // just papering over the shape of the LaTeX regardless of what it actually names.
+        await evaluate(window, `(() => {
+            const field = document.querySelector('#editEdgeMathField');
+            field.setValue(${JSON.stringify('\\operatorname{Bogus}(1, 2)')});
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationSummary').classList.contains('error')`, 'An unrecognized \\operatorname{} name was not rejected.');
+        assert.match(await evaluate(window, `document.querySelector('#validationIssues').textContent`), /Bogus/);
+
         await evaluate(window, `(() => {
             const field = document.querySelector('#editEdgeMathField');
             field.setValue(${JSON.stringify(originalEquation)});

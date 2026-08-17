@@ -91,3 +91,43 @@ test('provider registry rejects unknown providers', async () => {
         configuration: { provider: 'missing' }, context: { nodes: [] }, request: 'Build it'
     }), /unavailable/);
 });
+
+test('provider registry returns a clarification response directly, bypassing repair', async () => {
+    let calls = 0;
+    const registry = createAIProviderRegistry([{
+        id: 'asksQuestions', name: 'Asks questions', generateProposal: async () => {
+            calls += 1;
+            return { responseKind: 'clarification', question: 'Which node?', suggestions: ['A', 'B'] };
+        }
+    }]);
+    const response = await registry.generate({
+        configuration: { provider: 'asksQuestions' }, context: { nodes: [] }, request: 'Set the temperature.'
+    });
+    assert.deepEqual(response, { responseKind: 'clarification', question: 'Which node?', suggestions: ['A', 'B'] });
+    assert.equal(calls, 1);
+});
+
+test('provider registry rejects a malformed clarification response', async () => {
+    const registry = createAIProviderRegistry([{
+        id: 'badClarification', name: 'Bad clarification',
+        generateProposal: async () => ({ responseKind: 'clarification' })
+    }]);
+    await assert.rejects(() => registry.generate({
+        configuration: { provider: 'badClarification' }, context: { nodes: [] }, request: 'Build it'
+    }), /requires a question/);
+});
+
+test('provider registry forwards conversation history to the provider', async () => {
+    let receivedHistory;
+    const registry = createAIProviderRegistry([{
+        id: 'historyAware', name: 'History aware', generateProposal: async ({ history }) => {
+            receivedHistory = history;
+            return { proposalVersion: 1, operations: [{ kind: 'addNode', ref: 'testNode', name: 'Test node' }] };
+        }
+    }]);
+    const history = [{ request: 'Earlier request', outcome: 'Applied something.' }];
+    await registry.generate({
+        configuration: { provider: 'historyAware' }, context: { nodes: [] }, request: 'Build it', history
+    });
+    assert.deepEqual(receivedHistory, history);
+});

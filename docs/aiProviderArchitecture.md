@@ -64,10 +64,11 @@ The renderer prepares a proposed document in memory, invokes the native validato
 
 ## Proposal contract
 
-The canonical contract is `schemas/assistantOperations.schema.json`. A proposal has a version, optional summary and assumptions, and an ordered list of operations.
+The canonical contract is `schemas/assistantOperations.schema.json`, a top-level `oneOf` between two response shapes distinguished by `responseKind`. A proposal has a version, optional summary and assumptions, and an ordered list of operations.
 
 ```json
 {
+    "responseKind": "proposal",
     "proposalVersion": 1,
     "summary": "Add two thermal bodies and connect them.",
     "assumptions": [
@@ -94,6 +95,20 @@ Supported operation families include:
 
 The schema describes transport structure. `src/assistantOperations.mjs` performs semantic preparation and checks ownership, references, symbols, values, shapes, directionality and equations.
 
+### Clarification contract
+
+A provider that judges a request ambiguous or missing required information may return a clarification instead of a proposal:
+
+```json
+{
+    "responseKind": "clarification",
+    "question": "Which node should I update?",
+    "suggestions": ["Battery module", "Enclosed air"]
+}
+```
+
+`suggestions` is optional and capped at five short strings. A clarification carries no operations, so it never reaches `applyAssistantProposal` or native validation — the registry returns it to the renderer directly, which shows it and waits for the user's reply. The reply becomes a new request, sent together with the conversation history described below so the provider has the original request and its own question in context.
+
 ## Automatic repair
 
 Provider output is untrusted. When a proposal is malformed or fails structural validation, the registry can send the provider:
@@ -106,6 +121,12 @@ Provider output is untrusted. When a proposal is malformed or fails structural v
 The provider must return a complete replacement proposal, not a patch or explanation. Repair attempts are bounded to prevent unending requests, unexpected cost and repeated low-quality output.
 
 Network errors, authentication errors, insecure endpoints and timeouts are not repaired by the model. They require an environmental or configuration change.
+
+A clarification response is not repaired against the operation schema — it isn't an operation proposal to begin with, and asking again isn't a malformed-output condition. The registry returns it as soon as its own light shape check (a non-empty question, and string suggestions if present) passes.
+
+## Conversation history
+
+The renderer keeps a bounded window of the last five exchanges, each a compact `{ request, outcome }` summary rather than the full proposal JSON, and sends it with every `generateProposal` call as `history`. Adapters fold it in however suits their API: `openAICompatibleProvider` expands it into real alternating `user`/`assistant` messages ahead of the current turn; `ollamaProvider` and `geminiProvider`, which only ever send one text blob, prepend a `CONVERSATION SO FAR:` block instead. The local demonstration provider, having no real language understanding, only ever falls back to history when the plain request alone can't be resolved (an ambiguous target, a missing value, an unrecognized shape) — trying the request exactly as typed first keeps an unrelated, already self-sufficient new request from being derailed by an earlier turn's own numbers or names.
 
 ## Adding a provider
 
@@ -121,13 +142,13 @@ A provider adapter supplies an identifier, display metadata and supported operat
     locality: 'online',
     async listModels({ configuration, credential, signal }) {},
     async testConnection({ configuration, credential, signal }) {},
-    async generateProposal({ configuration, credential, context, request, repair, signal }) {}
+    async generateProposal({ configuration, credential, context, request, history, repair, signal }) {}
 }
 ```
 
 Provider identifiers use lower camel case. Adapters should honour the supplied abort signal, avoid logging credentials, bound error content and return plain serialisable data.
 
-`generateProposal` must return a parsed proposal object. It should request JSON output through the strongest portable capability offered by the provider. Host validation remains mandatory even when a provider claims strict structured output.
+`generateProposal` must return a parsed proposal object, or a clarification object (see above) when the request is ambiguous or underspecified. It should request JSON output through the strongest portable capability offered by the provider. Host validation remains mandatory even when a provider claims strict structured output.
 
 Register the adapter through `createRemoteAIProviders`, then add tests covering:
 
@@ -149,7 +170,7 @@ Provider changes must preserve these invariants:
 2. Credentials are not written to logs, proposal errors or model context.
 3. Remote endpoints require HTTPS; HTTP is restricted to loopback hosts.
 4. Provider output is treated as untrusted data.
-5. No proposal mutates the active model before host and native validation.
+5. No proposal mutates the active model before host and native validation. A clarification response never reaches that path at all.
 6. The user explicitly approves the final proposal.
 7. Cancellation and timeouts release request state.
 8. Draft testing does not persist configuration fields or credentials.

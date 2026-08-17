@@ -2,35 +2,52 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://konjugate.com/schemas/assistantOperations.schema.json",
     "$comment": "Copyright © 2026 Zenin Easa Panthakkalakath",
-    "title": "Konjugate assistant proposal",
-    "type": "object",
-    "additionalProperties": false,
-    "required": ["proposalVersion", "operations"],
-    "properties": {
-        "proposalVersion": { "const": 1 },
-        "summary": { "type": "string" },
-        "assumptions": { "type": "array", "items": { "type": "string" } },
-        "operations": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-                "oneOf": [
-                    { "$ref": "#/$defs/addNode" },
-                    { "$ref": "#/$defs/addState" },
-                    { "$ref": "#/$defs/addSourceTerm" },
-                    { "$ref": "#/$defs/addEdge" },
-                    { "$ref": "#/$defs/addParameter" },
-                    { "$ref": "#/$defs/setEdgeEquation" },
-                    { "$ref": "#/$defs/updateNode" },
-                    { "$ref": "#/$defs/updateState" },
-                    { "$ref": "#/$defs/updateEdge" },
-                    { "$ref": "#/$defs/updateParameter" },
-                    { "$ref": "#/$defs/removeEntity" }
-                ]
-            }
-        }
-    },
+    "title": "Konjugate assistant response",
+    "oneOf": [
+        { "$ref": "#/$defs/proposal" },
+        { "$ref": "#/$defs/clarification" }
+    ],
     "$defs": {
+        "proposal": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["responseKind", "proposalVersion", "operations"],
+            "properties": {
+                "responseKind": { "const": "proposal" },
+                "proposalVersion": { "const": 1 },
+                "summary": { "type": "string" },
+                "assumptions": { "type": "array", "items": { "type": "string" } },
+                "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "oneOf": [
+                            { "$ref": "#/$defs/addNode" },
+                            { "$ref": "#/$defs/addState" },
+                            { "$ref": "#/$defs/addSourceTerm" },
+                            { "$ref": "#/$defs/addEdge" },
+                            { "$ref": "#/$defs/addParameter" },
+                            { "$ref": "#/$defs/setEdgeEquation" },
+                            { "$ref": "#/$defs/updateNode" },
+                            { "$ref": "#/$defs/updateState" },
+                            { "$ref": "#/$defs/updateEdge" },
+                            { "$ref": "#/$defs/updateParameter" },
+                            { "$ref": "#/$defs/removeEntity" }
+                        ]
+                    }
+                }
+            }
+        },
+        "clarification": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["responseKind", "question"],
+            "properties": {
+                "responseKind": { "const": "clarification" },
+                "question": { "type": "string", "minLength": 1 },
+                "suggestions": { "type": "array", "maxItems": 5, "items": { "type": "string", "minLength": 1 } }
+            }
+        },
         "ref": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "entityRef": {
             "oneOf": [

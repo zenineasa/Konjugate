@@ -122,8 +122,8 @@ contextBridge.exposeInMainWorld('aiProviders', {
     setActiveConfiguration: (configurationUuid) => ipcRenderer.invoke('aiSetActiveConfiguration', configurationUuid),
     testConnection: (configurationUuid) => ipcRenderer.invoke('aiTestConnection', configurationUuid),
     testDraftConnection: (configuration, credential) => ipcRenderer.invoke('aiTestDraftConnection', configuration, credential),
-    generateProposal: async (requestUuid, configurationUuid, request, context) => {
-        const result = await ipcRenderer.invoke('aiGenerateProposal', { requestUuid, configurationUuid, request, context });
+    generateProposal: async (requestUuid, configurationUuid, request, context, history) => {
+        const result = await ipcRenderer.invoke('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });
         if (result.ok) return result.proposal;
         if (result.error?.code === 'requestCancelled') throw new DOMException(result.error.message, 'AbortError');
         const error = new Error(result.error?.message ?? 'The model provider could not generate a proposal.');

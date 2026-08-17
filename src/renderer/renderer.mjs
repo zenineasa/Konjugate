@@ -2294,6 +2294,9 @@ async function saveUploadToShapeLibrary(file, status) {
         const bytes = new Uint8Array(await file.arrayBuffer());
         await window.shapeLibrary.saveUpload(file.name, bytes);
         shapeLibraryEntries = null;
+        // A re-upload could reuse a filename (and therefore id) that already has a cached
+        // thumbnail from a different, previously-deleted file -- clear rather than diff.
+        shapeLibraryThumbnailCache.clear();
         status.textContent += ' · saved to shape library';
     } catch (error) {
         console.error(error);
@@ -2319,6 +2322,16 @@ function domainLabel(domain) {
     return `${domain.charAt(0).toUpperCase()}${domain.slice(1)}`;
 }
 
+function shapeLibraryThumbnailMarkup(id) {
+    if (shapeLibraryThumbnailCache.has(id)) {
+        const dataUrl = shapeLibraryThumbnailCache.get(id);
+        return dataUrl
+            ? `<img class="examplesExplorerThumb" src="${escapeHtml(dataUrl)}" alt="">`
+            : '<span class="examplesExplorerThumbPlaceholder">No preview</span>';
+    }
+    return '<img class="examplesExplorerThumb" alt="">';
+}
+
 function renderShapeLibraryResults() {
     const query = $('#shapeLibrarySearch').value.trim().toLowerCase();
     const matches = shapeLibraryEntries.filter((shape) => {
@@ -2327,12 +2340,18 @@ function renderShapeLibraryResults() {
         const haystack = [shape.name, shape.domain, ...(shape.tags ?? [])].join(' ').toLowerCase();
         return haystack.includes(query);
     });
+    // Old buttons are about to be discarded -- drop the observer's references to them first so
+    // it doesn't accumulate entries for detached elements across repeated search keystrokes.
+    const observer = ensureShapeLibraryThumbnailObserver();
+    observer.disconnect();
     $('#shapeLibraryResults').replaceChildren(...matches.map((shape) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'shapeLibraryItem';
         button.dataset.shapeId = shape.id;
-        button.innerHTML = `<b>${escapeHtml(shape.name)}</b><small>${escapeHtml(domainLabel(shape.domain))}<span class="shapeFormatBadge">${escapeHtml(shape.format.toUpperCase())}</span></small>`;
+        button.classList.toggle('selected', shape.id === shapeLibrarySelectedId);
+        button.innerHTML = `${shapeLibraryThumbnailMarkup(shape.id)}<b>${escapeHtml(shape.name)}</b><small>${escapeHtml(domainLabel(shape.domain))}<span class="shapeFormatBadge">${escapeHtml(shape.format.toUpperCase())}</span></small>`;
+        if (!shapeLibraryThumbnailCache.has(shape.id)) observer.observe(button);
         return button;
     }));
     $('#shapeLibraryEmpty').hidden = matches.length > 0;
@@ -2342,7 +2361,10 @@ async function openShapeLibrary(target) {
     shapeLibraryTarget = target;
     if (!shapeLibraryEntries) shapeLibraryEntries = await window.shapeLibrary.list();
     shapeLibraryDomain = 'all';
+    shapeLibrarySelectedId = null;
     $('#shapeLibrarySearch').value = '';
+    $('#shapeLibraryDetailEmpty').hidden = false;
+    $('#shapeLibraryDetailContent').hidden = true;
     const domains = ['all', ...new Set(shapeLibraryEntries.map((shape) => shape.domain))];
     $('#shapeLibraryDomains').replaceChildren(...domains.map((domain) => {
         const button = document.createElement('button');
@@ -2381,6 +2403,223 @@ async function applyLibraryShape(id) {
     }
     geometry.dispose();
     $('#shapeLibraryDialog').close();
+}
+
+// A second, small, permanent three.js scene/renderer for the shape library's own detail pane --
+// the main canvas (this file, ~517-535) is otherwise the only one in the renderer process.
+// Created lazily on first use and kept alive for the app's lifetime, the same way the main
+// canvas is a persistent singleton, rather than being rebuilt on every dialog open.
+let shapeLibraryPreviewScene = null;
+let shapeLibraryPreviewCamera = null;
+let shapeLibraryPreviewRenderer = null;
+let shapeLibraryPreviewOrbit = null;
+let shapeLibraryPreviewMesh = null;
+let shapeLibraryPreviewRevision = 0;
+let shapeLibraryPreviewAnimating = false;
+let shapeLibrarySelectedId = null;
+
+function ensureShapeLibraryPreview() {
+    if (shapeLibraryPreviewRenderer) return;
+    const canvas = $('#shapeLibraryPreviewCanvas');
+    shapeLibraryPreviewScene = new THREE.Scene();
+    shapeLibraryPreviewScene.background = new THREE.Color(0x060d12);
+    shapeLibraryPreviewCamera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    shapeLibraryPreviewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    shapeLibraryPreviewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Same light rig as the main canvas (~779-787), minus its floor grid -- keeps a previewed
+    // shape's shading consistent with how it will actually look once applied to a node.
+    shapeLibraryPreviewScene.add(new THREE.HemisphereLight(0xbfe4f2, 0x16212a, 2.25));
+    const keyLight = new THREE.DirectionalLight(0xfff0d6, 3.2);
+    keyLight.position.set(7, 11, 9);
+    shapeLibraryPreviewScene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0x65d6db, 2.1);
+    rimLight.position.set(-8, 4, -7);
+    shapeLibraryPreviewScene.add(rimLight);
+    // Rotate only -- zoom/pan would let this small canvas capture page scroll/drag gestures it
+    // has no real need for, since normalizeImportedGeometry already frames every shape into the
+    // same consistent bounding box regardless of its original size.
+    shapeLibraryPreviewOrbit = new OrbitControls(shapeLibraryPreviewCamera, shapeLibraryPreviewRenderer.domElement);
+    shapeLibraryPreviewOrbit.enableZoom = false;
+    shapeLibraryPreviewOrbit.enablePan = false;
+    new ResizeObserver(resizeShapeLibraryPreview).observe(canvas);
+}
+
+function resizeShapeLibraryPreview() {
+    const canvas = $('#shapeLibraryPreviewCanvas');
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    shapeLibraryPreviewCamera.aspect = rect.width / rect.height;
+    shapeLibraryPreviewCamera.updateProjectionMatrix();
+    shapeLibraryPreviewRenderer.setSize(rect.width, rect.height, false);
+}
+
+function animateShapeLibraryPreview() {
+    if (!shapeLibraryPreviewAnimating) return;
+    requestAnimationFrame(animateShapeLibraryPreview);
+    shapeLibraryPreviewOrbit.update();
+    shapeLibraryPreviewRenderer.render(shapeLibraryPreviewScene, shapeLibraryPreviewCamera);
+}
+
+function disposeShapeLibraryPreviewMesh() {
+    if (!shapeLibraryPreviewMesh) return;
+    shapeLibraryPreviewScene.remove(shapeLibraryPreviewMesh);
+    shapeLibraryPreviewMesh.geometry.dispose();
+    shapeLibraryPreviewMesh.material.dispose();
+    shapeLibraryPreviewMesh = null;
+}
+
+// Stops the render loop and disposes the previewed mesh -- called on every dialog-close path
+// (Cancel, Escape, and Apply's own close()) via the dialog's native 'close' event, so there's
+// one single cleanup point rather than duplicating this in each button handler.
+function stopShapeLibraryPreview() {
+    shapeLibraryPreviewAnimating = false;
+    disposeShapeLibraryPreviewMesh();
+}
+
+// Resets to the same canonical framing for every newly-selected shape, rather than carrying
+// over whatever angle the user last rotated to -- so each shape starts from a consistent,
+// predictable view instead of an awkward angle inherited from the previous one.
+function frameShapeLibraryPreview() {
+    shapeLibraryPreviewCamera.position.set(3, 2.4, 3);
+    shapeLibraryPreviewOrbit.target.set(0, 0, 0);
+    shapeLibraryPreviewOrbit.update();
+}
+
+async function selectShapeLibraryPreview(id) {
+    const shape = shapeLibraryEntries.find((entry) => entry.id === id);
+    $('#shapeLibraryDetailEmpty').hidden = true;
+    $('#shapeLibraryDetailContent').hidden = false;
+    $('#shapeLibraryDetailTitle').textContent = shape?.name ?? '';
+    $('#shapeLibraryDetailMeta').textContent = shape ? `${domainLabel(shape.domain)} · ${shape.format.toUpperCase()} · Loading…` : '';
+    ensureShapeLibraryPreview();
+    resizeShapeLibraryPreview();
+    // A later click while this load is still in flight must win -- discard a now-stale result
+    // rather than overwriting whatever the user has since selected.
+    const revision = ++shapeLibraryPreviewRevision;
+    let geometry;
+    try {
+        ({ geometry } = await importLibraryShape(id));
+    } catch (error) {
+        if (revision === shapeLibraryPreviewRevision) $('#shapeLibraryDetailMeta').textContent = `Could not preview this shape: ${error.message}`;
+        return;
+    }
+    if (revision !== shapeLibraryPreviewRevision) {
+        geometry.dispose();
+        return;
+    }
+    disposeShapeLibraryPreviewMesh();
+    const material = new THREE.MeshStandardMaterial({ color: 0x42c9bc, roughness: 0.55, metalness: 0.1 });
+    shapeLibraryPreviewMesh = new THREE.Mesh(geometry, material);
+    shapeLibraryPreviewScene.add(shapeLibraryPreviewMesh);
+    frameShapeLibraryPreview();
+    $('#shapeLibraryDetailMeta').textContent = shape ? `${domainLabel(shape.domain)} · ${shape.format.toUpperCase()}` : '';
+    // Guarded so switching between several shapes never spawns more than one concurrent
+    // requestAnimationFrame chain -- animateShapeLibraryPreview() re-schedules itself as long as
+    // this stays true, so it only needs to be (re)started when nothing is running yet.
+    if (!shapeLibraryPreviewAnimating) {
+        shapeLibraryPreviewAnimating = true;
+        animateShapeLibraryPreview();
+    }
+}
+
+// Static per-card thumbnails for the shape library grid, distinct from the live rotating preview
+// above -- one shared offscreen renderer (never inserted into the DOM) renders each shape exactly
+// once, caches the resulting PNG, and stops. This keeps WebGL context/render-loop cost constant
+// regardless of how many shapes exist: no per-card context, no continuous rendering.
+let shapeLibraryThumbnailCache = new Map(); // id -> dataURL (success) | null (permanent failure)
+let shapeLibraryThumbnailQueue = [];
+let shapeLibraryThumbnailQueued = new Set();
+let shapeLibraryThumbnailBusy = false;
+let shapeLibraryThumbnailObserver = null;
+let shapeLibraryThumbnailScene = null;
+let shapeLibraryThumbnailCamera = null;
+let shapeLibraryThumbnailRenderer = null;
+
+function ensureShapeLibraryThumbnailRenderer() {
+    if (shapeLibraryThumbnailRenderer) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 100;
+    shapeLibraryThumbnailScene = new THREE.Scene();
+    shapeLibraryThumbnailScene.background = new THREE.Color(0x060d12);
+    shapeLibraryThumbnailCamera = new THREE.PerspectiveCamera(42, canvas.width / canvas.height, 0.1, 100);
+    shapeLibraryThumbnailCamera.position.set(3, 2.4, 3);
+    shapeLibraryThumbnailCamera.lookAt(0, 0, 0);
+    // preserveDrawingBuffer is required for toDataURL() to read back a framebuffer that would
+    // otherwise be cleared right after this single render call.
+    shapeLibraryThumbnailRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    shapeLibraryThumbnailRenderer.setSize(canvas.width, canvas.height, false);
+    // Same light rig as ensureShapeLibraryPreview (~2411-2419), for shading consistency between
+    // a shape's card thumbnail and its live detail-pane preview.
+    shapeLibraryThumbnailScene.add(new THREE.HemisphereLight(0xbfe4f2, 0x16212a, 2.25));
+    const keyLight = new THREE.DirectionalLight(0xfff0d6, 3.2);
+    keyLight.position.set(7, 11, 9);
+    shapeLibraryThumbnailScene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0x65d6db, 2.1);
+    rimLight.position.set(-8, 4, -7);
+    shapeLibraryThumbnailScene.add(rimLight);
+}
+
+async function generateShapeLibraryThumbnail(id) {
+    try {
+        ensureShapeLibraryThumbnailRenderer();
+        const { geometry } = await importLibraryShape(id);
+        const material = new THREE.MeshStandardMaterial({ color: 0x42c9bc, roughness: 0.55, metalness: 0.1 });
+        const mesh = new THREE.Mesh(geometry, material);
+        shapeLibraryThumbnailScene.add(mesh);
+        shapeLibraryThumbnailRenderer.render(shapeLibraryThumbnailScene, shapeLibraryThumbnailCamera);
+        const dataUrl = shapeLibraryThumbnailRenderer.domElement.toDataURL('image/png');
+        shapeLibraryThumbnailScene.remove(mesh);
+        geometry.dispose();
+        material.dispose();
+        return dataUrl;
+    } catch (error) {
+        console.error(error);
+        return null;
+    }
+}
+
+function shapeLibraryItemButton(id) {
+    return $$('#shapeLibraryResults .shapeLibraryItem').find((item) => item.dataset.shapeId === id);
+}
+
+// The queue's only real job is bounding work to one shape at a time (STEP parsing runs on this
+// thread and would jank the UI if several ran concurrently) -- staleness is handled by simply
+// re-checking whether a matching card still exists right before doing the work, rather than a
+// revision counter, since a shape scrolled/filtered away and back is still valid to thumbnail.
+async function runShapeLibraryThumbnailQueue() {
+    if (shapeLibraryThumbnailBusy) return;
+    shapeLibraryThumbnailBusy = true;
+    while (shapeLibraryThumbnailQueue.length) {
+        const id = shapeLibraryThumbnailQueue.shift();
+        shapeLibraryThumbnailQueued.delete(id);
+        if (shapeLibraryThumbnailCache.has(id) || !shapeLibraryItemButton(id)) continue;
+        const dataUrl = await generateShapeLibraryThumbnail(id);
+        shapeLibraryThumbnailCache.set(id, dataUrl);
+        const button = shapeLibraryItemButton(id);
+        const img = button?.querySelector('img.examplesExplorerThumb');
+        if (dataUrl && img) img.src = dataUrl;
+    }
+    shapeLibraryThumbnailBusy = false;
+}
+
+function enqueueShapeLibraryThumbnail(id) {
+    if (shapeLibraryThumbnailCache.has(id) || shapeLibraryThumbnailQueued.has(id)) return;
+    shapeLibraryThumbnailQueued.add(id);
+    shapeLibraryThumbnailQueue.push(id);
+    runShapeLibraryThumbnailQueue();
+}
+
+function ensureShapeLibraryThumbnailObserver() {
+    if (shapeLibraryThumbnailObserver) return shapeLibraryThumbnailObserver;
+    shapeLibraryThumbnailObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            shapeLibraryThumbnailObserver.unobserve(entry.target);
+            enqueueShapeLibraryThumbnail(entry.target.dataset.shapeId);
+        });
+    }, { root: $('#shapeLibraryResults'), rootMargin: '200px 0px' });
+    return shapeLibraryThumbnailObserver;
 }
 
 let componentLibraryEntries = null;
@@ -5661,9 +5900,23 @@ $$('#editNodeScaleX, #editNodeScaleY, #editNodeScaleZ').forEach((input) => input
 $('#shapeLibrarySearch').addEventListener('input', renderShapeLibraryResults);
 $('#shapeLibraryResults').addEventListener('click', (event) => {
     const button = event.target.closest('[data-shape-id]');
-    if (button) applyLibraryShape(button.dataset.shapeId);
+    if (!button) return;
+    shapeLibrarySelectedId = button.dataset.shapeId;
+    $$('#shapeLibraryResults .shapeLibraryItem').forEach((item) => item.classList.toggle('selected', item === button));
+    selectShapeLibraryPreview(shapeLibrarySelectedId);
+});
+$('#shapeLibraryApply').addEventListener('click', () => {
+    if (shapeLibrarySelectedId) applyLibraryShape(shapeLibrarySelectedId);
 });
 $('#shapeLibraryCancel').addEventListener('click', () => $('#shapeLibraryDialog').close());
+$('#shapeLibraryDialog').addEventListener('close', stopShapeLibraryPreview);
+// Separate from stopShapeLibraryPreview, which is documented as that subsystem's own single
+// cleanup point -- this just stops scheduling further thumbnail work; any generation already
+// in flight finishes naturally and gets cached for next time.
+$('#shapeLibraryDialog').addEventListener('close', () => {
+    shapeLibraryThumbnailQueue.length = 0;
+    shapeLibraryThumbnailQueued.clear();
+});
 
 $('#addButton').addEventListener('click', (event) => {
     if (activeResult) return;

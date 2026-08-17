@@ -45,5 +45,5 @@ window.exampleGuide.onContent(({ title, markdown }) => {
     document.title = `${title} · Example Guide`;
     document.querySelector('#guideTitle').textContent = `${title} · Example Guide`;
     document.querySelector('#content').innerHTML = renderMarkdown(markdown);
-    window.scrollTo(0, 0);
+    document.querySelector('#content').scrollTop = 0;
 });

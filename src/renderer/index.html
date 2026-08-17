@@ -165,8 +165,21 @@
             <p>Pick a bundled STL or STEP shape to use for this node.</p>
             <input id="shapeLibrarySearch" type="search" placeholder="Search shapes…" autocomplete="off">
             <div id="shapeLibraryDomains" class="shapeLibraryDomains"></div>
-            <div id="shapeLibraryResults" class="shapeLibraryResults"></div>
-            <p id="shapeLibraryEmpty" class="emptyEditorState" hidden>No shapes match your search.</p>
+            <div class="shapeLibraryBody">
+                <div class="shapeLibraryBrowse">
+                    <div id="shapeLibraryResults" class="shapeLibraryResults"></div>
+                    <p id="shapeLibraryEmpty" class="emptyEditorState" hidden>No shapes match your search.</p>
+                </div>
+                <div class="shapeLibraryDetail">
+                    <p id="shapeLibraryDetailEmpty" class="examplesExplorerDetailEmpty">Select a shape to preview it here.</p>
+                    <div id="shapeLibraryDetailContent" hidden>
+                        <canvas id="shapeLibraryPreviewCanvas" class="shapeLibraryPreviewCanvas"></canvas>
+                        <strong id="shapeLibraryDetailTitle"></strong>
+                        <p id="shapeLibraryDetailMeta"></p>
+                        <button id="shapeLibraryApply" class="doneButton" type="button">Apply shape</button>
+                    </div>
+                </div>
+            </div>
             <footer><button id="shapeLibraryCancel" type="button">Cancel</button></footer>
         </form>
     </dialog>

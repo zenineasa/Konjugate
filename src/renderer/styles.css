@@ -106,18 +106,35 @@ input, select { user-select: text; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .runConfigurationDialog { width: 360px; }
-.shapeLibraryDialog { width: 480px; }
+.shapeLibraryDialog { width: 760px; }
 .shapeLibraryDialog #shapeLibrarySearch { box-sizing: border-box; width: 100%; height: 30px; padding: 0 9px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 9px; }
 .shapeLibraryDomains { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
 .shapeLibraryDomains button { padding: 4px 9px; color: #8199a3; background: #0f1c24; border: 1px solid #263b45; border-radius: 999px; font-size: 7px; text-transform: uppercase; letter-spacing: .06em; }
 .shapeLibraryDomains button.active { color: #09201e; background: var(--accent, #42c9bc); border-color: transparent; }
-.shapeLibraryResults { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; max-height: 300px; overflow-y: auto; }
+.shapeLibraryBody { display: grid; grid-template-columns: 1fr 240px; gap: 14px; margin-top: 10px; }
+.shapeLibraryBrowse { min-width: 0; }
+.shapeLibraryResults { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; max-height: 380px; overflow-y: auto; }
 .shapeLibraryItem { display: grid; gap: 3px; padding: 9px; text-align: left; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 5px; }
 .shapeLibraryItem:hover { background: rgb(66 201 188 / 6%); border-color: #47736f; }
+.shapeLibraryItem.selected { background: rgb(66 201 188 / 10%); border-color: var(--accent, #42c9bc); }
 .shapeLibraryItem b { color: #d8e4e9; font-size: 9px; }
 .shapeLibraryItem small { display: flex; gap: 5px; color: #6c818d; font-size: 7px; text-transform: uppercase; letter-spacing: .05em; }
 .shapeLibraryItem .shapeFormatBadge { padding: 1px 5px; background: #16262e; border-radius: 3px; }
 #shapeLibraryEmpty { margin-top: 8px; }
+.shapeLibraryDetail { display: flex; flex-direction: column; padding: 10px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 5px; }
+#shapeLibraryDetailEmpty { margin: 0; color: #5e747d; font-size: 8px; line-height: 1.5; }
+#shapeLibraryDetailContent { display: grid; gap: 8px; }
+#shapeLibraryDetailContent[hidden] { display: none; }
+/* Drag-to-rotate only (no zoom/pan) inside a small canvas benefits from an obvious grab
+   affordance, since there's no page-level scroll gesture for it to be mistaken for. */
+.shapeLibraryPreviewCanvas { width: 100%; aspect-ratio: 16 / 10; background: #060d12; border-radius: 4px; cursor: grab; touch-action: none; }
+.shapeLibraryPreviewCanvas:active { cursor: grabbing; }
+#shapeLibraryDetailTitle { color: #d8e4e9; font-size: 10px; }
+#shapeLibraryDetailMeta { margin: 0; color: #8199a3; font-size: 8px; line-height: 1.6; text-transform: uppercase; letter-spacing: .05em; }
+/* Same toolstrip-Run-button treatment as #examplesExplorerLoad, since this is likewise the
+   dialog's own primary action rather than a small dialog-footer button. */
+#shapeLibraryApply { display: flex; align-items: center; justify-content: center; height: 32px; margin-top: 4px; border-radius: 5px; font-size: 11px; }
+#shapeLibraryApply:hover { background: var(--accent-bright) !important; }
 
 .examplesExplorerDialog { width: 760px; }
 .examplesExplorerDialog #examplesExplorerSearch { box-sizing: border-box; width: 100%; height: 30px; padding: 0 9px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 9px; }

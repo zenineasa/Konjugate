@@ -7,6 +7,7 @@
         { "id": "batteryPoweredJoint", "domains": ["electrical", "mechanical", "thermal"] },
         { "id": "positionControlledJoint", "domains": ["electrical", "mechanical"] },
         { "id": "fourBarLinkage", "domains": ["mechanical"] },
-        { "id": "thermalManagement", "domains": ["thermal", "electrical"] }
+        { "id": "thermalManagement", "domains": ["thermal", "electrical"] },
+        { "id": "pumpSuctionHydraulics", "domains": ["fluid"] }
     ]
 }

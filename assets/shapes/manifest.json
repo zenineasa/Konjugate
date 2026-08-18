@@ -96,6 +96,30 @@
             "format": "stl",
             "file": "fluid/valveBody.stl",
             "tags": ["valve", "port", "fitting", "control"]
+        },
+        {
+            "id": "fluid/tank",
+            "name": "Tank",
+            "domain": "fluid",
+            "format": "stl",
+            "file": "fluid/tank.stl",
+            "tags": ["tank", "vessel", "reservoir", "storage"]
+        },
+        {
+            "id": "fluid/meteringPump",
+            "name": "Metering Pump",
+            "domain": "fluid",
+            "format": "stl",
+            "file": "fluid/meteringPump.stl",
+            "tags": ["pump", "metering", "positive-displacement", "suction"]
+        },
+        {
+            "id": "fluid/concentricReducer",
+            "name": "Concentric Reducer",
+            "domain": "fluid",
+            "format": "stl",
+            "file": "fluid/concentricReducer.stl",
+            "tags": ["reducer", "fitting", "transition", "pipe"]
         }
     ]
 }

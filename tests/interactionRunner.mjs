@@ -44,6 +44,32 @@ async function waitFor(window, expression, message, timeout = 5000) {
     throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}`);
 }
 
+// A single requestAnimationFrame apart is not a reliable "stopped moving" signal here: the main
+// render loop (renderer.mjs's render(), which repositions every CSS2D label and applies
+// OrbitControls damping) is throttled to 30fps, so two rAF ticks can both land inside the same
+// un-rendered ~33ms window and report "unchanged" even while a real position update -- e.g.
+// OrbitControls damping (dampingFactor 0.07) still easing off a preceding pan/zoom/rotate test --
+// is genuinely pending on the next actual render tick. Requiring several consecutive matches,
+// each spaced further apart (50ms) than the render throttle, actually observes real render ticks
+// instead of possibly sampling twice inside a gap between them.
+async function waitForStableRect(window, expression, message, timeout = 3000) {
+    const startedAt = Date.now();
+    let previous = null;
+    let stableStreak = 0;
+    while (Date.now() - startedAt < timeout) {
+        const current = await evaluate(window, expression);
+        if (current && current === previous) {
+            stableStreak += 1;
+            if (stableStreak >= 3) return;
+        } else {
+            stableStreak = 0;
+        }
+        previous = current;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(message);
+}
+
 async function clickElement(window, expression, modifiers = []) {
     const point = await evaluate(window, `(() => {
         const element = ${expression};
@@ -492,13 +518,11 @@ export async function runInteractionTests(window) {
         // change before reading its bounding rect for the click below — under SwiftShader
         // software rendering (used in headless/CI test runs) this can otherwise still be
         // mid-transition, sending the click past the label onto the canvas underneath.
-        // SwiftShader frames have been observed stalling well past 250ms, so wait for two
-        // consecutive identical bounding rects rather than a single fixed delay.
-        await waitFor(window, `(() => {
-            const rectOf = () => { const rect = document.querySelector('.bundleLabel')?.getBoundingClientRect(); return rect && JSON.stringify(rect); };
-            const first = rectOf();
-            return new Promise((resolve) => requestAnimationFrame(() => resolve(Boolean(first) && first === rectOf())));
-        })()`, 'The bundle label did not settle into a stable position.', 3000);
+        // SwiftShader frames have been observed stalling well past 250ms, so wait for it to
+        // actually settle rather than a single fixed delay.
+        await waitForStableRect(window,
+            `(() => { const rect = document.querySelector('.bundleLabel')?.getBoundingClientRect(); return rect && JSON.stringify(rect); })()`,
+            'The bundle label did not settle into a stable position.');
         await clickElement(window, `document.querySelector('.bundleLabel')`, ['shift']);
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
         const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
@@ -550,15 +574,11 @@ export async function runInteractionTests(window) {
         // The preceding paste/undo tests leave the CSS2DRenderer mid-reposition (same cause as the
         // bundle-label wait in the multi-selection test above); under SwiftShader software rendering
         // this can still be settling when we read the label rects below, silently skewing the
-        // computed drag rectangle. Wait for two consecutive identical rects, like that test does.
+        // computed drag rectangle. Wait for it to actually settle, like that test does.
         const labelRectsSelector = `[...document.querySelectorAll('.node-label-container')]
             .filter((label) => (label.textContent.includes('Battery module') || label.textContent.includes('Enclosed air')) && !label.textContent.includes('copy'))
             .map((label) => label.getBoundingClientRect())`;
-        await waitFor(window, `(() => {
-            const rectsOf = () => JSON.stringify(${labelRectsSelector});
-            const first = rectsOf();
-            return new Promise((resolve) => requestAnimationFrame(() => resolve(first === rectsOf())));
-        })()`, 'The node labels did not settle into a stable position.', 3000);
+        await waitForStableRect(window, `JSON.stringify(${labelRectsSelector})`, 'The node labels did not settle into a stable position.');
         const bounds = await evaluate(window, `(() => {
             // Excludes "... copy" labels: a soft-deleted "Battery module copy" from the preceding
             // paste-undo test can still be present (hidden) in the DOM, and getBoundingClientRect()

@@ -372,6 +372,15 @@ let selectedRelationship = null;
 let activeSubsystemId = null;
 let currentTool = 'select';
 let currentView = 'orbit';
+let is2DLocked = false;
+const faceDirections = {
+    front: new THREE.Vector3(0, 0, 1),
+    back: new THREE.Vector3(0, 0, -1),
+    right: new THREE.Vector3(1, 0, 0),
+    left: new THREE.Vector3(-1, 0, 0),
+    top: new THREE.Vector3(0, 1, 0),
+    bottom: new THREE.Vector3(0, -1, 0)
+};
 let activeEndpointPick = null;
 let endpointPickRestoreCard = null;
 let endpointPickMaterialState = new Map();
@@ -6722,6 +6731,38 @@ $$('[data-nav-view]').forEach((button) => {
     });
 });
 
+function nearestOrthogonalView() {
+    const cameraDirection = camera.position.clone().sub(orbitControls.target).normalize();
+    let bestView = 'front';
+    let bestDot = -Infinity;
+    for (const [view, direction] of Object.entries(faceDirections)) {
+        const dot = cameraDirection.dot(direction);
+        if (dot > bestDot) {
+            bestDot = dot;
+            bestView = view;
+        }
+    }
+    return bestView;
+}
+
+// Repurposes OrbitControls' own native mouse-button mapping -- the same mechanism already
+// behind today's "Shift-drag pans" behavior -- so a plain left-drag pans instead of rotates
+// while locked. Corner/isometric views are inherently non-orthogonal, so they're disabled
+// rather than left free to silently break the "always looking straight down one axis" promise.
+function set2DLock(locked) {
+    is2DLocked = locked;
+    orbitControls.enableRotate = !locked;
+    orbitControls.mouseButtons.LEFT = locked ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    const button = $('#lock2DButton');
+    button.classList.toggle('active', locked);
+    button.ariaPressed = String(locked);
+    button.querySelector('img').src = locked ? '../../assets/lock2D.svg' : '../../assets/lock2DOpen.svg';
+    $$('.cubeCorner').forEach((corner) => { corner.disabled = locked; });
+    if (locked) setCameraView(nearestOrthogonalView(), true);
+}
+
+$('#lock2DButton').addEventListener('click', () => set2DLock(!is2DLocked));
+
 function setCameraCorner(direction) {
     const [x, y, z] = direction.split(',').map(Number);
     currentView = `corner:${direction}`;
@@ -6797,14 +6838,6 @@ function updateViewCube() {
     const cssRotation = flipCssY.clone().multiply(worldRotation).multiply(flipCssY);
     $('#viewCubeObject').style.transform = `matrix3d(${cssRotation.elements.join(',')})`;
     const cameraDirection = camera.position.clone().sub(orbitControls.target).normalize();
-    const faceDirections = {
-        front: new THREE.Vector3(0, 0, 1),
-        back: new THREE.Vector3(0, 0, -1),
-        right: new THREE.Vector3(1, 0, 0),
-        left: new THREE.Vector3(-1, 0, 0),
-        top: new THREE.Vector3(0, 1, 0),
-        bottom: new THREE.Vector3(0, -1, 0)
-    };
     $$('.cubeFace').forEach((face) => {
         face.classList.toggle(
             'active',

@@ -766,6 +766,16 @@ input, select { user-select: text; }
 .viewNavActions button { display: grid; min-width: 23px; height: 22px; place-items: center; padding: 0 7px; color: #6d838e; background: #11212a; border: 1px solid #2d4651; border-radius: 11px; font-size: 9px; }
 .viewNavActions .cubeFit { font-size: 7px; }
 .viewNavActions button:hover { color: #8adfd8; border-color: #477574; }
+/* #viewCube #lock2DButton (not just #lock2DButton): the shared tooltip rule above,
+   :is(#titleBar, .toolstrip, .viewCube) [data-tooltip], carries #titleBar's id specificity
+   even though .viewCube is what actually matches here (:is() specificity is its highest-
+   specificity argument, not the one that matched) -- a bare id selector alone still loses to it. */
+#viewCube #lock2DButton { position: absolute; z-index: 4; top: 8px; right: 8px; display: grid; width: 22px; height: 22px; place-items: center; padding: 0; background: #11212a; border: 1px solid #2d4651; border-radius: 50%; }
+#lock2DButton:hover { border-color: #477574; }
+#lock2DButton.active { background: #235057; border-color: #65aaa7; }
+#lock2DButton img { width: 13px; height: 13px; opacity: .8; transition: filter .12s, opacity .12s; }
+#lock2DButton:hover img { filter: brightness(1.4); opacity: 1; }
+#lock2DButton.active img { filter: brightness(1.5); opacity: 1; }
 .viewCube [data-tooltip]::after { top: auto; bottom: calc(100% + 7px); }
 .modelStatus { position: absolute; z-index: 8; right: 12px; top: 12px; display: flex; align-items: center; gap: 13px; padding: 6px 9px; color: #607581; background: rgb(9 18 25 / 74%); border: 1px solid #22343e; border-radius: 5px; font-size: 7px; }
 .modelStatus i { width: 5px; height: 5px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 6px var(--accent); }

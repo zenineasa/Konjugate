@@ -1505,6 +1505,48 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('.webglSurface').getAttribute('aria-label')`), '3D model canvas');
     });
 
+    await run('the 2D lock toggle turns left-drag into pan and disables isometric corners', async () => {
+        const point = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
+        const dragTo = { x: point.x + 50, y: point.y + 30 };
+        const cameraTargetExpression = `document.querySelector('#viewCube').dataset.cameraTarget`;
+        const drag = () => {
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+            window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...dragTo });
+            window.webContents.sendInputEvent({ type: 'mouseUp', ...dragTo, button: 'left', clickCount: 1 });
+        };
+        const readTarget = async () => (await evaluate(window, cameraTargetExpression)).split(',').map(Number);
+        // OrbitControls' damping (dampingFactor 0.07) eases a pan's momentum into the target
+        // exponentially and never reaches an exact fixed point to poll for -- unlike the
+        // deterministic 650ms snap animation below, comparing "close enough" after a generous
+        // settle is the reliable check here, not exact equality.
+        const targetsClose = (a, b, epsilon = 0.02) => a.every((value, index) => Math.abs(value - b[index]) < epsilon);
+
+        assert.equal(await evaluate(window, `document.querySelector('#lock2DButton').ariaPressed`), 'false');
+        await evaluate(window, `document.querySelector('#lock2DButton').click()`);
+        await waitFor(window, `document.querySelector('#lock2DButton').ariaPressed === 'true'`, '2D lock button did not report itself pressed.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.cubeCorner')].every((corner) => corner.disabled)`), true, 'Isometric corner buttons should be disabled while locked.');
+        // Engaging the lock snaps to the nearest orthogonal view via the existing 650ms animated
+        // camera transition, which sets orbitControls.target once and then only lerps
+        // camera.position -- genuinely stable to poll for, unlike a damped pan/rotate.
+        await waitForStableRect(window, cameraTargetExpression, '2D lock camera snap did not settle.');
+
+        const targetBeforeLockedDrag = await readTarget();
+        drag();
+        await waitFor(window, `${cameraTargetExpression} !== ${JSON.stringify(targetBeforeLockedDrag.map((v) => v.toFixed(4)).join(','))}`, 'A left-drag while 2D-locked did not pan the camera.');
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        assert.ok(!targetsClose(targetBeforeLockedDrag, await readTarget()), 'A left-drag while 2D-locked did not pan the camera by a meaningful amount.');
+
+        await evaluate(window, `document.querySelector('#lock2DButton').click()`);
+        await waitFor(window, `document.querySelector('#lock2DButton').ariaPressed === 'false'`, '2D lock button did not report itself unpressed.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.cubeCorner')].every((corner) => !corner.disabled)`), true, 'Isometric corner buttons should re-enable once unlocked.');
+
+        const targetBeforeUnlockedDrag = await readTarget();
+        drag();
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        assert.ok(targetsClose(targetBeforeUnlockedDrag, await readTarget()), 'An unlocked left-drag should rotate around a fixed target, not pan it.');
+    });
+
     await run('encrypted-save password feedback updates continuously', async () => {
         await evaluate(window, `document.querySelector('#saveEncryptedButton').click()`);
         await waitFor(window, `document.querySelector('#passwordDialog').open`, 'Password dialog did not open.');

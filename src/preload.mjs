@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('windowControls', {
     minimize: () => ipcRenderer.send('windowMinimize'),
     toggleMaximize: () => ipcRenderer.send('windowMaximizeToggle'),
     close: () => ipcRenderer.send('windowClose'),
+    newWindow: () => ipcRenderer.send('newProjectWindow'),
     onMaximizedChange: (callback) => {
         ipcRenderer.on('windowMaximizedChange', (_event, isMaximized) => {
             callback(isMaximized);

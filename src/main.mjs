@@ -24,7 +24,7 @@ import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
-import { auxiliaryWindowPresentation, senderOwnsWindow } from './windowLifecycle.mjs';
+import { auxiliaryWindowPresentation } from './windowLifecycle.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -57,16 +57,19 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const pendingEncryptedPaths = new Set();
-let mainWindow = null;
-let analysisWindow = null;
-let exampleGuideWindow = null;
-let exampleGuideBounds = null;
-let providerEditorWindow = null;
-let providerEditorBounds = null;
-let providerEditorOwner = null;
-let analysisAddonId = null;
-let visualizerManifest = null;
-let visualizerSession = null;
+// Every open project window, plus one state record per window replacing what used to be a
+// single set of module-level globals -- each project window gets its own aux windows (example
+// guide/about, provider editor, results visualizer) and its own pending-provider-apply state,
+// since two project windows can now legitimately have any of these open at once.
+const projectWindows = new Set();
+const projectWindowState = new WeakMap();
+function createProjectWindowState() {
+    return {
+        exampleGuideWindow: null, exampleGuideBounds: null,
+        providerEditorWindow: null, providerEditorBounds: null, providerEditorOwner: null, pendingProviderApply: null,
+        analysisWindow: null, analysisAddonId: null, visualizerManifest: null, visualizerSession: null
+    };
+}
 const addonRegistry = new Map();
 const activeEngineJobs = new Map();
 const completedEngineResults = new Map();
@@ -83,6 +86,33 @@ function getWindowFromEvent(event) {
     return BrowserWindow.fromWebContents(event.sender);
 }
 
+function senderIs(window, event) {
+    return Boolean(window && !window.isDestroyed() && event.sender === window.webContents);
+}
+
+function isProjectWindow(window) {
+    return Boolean(window && !window.isDestroyed() && projectWindows.has(window));
+}
+
+function senderIsProjectWindow(event) {
+    return isProjectWindow(getWindowFromEvent(event));
+}
+
+function requireProjectWindow(event, message = 'Only a project window can do this.') {
+    if (!senderIsProjectWindow(event)) throw new Error(message);
+}
+
+// Reverse lookup for an auxiliary window's own IPC handlers: given the event from e.g. the
+// results-visualizer window itself, find which project window owns it (by comparing against
+// that field in every project window's state record) -- the aux window has no identity of its
+// own to gate on, only "whichever project window currently has one open under this field."
+function projectWindowForAuxSender(event, field) {
+    for (const projectWindow of projectWindows) {
+        if (senderIs(projectWindowState.get(projectWindow)[field], event)) return projectWindow;
+    }
+    return null;
+}
+
 function installCustomWindowState(window) {
     const sendExpandedState = (expanded) => {
         if (!window.webContents.isDestroyed()) window.webContents.send('windowMaximizedChange', expanded);
@@ -96,8 +126,8 @@ function installCustomWindowState(window) {
     });
 }
 
-function createWindow() {
-    mainWindow = new BrowserWindow({
+function createProjectWindow() {
+    const window = new BrowserWindow({
         width: 1200,
         height: 760,
         minWidth: 720,
@@ -114,8 +144,11 @@ function createWindow() {
             backgroundThrottling: false
         }
     });
+    projectWindows.add(window);
+    projectWindowState.set(window, createProjectWindowState());
+    window.on('closed', () => projectWindows.delete(window));
 
-    const owner = mainWindow.webContents;
+    const owner = window.webContents;
     const ownerUnavailable = () => {
         abortAIOperations(owner);
         shutdownValidationOperations(owner);
@@ -124,37 +157,13 @@ function createWindow() {
     owner.once('destroyed', ownerUnavailable);
     owner.once('render-process-gone', ownerUnavailable);
 
-    installCustomWindowState(mainWindow);
+    installCustomWindowState(window);
 
-    if (process.argv.includes('--interaction-test')) {
-        mainWindow.webContents.once('did-finish-load', async () => {
-            try {
-                const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
-                await runInteractionTests(mainWindow);
-                app.exit(0);
-            } catch (error) {
-                console.error(error);
-                app.exit(1);
-            }
-        });
-    }
-    if (process.argv.includes('--generate-example-thumbnails')) {
-        mainWindow.webContents.once('did-finish-load', async () => {
-            try {
-                const { generateExampleThumbnails } = await import('../tests/generateExampleThumbnails.mjs');
-                await generateExampleThumbnails(mainWindow);
-                app.exit(0);
-            } catch (error) {
-                console.error(error);
-                app.exit(1);
-            }
-        });
-    }
-
-    mainWindow.loadFile(join(currentDir, 'renderer', 'index.html'));
+    window.loadFile(join(currentDir, 'renderer', 'index.html'));
+    return window;
 }
 
-async function checkForUpdates() {
+async function checkForUpdates(window) {
     let update;
     try {
         update = await findAvailableUpdate(app.getVersion());
@@ -162,8 +171,8 @@ async function checkForUpdates() {
         console.warn('Update check failed:', error.message);
         return;
     }
-    if (!update || !mainWindow || mainWindow.isDestroyed()) return;
-    const { response } = await dialog.showMessageBox(mainWindow, {
+    if (!update || !window || window.isDestroyed()) return;
+    const { response } = await dialog.showMessageBox(window, {
         type: 'info',
         title: 'Update available',
         message: `Konjugate ${update.version} is available.`,
@@ -175,13 +184,14 @@ async function checkForUpdates() {
     if (response === 0) shell.openExternal(update.url);
 }
 
-async function openGuideWindow(payload) {
-    if (!exampleGuideWindow || exampleGuideWindow.isDestroyed()) {
-        exampleGuideWindow = new BrowserWindow({
+async function openGuideWindow(projectWindow, payload) {
+    const state = projectWindowState.get(projectWindow);
+    if (!state.exampleGuideWindow || state.exampleGuideWindow.isDestroyed()) {
+        const createdWindow = new BrowserWindow({
             width: 720,
             height: 760,
-            ...exampleGuideBounds,
-            ...auxiliaryWindowPresentation(mainWindow),
+            ...state.exampleGuideBounds,
+            ...auxiliaryWindowPresentation(projectWindow),
             minWidth: 480,
             minHeight: 420,
             frame: false,
@@ -194,25 +204,26 @@ async function openGuideWindow(payload) {
                 sandbox: true
             }
         });
-        installCustomWindowState(exampleGuideWindow);
-        exampleGuideWindow.on('close', () => { exampleGuideBounds = exampleGuideWindow?.getBounds() ?? exampleGuideBounds; });
-        exampleGuideWindow.on('closed', () => { exampleGuideWindow = null; });
-        exampleGuideWindow.webContents.once('did-finish-load', () => exampleGuideWindow?.webContents.send('exampleGuideContent', payload));
-        await exampleGuideWindow.loadFile(join(currentDir, 'exampleGuide', 'index.html'));
+        state.exampleGuideWindow = createdWindow;
+        installCustomWindowState(createdWindow);
+        createdWindow.on('close', () => { state.exampleGuideBounds = createdWindow.isDestroyed() ? state.exampleGuideBounds : createdWindow.getBounds(); });
+        createdWindow.on('closed', () => { if (state.exampleGuideWindow === createdWindow) state.exampleGuideWindow = null; });
+        createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('exampleGuideContent', payload); });
+        await createdWindow.loadFile(join(currentDir, 'exampleGuide', 'index.html'));
     } else {
-        exampleGuideWindow.setTitle(`${payload.title} · ${payload.kind === 'about' ? 'About' : 'Example Guide'}`);
-        exampleGuideWindow.webContents.send('exampleGuideContent', payload);
-        exampleGuideWindow.show();
-        exampleGuideWindow.focus();
+        state.exampleGuideWindow.setTitle(`${payload.title} · ${payload.kind === 'about' ? 'About' : 'Example Guide'}`);
+        state.exampleGuideWindow.webContents.send('exampleGuideContent', payload);
+        state.exampleGuideWindow.show();
+        state.exampleGuideWindow.focus();
     }
     return true;
 }
 
-async function openExampleGuide(id) {
+async function openExampleGuide(projectWindow, id) {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     const guideName = id.replace(/\.kjt$/, '.md');
     const markdown = await readFile(join(examplesDir, guideName), 'utf8');
-    return openGuideWindow({
+    return openGuideWindow(projectWindow, {
         id,
         title: exampleLabel(id),
         markdown,
@@ -220,24 +231,25 @@ async function openExampleGuide(id) {
     });
 }
 
-async function openAboutWindow() {
+async function openAboutWindow(projectWindow) {
     const markdown = (await readFile(join(currentDir, '..', 'docs', 'About.md'), 'utf8'))
         .replace('**runtime version**', `**${app.getVersion()}**`);
-    return openGuideWindow({
+    return openGuideWindow(projectWindow, {
         title: 'Konjugate',
         markdown,
         kind: 'about'
     });
 }
 
-function openProviderEditorWindow(ownerWebContents, payload) {
-    providerEditorOwner = ownerWebContents;
-    if (!providerEditorWindow || providerEditorWindow.isDestroyed()) {
-        providerEditorWindow = new BrowserWindow({
+function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
+    const state = projectWindowState.get(projectWindow);
+    state.providerEditorOwner = ownerWebContents;
+    if (!state.providerEditorWindow || state.providerEditorWindow.isDestroyed()) {
+        const createdWindow = new BrowserWindow({
             width: 820,
             height: 640,
-            ...providerEditorBounds,
-            ...auxiliaryWindowPresentation(mainWindow),
+            ...state.providerEditorBounds,
+            ...auxiliaryWindowPresentation(projectWindow),
             minWidth: 480,
             minHeight: 360,
             frame: false,
@@ -250,24 +262,19 @@ function openProviderEditorWindow(ownerWebContents, payload) {
                 sandbox: false
             }
         });
-        installCustomWindowState(providerEditorWindow);
-        providerEditorWindow.on('close', () => { providerEditorBounds = providerEditorWindow?.getBounds() ?? providerEditorBounds; });
-        providerEditorWindow.on('closed', () => { providerEditorWindow = null; providerEditorOwner = null; });
-        providerEditorWindow.webContents.once('did-finish-load', () => providerEditorWindow?.webContents.send('providerEditorContent', payload));
-        providerEditorWindow.loadFile(join(currentDir, 'providerEditor', 'index.html'));
+        state.providerEditorWindow = createdWindow;
+        installCustomWindowState(createdWindow);
+        createdWindow.on('close', () => { state.providerEditorBounds = createdWindow.isDestroyed() ? state.providerEditorBounds : createdWindow.getBounds(); });
+        createdWindow.on('closed', () => {
+            if (state.providerEditorWindow === createdWindow) { state.providerEditorWindow = null; state.providerEditorOwner = null; }
+        });
+        createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('providerEditorContent', payload); });
+        createdWindow.loadFile(join(currentDir, 'providerEditor', 'index.html'));
     } else {
-        providerEditorWindow.webContents.send('providerEditorContent', payload);
-        providerEditorWindow.show();
-        providerEditorWindow.focus();
+        state.providerEditorWindow.webContents.send('providerEditorContent', payload);
+        state.providerEditorWindow.show();
+        state.providerEditorWindow.focus();
     }
-}
-
-function senderIs(window, event) {
-    return Boolean(window && !window.isDestroyed() && event.sender === window.webContents);
-}
-
-function requireProjectWindow(event) {
-    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can access AI providers.');
 }
 
 function aiRequestKey(sender, requestUuid) {
@@ -361,8 +368,8 @@ function beginApplicationShutdown() {
     return applicationShutdownPromise;
 }
 
-function visualizerCan(permission) {
-    return visualizerManifest?.permissions.includes(permission);
+function visualizerCan(manifest, permission) {
+    return manifest?.permissions.includes(permission);
 }
 
 async function discoverAddons() {
@@ -387,21 +394,22 @@ async function discoverAddons() {
     }
 }
 
-async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
-    if (analysisWindow && !analysisWindow.isDestroyed() && analysisAddonId !== manifest.addonId) {
-        analysisWindow.destroy();
-        analysisWindow = null;
+async function openResultsVisualizer(projectWindow, { addonDirectory, manifest }, payload) {
+    const state = projectWindowState.get(projectWindow);
+    if (state.analysisWindow && !state.analysisWindow.isDestroyed() && state.analysisAddonId !== manifest.addonId) {
+        state.analysisWindow.destroy();
+        state.analysisWindow = null;
     }
-    analysisAddonId = manifest.addonId;
-    visualizerManifest = manifest;
+    state.analysisAddonId = manifest.addonId;
+    state.visualizerManifest = manifest;
     const liveResult = activeEngineJobs.get(payload.engineJobId)?.latestResult;
     const completedResult = completedEngineResults.get(payload.engineJobId)?.result;
-    visualizerSession = createVisualizerSession({ ...payload, result: liveResult ?? completedResult ?? payload.result, sessionId: randomUUID() });
-    if (analysisWindow && !analysisWindow.isDestroyed()) {
-        analysisWindow.setTitle(`${visualizerSession.projectName} — Results`);
-        analysisWindow.webContents.send('visualizerSessionChange');
-        analysisWindow.show();
-        analysisWindow.focus();
+    state.visualizerSession = createVisualizerSession({ ...payload, result: liveResult ?? completedResult ?? payload.result, sessionId: randomUUID() });
+    if (state.analysisWindow && !state.analysisWindow.isDestroyed()) {
+        state.analysisWindow.setTitle(`${state.visualizerSession.projectName} — Results`);
+        state.analysisWindow.webContents.send('visualizerSessionChange');
+        state.analysisWindow.show();
+        state.analysisWindow.focus();
         return;
     }
     const createdWindow = new BrowserWindow({
@@ -409,7 +417,8 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
         height: 720,
         minWidth: 720,
         minHeight: 480,
-        title: `${visualizerSession.projectName} — Results`,
+        ...auxiliaryWindowPresentation(projectWindow),
+        title: `${state.visualizerSession.projectName} — Results`,
         frame: false,
         backgroundColor: '#081119',
         webPreferences: {
@@ -421,119 +430,136 @@ async function openResultsVisualizer({ addonDirectory, manifest }, payload) {
         }
     });
     installCustomWindowState(createdWindow);
-    analysisWindow = createdWindow;
+    state.analysisWindow = createdWindow;
     createdWindow.on('closed', () => {
-        if (analysisWindow === createdWindow) {
-            analysisWindow = null;
-            analysisAddonId = null;
+        if (state.analysisWindow === createdWindow) {
+            state.analysisWindow = null;
+            state.analysisAddonId = null;
         }
     });
-    await analysisWindow.loadFile(join(addonDirectory, manifest.entry));
+    await state.analysisWindow.loadFile(join(addonDirectory, manifest.entry));
 }
 
 ipcMain.handle('addonListToolstripContributions', async (event) => {
-    if (!senderIs(mainWindow, event)) return [];
+    if (!senderIsProjectWindow(event)) return [];
     await discoverAddons();
     return [...addonRegistry.values()].flatMap(({ manifest }) => publicToolstripContributions(manifest));
 });
 
 ipcMain.handle('addonInvokeCommand', async (event, { addonId, commandId, contexts = {} }) => {
-    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can invoke add-on commands.');
+    if (!senderIsProjectWindow(event)) throw new Error('Only a project window can invoke add-on commands.');
     if (!addonRegistry.size) await discoverAddons();
     const addon = addonRegistry.get(addonId);
     const contribution = addon?.manifest.contributes?.toolstrip?.find((item) => item.commandId === commandId);
     if (!addon || !contribution) throw new Error('That add-on command is unavailable.');
     if (!(contribution.contexts ?? []).every((context) => contexts[context])) throw new Error('The add-on command requires unavailable context.');
     if (addon.manifest.kind === 'resultVisualizer') {
-        await openResultsVisualizer(addon, contexts.resultSession);
-        return { addonId, commandId, sessionId: visualizerSession.sessionId };
+        const projectWindow = getWindowFromEvent(event);
+        await openResultsVisualizer(projectWindow, addon, contexts.resultSession);
+        return { addonId, commandId, sessionId: projectWindowState.get(projectWindow).visualizerSession.sessionId };
     }
     throw new Error(`Unsupported add-on kind: ${addon.manifest.kind}.`);
 });
 
 ipcMain.on('visualizerHostTimelineChange', (event, time) => {
-    if (!senderIs(mainWindow, event) || !visualizerSession) return;
-    visualizerSession.time = Number(time);
-    if (visualizerCan('timeline.read') && analysisWindow && !analysisWindow.isDestroyed()) {
-        analysisWindow.webContents.send('visualizerTimelineChange', visualizerSession.time);
+    if (!senderIsProjectWindow(event)) return;
+    const state = projectWindowState.get(getWindowFromEvent(event));
+    if (!state.visualizerSession) return;
+    state.visualizerSession.time = Number(time);
+    if (visualizerCan(state.visualizerManifest, 'timeline.read') && state.analysisWindow && !state.analysisWindow.isDestroyed()) {
+        state.analysisWindow.webContents.send('visualizerTimelineChange', state.visualizerSession.time);
     }
 });
 
 ipcMain.on('visualizerHostSelectionChange', (event, nodeId) => {
-    if (!senderIs(mainWindow, event) || !visualizerSession) return;
-    visualizerSession.selectedNodeId = nodeId ?? null;
-    if (visualizerCan('selection.read') && analysisWindow && !analysisWindow.isDestroyed()) {
-        analysisWindow.webContents.send('visualizerSelectionChange', nodeId ?? null);
+    if (!senderIsProjectWindow(event)) return;
+    const state = projectWindowState.get(getWindowFromEvent(event));
+    if (!state.visualizerSession) return;
+    state.visualizerSession.selectedNodeId = nodeId ?? null;
+    if (visualizerCan(state.visualizerManifest, 'selection.read') && state.analysisWindow && !state.analysisWindow.isDestroyed()) {
+        state.analysisWindow.webContents.send('visualizerSelectionChange', nodeId ?? null);
     }
 });
 
-function updateVisualizerResult(jobId, result) {
-    if (!visualizerSession || visualizerSession.engineJobId !== jobId) return;
-    visualizerSession.samples = result.samples;
-    visualizerSession.run = {
-        ...visualizerSession.run,
+function updateVisualizerResult(projectWindow, jobId, result) {
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state || !state.visualizerSession || state.visualizerSession.engineJobId !== jobId) return;
+    state.visualizerSession.samples = result.samples;
+    state.visualizerSession.run = {
+        ...state.visualizerSession.run,
         sampleCount: result.samples.length,
         lifecycle: result.lifecycle,
         simulationTime: Number(result.simulationTime),
         availableResultTime: Number(result.availableResultTime),
         pacing: structuredClone(result.pacing)
     };
-    if (!analysisWindow || analysisWindow.isDestroyed()) return;
-    if (visualizerCan('results.live.read')) {
-        analysisWindow.webContents.send('visualizerSamplesAvailable', {
-            sampleCount: visualizerSession.run.sampleCount,
-            availableResultTime: visualizerSession.run.availableResultTime
+    if (!state.analysisWindow || state.analysisWindow.isDestroyed()) return;
+    if (visualizerCan(state.visualizerManifest, 'results.live.read')) {
+        state.analysisWindow.webContents.send('visualizerSamplesAvailable', {
+            sampleCount: state.visualizerSession.run.sampleCount,
+            availableResultTime: state.visualizerSession.run.availableResultTime
         });
     }
-    if (visualizerCan('simulation.status.read')) {
-        analysisWindow.webContents.send('visualizerRunStatusChange', structuredClone(visualizerSession.run));
+    if (visualizerCan(state.visualizerManifest, 'simulation.status.read')) {
+        state.analysisWindow.webContents.send('visualizerRunStatusChange', structuredClone(state.visualizerSession.run));
     }
-    if (visualizerCan('simulation.pacing.read')) {
-        analysisWindow.webContents.send('visualizerPacingChange', structuredClone(visualizerSession.run.pacing));
+    if (visualizerCan(state.visualizerManifest, 'simulation.pacing.read')) {
+        state.analysisWindow.webContents.send('visualizerPacingChange', structuredClone(state.visualizerSession.run.pacing));
     }
 }
 
 ipcMain.on('visualizerCloseSession', (event) => {
-    if (!senderIs(mainWindow, event)) return;
-    visualizerSession = null;
-    visualizerManifest = null;
-    analysisAddonId = null;
-    analysisWindow?.close();
+    if (!senderIsProjectWindow(event)) return;
+    const state = projectWindowState.get(getWindowFromEvent(event));
+    state.visualizerSession = null;
+    state.visualizerManifest = null;
+    state.analysisAddonId = null;
+    state.analysisWindow?.close();
 });
 
 ipcMain.handle('visualizerGetContext', (event) => {
-    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return null;
-    return publicVisualizerContext(visualizerSession);
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.read')) return null;
+    return publicVisualizerContext(state.visualizerSession);
 });
 
 ipcMain.handle('visualizerListSignals', (event) => {
-    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return [];
-    return structuredClone(visualizerSession.signals);
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.read')) return [];
+    return structuredClone(state.visualizerSession.signals);
 });
 
 ipcMain.handle('visualizerReadSeries', (event, { signalIds, options }) => {
-    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('results.read')) return [];
-    return readSignalSeries(visualizerSession, signalIds, options);
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.read')) return [];
+    return readSignalSeries(state.visualizerSession, signalIds, options);
 });
 
 ipcMain.handle('visualizerTitlebarStylesheet', (event) => {
-    if (!senderIs(analysisWindow, event)) throw new Error('The titlebar stylesheet is available only to the active add-on window.');
+    if (!projectWindowForAuxSender(event, 'analysisWindow')) throw new Error('The titlebar stylesheet is available only to the active add-on window.');
     return pathToFileURL(join(currentDir, 'addonTitlebar.css')).href;
 });
 
 ipcMain.on('visualizerSeek', (event, time) => {
-    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('timeline.seek')) return;
-    if (['running', 'paused'].includes(visualizerSession.run.lifecycle)) return;
-    const boundedTime = Math.max(0, Math.min(Number(time), visualizerSession.run.availableResultTime));
-    visualizerSession.time = boundedTime;
-    mainWindow?.webContents.send('visualizerSeekRequest', boundedTime);
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'timeline.seek')) return;
+    if (['running', 'paused'].includes(state.visualizerSession.run.lifecycle)) return;
+    const boundedTime = Math.max(0, Math.min(Number(time), state.visualizerSession.run.availableResultTime));
+    state.visualizerSession.time = boundedTime;
+    projectWindow.webContents.send('visualizerSeekRequest', boundedTime);
 });
 
 ipcMain.handle('visualizerRequestPacing', async (event, pacing) => {
-    if (!senderIs(analysisWindow, event) || !visualizerSession || !visualizerCan('simulation.pacing.control')) {
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'simulation.pacing.control')) {
         throw new Error('The visualizer does not have permission to control pacing.');
     }
-    const job = activeEngineJobs.get(visualizerSession.engineJobId);
+    const job = activeEngineJobs.get(state.visualizerSession.engineJobId);
     if (!job) throw new Error('The simulation is no longer running.');
     return job.setPacing(pacing);
 });
@@ -556,14 +582,15 @@ ipcMain.on('windowMinimize', (event) => {
 });
 
 ipcMain.on('windowClose', (event) => {
-    const targetWindow = getWindowFromEvent(event);
-    if (!targetWindow) return;
-    if (senderOwnsWindow(event.sender, mainWindow)) app.quit();
-    else targetWindow.close();
+    // Just close this window -- 'window-all-closed' below already handles quitting the whole
+    // app on non-macOS once truly zero windows remain, which is exactly what's needed now that
+    // more than one project window can exist (closing one used to force-quit the entire app).
+    getWindowFromEvent(event)?.close();
 });
 
 ipcMain.handle('applicationInfo', () => ({ version: app.getVersion() }));
-ipcMain.handle('applicationOpenAbout', () => openAboutWindow());
+ipcMain.handle('applicationOpenAbout', (event) => openAboutWindow(getWindowFromEvent(event)));
+ipcMain.on('newProjectWindow', () => createProjectWindow());
 ipcMain.handle('applicationOpenExternal', (event, url) => {
     if (typeof url !== 'string' || !['https://discord.gg/', 'https://github.com/zenineasa/Konjugate/'].some((prefix) => url.startsWith(prefix))) return false;
     shell.openExternal(url);
@@ -572,7 +599,9 @@ ipcMain.handle('applicationOpenExternal', (event, url) => {
 
 ipcMain.handle('diagnosticsList', () => listDiagnostics());
 onDiagnostic((entry) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('diagnosticsIssue', entry);
+    for (const window of projectWindows) {
+        if (!window.isDestroyed()) window.webContents.send('diagnosticsIssue', entry);
+    }
 });
 
 const examplesDir = join(currentDir, '..', 'examples');
@@ -626,8 +655,8 @@ ipcMain.handle('projectLoadExample', async (_event, id) => {
 });
 
 ipcMain.handle('projectOpenExampleGuide', async (event, id) => {
-    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can open example guides.');
-    return openExampleGuide(id);
+    requireProjectWindow(event, 'Only a project window can open example guides.');
+    return openExampleGuide(getWindowFromEvent(event), id);
 });
 
 const shapesDir = join(currentDir, '..', 'assets', 'shapes');
@@ -1101,38 +1130,37 @@ async function validatePythonSource(source) {
 }
 
 ipcMain.handle('providerEditorOpenWindow', (event, payload) => {
-    openProviderEditorWindow(event.sender, payload);
+    openProviderEditorWindow(getWindowFromEvent(event), event.sender, payload);
 });
 
 ipcMain.handle('providerEditorValidate', async (_event, { source, kind }) => (
     kind === 'python' ? validatePythonSource(source) : validateCppSource(source)
 ));
 
-let pendingProviderApply = null;
-
-ipcMain.handle('providerEditorApply', (_event, { source }) => {
-    if (!providerEditorOwner || providerEditorOwner.isDestroyed()) {
+ipcMain.handle('providerEditorApply', (event, { source }) => {
+    // This call comes from the provider-editor window itself, not a project window -- find
+    // which project window owns it (each can have its own provider editor open now).
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.providerEditorOwner || state.providerEditorOwner.isDestroyed()) {
         return { applied: false, error: 'The originating window is no longer available.' };
     }
     // The project window computes success/failure (e.g. its edge or source term may have been
     // deleted while this editor was open) and reports back over providerEditorApplyResult,
     // since webContents.send() has no built-in reply channel of its own.
-    pendingProviderApply?.({ applied: false, error: 'Superseded by a newer apply.' });
+    state.pendingProviderApply?.({ applied: false, error: 'Superseded by a newer apply.' });
     return new Promise((resolve) => {
-        pendingProviderApply = resolve;
-        providerEditorOwner.send('providerEditorApplied', { source });
+        state.pendingProviderApply = resolve;
+        state.providerEditorOwner.send('providerEditorApplied', { source });
     });
 });
 
 ipcMain.on('providerEditorApplyResult', (event, result) => {
-    if (!senderIs(mainWindow, event)) return;
-    pendingProviderApply?.(result);
-    pendingProviderApply = null;
+    if (!senderIsProjectWindow(event)) return;
+    const state = projectWindowState.get(getWindowFromEvent(event));
+    state.pendingProviderApply?.(result);
+    state.pendingProviderApply = null;
 });
-
-function requireMainWindow(event) {
-    if (!senderIs(mainWindow, event)) throw new Error('Only the project window can access toolchain settings.');
-}
 
 ipcMain.on('clipboardReadBuffer', (event, format) => {
     event.returnValue = clipboard.readBuffer(format);
@@ -1143,8 +1171,10 @@ ipcMain.on('clipboardWriteBuffer', (event, { format, buffer }) => {
     event.returnValue = true;
 });
 
+const requireToolchainWindow = (event) => requireProjectWindow(event, 'Only a project window can access toolchain settings.');
+
 ipcMain.handle('providerToolchainGet', async (event, kind) => {
-    requireMainWindow(event);
+    requireToolchainWindow(event);
     const settings = await providerToolchainStore.get();
     const overridePath = kind === 'python' ? settings.python.interpreterPath : settings.cpp.compilerPath;
     const guess = kind === 'python' ? await autoDetectPythonInterpreter() : (await autoDetectCppCompiler()).compiler;
@@ -1153,7 +1183,7 @@ ipcMain.handle('providerToolchainGet', async (event, kind) => {
 });
 
 ipcMain.handle('providerToolchainSet', async (event, { kind, path }) => {
-    requireMainWindow(event);
+    requireToolchainWindow(event);
     const trimmed = (path ?? '').trim();
     if (trimmed) {
         const test = await testToolchainPath(kind, trimmed);
@@ -1164,13 +1194,13 @@ ipcMain.handle('providerToolchainSet', async (event, { kind, path }) => {
 });
 
 ipcMain.handle('providerToolchainTest', async (event, { kind, path }) => {
-    requireMainWindow(event);
+    requireToolchainWindow(event);
     return testToolchainPath(kind, path);
 });
 
 ipcMain.handle('providerToolchainBrowse', async (event, kind) => {
-    requireMainWindow(event);
-    const result = await dialog.showOpenDialog(mainWindow, {
+    requireToolchainWindow(event);
+    const result = await dialog.showOpenDialog(getWindowFromEvent(event), {
         title: kind === 'python' ? 'Select a Python interpreter' : 'Select a C++ compiler',
         properties: ['openFile'],
         ...(process.platform === 'win32' ? { filters: [{ name: 'Executable', extensions: ['exe'] }] } : {})
@@ -1184,13 +1214,13 @@ ipcMain.handle('providerToolchainBrowse', async (event, kind) => {
 // leaves it to the engine's own default rather than persisting a specific choice, so a future
 // change to that default reaches users who never touched this setting.
 ipcMain.handle('providerExecutionModeGet', async (event) => {
-    requireMainWindow(event);
+    requireToolchainWindow(event);
     const settings = await providerToolchainStore.get();
     return { executionMode: settings.executionMode, options: providerExecutionModes };
 });
 
 ipcMain.handle('providerExecutionModeSet', async (event, executionMode) => {
-    requireMainWindow(event);
+    requireToolchainWindow(event);
     const settings = await providerToolchainStore.set('executionMode', executionMode);
     return { executionMode: settings.executionMode };
 });
@@ -1329,6 +1359,7 @@ ipcMain.handle('engineRun', async (event, content, configuration) => {
 
 ipcMain.handle('engineStart', async (event, content, configuration) => {
     const owner = event.sender;
+    const projectWindow = getWindowFromEvent(event);
     let execution;
     let latestUpdate = null;
     let updateTimer = null;
@@ -1347,7 +1378,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         onUpdate: (result) => {
             const job = activeEngineJobs.get(execution.jobId);
             if (job) job.latestResult = result;
-            updateVisualizerResult(execution.jobId, result);
+            updateVisualizerResult(projectWindow, execution.jobId, result);
             latestUpdate = { jobId: execution.jobId, result: projectLiveResult(result) };
             updateTimer ??= setTimeout(flushUpdate, 100);
         }
@@ -1360,7 +1391,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         latestUpdate = null;
         const reader = await openIndexedResult(execution.resultPath);
         completedEngineResults.set(execution.jobId, { result, reader, cleanup: execution.cleanup, path: execution.resultPath });
-        updateVisualizerResult(execution.jobId, result);
+        updateVisualizerResult(projectWindow, execution.jobId, result);
         if (!owner.isDestroyed()) owner.send('engineRunComplete', {
             jobId: execution.jobId,
             result: rendererResultProjection(result)
@@ -1400,7 +1431,7 @@ ipcMain.handle('engineCancel', async (event, jobId) => {
 });
 
 ipcMain.handle('engineReadResultSeries', async (event, jobId, signalIds, options) => {
-    if (!senderIs(mainWindow, event)) return [];
+    if (!senderIsProjectWindow(event)) return [];
     const stored = completedEngineResults.get(jobId);
     if (!stored) return [];
     const result = {
@@ -1415,14 +1446,14 @@ ipcMain.handle('engineReadResultSeries', async (event, jobId, signalIds, options
 });
 
 ipcMain.handle('engineReadResultSample', async (event, jobId, time) => {
-    if (!senderIs(mainWindow, event)) return null;
+    if (!senderIsProjectWindow(event)) return null;
     const stored = completedEngineResults.get(jobId);
     if (!stored) return null;
     return structuredClone(await stored.reader.readNearestSample(Number(time)));
 });
 
 ipcMain.handle('engineReleaseResult', async (event, jobId) => {
-    if (!senderIs(mainWindow, event)) return false;
+    if (!senderIsProjectWindow(event)) return false;
     const stored = completedEngineResults.get(jobId);
     if (!stored) return false;
     completedEngineResults.delete(jobId);
@@ -1441,12 +1472,42 @@ app.whenReady().then(async () => {
     providerToolchainStore = createProviderToolchainStore({
         directory: join(app.getPath('userData'), 'providers')
     });
-    createWindow();
-    if (!process.argv.includes('--interaction-test')) checkForUpdates();
+    const firstWindow = createProjectWindow();
+
+    // These CLI-driven harness hooks are wired only for this one, first-created window --
+    // never inside createProjectWindow() itself, since that factory is also used for every
+    // window a user opens via "New Window" (and every window the interaction-test suite itself
+    // opens to exercise multi-window behavior), which must never recursively re-run the suite.
+    if (process.argv.includes('--interaction-test')) {
+        firstWindow.webContents.once('did-finish-load', async () => {
+            try {
+                const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
+                await runInteractionTests(firstWindow);
+                app.exit(0);
+            } catch (error) {
+                console.error(error);
+                app.exit(1);
+            }
+        });
+    } else {
+        checkForUpdates(firstWindow);
+    }
+    if (process.argv.includes('--generate-example-thumbnails')) {
+        firstWindow.webContents.once('did-finish-load', async () => {
+            try {
+                const { generateExampleThumbnails } = await import('../tests/generateExampleThumbnails.mjs');
+                await generateExampleThumbnails(firstWindow);
+                app.exit(0);
+            } catch (error) {
+                console.error(error);
+                app.exit(1);
+            }
+        });
+    }
 
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+        if (projectWindows.size === 0) {
+            createProjectWindow();
         }
     });
 });

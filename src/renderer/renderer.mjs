@@ -6023,15 +6023,6 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
     }
 }
 
-async function newProject() {
-    if (simulationRunning) return;
-    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
-    await loadProjectDocument(emptyProjectDocument);
-    activeExampleId = null;
-    $('#exampleGuideButton').hidden = true;
-    $('#statusText').textContent = 'New project';
-}
-
 async function loadExample(id) {
     if (!id) return;
     try {
@@ -6202,7 +6193,7 @@ async function openExamplesExplorer() {
     $('#examplesExplorerSearch').focus();
 }
 
-$('#newButton').addEventListener('click', newProject);
+$('#newWindowButton').addEventListener('click', () => window.windowControls.newWindow());
 $('#loadButton').addEventListener('click', openProject);
 $('#saveButton').addEventListener('click', () => saveProject());
 $('#saveEncryptedButton').addEventListener('click', async (event) => {
@@ -6980,7 +6971,7 @@ $('#copySelection').addEventListener('click', copySelectedGraph);
 $('#pasteSelection').addEventListener('click', pasteGraph);
 window.addEventListener('focus', updateSelectionActionControls);
 
-$('#newButton').dataset.tooltip = `New project (${isMac ? '⌘N' : 'Ctrl+N'})`;
+$('#newWindowButton').dataset.tooltip = `New window (${isMac ? '⌘N' : 'Ctrl+N'})`;
 $('#loadButton').dataset.tooltip = `Open project (${isMac ? '⌘O' : 'Ctrl+O'})`;
 $('#saveButton').dataset.tooltip = `Save project (${isMac ? '⌘S' : 'Ctrl+S'})`;
 updateEncryptionControls();
@@ -7109,7 +7100,7 @@ window.addEventListener('keydown', (event) => {
     }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'n') {
         event.preventDefault();
-        newProject();
+        window.windowControls.newWindow();
         return;
     }
     if (!isEditing && commandKey && event.key.toLowerCase() === 'o') {

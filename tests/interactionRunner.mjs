@@ -154,6 +154,51 @@ export async function runInteractionTests(window) {
         assert.ok(BrowserWindow.getAllWindows().some((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide')), 'Example guide did not reopen.');
     });
 
+    await run('a second project window opens independently and does not affect the first', async () => {
+        const before = BrowserWindow.getAllWindows();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        let second = null;
+        const openStartedAt = Date.now();
+        while (Date.now() - openStartedAt < 5000 && !second) {
+            second = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
+            if (!second) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(second, 'A new project window did not open.');
+        await waitFor(second, `document.querySelector('.documentTitle')`, 'Second window did not finish loading.');
+
+        // Independence: the new window starts blank regardless of what's loaded in the first
+        // (the first window has an example loaded by this point in the suite).
+        assert.equal(await evaluate(second, `document.querySelectorAll('.node-label-container').length`), 0);
+
+        // An auxiliary window (About) opened from each project window stays scoped to its own
+        // parent -- win.getParentWindow() is a free, exact check since auxiliaryWindowPresentation
+        // already sets `parent:` on every auxiliary window.
+        const findAboutWindowFor = async (parent) => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 5000) {
+                const found = BrowserWindow.getAllWindows().find((candidate) => candidate.getParentWindow() === parent && candidate.getTitle().includes('About'));
+                if (found) return found;
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            throw new Error('About window did not open for its project window.');
+        };
+        await evaluate(window, `window.applicationInfo.openAbout()`);
+        await evaluate(second, `window.applicationInfo.openAbout()`);
+        const aboutFromFirst = await findAboutWindowFor(window);
+        const aboutFromSecond = await findAboutWindowFor(second);
+        assert.notEqual(aboutFromFirst, aboutFromSecond, 'Each project window should get its own About window.');
+        aboutFromFirst.close();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.ok(!aboutFromSecond.isDestroyed(), "Closing window A's About window must not affect window B's.");
+        aboutFromSecond.close();
+
+        // Closing a project window must not quit the app or affect the other window.
+        second.close();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.ok(!window.isDestroyed(), 'Closing the second window destroyed the first.');
+        assert.equal(await evaluate(window, `1 + 1`), 2, 'The first window is no longer responsive after the second closed.');
+    });
+
     await run('validation summary reports and displays a valid model', async () => {
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'C++ validation report did not reach the UI.');
         assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('error')`), false);

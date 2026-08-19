@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('windowControls', Object.freeze({
 }));
 
 contextBridge.exposeInMainWorld('exampleGuide', Object.freeze({
-    onContent: (callback) => ipcRenderer.on('exampleGuideContent', (_event, payload) => callback(payload))
+    onContent: (callback) => ipcRenderer.on('exampleGuideContent', (_event, payload) => callback(payload)),
+    openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url)
 }));

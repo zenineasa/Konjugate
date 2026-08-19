@@ -175,11 +175,7 @@ async function checkForUpdates() {
     if (response === 0) shell.openExternal(update.url);
 }
 
-async function openExampleGuide(id) {
-    if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
-    const guideName = id.replace(/\.kjt$/, '.md');
-    const markdown = await readFile(join(examplesDir, guideName), 'utf8');
-    const payload = { id, title: exampleLabel(id), markdown };
+async function openGuideWindow(payload) {
     if (!exampleGuideWindow || exampleGuideWindow.isDestroyed()) {
         exampleGuideWindow = new BrowserWindow({
             width: 720,
@@ -190,7 +186,7 @@ async function openExampleGuide(id) {
             minHeight: 420,
             frame: false,
             backgroundColor: '#09131b',
-            title: `${payload.title} · Example Guide`,
+            title: `${payload.title} · ${payload.kind === 'about' ? 'About' : 'Example Guide'}`,
             webPreferences: {
                 preload: join(currentDir, 'exampleGuide', 'preload.cjs'),
                 contextIsolation: true,
@@ -204,12 +200,34 @@ async function openExampleGuide(id) {
         exampleGuideWindow.webContents.once('did-finish-load', () => exampleGuideWindow?.webContents.send('exampleGuideContent', payload));
         await exampleGuideWindow.loadFile(join(currentDir, 'exampleGuide', 'index.html'));
     } else {
-        exampleGuideWindow.setTitle(`${payload.title} · Example Guide`);
+        exampleGuideWindow.setTitle(`${payload.title} · ${payload.kind === 'about' ? 'About' : 'Example Guide'}`);
         exampleGuideWindow.webContents.send('exampleGuideContent', payload);
         exampleGuideWindow.show();
         exampleGuideWindow.focus();
     }
     return true;
+}
+
+async function openExampleGuide(id) {
+    if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
+    const guideName = id.replace(/\.kjt$/, '.md');
+    const markdown = await readFile(join(examplesDir, guideName), 'utf8');
+    return openGuideWindow({
+        id,
+        title: exampleLabel(id),
+        markdown,
+        kind: 'example'
+    });
+}
+
+async function openAboutWindow() {
+    const markdown = (await readFile(join(currentDir, '..', 'docs', 'About.md'), 'utf8'))
+        .replace('**runtime version**', `**${app.getVersion()}**`);
+    return openGuideWindow({
+        title: 'Konjugate',
+        markdown,
+        kind: 'about'
+    });
 }
 
 function openProviderEditorWindow(ownerWebContents, payload) {
@@ -542,6 +560,14 @@ ipcMain.on('windowClose', (event) => {
     if (!targetWindow) return;
     if (senderOwnsWindow(event.sender, mainWindow)) app.quit();
     else targetWindow.close();
+});
+
+ipcMain.handle('applicationInfo', () => ({ version: app.getVersion() }));
+ipcMain.handle('applicationOpenAbout', () => openAboutWindow());
+ipcMain.handle('applicationOpenExternal', (event, url) => {
+    if (typeof url !== 'string' || !['https://discord.gg/', 'https://github.com/zenineasa/Konjugate/'].some((prefix) => url.startsWith(prefix))) return false;
+    shell.openExternal(url);
+    return true;
 });
 
 ipcMain.handle('diagnosticsList', () => listDiagnostics());

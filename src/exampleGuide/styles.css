@@ -20,6 +20,9 @@ h1 { margin: 0 0 8px; color: #e6f0f2; font-size: 28px; letter-spacing: -.03em; }
 h2 { margin: 32px 0 10px; padding-top: 14px; color: #cfe0e3; border-top: 1px solid #263a44; font-size: 17px; }
 h3 { margin: 22px 0 8px; color: #b8ced2; font-size: 13px; }
 p, li { font-size: 12px; line-height: 1.75; }
+a { color: #83d7cf; }
+a:hover, a:focus-visible { color: #b5efea; }
+img { max-width: 100%; height: auto; }
 ul { padding-left: 21px; }
 code { padding: 2px 5px; color: #83d7cf; background: #10242b; border-radius: 4px; }
 pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243944; border-radius: 7px; }

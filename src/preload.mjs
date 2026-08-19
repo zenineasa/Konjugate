@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld('windowControls', {
     }
 });
 
+contextBridge.exposeInMainWorld('applicationInfo', {
+    get: () => ipcRenderer.invoke('applicationInfo'),
+    openAbout: () => ipcRenderer.invoke('applicationOpenAbout')
+});
+
 contextBridge.exposeInMainWorld('diagnostics', {
     list: () => ipcRenderer.invoke('diagnosticsList'),
     onIssue: (callback) => {

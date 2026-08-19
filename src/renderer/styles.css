@@ -54,7 +54,8 @@ input, select { user-select: text; }
 }
 .windowTitle { display: flex; align-items: center; gap: 8px; padding-left: 13px; font-size: 11px; }
 .windowTitle img { width: 18px; height: 18px; }
-.windowTitle strong { font-size: 12px; }
+.windowTitle .aboutButton { padding: 3px 5px; color: #eff8fa; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 12px; font-weight: 700; outline: 0; -webkit-app-region: no-drag; }
+.windowTitle .aboutButton:hover, .windowTitle .aboutButton:focus-visible { background: #121d25; border-color: #263641; }
 .windowTitle .documentTitle { margin-left: 18px; padding: 3px 5px; color: #82949f; background: transparent; border: 1px solid transparent; border-radius: 4px; font-weight: 450; -webkit-app-region: no-drag; }
 .windowTitle .documentTitle:hover { color: #c4d2d8; background: #121d25; border-color: #263641; }
 .documentTitleInput { width: 170px; height: 25px; margin-left: 18px; padding: 0 5px; color: #d5e2e7; background: #111d25; border: 1px solid #34505c; border-radius: 4px; outline: 0; font-size: 11px; -webkit-app-region: no-drag; }

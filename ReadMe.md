@@ -15,7 +15,7 @@ Rather than requiring users to manually assemble large system-level formulations
 		<th align="center">Latest release</th>
 	</tr>
 	<tr>
-		<td align="center"><a href="https://discord.gg/WPUzNyC3S"><img src="https://img.shields.io/discord/1539540735404277771?label=Join%20Discord&logo=discord&logoColor=white&style=for-the-badge" alt="Join the Konjugate community on Discord"></a></td>
+		<td align="center"><a href="https://discord.gg/WPUzNyC3S"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?logo=discord&logoColor=white&style=for-the-badge" alt="Join the Konjugate community on Discord"></a></td>
 		<td align="center"><a href="https://github.com/zenineasa/Konjugate/releases/latest"><img src="https://img.shields.io/github/v/release/zenineasa/Konjugate?label=Download%20Latest%20Release&style=for-the-badge" alt="Download the latest Konjugate release"></a></td>
 	</tr>
 </table>
@@ -180,4 +180,4 @@ Ideas, discussions and contributions are welcome.
 
 This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE) for details.
 
-Copyright &copy; 2026 Zenin Easa Panthakkalakath
+Copyright © 2026 Zenin Easa Panthakkalakath

@@ -514,6 +514,11 @@ function initializeWindowControls() {
 
 initializeWindowControls();
 
+window.applicationInfo.get().then(({ version }) => {
+    $('#aboutButton').dataset.tooltip = `Konjugate · version ${version}`;
+});
+$('#aboutButton').addEventListener('click', () => window.applicationInfo.openAbout());
+
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a131b, 0.022);
 

@@ -25,11 +25,43 @@ import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSerie
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation } from './windowLifecycle.mjs';
+import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
 }
+
+// macOS can fire 'open-file' (double-click on a .kjt) before 'ready' resolves on a cold
+// launch -- queued here and drained once app.whenReady() runs, rather than assuming a window
+// already exists. openOrFocusProjectFile/parseKjtPathFromArgv are function declarations
+// defined further down; referencing them here is safe since neither handler below can run
+// before the rest of this module (and their const dependencies) has finished evaluating.
+const openFileQueue = [];
+app.on('open-file', (event, path) => {
+    event.preventDefault();
+    if (app.isReady()) openOrFocusProjectFile(path);
+    else openFileQueue.push(path);
+});
+
+// Must run after the userData override above (requestSingleInstanceLock's lock file lives
+// under userData) so interaction-test/thumbnail runs never false-positive collide with a real
+// running instance, or each other in CI, by checking the default profile's lock file instead.
+if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    process.exit(0);
+}
+app.on('second-instance', (_event, argv) => {
+    const path = parseKjtPathFromArgv(argv);
+    if (path) {
+        openOrFocusProjectFile(path);
+        return;
+    }
+    const [anyProjectWindow] = projectWindows;
+    if (anyProjectWindow?.isMinimized()) anyProjectWindow.restore();
+    anyProjectWindow?.show();
+    anyProjectWindow?.focus();
+});
 
 // Backstop for anything logged via console.error/console.warn -- including paths nobody has
 // explicitly wired up to a UI element -- so it still reaches the renderer's diagnostics panel
@@ -67,9 +99,15 @@ function createProjectWindowState() {
     return {
         exampleGuideWindow: null, exampleGuideBounds: null,
         providerEditorWindow: null, providerEditorBounds: null, providerEditorOwner: null, pendingProviderApply: null,
-        analysisWindow: null, analysisAddonId: null, visualizerManifest: null, visualizerSession: null
+        analysisWindow: null, analysisAddonId: null, visualizerManifest: null, visualizerSession: null,
+        currentProjectPath: null
     };
 }
+// A window created specifically to open an OS-provided file (double-click, second-instance
+// argv, macOS open-file) stores its decode outcome here -- keyed by promise rather than a
+// plain value so it's set synchronously at window-creation time (avoiding a race against the
+// renderer's own pending-open pull, which can fire before an async readFile/decode settles).
+const pendingWindowOpens = new WeakMap();
 const addonRegistry = new Map();
 const activeEngineJobs = new Map();
 const completedEngineResults = new Map();
@@ -126,7 +164,9 @@ function installCustomWindowState(window) {
     });
 }
 
-function createProjectWindow() {
+// pendingFileOpen, when given, is a Promise resolving to the payload the new window's
+// renderer will pull via projectPendingOpen once it's ready to load a project.
+function createProjectWindow(pendingFileOpen) {
     const window = new BrowserWindow({
         width: 1200,
         height: 760,
@@ -146,6 +186,7 @@ function createProjectWindow() {
     });
     projectWindows.add(window);
     projectWindowState.set(window, createProjectWindowState());
+    if (pendingFileOpen) pendingWindowOpens.set(window, pendingFileOpen);
     window.on('closed', () => projectWindows.delete(window));
 
     const owner = window.webContents;
@@ -161,6 +202,28 @@ function createProjectWindow() {
 
     window.loadFile(join(currentDir, 'renderer', 'index.html'));
     return window;
+}
+
+function findProjectWindowByPath(path) {
+    for (const projectWindow of projectWindows) {
+        if (projectWindowState.get(projectWindow).currentProjectPath === path) return projectWindow;
+    }
+    return null;
+}
+
+// The single entry point for every OS-initiated open (double-click, second-instance argv,
+// macOS open-file): reuses an already-open window on this exact file rather than opening a
+// confusing duplicate, otherwise opens a new window and lets its renderer pull the decoded
+// (or failed) payload once it's ready via projectPendingOpen.
+function openOrFocusProjectFile(path) {
+    const existing = findProjectWindowByPath(path);
+    if (existing) {
+        if (existing.isMinimized()) existing.restore();
+        existing.show();
+        existing.focus();
+        return;
+    }
+    createProjectWindow(readProjectFilePayload(path).catch((error) => ({ error: error.message })));
 }
 
 async function checkForUpdates(window) {
@@ -356,6 +419,19 @@ async function decodeProjectForRenderer(bytes, options = {}) {
     const bundle = await decodeProjectBundle(bytes, options);
     JSON.parse(bundle.content);
     return { content: bundle.content, embeddedResult: await createEmbeddedResultSession(bundle.result) };
+}
+
+// Shared by the dialog-driven projectOpen handler and every OS-initiated open (double-click,
+// second-instance argv, macOS open-file) -- everything projectOpen does after its own
+// dialog.showOpenDialog call, factored out so neither path duplicates the encrypted/decode logic.
+async function readProjectFilePayload(path) {
+    const bytes = await readFile(path);
+    const inspection = inspectProjectFile(bytes);
+    if (inspection.encrypted) {
+        pendingEncryptedPaths.add(path);
+        return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
+    }
+    return { path, fileName: basename(path), encrypted: false, ...await decodeProjectForRenderer(bytes) };
 }
 
 function beginApplicationShutdown() {
@@ -802,13 +878,7 @@ ipcMain.handle('projectOpen', async (event) => {
     if (result.canceled) return null;
     const [path] = result.filePaths;
     if (!path.toLowerCase().endsWith('.kjt')) throw new Error('Only .kjt project files are supported.');
-    const bytes = await readFile(path);
-    const inspection = inspectProjectFile(bytes);
-    if (inspection.encrypted) {
-        pendingEncryptedPaths.add(path);
-        return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
-    }
-    return { path, fileName: basename(path), encrypted: false, ...await decodeProjectForRenderer(bytes) };
+    return readProjectFilePayload(path);
 });
 
 ipcMain.handle('projectUnlock', async (_event, { path, password }) => {
@@ -816,6 +886,24 @@ ipcMain.handle('projectUnlock', async (_event, { path, password }) => {
     const project = await decodeProjectForRenderer(await readFile(path), { password });
     pendingEncryptedPaths.delete(path);
     return { path, fileName: basename(path), encrypted: true, ...project };
+});
+
+// Pull-based rather than pushed against a fresh window's did-finish-load: lets the renderer
+// ask "was I opened with a file?" once on its own startup and reuse its existing open/unlock
+// UI verbatim, rather than timing a webContents.send() against a load that can itself fail.
+ipcMain.handle('projectPendingOpen', (event) => {
+    const window = getWindowFromEvent(event);
+    const pending = pendingWindowOpens.get(window);
+    if (pending) pendingWindowOpens.delete(window);
+    return pending ?? null;
+});
+
+// Lets openOrFocusProjectFile find an already-open window on the same file instead of opening
+// a confusing duplicate -- main has no other visibility into which window has which file open.
+ipcMain.on('projectPathChanged', (event, path) => {
+    if (!senderIsProjectWindow(event)) return;
+    const state = projectWindowState.get(getWindowFromEvent(event));
+    if (state) state.currentProjectPath = path || null;
 });
 
 ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename, password, resultSessionId }) => {
@@ -1472,7 +1560,16 @@ app.whenReady().then(async () => {
     providerToolchainStore = createProviderToolchainStore({
         directory: join(app.getPath('userData'), 'providers')
     });
-    const firstWindow = createProjectWindow();
+
+    // A file passed on the initial launch (Windows/Linux double-click, or a path Electron
+    // handed us via process.argv) opens directly into the first window rather than opening
+    // blank and then a second one; any additional macOS open-file paths queued before ready
+    // get their own window each via the normal open-or-focus routing.
+    const initialPath = parseKjtPathFromArgv(process.argv) ?? openFileQueue.shift() ?? null;
+    const firstWindow = initialPath
+        ? createProjectWindow(readProjectFilePayload(initialPath).catch((error) => ({ error: error.message })))
+        : createProjectWindow();
+    for (const queuedPath of openFileQueue.splice(0)) openOrFocusProjectFile(queuedPath);
 
     // These CLI-driven harness hooks are wired only for this one, first-created window --
     // never inside createProjectWindow() itself, since that factory is also used for every

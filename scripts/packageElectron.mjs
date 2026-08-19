@@ -32,6 +32,24 @@ export function createPackageOptions({ platform, arch, appVersion, icon, name, a
         appVersion,
         icon,
         appBundleId: platform === 'darwin' ? appBundleId : undefined,
+        // Registers .kjt as a Konjugate document type in Info.plist -- CFBundleDocumentTypes is
+        // the legacy declaration most of macOS still keys off; UTExportedTypeDeclarations is the
+        // modern UTI counterpart Launch Services increasingly expects alongside it.
+        extendInfo: platform === 'darwin' ? {
+            CFBundleDocumentTypes: [{
+                CFBundleTypeName: 'Konjugate Project',
+                CFBundleTypeRole: 'Editor',
+                LSItemContentTypes: ['com.konjugate.kjt'],
+                LSHandlerRank: 'Owner',
+                CFBundleTypeExtensions: ['kjt']
+            }],
+            UTExportedTypeDeclarations: [{
+                UTTypeIdentifier: 'com.konjugate.kjt',
+                UTTypeConformsTo: ['public.data'],
+                UTTypeDescription: 'Konjugate Project',
+                UTTypeTagSpecification: { 'public.filename-extension': ['kjt'] }
+            }]
+        } : undefined,
         extraResource: [
             'out/packageResources/engine',
             'thirdPartyNotices.md',

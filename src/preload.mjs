@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('projectFiles', {
     loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),
     openExampleGuide: (id) => ipcRenderer.invoke('projectOpenExampleGuide', id),
     open: () => ipcRenderer.invoke('projectOpen'),
+    pendingOpen: () => ipcRenderer.invoke('projectPendingOpen'),
+    pathChanged: (path) => ipcRenderer.send('projectPathChanged', path),
     unlock: (path, password) => ipcRenderer.invoke('projectUnlock', { path, password }),
     save: (path, content, suggestedFilename, password, resultSessionId) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password, resultSessionId }),
     exportResultsCsv: (suggestedFilename, csv) => ipcRenderer.invoke('projectExportResultsCsv', { suggestedFilename, csv }),

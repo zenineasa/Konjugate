@@ -1,7 +1,8 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import assert from 'node:assert/strict';
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
+import { join } from 'node:path';
 
 async function evaluate(window, expression) {
     return window.webContents.executeJavaScript(expression, true);
@@ -197,6 +198,45 @@ export async function runInteractionTests(window) {
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.ok(!window.isDestroyed(), 'Closing the second window destroyed the first.');
         assert.equal(await evaluate(window, `1 + 1`), 2, 'The first window is no longer responsive after the second closed.');
+    });
+
+    await run('an OS-initiated file open reuses an already-open window on the same file, otherwise opens a new one', async () => {
+        // Simulates exactly what a real double-click (or a relaunch's second-instance argv, on
+        // Windows/Linux) drives main.mjs's own app.on('open-file', ...) listener to do -- no OS
+        // automation needed, since main.mjs never distinguishes a real 'open-file' from this one.
+        const examplePath = join(process.cwd(), 'examples', 'pumpSuctionHydraulics.kjt');
+
+        const beforeFirstOpen = BrowserWindow.getAllWindows();
+        app.emit('open-file', { preventDefault() {} }, examplePath);
+        let opened = null;
+        const openStartedAt = Date.now();
+        while (Date.now() - openStartedAt < 5000 && !opened) {
+            opened = BrowserWindow.getAllWindows().find((candidate) => !beforeFirstOpen.includes(candidate));
+            if (!opened) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(opened, 'An OS-initiated open of a valid .kjt file did not open a new window.');
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The OS-opened file did not load into the new window.');
+        assert.equal(await evaluate(opened, `document.querySelector('.documentTitle').textContent`), 'pumpSuctionHydraulics');
+        // Give the new window's pathChanged push time to reach main before re-opening the same path.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const beforeSecondOpen = BrowserWindow.getAllWindows();
+        app.emit('open-file', { preventDefault() {} }, examplePath);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.deepEqual(BrowserWindow.getAllWindows(), beforeSecondOpen, 'Opening the same file again should focus the existing window, not open a duplicate.');
+        opened.close();
+
+        const beforeBadOpen = BrowserWindow.getAllWindows();
+        app.emit('open-file', { preventDefault() {} }, join(process.cwd(), 'examples', 'doesNotExist.kjt'));
+        let failedWindow = null;
+        const badOpenStartedAt = Date.now();
+        while (Date.now() - badOpenStartedAt < 5000 && !failedWindow) {
+            failedWindow = BrowserWindow.getAllWindows().find((candidate) => !beforeBadOpen.includes(candidate));
+            if (!failedWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(failedWindow, 'An OS-initiated open of a missing file did not open a window at all.');
+        await waitFor(failedWindow, `document.querySelector('#statusText').textContent.startsWith('Load failed')`, 'A missing file did not surface a load-failed status instead of crashing.');
+        failedWindow.close();
     });
 
     await run('validation summary reports and displays a valid model', async () => {

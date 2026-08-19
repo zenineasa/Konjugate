@@ -4431,6 +4431,7 @@ async function loadProjectDocument(document, {
     updateRelationships();
     updateModelStatus();
     currentProjectPath = path;
+    window.projectFiles.pathChanged(currentProjectPath);
     currentProjectFilename = fileName;
     currentProjectPassword = password;
     documentController.reset({ saved });
@@ -5929,37 +5930,62 @@ $('#addButton').addEventListener('click', (event) => {
     openAddPalette(rect.left, rect.bottom + 3);
 });
 
+// Shared by openProject() (dialog-driven) and checkPendingProjectOpen() (an OS-initiated
+// open this window was created for) -- everything after a file/requiresPassword payload has
+// already been obtained, including the password-retry loop.
+async function loadOpenedProjectFile(file) {
+    let password = null;
+    let passwordError = '';
+    while (file.requiresPassword) {
+        password = await requestProjectPassword({
+            error: passwordError,
+            title: `Unlock ${file.fileName}`,
+            hint: `Enter the password for ${file.fileName}.`
+        });
+        if (password === null) return;
+        try {
+            file = await window.projectFiles.unlock(file.path, password);
+        } catch {
+            passwordError = 'Incorrect password, or this project has been modified.';
+        }
+    }
+    await loadProjectDocument(JSON.parse(file.content), {
+        path: file.path,
+        fileName: file.fileName,
+        password: file.encrypted ? password : null,
+        embeddedResult: file.embeddedResult
+    });
+    activeExampleId = null;
+    $('#exampleGuideButton').hidden = true;
+    $('#statusText').textContent = file.embeddedResult ? 'Project and simulation results loaded' : 'Project loaded';
+}
+
 async function openProject() {
     if (simulationRunning) return;
     try {
         if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) &&
             !await window.projectFiles.confirmDiscard()) return;
-        let file = await window.projectFiles.open();
+        const file = await window.projectFiles.open();
         if (!file) return;
-        let password = null;
-        let passwordError = '';
-        while (file.requiresPassword) {
-            password = await requestProjectPassword({
-                error: passwordError,
-                title: `Unlock ${file.fileName}`,
-                hint: `Enter the password for ${file.fileName}.`
-            });
-            if (password === null) return;
-            try {
-                file = await window.projectFiles.unlock(file.path, password);
-            } catch {
-                passwordError = 'Incorrect password, or this project has been modified.';
-            }
-        }
-        await loadProjectDocument(JSON.parse(file.content), {
-            path: file.path,
-            fileName: file.fileName,
-            password: file.encrypted ? password : null,
-            embeddedResult: file.embeddedResult
-        });
-        activeExampleId = null;
-        $('#exampleGuideButton').hidden = true;
-        $('#statusText').textContent = file.embeddedResult ? 'Project and simulation results loaded' : 'Project loaded';
+        await loadOpenedProjectFile(file);
+    } catch (error) {
+        console.error(error);
+        $('#statusText').textContent = `Load failed · ${error.message}`;
+    }
+}
+
+// Asks main whether this window was created specifically to open an OS-provided file (a
+// double-click, a relaunch's argv, or macOS's open-file) -- called once at startup so a fresh
+// window can load straight into that file using the exact same UI as a manual Open.
+async function checkPendingProjectOpen() {
+    const pending = await window.projectFiles.pendingOpen();
+    if (!pending) return;
+    if (pending.error) {
+        $('#statusText').textContent = `Load failed · ${pending.error}`;
+        return;
+    }
+    try {
+        await loadOpenedProjectFile(pending);
     } catch (error) {
         console.error(error);
         $('#statusText').textContent = `Load failed · ${error.message}`;
@@ -7162,6 +7188,7 @@ setTool('select');
 setCameraView('orbit', false);
 updateModelStatus();
 initializeAddonToolstripContributions();
+checkPendingProjectOpen();
 
 let lastRenderTime = 0;
 function render(time) {

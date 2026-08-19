@@ -89,6 +89,13 @@ Section "-Application" SecApp
   WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
+
+  ; Associates .kjt with a Konjugate ProgID so double-clicking a project file opens it.
+  WriteRegStr HKCR ".kjt" "" "${APP_ID}.Project"
+  WriteRegStr HKCR "${APP_ID}.Project" "" "${APP_NAME} Project"
+  WriteRegStr HKCR "${APP_ID}.Project\DefaultIcon" "" "$INSTDIR\${APP_NAME}.exe,0"
+  WriteRegStr HKCR "${APP_ID}.Project\shell\open\command" "" '"$INSTDIR\${APP_NAME}.exe" "%1"'
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)' ; SHCNE_ASSOCCHANGED, SHCNF_IDLIST
 SectionEnd
 
 Section "Uninstall"
@@ -101,4 +108,11 @@ Section "Uninstall"
   Delete "$DESKTOP\${APP_NAME}.lnk"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
   DeleteRegKey HKLM "Software\${APP_ID}"
+
+  DeleteRegKey HKCR "${APP_ID}.Project"
+  ; Only reclaim .kjt itself if it still points at this app -- another app may have taken it over.
+  ReadRegStr $0 HKCR ".kjt" ""
+  StrCmp $0 "${APP_ID}.Project" 0 +2
+    DeleteRegKey HKCR ".kjt"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 SectionEnd

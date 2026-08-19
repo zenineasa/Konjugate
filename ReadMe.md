@@ -8,9 +8,20 @@ The objective is to simplify the process of modelling complex physical systems b
 
 Rather than requiring users to manually assemble large system-level formulations, this project explores an approach where systems are represented as graphs of interconnected components. Components define their states and properties, while relationships define the equations governing how quantities are transported and transformed.
 
-![Konjugate Application Screenshot](assets/ForReadme/konjugateAppScreenshot.png)
+<div align="center">
+<table>
+	<tr>
+		<th align="center">Community</th>
+		<th align="center">Latest release</th>
+	</tr>
+	<tr>
+		<td align="center"><a href="https://discord.gg/WPUzNyC3S"><img src="https://img.shields.io/discord/1539540735404277771?label=Join%20Discord&logo=discord&logoColor=white&style=for-the-badge" alt="Join the Konjugate community on Discord"></a></td>
+		<td align="center"><a href="https://github.com/zenineasa/Konjugate/releases/latest"><img src="https://img.shields.io/github/v/release/zenineasa/Konjugate?label=Download%20Latest%20Release&style=for-the-badge" alt="Download the latest Konjugate release"></a></td>
+	</tr>
+</table>
+</div>
 
----
+![Konjugate Application Screenshot](assets/ForReadme/konjugateAppScreenshot.png)
 
 ## Why build another simulation software?
 
@@ -23,8 +34,6 @@ Some approaches begin with equations. Others focus on physical domains, block di
 This project explores another perspective: representing systems as networks of interconnected components. Components define their states and properties, while the relationships between them define the mathematical models governing how quantities are transferred and transformed.
 
 The goal is not to replace existing simulation tools, but to explore a flexible and composable framework for modelling complex engineering systems, enabling applications ranging from rapid system prototyping and conjugate multiphysics simulations to the development of digital twins.
-
----
 
 ## Viewing Systems as Networks of States and Relationships
 
@@ -76,13 +85,9 @@ Relationships may be unidirectional, such as an electrical input, diode current 
 
 ![Advanced multigraph with parallel thermal relationships and unidirectional electrical interactions](assets/ForReadme/advancedGraphRepresentation.png)
 
----
-
 ## Current Status
 
 This project is currently in the early stages of development.
-
----
 
 ## Development
 
@@ -130,8 +135,6 @@ Generated application bundles are stored in `out/package/`. Run `make clean` to 
 
 Every packaged application includes `thirdPartyNotices.md` and the applicable license texts under `thirdPartyLicenses/`. Packaging fails if these compliance files are missing. Native engine builds that include METIS receive the same files in their build directory. See [release packaging](docs/releasePackaging.md) for the host tools and packaged-runtime checks.
 
----
-
 ## Testing
 
 ```bash
@@ -148,8 +151,6 @@ npm run test:package
 ```
 
 This packages the app for the host platform (equivalent to `npm run package`) and then runs the engine and interaction suites against that package rather than the dev build. It's slower than the dev-mode suites, since it depends on a fresh package build each time, so treat it as a pre-release check rather than part of the fast dev loop. To run just one half, use `make verifyPackagedEngine` or `make verifyPackagedInteraction` (each also builds the package first).
-
----
 
 ## Vision and Roadmap
 
@@ -169,20 +170,14 @@ The roadmap includes:
 - extensible physics models,
 - AI-assisted modelling workflows.
 
----
-
 ## Contributing
 
 The project is currently focused on building a strong foundation.
 
 Ideas, discussions and contributions are welcome.
 
----
-
 ## License
 
 This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE) for details.
-
----
 
 Copyright &copy; 2026 Zenin Easa Panthakkalakath

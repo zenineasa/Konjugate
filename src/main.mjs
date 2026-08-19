@@ -294,8 +294,15 @@ async function openExampleGuide(projectWindow, id) {
     });
 }
 
+// docs/ is excluded wholesale from packaging (see ignoredTopLevelDirectories in
+// packageElectron.mjs) -- About.md is shipped individually as its own extraResource instead,
+// which @electron/packager copies flattened directly into Resources/, not Resources/docs/.
+function aboutMarkdownPath() {
+    return app.isPackaged ? join(process.resourcesPath, 'About.md') : join(currentDir, '..', 'docs', 'About.md');
+}
+
 async function openAboutWindow(projectWindow) {
-    const markdown = (await readFile(join(currentDir, '..', 'docs', 'About.md'), 'utf8'))
+    const markdown = (await readFile(aboutMarkdownPath(), 'utf8'))
         .replace('**runtime version**', `**${app.getVersion()}**`);
     return openGuideWindow(projectWindow, {
         title: 'Konjugate',

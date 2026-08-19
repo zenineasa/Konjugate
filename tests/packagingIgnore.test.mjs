@@ -46,6 +46,7 @@ test('Electron Packager options retain resources and macOS bundle ID', () => {
         'out/packageResources/engine',
         'thirdPartyNotices.md',
         'thirdPartyLicenses',
+        'docs/About.md',
     ]);
     assert.equal(options.ignore, shouldIgnorePackagePath);
 });

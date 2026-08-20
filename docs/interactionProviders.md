@@ -4,7 +4,7 @@
 
 ## Status
 
-This document originated as a pre-implementation architecture proposal. The initial vertical slice it scoped — stateless C++ and Python providers, evaluated inline with equation semantics — is now implemented, tested and in active use, and is described below as built rather than proposed. The broader architecture (reusable plugins, computational-node providers, FMU/live/remote providers, the public API, packaging) remains a direction for discussion and does not yet define a stable plugin ABI or engine protocol beyond the relationship/source-term provider contract described here. The central proposal is that a relationship, a node's own source term, and eventually a computational node, may delegate behavior to an execution provider supplied inline or by an engine plugin. Existing equations remain the simplest built-in provider.
+This document originated as a pre-implementation architecture proposal. The initial vertical slice it scoped — stateless C++ and Python providers, evaluated inline with equation semantics — is now implemented, tested and in active use, and is described below as built rather than proposed. Reusable `.kjp` packages now provide the first executable plugin slice for C++ and Python relationship providers, using the existing provider protocol rather than a second ABI. Computational-node providers, FMU/live/remote providers and the public API remain future directions. The central proposal is that a relationship, a node's own source term, and eventually a computational node, may delegate behavior to an execution provider supplied inline or by an engine plugin. Existing equations remain the simplest built-in provider.
 
 See [Implementation status](#implementation-status) for a concrete summary of what exists today versus what remains a proposal.
 
@@ -18,6 +18,8 @@ The first vertical slice is deliberately narrower than the complete architecture
 Both are managed local child processes using the same engine-owned protocol and lifecycle. The user writes the calculation, while a Konjugate-provided language wrapper handles protocol framing, binding tables and process startup. Provider source and binding metadata are stored with the project. The selected compiler or interpreter path remains a machine-local preference.
 
 The initial providers are stateless, accept bound scalar states (and, for relationships, parameters), and return one derivative contribution to an explicitly selected output state. They are evaluated with the same simulation-time semantics as an equation. Persistent provider state, computational-node providers, algebraic outputs, events and commands are deferred until checkpoint and solver interactions have been designed.
+
+The repository includes a minimal Python provider in [examples/providers](../examples/providers/README.md). It is the recommended starting point for understanding the author-facing provider contract before working on a larger model or future reusable plugin.
 
 The initial implementation does not integrate FMUs, Simulink, Modelica, hardware, remote services or arbitrary third-party applications. Those systems will generally require a dedicated plugin and protocol adapter. The generalized manifest, binding and lifecycle design should avoid preventing such plugins later, but no external-software integration is required to validate the first C++ and Python relationship providers.
 
@@ -42,7 +44,7 @@ This section is the concrete, current-state counterpart to the rest of this docu
 
 - Discovery among *multiple* compatible compilers/interpreters (today it's still auto-detect-one-or-manually-override, not a list to choose from); Windows/Linux auto-detection beyond the plain `c++`/`python3` fallback.
 - Recording compiler identity, build configuration and artifact hash in the project or results (see [Reproducibility and results](#reproducibility-and-results), [Packaging and portability](#packaging-and-portability)).
-- Everything scoped as a non-goal below: reusable plugin packaging, stateful/computational-node providers, algebraic outputs, events and commands, FMU/live/remote providers, the public engine API, and multi-output relationships.
+- Everything scoped as a non-goal below: stateful/computational-node providers, algebraic outputs, events and commands, FMU/live/remote providers, the public engine API, and multi-output relationships.
 
 ## Add-ons and plugins
 

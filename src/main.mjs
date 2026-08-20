@@ -30,6 +30,7 @@ import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
+import { inspectPackageArchive, installPackageArchive } from './packageArchive.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -492,7 +493,8 @@ async function discoverAddons() {
     addonRegistry.clear();
     const addonRoots = [
         join(currentDir, '..', 'addons'),
-        join(app.getPath('userData'), 'addons')
+        join(app.getPath('userData'), 'addons'),
+        join(app.getPath('userData'), 'packages', 'addons')
     ];
     for (const addonsDirectory of addonRoots) {
         const entries = await readdir(addonsDirectory, { withFileTypes: true }).catch(() => []);
@@ -919,6 +921,48 @@ ipcMain.handle('projectOpen', async (event) => {
     const [path] = result.filePaths;
     if (!path.toLowerCase().endsWith('.kjt')) throw new Error('Only .kjt project files are supported.');
     return readProjectFilePayload(path);
+});
+
+ipcMain.handle('packageInstall', async (event) => {
+    const targetWindow = getWindowFromEvent(event);
+    const result = await dialog.showOpenDialog(targetWindow, {
+        title: 'Install Konjugate package',
+        properties: ['openFile'],
+        filters: [{ name: 'Konjugate packages', extensions: ['kja', 'kjp'] }]
+    });
+    if (result.canceled) return null;
+    const [path] = result.filePaths;
+    const extension = path.toLowerCase().endsWith('.kja') ? '.kja' : path.toLowerCase().endsWith('.kjp') ? '.kjp' : null;
+    if (!extension) throw new Error('Only .kja add-ons and .kjp plugins can be installed.');
+    const archive = await readFile(path);
+    const inspected = inspectPackageArchive(archive, { extension });
+    const permissions = inspected.contributionManifest.permissions ?? [];
+    const detail = [
+        `${inspected.packageManifest.name} ${inspected.packageManifest.version}`,
+        `Publisher package: ${inspected.packageManifest.packageId}`,
+        `Type: ${inspected.packageManifest.packageType}`,
+        permissions.length ? `Permissions: ${permissions.join(', ')}` : 'Permissions: none'
+    ].join('\n');
+    const confirmation = await dialog.showMessageBox(targetWindow, {
+        type: 'question',
+        buttons: ['Cancel', 'Install'],
+        defaultId: 1,
+        cancelId: 0,
+        title: 'Review package installation',
+        message: `Install ${inspected.packageManifest.name}?`,
+        detail
+    });
+    if (confirmation.response !== 1) return null;
+    const installed = await installPackageArchive(archive, {
+        extension,
+        directory: join(app.getPath('userData'), 'packages')
+    });
+    await discoverAddons();
+    return {
+        packageType: installed.packageManifest.packageType,
+        packageId: installed.packageManifest.packageId,
+        version: installed.packageManifest.version
+    };
 });
 
 ipcMain.handle('projectUnlock', async (_event, { path, password }) => {
@@ -1442,6 +1486,7 @@ const engineOptions = async () => {
         applicationPath: app.getAppPath(),
         resourcesPath: process.resourcesPath,
         packaged: app.isPackaged,
+        pluginDirectory: join(app.getPath('userData'), 'packages'),
         providerToolchains: {
             cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
             python: { interpreterPath: resolvedPython ?? '' },

@@ -15,7 +15,7 @@ Konjugate uses two deliberately separate extension concepts. Confusing them is t
 | | Add-on (this document) | Plugin |
 | --- | --- | --- |
 | Layer | Electron application and presentation | Native engine and numerical execution |
-| Status | Implemented (API version 1, `resultVisualizer` kind only) | Proposed, not yet implemented |
+| Status | Implemented (API version 1, `resultVisualizer` kind only) | Implemented first slice: packaged C++/Python relationship providers |
 | Examples | Result visualizer, dashboard, modelling interface | Relationship provider, computational node, external-system adapter |
 | Runs where | A separate sandboxed Electron window, host-supplied bridge | Resolved and supervised by the native engine |
 | Model access | None — "no ability to edit the active model through API version 1" | Declared inputs/outputs only, no ambient authority |
@@ -44,6 +44,12 @@ Konjugate scans two locations when its main renderer starts:
 The user-data location follows the operating system. It is normally beneath `~/Library/Application Support` on macOS, `%APPDATA%` on Windows, and `$XDG_CONFIG_HOME` or `~/.config` on Linux. The final application-directory name is determined by the installed Konjugate build. Restart Konjugate after adding or removing an add-on; version 1 does not hot-reload manifests.
 
 During source development, placing the directory under the repository's `addons/` directory installs it as a bundled add-on.
+
+The repository includes a minimal working example in [Hello World add-on](helloWorldAddon.md). Start there before building a larger visualizer or dashboard.
+
+For end users, package the add-on as a `.kja` file and use the application's
+installer. See [Konjugate packages](packageDevelopment.md) for the portable
+package layout and safety checks.
 
 Invalid manifests are skipped. A diagnostic is written to the main-process console. Add-on IDs must be globally unique across bundled and user-installed add-ons; a duplicate is skipped.
 

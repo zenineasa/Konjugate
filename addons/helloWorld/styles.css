@@ -1,0 +1,57 @@
+/* Copyright © 2026 Konjugate contributors */
+
+:root {
+    color-scheme: dark;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    color: #e9f4f5;
+    background: #101b21;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    display: grid;
+    place-items: center;
+    background: radial-gradient(circle at 20% 10%, #234850 0, transparent 42%), #101b21;
+}
+
+main {
+    width: min(460px, calc(100vw - 48px));
+    padding: 36px;
+    border: 1px solid #37636b;
+    border-radius: 8px;
+    background: #16272d;
+    box-shadow: 0 24px 70px rgb(0 0 0 / 28%);
+}
+
+.kicker {
+    color: #66d8c9;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+h1 {
+    margin: 12px 0 8px;
+    font-size: 38px;
+    line-height: 1;
+}
+
+p { color: #a9c0c4; line-height: 1.5; }
+
+dl { margin: 28px 0 0; }
+
+dl div {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 12px 0;
+    border-top: 1px solid #29434a;
+}
+
+dt { color: #78959b; }
+dd { margin: 0; color: #e9f4f5; font-weight: 600; text-align: right; overflow-wrap: anywhere; }

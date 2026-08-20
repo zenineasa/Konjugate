@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Copyright © 2026 Konjugate contributors -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    <title>Hello World</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="helloWorld.mjs"></script>
+</head>
+<body>
+    <main>
+        <span class="kicker">Konjugate add-on API</span>
+        <h1>Hello, world.</h1>
+        <p id="status">Loading the active result session…</p>
+        <dl id="details" hidden>
+            <div><dt>Project</dt><dd id="projectName">—</dd></div>
+            <div><dt>Run</dt><dd id="runName">—</dd></div>
+            <div><dt>Signals</dt><dd id="signalCount">—</dd></div>
+        </dl>
+    </main>
+</body>
+</html>

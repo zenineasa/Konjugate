@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
+import { resolveInstalledPlugins } from './pluginResolver.mjs';
 
 function engineFileName() {
     return process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine';
@@ -54,7 +55,8 @@ export async function validateWithEngine(content, options) {
     const inputPath = join(directory, 'input.kjt');
     const reportPath = join(directory, 'validation.json');
     try {
-        await writeFile(inputPath, await encodeProjectFile(content));
+        const resolvedContent = await resolveInstalledPlugins(content, options);
+        await writeFile(inputPath, await encodeProjectFile(resolvedContent));
         const execution = await runEngine(executable, ['validate', inputPath, '--report', reportPath], {}, options.signal);
         if (execution.code !== 0 && execution.code !== 2) {
             throw new Error(execution.diagnostics || `The validation engine exited with code ${execution.code}.`);
@@ -106,7 +108,8 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const outputPath = join(directory, 'simulationResult.bin');
     const jobId = randomUUID();
     const initialPacing = normalizePacing(configuration.pacing);
-    await writeFile(inputPath, await encodeProjectFile(content));
+    const resolvedContent = await resolveInstalledPlugins(content, options);
+    await writeFile(inputPath, await encodeProjectFile(resolvedContent));
     await writeFile(configurationPath, JSON.stringify({
         ...configuration,
         pacing: initialPacing,

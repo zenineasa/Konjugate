@@ -6427,6 +6427,14 @@ async function openExamplesExplorer() {
 
 $('#newWindowButton').addEventListener('click', () => window.windowControls.newWindow());
 $('#loadButton').addEventListener('click', openProject);
+$('#installPackageButton').addEventListener('click', async () => {
+    try {
+        const installed = await window.projectFiles.installPackage();
+        if (installed) window.alert(`Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate new add-ons.`);
+    } catch (error) {
+        window.alert(`Package installation failed: ${error.message}`);
+    }
+});
 $('#saveButton').addEventListener('click', () => saveProject());
 $('#saveEncryptedButton').addEventListener('click', async (event) => {
     if (!currentProjectPassword) {

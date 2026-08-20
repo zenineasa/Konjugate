@@ -119,11 +119,15 @@ export function inspectPackageArchive(archive, { extension = null } = {}) {
             throw new PackageArchiveError('The plugin manifest is invalid or does not match the package.', 'INVALID_MANIFEST');
         }
         for (const contribution of contributionManifest.contributes) {
-            if (!contribution.providerId || contribution.apiVersion !== 1 || !['cpp', 'python'].includes(contribution.runtime)) {
-                throw new PackageArchiveError('The plugin contains an unsupported provider contribution.', 'INVALID_MANIFEST');
+            if (contribution.kind === 'component') {
+                if (!contribution.componentId || contribution.apiVersion !== 1) throw new PackageArchiveError('The plugin contains an invalid component contribution.', 'INVALID_MANIFEST');
+            } else {
+                if (!contribution.providerId || contribution.apiVersion !== 1 || !['cpp', 'python'].includes(contribution.runtime)) {
+                    throw new PackageArchiveError('The plugin contains an unsupported provider contribution.', 'INVALID_MANIFEST');
+                }
             }
             safeArchivePath(contribution.entry);
-            if (!files[contribution.entry]) throw new PackageArchiveError(`The plugin provider entry is missing: ${contribution.entry}.`, 'MISSING_ENTRY');
+            if (!files[contribution.entry]) throw new PackageArchiveError(`The plugin contribution entry is missing: ${contribution.entry}.`, 'MISSING_ENTRY');
         }
     }
     return { packageManifest, contributionManifest, files };

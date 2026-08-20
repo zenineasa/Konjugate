@@ -26,6 +26,7 @@ const addonPackage = createPackageArchive({
 
 const pluginManifest = JSON.parse(await readFile(join(providerDirectory, 'helloWorld.plugin.json'), 'utf8'));
 const pluginSource = await readFile(join(providerDirectory, 'helloWorld.py'));
+const pluginComponent = await readFile(join(providerDirectory, 'helloComponent.json'));
 const pluginPackage = createPackageArchive({
     packageManifest: {
         format: 'konjugate-package', formatVersion: 1, packageType: 'plugin',
@@ -33,7 +34,7 @@ const pluginPackage = createPackageArchive({
         contents: { manifest: 'plugin.json' }
     },
     contributionManifest: pluginManifest,
-    files: { 'helloWorld.py': pluginSource }
+    files: { 'helloWorld.py': pluginSource, 'helloComponent.json': pluginComponent }
 });
 
 await mkdir(outputDirectory, { recursive: true });

@@ -9,6 +9,11 @@
         "runtime": "python",
         "entry": "helloWorld.py",
         "determinism": "deterministic"
+    }, {
+        "kind": "component",
+        "componentId": "helloComponent",
+        "apiVersion": 1,
+        "entry": "helloComponent.json"
     }],
     "permissions": []
 }

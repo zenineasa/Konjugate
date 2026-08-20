@@ -61,15 +61,19 @@ test('creates and inspects a valid .kjp plugin archive', () => {
         name: 'Hello Provider',
         version: manifest.version,
         apiVersion: 1,
-        contributes: [{ providerId: 'example.helloWorld', apiVersion: 1, runtime: 'python', entry: 'helloWorld.py' }]
+        contributes: [
+            { providerId: 'example.helloWorld', apiVersion: 1, runtime: 'python', entry: 'helloWorld.py' },
+            { kind: 'component', componentId: 'helloComponent', apiVersion: 1, entry: 'helloComponent.json' }
+        ]
     };
     const result = inspectPackageArchive(createPackageArchive({
         packageManifest: manifest,
         contributionManifest: contribution,
-        files: { 'helloWorld.py': 'provider source' }
+        files: { 'helloWorld.py': 'provider source', 'helloComponent.json': '{}' }
     }), { extension: '.kjp' });
     assert.equal(result.packageManifest.packageType, 'plugin');
     assert.equal(result.contributionManifest.contributes[0].runtime, 'python');
+    assert.equal(result.contributionManifest.contributes[1].kind, 'component');
 });
 
 test('rejects a plugin that omits a declared provider artifact', () => {

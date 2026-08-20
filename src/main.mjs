@@ -894,6 +894,33 @@ async function discoverComponentLibrary() {
             }
         }
     }
+    const pluginRoot = join(app.getPath('userData'), 'packages', 'plugins');
+    const pluginIds = await readdir(pluginRoot, { withFileTypes: true }).catch(() => []);
+    for (const pluginIdEntry of pluginIds) {
+        if (!pluginIdEntry.isDirectory()) continue;
+        const pluginVersions = await readdir(join(pluginRoot, pluginIdEntry.name), { withFileTypes: true }).catch(() => []);
+        for (const versionEntry of pluginVersions) {
+            if (!versionEntry.isDirectory()) continue;
+            const pluginDirectory = join(pluginRoot, pluginIdEntry.name, versionEntry.name);
+            try {
+                const manifest = JSON.parse(await readFile(join(pluginDirectory, 'plugin.json'), 'utf8'));
+                for (const contribution of manifest.contributes ?? []) {
+                    if (contribution.kind !== 'component') continue;
+                    const template = validateComponentTemplate(JSON.parse(await readFile(join(pluginDirectory, contribution.entry), 'utf8')));
+                    if (template.id !== contribution.componentId) throw new Error(`Component ID mismatch: ${contribution.componentId}.`);
+                    if (componentLibraryRegistry.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
+                    componentLibraryRegistry.set(template.id, {
+                        ...template,
+                        source: 'plugin',
+                        pluginId: manifest.pluginId,
+                        pluginVersion: manifest.version
+                    });
+                }
+            } catch (error) {
+                console.warn(`Skipping plugin components from ${pluginIdEntry.name}/${versionEntry.name}: ${error.message}`);
+            }
+        }
+    }
 }
 
 ipcMain.handle('componentLibraryList', async () => {

@@ -1,0 +1,13 @@
+{
+    "copyright": "Copyright © 2026 Konjugate contributors",
+    "id": "helloComponent",
+    "kind": "node",
+    "name": "Hello component",
+    "domains": ["examples"],
+    "description": "A minimal node template contributed by the Hello World plugin.",
+    "shape": "box",
+    "color": "#66d8c9",
+    "states": [
+        { "symbol": "value", "label": "Value", "initialValue": 0, "unit": "" }
+    ]
+}

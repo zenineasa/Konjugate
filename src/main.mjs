@@ -10,6 +10,9 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { cppProviderSdkPath, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { executionProjectDocument } from './subsystems.mjs';
+import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
+import { matchRunConfiguration, parseCliFlags } from './cliArgs.mjs';
 import {
     createVisualizerSession,
     publicToolstripContributions,
@@ -32,36 +35,46 @@ if ((process.argv.includes('--interaction-test') || process.argv.includes('--gen
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
 }
 
+// A --cli invocation is a one-shot batch job (run/validate a project, write output, exit), not
+// a GUI instance -- it must run and exit on its own even while a real GUI instance is already
+// open, so it skips single-instance-lock/open-file entirely below rather than risk being
+// silently absorbed into an already-running instance's second-instance handler and never
+// actually doing anything.
+const isCliMode = process.argv.includes('--cli');
+
 // macOS can fire 'open-file' (double-click on a .kjt) before 'ready' resolves on a cold
 // launch -- queued here and drained once app.whenReady() runs, rather than assuming a window
 // already exists. openOrFocusProjectFile/parseKjtPathFromArgv are function declarations
 // defined further down; referencing them here is safe since neither handler below can run
 // before the rest of this module (and their const dependencies) has finished evaluating.
 const openFileQueue = [];
-app.on('open-file', (event, path) => {
-    event.preventDefault();
-    if (app.isReady()) openOrFocusProjectFile(path);
-    else openFileQueue.push(path);
-});
+if (!isCliMode) {
+    app.on('open-file', (event, path) => {
+        event.preventDefault();
+        if (app.isReady()) openOrFocusProjectFile(path);
+        else openFileQueue.push(path);
+    });
 
-// Must run after the userData override above (requestSingleInstanceLock's lock file lives
-// under userData) so interaction-test/thumbnail runs never false-positive collide with a real
-// running instance, or each other in CI, by checking the default profile's lock file instead.
-if (!app.requestSingleInstanceLock()) {
-    app.quit();
-    process.exit(0);
-}
-app.on('second-instance', (_event, argv) => {
-    const path = parseKjtPathFromArgv(argv);
-    if (path) {
-        openOrFocusProjectFile(path);
-        return;
+    // Must run after the userData override above (requestSingleInstanceLock's lock file lives
+    // under userData) so interaction-test/thumbnail runs never false-positive collide with a
+    // real running instance, or each other in CI, by checking the default profile's lock file
+    // instead.
+    if (!app.requestSingleInstanceLock()) {
+        app.quit();
+        process.exit(0);
     }
-    const [anyProjectWindow] = projectWindows;
-    if (anyProjectWindow?.isMinimized()) anyProjectWindow.restore();
-    anyProjectWindow?.show();
-    anyProjectWindow?.focus();
-});
+    app.on('second-instance', (_event, argv) => {
+        const path = parseKjtPathFromArgv(argv);
+        if (path) {
+            openOrFocusProjectFile(path);
+            return;
+        }
+        const [anyProjectWindow] = projectWindows;
+        if (anyProjectWindow?.isMinimized()) anyProjectWindow.restore();
+        anyProjectWindow?.show();
+        anyProjectWindow?.focus();
+    });
+}
 
 // Backstop for anything logged via console.error/console.warn -- including paths nobody has
 // explicitly wired up to a UI element -- so it still reaches the renderer's diagnostics panel
@@ -439,6 +452,26 @@ async function readProjectFilePayload(path) {
         return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
     }
     return { path, fileName: basename(path), encrypted: false, ...await decodeProjectForRenderer(bytes) };
+}
+
+// Shared by projectSave and CLI mode's --output-kjt: write via a temp file + rename so a
+// crash or a concurrent read of `path` never observes a partially-written file; falls back to
+// a direct overwrite on platforms/situations where the rename itself can't complete in place.
+async function atomicWriteFile(path, bytes) {
+    const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
+    try {
+        await writeFile(temporaryPath, bytes);
+        try {
+            await rename(temporaryPath, path);
+        } catch (error) {
+            if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+            await writeFile(path, bytes);
+            await unlink(temporaryPath);
+        }
+    } catch (error) {
+        await unlink(temporaryPath).catch(() => { });
+        throw error;
+    }
 }
 
 function beginApplicationShutdown() {
@@ -935,20 +968,7 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
     if (verification.content !== content || Boolean(verification.result) !== Boolean(resultBytes)) {
         throw new Error('The saved project could not be verified.');
     }
-    const temporaryPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
-    try {
-        await writeFile(temporaryPath, bytes);
-        try {
-            await rename(temporaryPath, path);
-        } catch (error) {
-            if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
-            await writeFile(path, bytes);
-            await unlink(temporaryPath);
-        }
-    } catch (error) {
-        await unlink(temporaryPath).catch(() => { });
-        throw error;
-    }
+    await atomicWriteFile(path, bytes);
     return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resultBytes) };
 });
 
@@ -1430,6 +1450,121 @@ const engineOptions = async () => {
     };
 };
 
+const cliUsage = 'Usage: konjugate --cli run <project.kjt> --target-time <seconds> '
+    + '[--configuration <name-or-id>] [--output-kjt <path>] [--output-csv <path>]\n'
+    + '       konjugate --cli validate <project.kjt>';
+
+// Runs entirely inside app.whenReady() (see the branch there) -- never creates a BrowserWindow,
+// and always ends in app.exit(code) rather than leaving the process running or calling the
+// graceful app.quit(), since a CLI invocation is a one-shot batch job, not a long-lived instance.
+async function runCliMode() {
+    const cliArgs = process.argv.slice(process.argv.indexOf('--cli') + 1);
+    const [subcommand, inputPath, ...rest] = cliArgs;
+    if (!subcommand || !inputPath || !['run', 'validate'].includes(subcommand)) {
+        console.error(cliUsage);
+        app.exit(2);
+        return;
+    }
+    const flags = parseCliFlags(rest);
+
+    providerToolchainStore = createProviderToolchainStore({ directory: join(app.getPath('userData'), 'providers') });
+
+    let bundle;
+    try {
+        // KONJUGATE_PASSWORD, not a --password flag, matching the engine's own CLI convention
+        // for the same input -- a password never belongs in shell history or a process list.
+        bundle = await decodeProjectBundle(await readFile(inputPath), { password: process.env.KONJUGATE_PASSWORD });
+    } catch (error) {
+        console.error(`Could not read or decode "${inputPath}": ${error.message}`);
+        app.exit(1);
+        return;
+    }
+    const options = await engineOptions();
+
+    if (subcommand === 'validate') {
+        const outcome = await validateWithEngine(bundle.content, options);
+        if (!outcome.available) {
+            console.error('The simulation engine is unavailable.');
+            app.exit(1);
+            return;
+        }
+        console.log(JSON.stringify(outcome.report, null, 2));
+        app.exit(outcome.report.valid ? 0 : 2);
+        return;
+    }
+
+    const targetTime = Number(flags['target-time']);
+    if (!Number.isFinite(targetTime) || targetTime <= 0) {
+        console.error('--target-time <seconds> (a positive number) is required for --cli run.');
+        app.exit(2);
+        return;
+    }
+    const document = JSON.parse(bundle.content);
+    const runConfigurations = document.runConfigurations ?? [];
+    const runConfiguration = matchRunConfiguration(runConfigurations, document.activeRunConfigurationId, flags.configuration);
+    if (flags.configuration && !runConfiguration) {
+        console.error(`No run configuration named or numbered "${flags.configuration}".`);
+        app.exit(2);
+        return;
+    }
+    if (!runConfiguration) {
+        console.error('The project has no run configurations.');
+        app.exit(2);
+        return;
+    }
+
+    const configuration = { ...runConfiguration, targetTime, pacing: { mode: 'fastest' } };
+    console.log(`Running "${inputPath}" with configuration "${runConfiguration.name}" for ${targetTime}s of simulated time...`);
+    let execution;
+    try {
+        execution = await startEngineRun(
+            JSON.stringify(executionProjectDocument(document)), configuration, options, { retainResult: true }
+        );
+    } catch (error) {
+        console.error(`The simulation failed: ${error.message}`);
+        app.exit(1);
+        return;
+    }
+    if (!execution.available) {
+        console.error('The simulation engine is unavailable.');
+        app.exit(1);
+        return;
+    }
+
+    let result;
+    try {
+        result = await execution.completion;
+    } catch (error) {
+        console.error(`The simulation failed: ${error.message}`);
+        await execution.cleanup();
+        app.exit(1);
+        return;
+    }
+
+    try {
+        if (flags['output-kjt']) {
+            const resultBytes = await readFile(execution.resultPath);
+            await atomicWriteFile(flags['output-kjt'], await encodeProjectFile(bundle.content, { result: resultBytes }));
+            console.log(`Wrote ${flags['output-kjt']}`);
+        }
+        if (flags['output-csv']) {
+            const csv = resultSignalsToCsv(result, projectDocumentSignals(document));
+            await writeFile(flags['output-csv'], csv, 'utf8');
+            console.log(`Wrote ${flags['output-csv']}`);
+        }
+        if (!flags['output-kjt'] && !flags['output-csv']) {
+            console.log('Simulation completed. Pass --output-kjt and/or --output-csv to save the result.');
+        }
+    } catch (error) {
+        console.error(`Could not write output: ${error.message}`);
+        await execution.cleanup();
+        app.exit(1);
+        return;
+    }
+    await execution.cleanup();
+    app.exit(0);
+}
+
 ipcMain.handle('engineValidate', async (event, content) => {
     const active = { owner: event.sender, controller: new AbortController(), completion: null };
     activeValidationOperations.add(active);
@@ -1558,6 +1693,10 @@ ipcMain.handle('engineReleaseResult', async (event, jobId) => {
 });
 
 app.whenReady().then(async () => {
+    if (isCliMode) {
+        await runCliMode();
+        return;
+    }
     const operationSchema = JSON.parse(await readFile(join(currentDir, '..', 'schemas', 'assistantOperations.schema.json'), 'utf8'));
     aiProviderRegistry = createAIProviderRegistry(createRemoteAIProviders({ operationSchema }));
     aiConfigurationStore = createAIConfigurationStore({

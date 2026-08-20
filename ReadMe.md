@@ -146,6 +146,29 @@ Generated application bundles are stored in `out/package/`. Run `make clean` to 
 
 Every packaged application includes `thirdPartyNotices.md` and the applicable license texts under `thirdPartyLicenses/`. Packaging fails if these compliance files are missing. Native engine builds that include METIS receive the same files in their build directory. See [release packaging](docs/releasePackaging.md) for the host tools and packaged-runtime checks.
 
+## Command-line mode
+
+The packaged app can also run a project headlessly from a terminal — no window opens, and it exits when the run finishes. Invoke the app's own executable directly (not through `open`/a shell shortcut) so output streams back and the exit code is real:
+
+```bash
+# macOS
+/Applications/Konjugate.app/Contents/MacOS/Konjugate --cli run model.kjt --target-time 30 --output-kjt result.kjt --output-csv result.csv
+
+# Windows
+Konjugate.exe --cli run model.kjt --target-time 30 --output-kjt result.kjt --output-csv result.csv
+
+# Linux (AppImage — make it executable once with chmod +x)
+./Konjugate-*-linux-x64.AppImage --cli run model.kjt --target-time 30 --output-kjt result.kjt --output-csv result.csv
+```
+
+- `--cli run <project.kjt> --target-time <seconds>` runs the project's active run configuration (or `--configuration <name-or-id>` to pick another) for the given simulated duration.
+- `--output-kjt <path>` writes a new `.kjt` with the result embedded, exactly like saving after a run in the GUI.
+- `--output-csv <path>` exports the same signal columns the GUI's CSV export button produces — opens directly in Excel or any spreadsheet app.
+- `--cli validate <project.kjt>` prints the validation report as JSON and exits `0` if valid, `2` if not.
+- An encrypted `.kjt` reads its password from a `KONJUGATE_PASSWORD` environment variable, never a command-line flag, so it never lands in shell history.
+
+This also works against a dev build: `electron . --cli run model.kjt --target-time 30 ...`. A CLI invocation always runs as its own independent process, even while a GUI instance is already open elsewhere.
+
 ## Testing
 
 ```bash

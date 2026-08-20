@@ -19,6 +19,7 @@ import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs'
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
+import { seriesToCsv } from '../resultExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
 import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
@@ -3769,11 +3770,6 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
     renderValidationStatus();
 }
 
-function csvField(value) {
-    const text = String(value);
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
 async function exportResultsCsv() {
     if (!activeResult || !activeEngineJobId) return;
     const signals = model.nodes.filter((node) => !node.deleted).flatMap((node) => node.states.map((state) => ({
@@ -3788,13 +3784,7 @@ async function exportResultsCsv() {
             endTime: activeResult.availableResultTime ?? Infinity,
             maxPoints: Infinity
         });
-        const sampleCount = Math.max(0, ...series.map((item) => item.samples.length));
-        const rows = Array.from({ length: sampleCount }, (_, index) => [
-            series.find((item) => item.samples.length)?.samples[index]?.time ?? '',
-            ...series.map((item) => item.samples[index]?.value ?? '')
-        ]);
-        const csv = [['time (s)', ...signals.map((signal) => signal.header)], ...rows]
-            .map((row) => row.map(csvField).join(',')).join('\n');
+        const csv = seriesToCsv(series, signals);
         const outcome = await window.projectFiles.exportResultsCsv(`${filenameStem(currentProjectFilename)}.csv`, csv);
         if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
     } catch (error) {

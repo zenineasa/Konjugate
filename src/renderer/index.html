@@ -559,9 +559,15 @@
 
         <div id="edgeContextMenu" class="contextCard addPalette hidden">
             <span class="contextKicker">Edge</span>
+            <button id="edgeContextAddWaypoint" type="button"><i class="primitiveIcon edgeIcon">✛</i><span><strong>Add waypoint here</strong><small>Route the edge around this point</small></span><b>›</b></button>
             <button id="edgeContextToggle" type="button"><i class="primitiveIcon edgeIcon">⏻</i><span><strong id="edgeContextToggleLabel">Disable edge</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
             <hr>
             <button id="edgeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete edge</strong></span><b>›</b></button>
+        </div>
+
+        <div id="waypointContextMenu" class="contextCard addPalette hidden">
+            <span class="contextKicker">Waypoint</span>
+            <button id="waypointContextRemove" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Remove waypoint</strong></span><b>›</b></button>
         </div>
 
         <div id="nodeBuilder" class="contextCard builderCard hidden">

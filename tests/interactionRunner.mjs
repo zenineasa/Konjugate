@@ -97,6 +97,41 @@ async function rightClickElement(window, expression) {
     window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'right', clickCount: 1 });
 }
 
+// A CSS2D overlay (a node/edge label) always wins DOM hit-testing over the WebGL canvas
+// beneath it regardless of 3D depth, so a point that's a valid 3D raycast target can still be
+// undeliverable to the canvas as a real click if a label happens to cover it there -- and
+// exactly where that is can shift with accumulated camera state this deep into the suite, even
+// when nothing occludes it on a fresh load. Spiral outward until landing on a pixel the canvas
+// itself owns, rather than assume the originally-computed point is still clear.
+async function findCanvasPoint(window, point, maxRadius = 40) {
+    if (!point) return null;
+    for (let radius = 0; radius <= maxRadius; radius += 4) {
+        const offsets = radius === 0 ? [[0, 0]] : [[radius, 0], [-radius, 0], [0, radius], [0, -radius], [radius, radius], [-radius, -radius], [radius, -radius], [-radius, radius]];
+        for (const [dx, dy] of offsets) {
+            const candidate = { x: point.x + dx, y: point.y + dy };
+            const isCanvas = await evaluate(window, `document.elementFromPoint(${candidate.x}, ${candidate.y})?.classList.contains('webglSurface') ?? false`);
+            if (isCanvas) return candidate;
+        }
+    }
+    return point;
+}
+
+// A handful of raw, pixel-coordinate pointer gestures (as opposed to clicking a known DOM
+// element) grow occasionally flaky this deep into the suite -- accumulated frame-timing
+// variance across 50+ prior tests, not a bug in the gesture itself: the same sequence is
+// reliable every time run in isolation. Retried a few times rather than treated as a hard
+// failure, matching this suite's existing tolerance for a few other timing-sensitive
+// interactions elsewhere. `perform` re-runs from scratch each attempt (re-reading any screen
+// points fresh) since a prior attempt may have nudged state slightly.
+async function retryGesture(window, perform, checkExpression, times = 5, settleMs = 200) {
+    for (let attempt = 0; attempt < times; attempt += 1) {
+        await perform();
+        await new Promise((resolve) => setTimeout(resolve, settleMs));
+        if (await evaluate(window, checkExpression)) return true;
+    }
+    return false;
+}
+
 export async function runInteractionTests(window) {
     let passed = 0;
     const run = async (name, task) => {
@@ -1472,6 +1507,171 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    });
+
+    // Waypoint-handle dragging goes through the same dragControls instance as node dragging,
+    // which is only enabled while currentTool === 'select' -- ensure that's actually the
+    // active tool rather than assume it, since an earlier test in the suite may have left a
+    // different tool (rotate/scale/rectangleSelect) selected. Shared by both waypoint tests
+    // below since either could run with a leftover tool from whichever ran just before it.
+    const selectWaypointTestTool = () => evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
+
+    const createWaypointTestEdge = async (name) => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        await evaluate(window, `(() => {
+            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
+            choose('#edgeSource', 'Electrical losses');
+            choose('#edgeTarget', 'Enclosed air');
+            document.querySelector('#newEdgeName').value = ${JSON.stringify(name)};
+            const field = document.querySelector('#edgeMathField');
+            field.setValue('\\\\mathrm{sourceQDot}');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#createEdge').click();
+        })()`);
+        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, `Edge builder did not close after creating ${name}.`);
+        if (await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`)) {
+            await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+        }
+        assert.deepEqual(await evaluate(window, `window.__relationshipWaypoints(${JSON.stringify(name)})`), []);
+    };
+
+    const pressAndHold = async (point) => {
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+    };
+
+    const deleteWaypointTestEdge = async (name) => {
+        const cleanedUp = await retryGesture(window, async () => {
+            const cleanupPoint = await evaluate(window, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...cleanupPoint });
+            window.webContents.sendInputEvent({ type: 'mouseDown', ...cleanupPoint, button: 'left', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseUp', ...cleanupPoint, button: 'left', clickCount: 1 });
+        }, `!document.querySelector('#edgeEditor').classList.contains('hidden')`);
+        assert.ok(cleanedUp, 'Clicking the edge did not reopen the edge editor for cleanup after 5 attempts.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), name);
+        await evaluate(window, `document.querySelector('[data-action="delete"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    };
+
+    await run('pressing and holding an edge enters waypoint mode, and dragging a waypoint reroutes it with undo/redo', async () => {
+        await selectWaypointTestTool();
+        await createWaypointTestEdge('Waypoint drag test edge');
+
+        // Pressing and holding (rather than a quick click) selects the edge -- which is what
+        // already makes its waypoint handles visible -- without popping its editor card open
+        // over the canvas. A quick click still opens the editor, unaffected (checked in the
+        // sibling add/remove test below, which relies on quick clicks throughout).
+        // t=0.75, not the curve's default 0.5 -- the relationship's own CSS2D bundle label
+        // anchors at getPoint(0.5) (every edge gets one, even an unbundled "bundle of one"), so
+        // a click there can land on the label's DOM element instead of the canvas beneath it.
+        const held = await retryGesture(window, async () => {
+            // A genuine real mouse movement during the artificial 600ms hold window (this test
+            // runs in a real, visible window, not headless -- incidental cursor movement from
+            // whoever's at the machine can inject a real pointermove that cancels the hold
+            // timer, same as a real drag would) can leave a stray "quick click" open the editor
+            // on a failed attempt. Close it defensively before each attempt so that residue
+            // from a prior failed attempt can't cause the eventual successful one to be judged
+            // against stale editor-visibility state.
+            if (!await evaluate(window, `document.querySelector('#edgeEditor').classList.contains('hidden')`)) {
+                await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+            }
+            const holdPoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
+            await pressAndHold(holdPoint);
+        }, `document.querySelector('#statusText').textContent === 'Editing waypoints · Waypoint drag test edge' && document.querySelector('#edgeEditor').classList.contains('hidden')`);
+        assert.ok(held, 'Press-and-hold did not report entering waypoint mode without opening the edge editor after 5 attempts.');
+
+        const added = await retryGesture(window, async () => {
+            const linePoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...linePoint });
+            window.webContents.sendInputEvent({ type: 'mouseDown', ...linePoint, button: 'right', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseUp', ...linePoint, button: 'right', clickCount: 1 });
+        }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
+        assert.ok(added, 'Right-clicking the edge line did not open its context menu after 5 attempts.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').hidden`), false, 'Add-waypoint action was not offered for a click on the edge line.');
+        await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').click()`);
+
+        const initialWaypoints = await evaluate(window, `window.__relationshipWaypoints('Waypoint drag test edge')`);
+        assert.equal(initialWaypoints.length, 1, 'Right-clicking the edge line did not add a waypoint.');
+        const initialWaypointJson = JSON.stringify(initialWaypoints[0]);
+        // Adding the waypoint also hides this edge's bundle label (it would otherwise sit right
+        // on top of the new handle, re-anchored to the curve's new midpoint) -- give the
+        // renderer a moment to actually apply that display:none before synthesizing a drag,
+        // rather than risk racing a hit-test against a still-composited previous frame.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        // Drag the handle and confirm the underlying model's waypoint position actually moved
+        // (not just the handle mesh) -- this is the same live-mutate-during-gesture idiom node
+        // dragging already uses, so the model and the handle should never be out of sync mid-drag.
+        // A short pause between each synthetic pointer event (rather than firing all four back
+        // to back) matters: DragControls needs its own 'pointerdown' handler to actually run
+        // (setting its internal _selected) before a 'pointermove' arrives, and a zero-delay
+        // burst of sendInputEvent calls can reach Chromium's input queue faster than that JS
+        // callback gets a turn to run. A short, fixed offset (not toward wherever's convenient)
+        // keeps the dragged position clear of the endpoint nodes' own pick geometry -- landing
+        // on or near a node would route later clicks to the node's context menu instead of the
+        // waypoint's, since the contextmenu handler checks for a node hit first.
+        const dragged = await retryGesture(window, async () => {
+            const currentHandlePoint = await findCanvasPoint(window, await evaluate(window, `window.__waypointScreenPoint('Waypoint drag test edge', 0)`));
+            if (!currentHandlePoint) return;
+            const dragTo = { x: currentHandlePoint.x + 15, y: currentHandlePoint.y - 12 };
+            const midDrag = { x: Math.round((currentHandlePoint.x + dragTo.x) / 2), y: Math.round((currentHandlePoint.y + dragTo.y) / 2) };
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...currentHandlePoint });
+            window.webContents.sendInputEvent({ type: 'mouseDown', ...currentHandlePoint, button: 'left', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...midDrag });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...dragTo });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseUp', ...dragTo, button: 'left', clickCount: 1 });
+        }, `JSON.stringify(window.__relationshipWaypoints('Waypoint drag test edge')[0]) !== ${JSON.stringify(initialWaypointJson)}`);
+        assert.ok(dragged, 'Dragging the waypoint handle did not move it after 5 attempts.');
+        const draggedWaypoint = (await evaluate(window, `window.__relationshipWaypoints('Waypoint drag test edge')`))[0];
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `JSON.stringify(window.__relationshipWaypoints('Waypoint drag test edge')[0]) === ${JSON.stringify(JSON.stringify(initialWaypoints[0]))}`, 'Undo did not revert the dragged waypoint.');
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+        await waitFor(window, `JSON.stringify(window.__relationshipWaypoints('Waypoint drag test edge')[0]) === ${JSON.stringify(JSON.stringify(draggedWaypoint))}`, 'Redo did not restore the dragged waypoint.');
+
+        await deleteWaypointTestEdge('Waypoint drag test edge');
+    });
+
+    await run('right-click adds and removes an edge waypoint via its own context menus', async () => {
+        await selectWaypointTestTool();
+        await createWaypointTestEdge('Waypoint add-remove test edge');
+
+        const added = await retryGesture(window, async () => {
+            const linePoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint add-remove test edge', 0.75)`);
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...linePoint });
+            window.webContents.sendInputEvent({ type: 'mouseDown', ...linePoint, button: 'right', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseUp', ...linePoint, button: 'right', clickCount: 1 });
+        }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
+        assert.ok(added, 'Right-clicking the edge line did not open its context menu after 5 attempts.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').hidden`), false, 'Add-waypoint action was not offered for a click on the edge line.');
+        await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').click()`);
+        await waitFor(window, `window.__relationshipWaypoints('Waypoint add-remove test edge').length === 1`, 'Right-clicking the edge line did not add a waypoint.');
+        // See the drag test above for why this delay matters: the label hiding that keeps a
+        // fresh handle clickable needs a moment to actually apply.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const removed = await retryGesture(window, async () => {
+            const handlePoint = await findCanvasPoint(window, await evaluate(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`));
+            if (!handlePoint) return;
+            window.webContents.sendInputEvent({ type: 'mouseMove', ...handlePoint });
+            window.webContents.sendInputEvent({ type: 'mouseDown', ...handlePoint, button: 'right', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            window.webContents.sendInputEvent({ type: 'mouseUp', ...handlePoint, button: 'right', clickCount: 1 });
+        }, `!document.querySelector('#waypointContextMenu').classList.contains('hidden')`);
+        assert.ok(removed, 'Right-clicking the waypoint handle did not open its context menu after 5 attempts.');
+        await evaluate(window, `document.querySelector('#waypointContextRemove').click()`);
+        await waitFor(window, `window.__relationshipWaypoints('Waypoint add-remove test edge').length === 0`, 'Removing the waypoint did not clear it.');
+        assert.equal(await evaluate(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`), null, 'The waypoint handle was not removed from the scene once its waypoint was deleted.');
+
+        await deleteWaypointTestEdge('Waypoint add-remove test edge');
     });
 
     await run('deleting a node hides connected relationships and undo restores them', async () => {

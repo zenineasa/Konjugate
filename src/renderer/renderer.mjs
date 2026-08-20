@@ -293,6 +293,7 @@ function hydrateProjectDocument(document) {
         parameters: edge.parameters ?? [],
         color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: Number(edge.appearance?.offset) || 0,
+        waypoints: Array.isArray(edge.appearance?.waypoints) ? edge.appearance.waypoints.map((point) => point.map(Number)) : [],
         deleted: false,
         enabled: edge.enabled !== false
     }));
@@ -366,6 +367,11 @@ const relationshipObjects = new Map();
 const subsystemObjects = new Map();
 const nodePickTargets = [];
 const relationshipPickTargets = [];
+// Handles are pushed into nodePickTargets (not a separate DragControls instance) -- DragControls'
+// internal _selected/_hovered/_plane state is module-scope, not per-instance, so two concurrent
+// instances on the same domElement would race over it. Keyed by relationship id since only the
+// selected relationship's waypoints get handles at all.
+const waypointHandleObjects = new Map();
 let selectedNode = null;
 const selectedNodeIds = new Set();
 let selectedRelationship = null;
@@ -1009,6 +1015,15 @@ const selectionOutlines = new Map();
 function relationshipPoints(definition) {
     const source = displayObjectForNode(definition.source)?.position ?? nodeObjects.get(definition.source).position;
     const target = displayObjectForNode(definition.target)?.position ?? nodeObjects.get(definition.target).position;
+
+    if (definition.waypoints?.length) {
+        return {
+            start: source.clone(),
+            controlPoints: definition.waypoints.map(([x, y, z]) => new THREE.Vector3(x, y, z)),
+            end: target.clone()
+        };
+    }
+
     const midpoint = source.clone().lerp(target, 0.5);
     const lateral = new THREE.Vector3()
         .subVectors(target, source)
@@ -1021,7 +1036,7 @@ function relationshipPoints(definition) {
     midpoint.add(lateral);
     midpoint.y -= 0.55;
 
-    return { start, midpoint, end };
+    return { start, controlPoints: [midpoint], end };
 }
 
 function createDirectionMarker(definition, curve) {
@@ -1059,7 +1074,7 @@ function createRelationship(definition) {
     const points = relationshipPoints(definition);
     const curve = new THREE.CatmullRomCurve3([
         points.start,
-        points.midpoint,
+        ...points.controlPoints,
         points.end
     ]);
     const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(42));
@@ -1241,7 +1256,7 @@ function updateRelationships() {
         const points = relationshipPoints(relationship.definition);
         const curve = new THREE.CatmullRomCurve3([
             points.start,
-            points.midpoint,
+            ...points.controlPoints,
             points.end
         ]);
         relationship.line.geometry.dispose();
@@ -1263,13 +1278,27 @@ const dragControls = new DragControls(
 dragControls.recursive = false;
 let dragStartPositions = null;
 let dragLastPosition = null;
+let waypointDragStart = null;
 dragControls.addEventListener('dragstart', (event) => {
     orbitControls.enabled = false;
+    if (event.object.userData.kind === 'waypoint') {
+        waypointDragStart = event.object.position.clone();
+        return;
+    }
     if (!selectedNodeIds.has(event.object.userData.id)) selectNode(event.object);
     dragStartPositions = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
     dragLastPosition = event.object.position.clone();
 });
 dragControls.addEventListener('drag', (event) => {
+    if (event.object.userData.kind === 'waypoint') {
+        const { relationshipId, index } = event.object.userData;
+        const definition = relationshipObjects.get(relationshipId)?.definition;
+        if (definition) {
+            definition.waypoints[index] = event.object.position.toArray();
+            updateRelationships();
+        }
+        return;
+    }
     if (dragLastPosition && selectedNodeIds.size > 1) {
         const delta = event.object.position.clone().sub(dragLastPosition);
         selectedNodeIds.forEach((id) => {
@@ -1282,6 +1311,25 @@ dragControls.addEventListener('drag', (event) => {
 });
 dragControls.addEventListener('dragend', (event) => {
     orbitControls.enabled = true;
+    if (event.object.userData.kind === 'waypoint') {
+        const { relationshipId, index } = event.object.userData;
+        const definition = relationshipObjects.get(relationshipId)?.definition;
+        if (definition && waypointDragStart && !event.object.position.equals(waypointDragStart)) {
+            const from = waypointDragStart.toArray();
+            const to = event.object.position.toArray();
+            const applyWaypoint = (point) => {
+                definition.waypoints[index] = point;
+                updateRelationships();
+                if (selectedRelationship?.id === relationshipId) syncWaypointHandles(relationshipId);
+            };
+            recordHistory({
+                undo: () => applyWaypoint(from),
+                redo: () => applyWaypoint(to)
+            });
+        }
+        waypointDragStart = null;
+        return;
+    }
     if (dragStartPositions && !event.object.position.equals(dragStartPositions.get(event.object.userData.id))) {
         const from = new Map([...dragStartPositions].map(([id, position]) => [id, position.clone()]));
         const to = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
@@ -1320,16 +1368,30 @@ function firstIntersection(targets) {
 // Debug/test hook only; not part of the app's public surface (mirrors window.__providerEditorView
 // in src/providerEditor/renderer.mjs). Exposes the on-screen point for a relationship's rendered
 // line midpoint so interaction tests can click it without duplicating the camera-projection math.
-window.__relationshipScreenPoint = (title) => {
-    const relationship = [...relationshipObjects.values()].find((entry) => entry.definition.title === title);
-    if (!relationship) return null;
-    const midpoint = relationship.line.userData.curve.getPoint(0.5);
+function screenPointFor(worldPoint) {
     const rect = renderer.domElement.getBoundingClientRect();
-    const projected = midpoint.clone().project(camera);
+    const projected = worldPoint.clone().project(camera);
     return {
         x: Math.round(rect.left + (projected.x + 1) / 2 * rect.width),
         y: Math.round(rect.top + (1 - projected.y) / 2 * rect.height)
     };
+}
+
+window.__relationshipScreenPoint = (title, t = 0.5) => {
+    const relationship = [...relationshipObjects.values()].find((entry) => entry.definition.title === title);
+    if (!relationship) return null;
+    return screenPointFor(relationship.line.userData.curve.getPoint(t));
+};
+
+window.__waypointScreenPoint = (title, index) => {
+    const relationship = [...relationshipObjects.values()].find((entry) => entry.definition.title === title);
+    const handle = waypointHandleObjects.get(relationship?.definition.id)?.[index];
+    return handle ? screenPointFor(handle.position) : null;
+};
+
+window.__relationshipWaypoints = (title) => {
+    const relationship = [...relationshipObjects.values()].find((entry) => entry.definition.title === title);
+    return relationship ? structuredClone(relationship.definition.waypoints ?? []) : null;
 };
 
 function rootNodeFromIntersection(intersection) {
@@ -1423,6 +1485,40 @@ function selectAllNodes() {
     $('#statusText').textContent = `${selectedNodeIds.size} node${selectedNodeIds.size === 1 ? '' : 's'} selected`;
 }
 
+function clearWaypointHandles(relationshipId) {
+    const handles = waypointHandleObjects.get(relationshipId);
+    if (!handles) return;
+    handles.forEach((handle) => {
+        scene.remove(handle);
+        const pickIndex = nodePickTargets.indexOf(handle);
+        if (pickIndex >= 0) nodePickTargets.splice(pickIndex, 1);
+        handle.geometry.dispose();
+        handle.material.dispose();
+    });
+    waypointHandleObjects.delete(relationshipId);
+}
+
+// Rebuilds every handle mesh for one relationship from its current definition.waypoints --
+// used both for the initial create-on-select and to resync handle positions/count after an
+// undo/redo or an add/remove waypoint mutation, none of which move the handle mesh itself.
+function syncWaypointHandles(relationshipId) {
+    clearWaypointHandles(relationshipId);
+    const definition = relationshipObjects.get(relationshipId)?.definition;
+    if (!definition?.waypoints?.length) return;
+    waypointHandleObjects.set(relationshipId, definition.waypoints.map(([x, y, z], index) => {
+        const handle = new THREE.Mesh(
+            new THREE.SphereGeometry(0.22, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0xf3f7f6, depthTest: false })
+        );
+        handle.position.set(x, y, z);
+        handle.renderOrder = 9;
+        handle.userData = { kind: 'waypoint', relationshipId, index };
+        scene.add(handle);
+        nodePickTargets.push(handle);
+        return handle;
+    }));
+}
+
 function updateRelationshipSelection() {
     relationshipObjects.forEach((relationship) => {
         const selected = relationship.definition.id === selectedRelationship?.id;
@@ -1442,6 +1538,10 @@ function updateRelationshipSelection() {
             relationship.marker.scale.setScalar(selected ? 1.35 : 1);
         }
     });
+    [...waypointHandleObjects.keys()].forEach((id) => {
+        if (id !== selectedRelationship?.id) clearWaypointHandles(id);
+    });
+    if (selectedRelationship) syncWaypointHandles(selectedRelationship.id);
 }
 
 function hideCards(except) {
@@ -1876,7 +1976,8 @@ function captureEdgeModel(definition) {
         equationModel: structuredClone(equationModel),
         implementation: structuredClone(definition.implementation ?? null),
         parameters: structuredClone(definition.parameters),
-        color: definition.color
+        color: definition.color,
+        waypoints: structuredClone(definition.waypoints ?? [])
     };
 }
 
@@ -1913,8 +2014,13 @@ function applyEdgeModel(definition, snapshot) {
     definition.equationModel = normalizeEdgeEquationModel(definition, snapshot.equationModel);
     definition.equation = definition.equationModel.latex;
     definition.implementation = structuredClone(snapshot.implementation ?? null);
+    definition.waypoints = structuredClone(snapshot.waypoints ?? []);
     setRelationshipDirectionality(definition, snapshot.directionality);
     setRelationshipColor(definition, snapshot.color);
+    // Before updateRelationships() -- it calls syncContextualOverlays() internally, which reads
+    // waypointHandleObjects to decide whether to hide this edge's label; populating the handles
+    // first means that decision reflects the new waypoint count, not the pre-mutation one.
+    if (selectedRelationship?.id === definition.id) syncWaypointHandles(definition.id);
     updateRelationships();
     updateValidationStatus();
     if (selectedRelationship?.id === definition.id && !$('#edgeEditor').classList.contains('hidden')) {
@@ -2212,6 +2318,13 @@ function openEdgeContextMenu(clientX, clientY) {
     hideCards(menu);
     const enabled = selectedRelationship?.enabled !== false;
     $('#edgeContextToggleLabel').textContent = enabled ? 'Disable edge' : 'Enable edge';
+    $('#edgeContextAddWaypoint').hidden = !pendingWaypoint;
+    positionCard(menu, clientX, clientY);
+}
+
+function openWaypointContextMenu(clientX, clientY) {
+    const menu = $('#waypointContextMenu');
+    hideCards(menu);
     positionCard(menu, clientX, clientY);
 }
 
@@ -4166,7 +4279,13 @@ function syncContextualOverlays() {
         }
         const sourceObject = nodeObjects.get(bundle.source);
         const targetObject = nodeObjects.get(bundle.target);
-        overlay.anchor.visible = Boolean(sourceObject?.visible && targetObject?.visible);
+        // A CSS2D overlay always wins DOM hit-testing over the WebGL canvas beneath it, even
+        // though 3D raycasting ignores it entirely -- so a visible label can silently block
+        // clicks meant for a waypoint handle it happens to sit near or on top of. Hiding it
+        // while any of its relationships has waypoint handles showing (i.e. is the selected
+        // relationship and has at least one waypoint) keeps that whole editing gesture clear.
+        const editingWaypoints = bundle.relationships.some((relationship) => waypointHandleObjects.has(relationship.id));
+        overlay.anchor.visible = Boolean(sourceObject?.visible && targetObject?.visible) && !editingWaypoints;
         const curveMidpoints = bundle.relationships
             .map((relationship) => relationshipObjects.get(relationship.id)?.line.userData.curve?.getPoint(0.5))
             .filter(Boolean);
@@ -4363,7 +4482,8 @@ function serializeProjectDocument() {
                 parameters: edge.parameters ?? [],
                 appearance: {
                     color: `#${edge.color.toString(16).padStart(6, '0')}`,
-                    offset: edge.offset
+                    offset: edge.offset,
+                    waypoints: edge.waypoints ?? []
                 }
             })),
         subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => ({
@@ -5265,6 +5385,27 @@ function connectFromNode(node) {
 }
 
 let nodePointerDown = null;
+let relationshipPointerDown = null;
+const relationshipHoldDurationMs = 450;
+// Distinguishes a genuine "press and hold in place" from a drag that happens to start on an
+// edge (e.g. panning) -- cancels the pending hold if the pointer moves before it fires.
+const relationshipHoldTravelLimit = 6;
+// Staged by the contextmenu handler below and consumed by #edgeContextMenu's/#waypointContextMenu's
+// own click handlers -- context-menu opening is itself deferred (see stageContextMenuAction), so
+// this can't just be a local passed straight into an inline handler.
+let pendingWaypoint = null;
+let pendingWaypointRemoval = null;
+
+// The 42 here must match curve.getPoints(42) in createRelationship/updateRelationships -- a
+// Line raycast intersection's .index is a segment index into that same sampled geometry, so
+// intersection.index / 42 approximates the hit's parameter along the curve. Each existing
+// waypoint i sits at exactly t = (i+1)/(waypoints.length+1) on an open CatmullRomCurve3, so the
+// insertion index is just how many existing waypoints come before the hit along the curve.
+function waypointInsertionIndex(definition, hitSegmentIndex) {
+    const waypoints = definition.waypoints ?? [];
+    const tHit = hitSegmentIndex / 42;
+    return waypoints.filter((_, i) => (i + 1) / (waypoints.length + 1) < tHit).length;
+}
 
 function captureAdditiveNodeSelection(event) {
     if (event.button !== 0 || !event.shiftKey || activeEndpointPick || currentTool === 'rectangleSelect') return;
@@ -5369,7 +5510,8 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
         enterSubsystem(subsystemHit.object.userData.id);
         return;
     }
-    const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
+    const nodeIntersection = firstIntersection(nodePickTargets);
+    const node = rootNodeFromIntersection(nodeIntersection);
 
     if (node) {
         const wasSelected = selectedNodeIds.has(node.userData.id);
@@ -5389,12 +5531,32 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     if (activeEndpointPick) return;
     if (event.shiftKey) return;
 
+    // A waypoint handle isn't reachable via rootNodeFromIntersection's node-only walk (by
+    // design -- it degrades to null for any non-'node' kind), so it falls through to here just
+    // like empty canvas would. Bail out without touching selection and let DragControls' own
+    // pointerdown (registered earlier, same element) start the drag -- otherwise clearSelection()
+    // below would tear down the very handle the user is about to drag before DragControls sees it.
+    if (nodeIntersection?.object.userData.kind === 'waypoint') return;
+
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
+        // A quick click still opens the editor (via pointerup below, once travel is known) --
+        // pressing and holding in place instead enters waypoint routing: the edge gets
+        // selected (which is what already makes its waypoint handles visible) without the
+        // editor card popping up over it.
         const definition = relationshipHit.object.userData.definition;
-        selectRelationship(definition);
-        transformControls.detach();
-        openRelationshipEditor(definition);
+        relationshipPointerDown = {
+            definition,
+            x: event.clientX,
+            y: event.clientY,
+            holdTriggered: false,
+            timer: setTimeout(() => {
+                relationshipPointerDown.holdTriggered = true;
+                selectRelationship(definition);
+                transformControls.detach();
+                $('#statusText').textContent = `Editing waypoints · ${definition.title}`;
+            }, relationshipHoldDurationMs)
+        };
         return;
     }
 
@@ -5402,7 +5564,30 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     hideCards();
 });
 
+renderer.domElement.addEventListener('pointermove', (event) => {
+    if (!relationshipPointerDown || relationshipPointerDown.holdTriggered) return;
+    const travel = Math.hypot(event.clientX - relationshipPointerDown.x, event.clientY - relationshipPointerDown.y);
+    if (travel > relationshipHoldTravelLimit) {
+        clearTimeout(relationshipPointerDown.timer);
+        relationshipPointerDown = null;
+    }
+});
+
 renderer.domElement.addEventListener('pointerup', (event) => {
+    if (relationshipPointerDown) {
+        clearTimeout(relationshipPointerDown.timer);
+        const { definition, x, y, holdTriggered } = relationshipPointerDown;
+        relationshipPointerDown = null;
+        if (holdTriggered || event.button !== 0) return;
+        const pointerTravel = Math.hypot(event.clientX - x, event.clientY - y);
+        if (pointerTravel <= 4) {
+            selectRelationship(definition);
+            transformControls.detach();
+            openRelationshipEditor(definition);
+        }
+        return;
+    }
+
     if (event.button !== 0 || !nodePointerDown || activeEndpointPick) {
         nodePointerDown = null;
         return;
@@ -5423,7 +5608,8 @@ renderer.domElement.addEventListener('pointerup', (event) => {
 renderer.domElement.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     setPointerFromEvent(event);
-    const node = rootNodeFromIntersection(firstIntersection(nodePickTargets));
+    const nodeIntersection = firstIntersection(nodePickTargets);
+    const node = rootNodeFromIntersection(nodeIntersection);
 
     if (node) {
         stageContextMenuAction(() => {
@@ -5434,11 +5620,32 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
         return;
     }
 
+    if (nodeIntersection?.object.userData.kind === 'waypoint') {
+        const { relationshipId, index } = nodeIntersection.object.userData;
+        stageContextMenuAction(() => {
+            if (activeResult) return;
+            pendingWaypointRemoval = { relationshipId, index };
+            openWaypointContextMenu(event.clientX, event.clientY);
+        });
+        return;
+    }
+
     const relationshipHit = firstIntersection(relationshipPickTargets);
     if (relationshipHit) {
         stageContextMenuAction(() => {
-            selectRelationship(relationshipHit.object.userData.definition);
-            if (!activeResult) openEdgeContextMenu(event.clientX, event.clientY);
+            const definition = relationshipHit.object.userData.definition;
+            selectRelationship(definition);
+            if (!activeResult) {
+                // relationshipHit.index only exists on a Line-geometry hit (the edge itself, not
+                // its direction-marker cone, which reports .faceIndex instead) -- so this is
+                // simultaneously "was the line clicked" and the sample index needed below.
+                pendingWaypoint = relationshipHit.index === undefined ? null : {
+                    relationshipId: definition.id,
+                    point: relationshipHit.point.toArray(),
+                    insertionIndex: waypointInsertionIndex(definition, relationshipHit.index)
+                };
+                openEdgeContextMenu(event.clientX, event.clientY);
+            }
         });
         return;
     }
@@ -7124,6 +7331,25 @@ $('#edgeContextToggle').addEventListener('click', () => {
 $('#edgeContextDelete').addEventListener('click', () => {
     hideCards();
     deleteSelected();
+});
+$('#edgeContextAddWaypoint').addEventListener('click', () => {
+    hideCards();
+    const staged = pendingWaypoint;
+    pendingWaypoint = null;
+    if (!staged || selectedRelationship?.id !== staged.relationshipId) return;
+    changeEdgeModel(selectedRelationship, (clone) => {
+        clone.waypoints.splice(staged.insertionIndex, 0, staged.point);
+    });
+});
+$('#waypointContextRemove').addEventListener('click', () => {
+    hideCards();
+    const staged = pendingWaypointRemoval;
+    pendingWaypointRemoval = null;
+    const definition = staged && relationshipObjects.get(staged.relationshipId)?.definition;
+    if (!definition) return;
+    changeEdgeModel(definition, (clone) => {
+        clone.waypoints.splice(staged.index, 1);
+    });
 });
 $('[data-action="select-all"]').addEventListener('click', () => {
     hideCards();

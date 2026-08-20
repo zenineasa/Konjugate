@@ -65,10 +65,10 @@ try {
             const energy = (states) => 2 * states.get(2) ** 2
                 + 0.5 * states.get(3) ** 2;
             assert.ok(energy(dynamicSeries.at(-1)) < energy(dynamicSeries[0]), 'Damping must reduce mechanical energy.');
-        } else if (testCase.example === 'dcMotor') {
+        } else if (testCase.example === 'singleJointActuator') {
             const final = dynamicSeries.at(-1);
-            assert.ok(Math.abs(final.get(2) - 9.8) < 1e-4);
-            assert.ok(Math.abs(final.get(3) - 44) < 1e-3);
+            assert.ok(Math.abs(final.get(4) - 9.8) < 1e-4);
+            assert.ok(Math.abs(final.get(5) - 44) < 1e-3);
         } else if (testCase.example === 'twoRoomBuilding') {
             assert.ok(dynamicSeries.every((states) => states.get(2)
                 > states.get(4)), 'The initially warmer room must remain warmer during this run.');

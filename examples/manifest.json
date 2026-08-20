@@ -8,6 +8,10 @@
         { "id": "positionControlledJoint", "domains": ["electrical", "mechanical"] },
         { "id": "fourBarLinkage", "domains": ["mechanical"] },
         { "id": "thermalManagement", "domains": ["thermal", "electrical"] },
-        { "id": "pumpSuctionHydraulics", "domains": ["fluid"] }
+        { "id": "pumpSuctionHydraulics", "domains": ["fluid"] },
+        { "id": "heatedWaterTank", "domains": ["thermal"] },
+        { "id": "springMassDamper", "domains": ["mechanical"] },
+        { "id": "twoRoomBuilding", "domains": ["thermal"] },
+        { "id": "thermalEquilibrium", "domains": ["thermal"] }
     ]
 }

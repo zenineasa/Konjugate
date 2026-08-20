@@ -240,6 +240,24 @@ if(BUILD_TESTING)
             )
     endif()
 
+    add_executable(nodeProviderRuntimeTests
+        tests/nodeProviderRuntimeTests.cpp
+        ${PROVIDER_PROTOCOL_SOURCES}
+        ${PROVIDER_PROTOCOL_HEADERS}
+        src/executionPlan.cpp
+        src/modelValidator.cpp
+        src/providerRuntime.cpp
+    )
+    target_include_directories(nodeProviderRuntimeTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(nodeProviderRuntimeTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
+    add_test(NAME nodeProviderRuntimeTests COMMAND nodeProviderRuntimeTests)
+    # Same resolution reasoning as relationshipProviderTests above: this test's Python provider
+    # case resolves PYTHONPATH relative to engine/tests, not ctest's default working directory.
+    set_tests_properties(nodeProviderRuntimeTests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
+    )
+
     # A manual perf tool, not a pass/fail test: intentionally left out of add_test/ctest.
     add_executable(providerBatchingBenchmark
         tests/providerBatchingBenchmark.cpp
@@ -257,12 +275,14 @@ if(MSVC)
     if(BUILD_TESTING)
         target_compile_options(executionPlanTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(relationshipProviderTests PRIVATE /W4 /permissive- /MP)
+        target_compile_options(nodeProviderRuntimeTests PRIVATE /W4 /permissive- /MP)
     endif()
 else()
     target_compile_options(konjugateEngine PRIVATE -Wall -Wextra -Wpedantic)
     if(BUILD_TESTING)
         target_compile_options(executionPlanTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(relationshipProviderTests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(nodeProviderRuntimeTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
@@ -272,5 +292,6 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     if(BUILD_TESTING)
         target_compile_options(executionPlanTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(relationshipProviderTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+        target_compile_options(nodeProviderRuntimeTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
     endif()
 endif()

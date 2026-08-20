@@ -1,0 +1,59 @@
+{
+    "format": "konjugate",
+    "version": 1,
+    "name": "PI-controlled tank",
+    "nodes": [
+        {
+            "id": 1,
+            "name": "Tank",
+            "type": "generic",
+            "position": [
+                0,
+                0,
+                0
+            ],
+            "states": [
+                {
+                    "id": 11,
+                    "name": "Level",
+                    "symbol": "level",
+                    "initialValue": 0
+                },
+                {
+                    "id": 12,
+                    "name": "Cumulative control effort squared",
+                    "symbol": "cumulativeControlEffortSquared",
+                    "initialValue": 0
+                }
+            ],
+            "sourceTerms": [],
+            "numerics": {
+                "substepsPerGlobalStep": 1
+            },
+            "appearance": {},
+            "implementation": {
+                "kind": "python",
+                "providerApiVersion": 1,
+                "source": "# Copyright © 2026 Zenin Easa Panthakkalakath\n\n\"\"\"A computational-node provider the engine can actually execute end to end.\n\nUnlike accumulatorNode.py (which demonstrates the checkpointable NodeProvider wire contract in\nisolation, and returns an already-integrated running total as its \"gradient\"), this provider\nreturns real derivatives suitable for the engine's own explicit-Euler integration: two engine-\nvisible states (level, cumulativeControlEffortSquared) via two named outputs, plus one internal,\ncheckpointable field -- the PI controller's integral term -- that has no analog anywhere in the\nengine's own state vector. That integral term is why checkpoint()/restore() matter: without them,\npausing and resuming a run (or forking a branch from a checkpoint) would silently reset the\ncontroller's memory to zero, producing a different trajectory than an uninterrupted run.\n\nSee examples/providers/piControlledTankProject.json for a minimal model that wires this in via a\nnode's `implementation` block.\n\"\"\"\n\nimport struct\n\nfrom konjugate import NodeOutputCollector, NodeProvider, NodeProviderDescription, ScalarPort\n\n\nclass PIControllerNode(NodeProvider):\n    def __init__(self):\n        self._integral = 0.0\n\n    def describe(self):\n        return NodeProviderDescription(\n            \"example.piControllerNode\",\n            \"PI-controlled tank\",\n            [ScalarPort(\"level\", \"Tank level\", \"m\")],\n            [\n                ScalarPort(\"levelRate\", \"Level rate of change\", \"m/s\"),\n                ScalarPort(\"effortRateSquared\", \"Squared control effort rate\", \"\"),\n            ],\n        )\n\n    def evaluate(self, context, inputs, outputs):\n        setpoint = 10.0\n        error = setpoint - inputs[\"level\"]\n        self._integral += error * context.step_size\n        effort = 0.6 * error + 0.05 * self._integral\n        outputs.add_gradient(\"levelRate\", effort)\n        outputs.add_gradient(\"effortRateSquared\", effort * effort)\n\n    def checkpoint(self):\n        return struct.pack(\"!d\", self._integral)\n\n    def restore(self, payload):\n        if len(payload) != 8:\n            raise ValueError(\"PI controller checkpoint must contain one float.\")\n        self._integral = struct.unpack(\"!d\", payload)[0]\n",
+                "bindings": [
+                    {
+                        "key": "level",
+                        "kind": "state",
+                        "stateId": 11
+                    }
+                ],
+                "outputs": [
+                    {
+                        "key": "levelRate",
+                        "stateId": 11
+                    },
+                    {
+                        "key": "effortRateSquared",
+                        "stateId": 12
+                    }
+                ]
+            }
+        }
+    ],
+    "edges": []
+}

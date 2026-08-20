@@ -47,6 +47,13 @@ public:
                                       double simulationTime,
                                       double stepSize) override;
 
+    std::vector<std::pair<std::string, double>> evaluateNode(const NodeProviderTask& task,
+                                                              std::span<const double> inputs,
+                                                              double simulationTime,
+                                                              double stepSize) override;
+    std::vector<std::byte> requestNodeCheckpoint(const NodeProviderTask& task) override;
+    void requestNodeRestore(const NodeProviderTask& task, std::span<const std::byte> payload) override;
+
     void shutdown() noexcept;
 
 private:

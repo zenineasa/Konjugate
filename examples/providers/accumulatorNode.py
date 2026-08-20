@@ -1,7 +1,12 @@
 """Checkpointable computational-node provider contract example.
 
-The current engine worker does not execute NodeProvider instances yet. This
-example documents the intended lifecycle for the next runtime slice.
+This demonstrates the NodeProvider wire contract in isolation -- describe(), evaluate(),
+checkpoint() and restore() -- and is exercised directly by engine/tests/nodeProviderWorkerTest.py
+and scripts/checkNodeProviderExample.mjs. Its evaluate() returns an already-integrated running
+total as the "gradient", which is correct for demonstrating the protocol but would double-
+integrate if wired into a real model through the engine's explicit-Euler state update. For a
+provider the engine can actually run inside a model, see piControllerNode.py and
+piControlledTankProject.json alongside this file, which return real per-substep derivatives.
 """
 
 import struct

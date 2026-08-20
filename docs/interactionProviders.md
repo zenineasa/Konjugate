@@ -39,13 +39,13 @@ This section is the concrete, current-state counterpart to the rest of this docu
 - **Source terms as a first-class provider location**: a node's own source term now supports the same Equation/C++/Python choice as a relationship, with no source/target duality — bindings and the output always reference the owning node's own states only. See [Source terms](#source-terms) below; this was not in the original scope of this document and is documented here as an adopted extension of it.
 - **Validation stance on bindings**: neither a relationship nor a source term is required to declare any input binding — a provider may legitimately compute from parameters, time, or nothing at all. The one exception is a soft warning (not an error) when a provider has zero bindings *and* its source still contains the generated template's unedited `TODO: read` marker, since that combination signals the author has not started implementing it. Writing any real source clears the warning regardless of whether bindings are ever added.
 - **Editor UI**: both the relationship editor/builder and a new dedicated source-term editor/builder offer an Implementation selector (Equation / C++ program / Python program), a bindings list, an output-key field, starter-template generation (`src/providerTemplate.mjs`, regenerable via "Reset template"), and an "Open code editor" button that opens a dedicated syntax-highlighted, live-validated editor window — see [User experience](#user-experience).
-- **Computational-node protocol slice**: the C++ and Python SDKs expose a checkpointable node-provider interface with declared inputs, multiple outputs and explicit `checkpoint()`/`restore()` hooks. The Python worker now supports node evaluation, checkpoint and restore messages. The native engine execution plan does not launch this provider kind yet.
+- **Computational-node providers**: the C++ and Python SDKs expose a checkpointable node-provider interface with declared inputs, multiple outputs and explicit `checkpoint()`/`restore()` hooks. The Python worker supports node evaluation, checkpoint and restore messages. The native engine now launches this provider kind from a model (Python only): `executionPlan.cpp` compiles a node's `implementation` into a `NodeProviderTask`, `providerRuntime.cpp` evaluates it once per substep and requests checkpoint/restore over the same worker protocol, and `simulationRunner.cpp` folds its named derivative outputs into the ordinary Euler update and wires its checkpoint payload into the engine's own checkpoint/restart mechanism (`ResultCheckpoint.provider_states`, `startCheckpoint.providerStates`). C++ computational-node execution and the partitioned execution backend remain unimplemented for this provider kind.
 
 ### Not yet built
 
 - Discovery among *multiple* compatible compilers/interpreters (today it's still auto-detect-one-or-manually-override, not a list to choose from); Windows/Linux auto-detection beyond the plain `c++`/`python3` fallback.
 - Recording compiler identity, build configuration and artifact hash in the project or results (see [Reproducibility and results](#reproducibility-and-results), [Packaging and portability](#packaging-and-portability)).
-- Everything scoped as a non-goal below: stateful/computational-node providers, algebraic outputs, events and commands, FMU/live/remote providers, the public engine API, and multi-output relationships.
+- Everything scoped as a non-goal below: C++ computational-node providers, plugin-packaged (as opposed to inline) computational-node providers, partitioned-backend execution of computational-node providers, algebraic outputs, events and commands, FMU/live/remote providers, the public engine API, and multi-output relationships (other than the computational-node provider case above).
 
 ## Add-ons and plugins
 
@@ -646,7 +646,7 @@ Results mode should show the effective provider versions and any nondeterministi
 - Hiding meaningful state from checkpoints and results
 - Integrating FMUs, Simulink, Modelica, hardware, remote services or arbitrary third-party programs
 - Implementing the plugins and protocol adapters those external systems would require
-- Supporting stateful provider programs or provider-backed computational nodes
+- Supporting stateful provider programs or provider-backed computational nodes in C++, as a plugin package, or on the partitioned execution backend (Python, inline source, serial/thread-pool execution now ship -- see [Implementation status](#implementation-status))
 - Producing algebraic values, events or commands from provider code
 - Treating remote calls as if they were inexpensive deterministic equations
 - Supporting every solver rollback and algebraic-loop scenario immediately
@@ -665,7 +665,7 @@ This sequence is illustrative. The conceptual author-facing class lifecycle is s
 7. **Done.** Add native and interaction regressions proving that equation, C++ and Python edges receive identical bindings and contribution semantics. The same regressions were extended to source terms.
 8. **Not done.** Package an inline provider as a reusable plugin and verify generated configuration without adding provider-specific host code.
 9. **Not done.** Measure process and batching overhead before expanding the output contract or adding another plugin contribution kind.
-10. **Not done.** Design stateful computational-node providers, checkpoints and external-software plugins as separate later phases.
+10. **Partially done**, Python-only, serial/thread-pool execution only. Stateful computational-node providers now execute through the same worker protocol as relationship providers, with checkpoint/restore wired into the engine's own checkpoint and restart mechanism. C++ execution, the partitioned execution backend, and external-software plugins remain separate later phases.
 
 ## Recommended decisions before implementation
 

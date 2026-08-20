@@ -404,4 +404,56 @@ assert.deepEqual(restartResult.samples.map((sample) => sample.time), [0.1, 0.2])
 const unsupportedInput = join(directory, 'project.unsupported');
 await writeFile(unsupportedInput, await encodeProjectFile(project));
 assert.equal(await run(executable, ['validate', unsupportedInput, '--report', report]), 3);
+
+// A computational-node provider's opaque checkpoint()/restore() state (here, a controller's
+// integral term) has no analog in the ordinary state vector, so a pause/resume-style restart must
+// reproduce an uninterrupted run bit-for-bit, and a restart missing that state must be rejected
+// rather than silently resetting it -- see docs/pluginDevelopment.md's computational-node-provider
+// section.
+const pythonSdkPath = join(engineOptions.packaged ? engineOptions.resourcesPath : engineOptions.applicationPath, 'engine', 'sdk', 'python');
+const nodeProviderProject = JSON.parse(await readFile(
+    new URL('../../examples/providers/piControlledTankProject.json', import.meta.url), 'utf8'));
+const nodeProviderInput = join(directory, 'nodeProvider.kjt');
+await writeFile(nodeProviderInput, await encodeProjectFile(JSON.stringify(nodeProviderProject)));
+assert.equal(await run(executable, ['validate', nodeProviderInput, '--report', report]), 0);
+assert.equal(JSON.parse(await readFile(report, 'utf8')).valid, true);
+
+const nodeProviderRunConfiguration = (overrides) => JSON.stringify({
+    name: 'PI controller', globalTimeStep: 0.1, outputInterval: 0.5,
+    providers: { python: { sdkPath: pythonSdkPath } }, ...overrides
+});
+await writeFile(join(directory, 'nodeProviderFull.json'), nodeProviderRunConfiguration({ targetTime: 3 }));
+assert.equal(await run(executable, [
+    'run', nodeProviderInput, '--configuration', join(directory, 'nodeProviderFull.json'),
+    '--output', join(directory, 'nodeProviderFull.bin')
+]), 0);
+const nodeProviderFullResult = decodeResultFile(await readFile(join(directory, 'nodeProviderFull.bin')));
+assert.equal(nodeProviderFullResult.checkpoints.at(-1).providerStates.length, 1);
+assert.equal(nodeProviderFullResult.checkpoints.at(-1).providerStates[0].nodeId, 1);
+
+await writeFile(join(directory, 'nodeProviderPartial.json'), nodeProviderRunConfiguration({ targetTime: 1.5 }));
+assert.equal(await run(executable, [
+    'run', nodeProviderInput, '--configuration', join(directory, 'nodeProviderPartial.json'),
+    '--output', join(directory, 'nodeProviderPartial.bin')
+]), 0);
+const nodeProviderPartialResult = decodeResultFile(await readFile(join(directory, 'nodeProviderPartial.bin')));
+const nodeProviderCheckpoint = nodeProviderPartialResult.checkpoints.at(-1);
+
+await writeFile(join(directory, 'nodeProviderRestart.json'),
+    nodeProviderRunConfiguration({ targetTime: 3, startCheckpoint: nodeProviderCheckpoint }));
+assert.equal(await run(executable, [
+    'run', nodeProviderInput, '--configuration', join(directory, 'nodeProviderRestart.json'),
+    '--output', join(directory, 'nodeProviderRestart.bin')
+]), 0);
+const nodeProviderRestartResult = decodeResultFile(await readFile(join(directory, 'nodeProviderRestart.bin')));
+assert.deepEqual(nodeProviderRestartResult.samples.at(-1).states, nodeProviderFullResult.samples.at(-1).states);
+
+await writeFile(join(directory, 'nodeProviderRestartMissingProviderState.json'), nodeProviderRunConfiguration({
+    targetTime: 3, startCheckpoint: { time: nodeProviderCheckpoint.time, states: nodeProviderCheckpoint.states }
+}));
+assert.notEqual(await run(executable, [
+    'run', nodeProviderInput, '--configuration', join(directory, 'nodeProviderRestartMissingProviderState.json'),
+    '--output', join(directory, 'nodeProviderRestartMissingProviderState.bin')
+]), 0);
+
 console.log('C++/Electron container compatibility passed.');

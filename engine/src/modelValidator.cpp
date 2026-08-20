@@ -316,6 +316,66 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 add(result, "sourceOutputMissing", "error", "Source term requires an existing output state.", "node", id, "sourceTerms");
             }
         }
+        if (nodeEnabled) {
+            if (const auto implementation = node.get_child_optional("implementation")) {
+                const auto kind = value(*implementation, "kind");
+                if (kind != "python") {
+                    add(result, "nodeProviderKindInvalid", "error",
+                        "Computational-node provider implementation kind must be python (C++ computational-node execution is not implemented yet).",
+                        "node", id, "implementation");
+                }
+                if (value(*implementation, "providerApiVersion") != "1") {
+                    add(result, "providerApiVersionInvalid", "error", "Programmable computational-node providers require provider API version 1.", "node", id, "implementation");
+                }
+                if (value(*implementation, "source").empty()) {
+                    add(result, "providerSourceEmpty", "error", "Programmable computational-node providers require inline source.", "node", id, "implementation");
+                }
+                // Same "zero bindings is legitimate, but warn if it also still looks untouched"
+                // stance as edges/source terms: a computational-node provider may legitimately
+                // compute purely from parameters or time -- except a node has no parameter
+                // concept to bind against, so this is really "purely from time or constants".
+                std::set<std::string> nodeProviderKeys;
+                const auto providerBindings = implementation->get_child_optional("bindings");
+                const bool hasBindings = providerBindings && !providerBindings->empty();
+                if (!hasBindings && value(*implementation, "source").find("TODO: read") != std::string::npos) {
+                    add(result, "nodeProviderImplementationIncomplete", "warning",
+                        "This computational-node provider has no input bindings and still contains the generated template.",
+                        "node", id, "implementation");
+                }
+                if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
+                    const auto& binding = bindingEntry.second;
+                    const auto key = value(binding, "key");
+                    if (!std::regex_match(key, providerKeyPattern)) {
+                        add(result, "providerBindingKeyInvalid", "error", "Provider input keys must be lower camel case.", "node", id, "implementation");
+                    } else if (!nodeProviderKeys.insert(key).second) {
+                        add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "implementation");
+                    }
+                    if (value(binding, "kind") != "state" || !stateIds[id].contains(value(binding, "stateId"))) {
+                        add(result, "providerBindingMissing", "error", "Provider binding references a missing local state.", "node", id, "implementation");
+                    }
+                }
+                // Unlike an edge/source term's single output, a computational-node provider
+                // declares N named outputs -- each needs its own key-uniqueness check, and at
+                // least one is required since zero outputs would mean the provider contributes
+                // nothing at all, defeating the point of owning a node's dynamics.
+                std::set<std::string> outputKeys;
+                const auto outputs = implementation->get_child_optional("outputs");
+                if (!outputs || outputs->empty()) {
+                    add(result, "nodeProviderOutputsEmpty", "error", "A computational-node provider must declare at least one named output.", "node", id, "implementation");
+                } else for (const auto& outputEntry : *outputs) {
+                    const auto& output = outputEntry.second;
+                    const auto key = value(output, "key");
+                    if (key.empty() || !std::regex_match(key, providerKeyPattern)) {
+                        add(result, "nodeProviderOutputKeyInvalid", "error", "Provider output key must be lower camel case.", "node", id, "implementation");
+                    } else if (!outputKeys.insert(key).second) {
+                        add(result, "nodeProviderOutputKeyDuplicate", "error", "Provider output key \"" + key + "\" is duplicated.", "node", id, "implementation");
+                    }
+                    if (!stateIds[id].contains(value(output, "stateId"))) {
+                        add(result, "nodeProviderOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "implementation");
+                    }
+                }
+            }
+        }
     }
 
     result.edgeCount = edgesOptional->size();

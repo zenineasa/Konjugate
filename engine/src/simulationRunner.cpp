@@ -11,6 +11,7 @@
 #include "taskExecutor.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cmath>
 #include <fstream>
@@ -19,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <openssl/evp.h>
 #include <random>
 #include <set>
 #include <sstream>
@@ -42,7 +44,10 @@ void writeFramedEvent(std::ostream& output, const protocol::EngineEvent& event) 
 }
 using Values = StateValues;
 struct Sample { double time; Values states; };
-struct Checkpoint { std::string uuid; double time; Values states; };
+// Each entry pairs a computational-node-provider-owning node's id with that provider instance's
+// opaque checkpoint() payload. Empty for a plan with no computational-node providers.
+using ProviderCheckpointStates = std::vector<std::pair<EntityId, std::vector<std::byte>>>;
+struct Checkpoint { std::string uuid; double time; Values states; ProviderCheckpointStates providerStates; };
 enum class PacingMode { fastest, realTime, limitedRatio };
 enum class RunState { running, paused, stopped };
 struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
@@ -75,6 +80,29 @@ EntityId entityIdValue(const boost::property_tree::ptree& tree, const std::strin
         throw std::runtime_error("Model ids must be positive safe integers.");
     }
     return result;
+}
+
+// A restart checkpoint is plain JSON, which has no native bytes type, so a computational-node
+// provider's opaque checkpoint payload travels as base64 text -- same convention already used for
+// the encrypted-project container header in projectContainer.cpp, though that helper is
+// fixed-size-only and local to a different translation unit, hence this small counterpart.
+std::vector<std::byte> decodeBase64Bytes(const std::string& encoded) {
+    if (encoded.empty()) return {};
+    if (encoded.size() % 4) {
+        throw std::runtime_error("A computational-node provider checkpoint payload is not valid base64.");
+    }
+    std::vector<unsigned char> decoded(encoded.size() / 4 * 3);
+    const auto size = EVP_DecodeBlock(decoded.data(), reinterpret_cast<const unsigned char*>(encoded.data()),
+        static_cast<int>(encoded.size()));
+    if (size < 0) throw std::runtime_error("A computational-node provider checkpoint payload is not valid base64.");
+    std::size_t actual = static_cast<std::size_t>(size);
+    if (encoded.ends_with("==")) actual -= 2;
+    else if (encoded.ends_with("=")) actual -= 1;
+    decoded.resize(actual);
+    std::vector<std::byte> bytes(decoded.size());
+    std::transform(decoded.begin(), decoded.end(), bytes.begin(),
+        [](unsigned char byte) { return static_cast<std::byte>(byte); });
+    return bytes;
 }
 
 PacingMode pacingModeFromString(const std::string& value) {
@@ -336,6 +364,18 @@ void runSimulation(const boost::property_tree::ptree& document,
         executionSettings.estimatedOperationsPerSynchronization, executionSettings.automaticParallelThreshold,
         partitionPlan.selected.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
     executionSettings.backend = backendDecision.backend;
+    // Computational-node providers work through the partitioned backend "for free" -- it calls
+    // the same evaluateContributionTasks() as serial/threadPool -- but are untested there this
+    // release (see docs/pluginDevelopment.md). An explicit request fails loudly; an automatic
+    // choice quietly downgrades to threadPool, which is fully supported.
+    if (executionSettings.backend == ExecutionBackend::partitioned &&
+        std::any_of(executionPlan.nodes.begin(), executionPlan.nodes.end(),
+            [](const auto& node) { return node.nodeProvider.has_value(); })) {
+        if (executionSettings.requestedBackend == ExecutionBackend::partitioned) {
+            throw std::runtime_error("Computational-node providers are not yet supported by the partitioned execution backend.");
+        }
+        executionSettings.backend = ExecutionBackend::threadPool;
+    }
     if (executionSettings.backend == ExecutionBackend::serial) executionSettings.workerThreads = 1;
     const auto planningNanoseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - planningStartedAt).count());
@@ -403,6 +443,33 @@ void runSimulation(const boost::property_tree::ptree& document,
             states[stateIndex->second] = stateItem.second.get<double>("value");
         }
         if (restored.size() != states.size()) throw std::runtime_error("The restart checkpoint is missing model states.");
+
+        // Opaque provider-owned state (e.g. a controller's integral term) has no analog in the
+        // ordinary numeric state vector restored above, so it must be restored explicitly and
+        // exhaustively: a missing entry fails loudly here rather than silently resetting a
+        // provider instance to its initialize()-time default.
+        const auto providerNodeCount = std::count_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
+            [](const auto& node) { return node.nodeProvider.has_value(); });
+        if (providerNodeCount) {
+            const auto providerStatesNode = checkpoint->get_child_optional("providerStates");
+            if (!providerStatesNode) {
+                throw std::runtime_error("The restart checkpoint is missing computational-node provider state.");
+            }
+            std::set<EntityId> restoredNodes;
+            for (const auto& entry : *providerStatesNode) {
+                const auto nodeId = entityIdValue(entry.second, "nodeId");
+                const auto nodeIt = std::find_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
+                    [&](const auto& node) { return node.nodeId == nodeId; });
+                if (nodeIt == executionPlan.nodes.end() || !nodeIt->nodeProvider || !restoredNodes.insert(nodeId).second) {
+                    throw std::runtime_error("The restart checkpoint references an unknown computational-node provider.");
+                }
+                providerRuntime->requestNodeRestore(*nodeIt->nodeProvider,
+                    decodeBase64Bytes(entry.second.get<std::string>("payload", "")));
+            }
+            if (static_cast<std::size_t>(providerNodeCount) != restoredNodes.size()) {
+                throw std::runtime_error("The restart checkpoint is missing computational-node provider state.");
+            }
+        }
     }
     if (!(startTime >= 0) || !(targetTime > startTime)) throw std::runtime_error("targetTime must be later than the restart checkpoint.");
 
@@ -419,8 +486,16 @@ void runSimulation(const boost::property_tree::ptree& document,
     std::uint64_t partitionMessagePreparationNanoseconds = 0;
     std::uint64_t partitionTransportPublishNanoseconds = 0;
     std::uint64_t partitionBoundaryWaitNanoseconds = 0;
+    const auto captureProviderStates = [&]() {
+        ProviderCheckpointStates result;
+        if (!providerRuntime) return result;
+        for (const auto& node : executionPlan.nodes) {
+            if (node.nodeProvider) result.emplace_back(node.nodeId, providerRuntime->requestNodeCheckpoint(*node.nodeProvider));
+        }
+        return result;
+    };
     std::vector<Sample> samples = {{startTime, states}};
-    std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states}};
+    std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
     std::vector<Sample> pendingEventSamples;
     if (eventStream) {
         protocol::EngineEvent event;
@@ -465,7 +540,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             appendStreamRecord("sample", currentTime, states);
         }
         if (currentTime > checkpoints.back().time + 1e-12) {
-            checkpoints.push_back({createUuid(), currentTime, states});
+            checkpoints.push_back({createUuid(), currentTime, states, captureProviderStates()});
             appendStreamRecord("checkpoint", currentTime, states, checkpoints.back().uuid);
         }
     };
@@ -589,6 +664,11 @@ void runSimulation(const boost::property_tree::ptree& document,
                 encoded->set_solver_version(1);
                 for (const auto stateId : stateIds) {
                     encoded->add_values(checkpoint.states.at(executionPlan.stateIndexes.at(stateId)));
+                }
+                for (const auto& [nodeId, payload] : checkpoint.providerStates) {
+                    auto* providerState = encoded->add_provider_states();
+                    providerState->set_node_id(nodeId);
+                    providerState->set_payload(std::string(reinterpret_cast<const char*>(payload.data()), payload.size()));
                 }
             }
         }
@@ -764,7 +844,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             samples.push_back({elapsed, states});
             appendStreamRecord("sample", elapsed, states);
             if (step + 1 == steps && elapsed > checkpoints.back().time + 1e-12) {
-                checkpoints.push_back({createUuid(), elapsed, states});
+                checkpoints.push_back({createUuid(), elapsed, states, captureProviderStates()});
                 appendStreamRecord("checkpoint", elapsed, states, checkpoints.back().uuid);
             }
             while (nextOutputTime <= elapsed + 1e-12) nextOutputTime += outputInterval;

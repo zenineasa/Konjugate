@@ -521,6 +521,28 @@ public:
         std::uint64_t sequence, double simulationTime, double stepSize,
         const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) = 0;
     virtual void shutdown() noexcept = 0;
+
+    // Throwing defaults: only PipeProviderBackend (the transport Python computational-node
+    // providers always use) overrides these. SharedMemoryProviderBackend/InProcessProviderBackend
+    // never receive these calls in practice, since createProviderBackend only routes cppProvider
+    // tasks to them and node-provider tasks are always pythonProvider this release.
+    virtual std::vector<std::pair<std::string, double>> evaluateNode(
+        std::uint64_t instanceId, double simulationTime, double stepSize, std::span<const double> inputs) {
+        static_cast<void>(instanceId);
+        static_cast<void>(simulationTime);
+        static_cast<void>(stepSize);
+        static_cast<void>(inputs);
+        throw std::runtime_error("This provider transport does not support computational-node providers.");
+    }
+    virtual std::vector<std::byte> requestCheckpoint(std::uint64_t instanceId) {
+        static_cast<void>(instanceId);
+        throw std::runtime_error("This provider transport does not support computational-node checkpointing.");
+    }
+    virtual void requestRestore(std::uint64_t instanceId, std::span<const std::byte> payload) {
+        static_cast<void>(instanceId);
+        static_cast<void>(payload);
+        throw std::runtime_error("This provider transport does not support computational-node restore.");
+    }
 };
 
 // Owns one spawned provider process's control pipe: spawn, protocol handshake, the initialize
@@ -595,6 +617,85 @@ public:
             results.emplace_back(contrib.instance_id(), contrib.value());
         }
         return results;
+    }
+
+    // A node has at most one provider task, so this always carries exactly one NodeEvaluation:
+    // there is no cross-instance batching benefit here the way evaluateBatchOverPipe has across
+    // multiple relationship-provider instances sharing one process.
+    std::vector<std::pair<std::string, double>> sendNodeEvaluate(
+        std::uint64_t instanceId, double simulationTime, double stepSize, std::span<const double> inputs) {
+        EngineToProvider msg;
+        auto* request = msg.mutable_node_evaluate();
+        request->set_sequence(0);
+        request->set_simulation_time(simulationTime);
+        request->set_step_size(stepSize);
+        auto* evaluation = request->add_evaluations();
+        evaluation->set_instance_id(instanceId);
+        for (const auto value : inputs) evaluation->add_inputs(value);
+
+        writeFramed(stdinFd_, msg);
+
+        ProviderToEngine resp;
+        if (!readFramed(stdoutFd_, resp)) {
+            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during nodeEvaluate.");
+        }
+        if (resp.has_failure()) {
+            throw std::runtime_error("Provider process node evaluation failed: " + std::string(resp.failure().message()));
+        }
+        if (!resp.has_node_evaluate()) {
+            throw std::runtime_error("Unexpected response to nodeEvaluate from provider process " + processKey_);
+        }
+
+        std::vector<std::pair<std::string, double>> results;
+        for (const auto& contribution : resp.node_evaluate().contributions()) {
+            if (contribution.instance_id() != instanceId) continue;
+            for (const auto& output : contribution.outputs()) {
+                results.emplace_back(output.key(), output.value());
+            }
+        }
+        return results;
+    }
+
+    std::vector<std::byte> sendCheckpoint(std::uint64_t instanceId) {
+        EngineToProvider msg;
+        msg.mutable_checkpoint()->set_instance_id(instanceId);
+        writeFramed(stdinFd_, msg);
+
+        ProviderToEngine resp;
+        if (!readFramed(stdoutFd_, resp)) {
+            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during checkpoint.");
+        }
+        if (resp.has_failure()) {
+            throw std::runtime_error("Provider process checkpoint failed: " + std::string(resp.failure().message()));
+        }
+        if (!resp.has_checkpoint() || resp.checkpoint().instance_id() != instanceId) {
+            throw std::runtime_error("Unexpected response to checkpoint from provider process " + processKey_);
+        }
+
+        const auto& payload = resp.checkpoint().payload();
+        std::vector<std::byte> bytes(payload.size());
+        std::transform(payload.begin(), payload.end(), bytes.begin(),
+            [](char byte) { return static_cast<std::byte>(byte); });
+        return bytes;
+    }
+
+    void sendRestore(std::uint64_t instanceId, std::span<const std::byte> payload) {
+        EngineToProvider msg;
+        auto* request = msg.mutable_restore();
+        request->set_instance_id(instanceId);
+        request->set_payload(std::string(reinterpret_cast<const char*>(payload.data()), payload.size()));
+        writeFramed(stdinFd_, msg);
+
+        ProviderToEngine resp;
+        if (!readFramed(stdoutFd_, resp)) {
+            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during restore.");
+        }
+        if (resp.has_failure()) {
+            throw std::runtime_error("Provider process restore failed: " + std::string(resp.failure().message()));
+        }
+        if (!resp.has_restore() || resp.restore().instance_id() != instanceId || !resp.restore().restored()) {
+            throw std::runtime_error("Unexpected response to restore from provider process " + processKey_);
+        }
     }
 
     void close() noexcept {
@@ -865,6 +966,22 @@ public:
     void shutdown() noexcept override {
         std::lock_guard<std::mutex> lock(mutex_);
         channel_.close();
+    }
+
+    std::vector<std::pair<std::string, double>> evaluateNode(
+        std::uint64_t instanceId, double simulationTime, double stepSize, std::span<const double> inputs) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return channel_.sendNodeEvaluate(instanceId, simulationTime, stepSize, inputs);
+    }
+
+    std::vector<std::byte> requestCheckpoint(std::uint64_t instanceId) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return channel_.sendCheckpoint(instanceId);
+    }
+
+    void requestRestore(std::uint64_t instanceId, std::span<const std::byte> payload) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        channel_.sendRestore(instanceId, payload);
     }
 
 private:
@@ -1250,6 +1367,23 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
 
             proc->addInstance(instanceId, task.bindings);
         }
+
+        if (node.nodeProvider) {
+            const auto& task = *node.nodeProvider;
+            const auto& key = task.providerProcessKeyCache;
+            auto& proc = processes_[key];
+            if (!proc) {
+                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_);
+            }
+
+            const std::uint64_t instanceId = nextInstanceId_++;
+            // Safe to share this EntityId-keyed map with edge/source-term sourceId entries above:
+            // docs/projectSchema.md guarantees ids are unique across nodes, states, source terms,
+            // edges, parameters and run configurations project-wide.
+            taskInstanceIds_[task.nodeId] = instanceId;
+
+            proc->addInstance(instanceId, task.bindings);
+        }
     }
 
     for (auto& [key, proc] : processes_) {
@@ -1257,6 +1391,43 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
     }
 
     initialized_ = true;
+}
+
+std::vector<std::pair<std::string, double>> ProviderRuntime::evaluateNode(
+    const NodeProviderTask& task, std::span<const double> inputs, double simulationTime, double stepSize) {
+    const auto processIt = processes_.find(task.providerProcessKeyCache);
+    if (processIt == processes_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    const auto instanceIt = taskInstanceIds_.find(task.nodeId);
+    if (instanceIt == taskInstanceIds_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    return processIt->second->evaluateNode(instanceIt->second, simulationTime, stepSize, inputs);
+}
+
+std::vector<std::byte> ProviderRuntime::requestNodeCheckpoint(const NodeProviderTask& task) {
+    const auto processIt = processes_.find(task.providerProcessKeyCache);
+    if (processIt == processes_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    const auto instanceIt = taskInstanceIds_.find(task.nodeId);
+    if (instanceIt == taskInstanceIds_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    return processIt->second->requestCheckpoint(instanceIt->second);
+}
+
+void ProviderRuntime::requestNodeRestore(const NodeProviderTask& task, std::span<const std::byte> payload) {
+    const auto processIt = processes_.find(task.providerProcessKeyCache);
+    if (processIt == processes_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    const auto instanceIt = taskInstanceIds_.find(task.nodeId);
+    if (instanceIt == taskInstanceIds_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    processIt->second->requestRestore(instanceIt->second, payload);
 }
 
 std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const ContributionTask*>& tasks,
@@ -1328,6 +1499,7 @@ void ProviderRuntime::shutdown() noexcept {
 
 bool planRequiresProviders(const ExecutionPlan& plan) {
     for (const auto& node : plan.nodes) {
+        if (node.nodeProvider) return true;
         for (const auto& task : node.contributions) {
             if (task.implementation != ContributionImplementation::equation) return true;
         }

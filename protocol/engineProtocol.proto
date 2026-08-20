@@ -61,12 +61,18 @@ message EngineCommand {
     }
 }
 
+message NodeProviderCheckpoint {
+    uint64 node_id = 1;
+    bytes payload = 2;
+}
+
 message ResultCheckpoint {
     string uuid = 1;
     double time = 2;
     repeated double values = 3;
     string solver_kind = 4;
     uint32 solver_version = 5;
+    repeated NodeProviderCheckpoint provider_states = 6;
 }
 
 message ResultFile {

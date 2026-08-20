@@ -170,13 +170,26 @@ export function decodeResultHeaderPayload(buffer) {
         else if (field.number === 2 && field.wireType === 2) header.metadata = JSON.parse(field.value.toString('utf8'));
         else if (field.number === 3 && field.wireType === 2) header.stateIds = decodedStateTable(field.value);
         else if (field.number === 5 && field.wireType === 2) {
-            const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 } };
+            const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 }, providerStates: [] };
             for (const item of fields(field.value)) {
                 if (item.number === 1 && item.wireType === 2) checkpoint.uuid = item.value.toString('utf8');
                 else if (item.number === 2 && item.wireType === 1) checkpoint.time = item.value.readDoubleLE();
                 else if (item.number === 3 && item.wireType === 2) checkpoint.values = checkpoint.values.concat(packedDoubles(item.value));
                 else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = item.value.toString('utf8');
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
+                else if (item.number === 6 && item.wireType === 2) {
+                    // Base64, not a raw Buffer: this shape is meant to be reused verbatim as a
+                    // startCheckpoint.providerStates entry on restart (mirroring how a decoded
+                    // checkpoint's `values` already matches startCheckpoint.states' shape), and
+                    // a restart configuration is plain JSON with no native bytes type.
+                    let nodeId = 0;
+                    let payload = '';
+                    for (const providerItem of fields(item.value)) {
+                        if (providerItem.number === 1 && providerItem.wireType === 0) nodeId = providerItem.value;
+                        else if (providerItem.number === 2 && providerItem.wireType === 2) payload = Buffer.from(providerItem.value).toString('base64');
+                    }
+                    checkpoint.providerStates.push({ nodeId, payload });
+                }
             }
             header.checkpoints.push(checkpoint);
         }
@@ -217,13 +230,26 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
         else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(field.value.toString('utf8'));
         else if (field.number === 3 && field.wireType === 2) stateIds = decodedStateTable(field.value);
         else if (field.number === 5 && field.wireType === 2) {
-            const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 } };
+            const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 }, providerStates: [] };
             for (const item of fields(field.value)) {
                 if (item.number === 1 && item.wireType === 2) checkpoint.uuid = item.value.toString('utf8');
                 else if (item.number === 2 && item.wireType === 1) checkpoint.time = item.value.readDoubleLE();
                 else if (item.number === 3 && item.wireType === 2) checkpoint.values = checkpoint.values.concat(packedDoubles(item.value));
                 else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = item.value.toString('utf8');
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
+                else if (item.number === 6 && item.wireType === 2) {
+                    // Base64, not a raw Buffer: this shape is meant to be reused verbatim as a
+                    // startCheckpoint.providerStates entry on restart (mirroring how a decoded
+                    // checkpoint's `values` already matches startCheckpoint.states' shape), and
+                    // a restart configuration is plain JSON with no native bytes type.
+                    let nodeId = 0;
+                    let payload = '';
+                    for (const providerItem of fields(item.value)) {
+                        if (providerItem.number === 1 && providerItem.wireType === 0) nodeId = providerItem.value;
+                        else if (providerItem.number === 2 && providerItem.wireType === 2) payload = Buffer.from(providerItem.value).toString('base64');
+                    }
+                    checkpoint.providerStates.push({ nodeId, payload });
+                }
             }
             checkpoints.push(checkpoint);
         }
@@ -304,7 +330,8 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
                 uuid: checkpoint.uuid,
                 time: checkpoint.time,
                 solver: checkpoint.solver,
-                states: materializeStates(checkpoint.values)
+                states: materializeStates(checkpoint.values),
+                providerStates: checkpoint.providerStates
             };
         })
     };

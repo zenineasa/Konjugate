@@ -5,9 +5,11 @@
 #include <boost/property_tree/ptree.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -95,6 +97,27 @@ struct ContributionTask {
 // evaluateBatch call rather than one round trip per contribution.
 const std::string& providerProcessKey(const ContributionTask& task);
 
+struct NodeProviderOutputBinding {
+    std::string key;
+    EntityId stateId = 0;
+    std::size_t stateIndex = std::numeric_limits<std::size_t>::max();
+};
+
+// Owns ALL the dynamics of one node, unlike ContributionTask which owns one scalar derivative
+// into one state: evaluated once per substep, returns N named derivative contributions (one per
+// declared output), each folded additively into its own target state exactly like an ordinary
+// contribution. A node has at most one of these. Python-only for now (see providerRuntime.cpp);
+// implementation is retained (rather than assumed) so a future C++ node-provider slice only has
+// to add a branch here, not a new field.
+struct NodeProviderTask {
+    EntityId nodeId = 0;
+    ContributionImplementation implementation = ContributionImplementation::pythonProvider;
+    std::string providerSource;
+    std::string providerProcessKeyCache; // "py:" + providerSource, same scheme as ContributionTask
+    std::vector<CompiledBinding> bindings;          // own-node states only, like a source term
+    std::vector<NodeProviderOutputBinding> outputs; // N named outputs -> this node's own states
+};
+
 class ProviderEvaluator {
 public:
     virtual ~ProviderEvaluator() = default;
@@ -105,6 +128,23 @@ public:
                                               const std::vector<std::span<const double>>& inputs,
                                               double simulationTime,
                                               double stepSize) = 0;
+
+    // Throwing defaults, not pure virtual: existing ProviderEvaluator doubles (tests, the
+    // benchmark harness) that never exercise computational-node providers need not implement
+    // these. A real caller only reaches them when a plan actually contains a NodeProviderTask.
+    virtual std::vector<std::pair<std::string, double>> evaluateNode(
+        const NodeProviderTask&, std::span<const double> inputs, double simulationTime, double stepSize) {
+        static_cast<void>(inputs);
+        static_cast<void>(simulationTime);
+        static_cast<void>(stepSize);
+        throw std::runtime_error("This provider evaluator does not support computational-node providers.");
+    }
+    virtual std::vector<std::byte> requestNodeCheckpoint(const NodeProviderTask&) {
+        throw std::runtime_error("This provider evaluator does not support computational-node checkpointing.");
+    }
+    virtual void requestNodeRestore(const NodeProviderTask&, std::span<const std::byte>) {
+        throw std::runtime_error("This provider evaluator does not support computational-node restore.");
+    }
 };
 
 struct NodeExecutionPlan {
@@ -113,6 +153,7 @@ struct NodeExecutionPlan {
     std::vector<EntityId> stateIds;
     std::vector<std::size_t> stateIndexes;
     std::vector<ContributionTask> contributions;
+    std::optional<NodeProviderTask> nodeProvider;
     std::size_t estimatedOperationsPerSubstep = 0;
 };
 

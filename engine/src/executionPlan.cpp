@@ -224,6 +224,31 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             compiledNode.estimatedOperationsPerSubstep += termProgrammable ? task.bindings.size() + 1 : task.expression.operationCount();
             compiledNode.contributions.push_back(std::move(task));
         }
+        if (const auto implementation = node.get_child_optional("implementation")) {
+            const auto kind = value(*implementation, "kind");
+            if (kind != "python") {
+                throw std::runtime_error("A computational-node provider implementation kind must be python.");
+            }
+            NodeProviderTask providerTask;
+            providerTask.implementation = ContributionImplementation::pythonProvider;
+            providerTask.nodeId = compiledNode.nodeId;
+            providerTask.providerSource = value(*implementation, "source");
+            if (const auto bindingsNode = implementation->get_child_optional("bindings")) {
+                providerTask.bindings = compileBindings(*bindingsNode, compiledNode.nodeId, true,
+                    plan.stateIndexes, localStateIndexes, "key");
+            }
+            for (const auto& outputItem : implementation->get_child("outputs")) {
+                const auto& outputEntry = outputItem.second;
+                NodeProviderOutputBinding output;
+                output.key = value(outputEntry, "key");
+                output.stateId = idValue(outputEntry, "stateId");
+                output.stateIndex = localStateIndexes.at(output.stateId);
+                providerTask.outputs.push_back(std::move(output));
+            }
+            providerTask.providerProcessKeyCache = "py:" + providerTask.providerSource;
+            compiledNode.estimatedOperationsPerSubstep += providerTask.bindings.size() + providerTask.outputs.size() + 1;
+            compiledNode.nodeProvider = std::move(providerTask);
+        }
         nodeIndexes[compiledNode.nodeId] = plan.nodes.size();
         plan.nodes.push_back(std::move(compiledNode));
     }
@@ -397,6 +422,31 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
         for (std::size_t index = 0; index < tasks.size(); ++index) {
             const auto& task = *tasks[index];
             evaluated.push_back({task.sequence, task.outputStateIndex, finalizeContribution(task, results[index])});
+        }
+    }
+
+    if (node.nodeProvider) {
+        const auto& task = *node.nodeProvider;
+        std::vector<double> inputs(task.bindings.size());
+        for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+            const auto& binding = task.bindings[index];
+            if (binding.source == BindingSource::parameter) {
+                throw std::runtime_error("A computational-node provider binding cannot reference a parameter.");
+            }
+            inputs[index] = binding.source == BindingSource::localState
+                ? localStates.at(binding.valueIndex) : synchronizationSnapshot.at(binding.valueIndex);
+        }
+        if (!providerEvaluator) throw std::runtime_error("A computational-node provider requires an initialized provider runtime.");
+        const auto outputs = providerEvaluator->evaluateNode(task, inputs, simulationTime, stepSize);
+        for (const auto& [outputKey, outputValue] : outputs) {
+            const auto found = std::find_if(task.outputs.begin(), task.outputs.end(),
+                [&](const auto& output) { return output.key == outputKey; });
+            if (found == task.outputs.end()) {
+                throw std::runtime_error("A computational-node provider returned an undeclared output key '" + outputKey + "'.");
+            }
+            if (!std::isfinite(outputValue)) throw std::runtime_error("A computational-node provider produced a non-finite derivative.");
+            const auto sequence = node.contributions.size() + static_cast<std::size_t>(std::distance(task.outputs.begin(), found));
+            evaluated.push_back({sequence, found->stateIndex, outputValue});
         }
     }
 

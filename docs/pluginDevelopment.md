@@ -71,11 +71,7 @@ platform selection, external dependency declarations and stronger review for
 native code. A package being installed is not the same as a package being
 trusted by every project.
 
-The SDK and Python worker now expose a checkpointable `NodeProvider` lifecycle.
-See [examples/providers/accumulatorNode.py](../examples/providers/accumulatorNode.py).
-The worker protocol supports node evaluation, multiple named outputs,
-checkpoint and restore. The native engine scheduler does not launch node
-providers from a model yet; that is the next integration boundary.
+The native engine now launches computational-node providers from a model: a node's `implementation` block (Python only this release) is compiled into the execution plan, evaluated once per substep through `ProviderRuntime`, and checkpointed/restored across pause, resume and restart alongside the ordinary state vector. See [examples/providers/piControllerNode.py](../examples/providers/piControllerNode.py) and [examples/providers/piControlledTankProject.json](../examples/providers/piControlledTankProject.json) for a runnable example, and [examples/providers/accumulatorNode.py](../examples/providers/accumulatorNode.py) for the underlying wire-contract demonstration. C++ computational-node execution, the partitioned execution backend, and plugin-packaged (as opposed to inline) node providers remain future work.
 
 ## Example
 
@@ -134,7 +130,7 @@ The planned capability levels are:
 | --- | --- | --- |
 | Relationship provider | Stateless behavior on an edge or source term | Implemented |
 | Component provider | A reusable node/edge vocabulary with declared ports and defaults | Planned |
-| Computational-node provider | A stateful component with lifecycle and checkpoint support | Next major slice |
+| Computational-node provider | A stateful component with lifecycle and checkpoint support | Implemented (Python, inline source only) |
 | Connector | Timestamped data from an approved device or external service | Planned |
 | Domain validator | Additional diagnostics that supplement native validation | Planned |
 | Visualization contribution | Read-only views synchronized with graph and result identity | Add-on API |
@@ -148,14 +144,14 @@ edge equation.
 
 A computational-node provider should:
 
-- own one declared provider instance per model node;
-- receive explicitly bound input states and parameters;
-- emit derivatives for one or more engine-owned output states;
-- declare whether it is substep-aware or synchronization-step-only;
-- separate speculative evaluation from committed side effects;
-- support initialize, evaluate, commit, checkpoint, restore and shutdown;
-- identify its provider API, package version and artifact hash in results;
-- run deterministically when the model requests a restartable result.
+- own one declared provider instance per model node -- **done**;
+- receive explicitly bound input states and parameters -- **done** (states only; a node has no parameter concept to bind against);
+- emit derivatives for one or more engine-owned output states -- **done**;
+- declare whether it is substep-aware or synchronization-step-only -- not done, always substep-synchronous today;
+- separate speculative evaluation from committed side effects -- not done;
+- support initialize, evaluate, commit, checkpoint, restore and shutdown -- **done** except `commit` (no speculative/committed distinction exists yet);
+- identify its provider API, package version and artifact hash in results -- not done;
+- run deterministically when the model requests a restartable result -- **done**: checkpoint/restore are wired into the engine's own checkpoint and `startCheckpoint` restart mechanism, not just the wire protocol.
 
 The first implementation should keep physical state in Konjugate's ordinary
 state vector. Opaque provider-owned state should not be introduced until its

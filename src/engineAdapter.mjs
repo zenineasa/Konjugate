@@ -143,7 +143,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         '--configuration', configurationPath,
         '--output', outputPath,
         '--control-stream', 'protobuf',
-        '--event-stream', 'protobuf'
+        ...(onUpdate ? ['--event-stream', 'protobuf'] : [])
     ], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
     let diagnostics = '';
     let lastSnapshotError = null;
@@ -214,7 +214,9 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             polling = false;
         }
     };
-    const pollTimer = setInterval(readSnapshot, 100);
+    // Without a consumer, nobody needs an in-progress snapshot -- skip the recurring read+decode of
+    // the (growing) result file and just decode it once at the end, in finalize below.
+    const pollTimer = onUpdate ? setInterval(readSnapshot, 100) : null;
 
     const completion = new Promise((resolve, reject) => {
         let finalized = false;

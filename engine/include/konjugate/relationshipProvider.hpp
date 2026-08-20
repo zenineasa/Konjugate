@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace konjugate::sdk::v1 {
@@ -24,6 +25,13 @@ struct RelationshipDescription {
     std::string name;
     std::vector<ScalarPort> inputs;
     ScalarPort output;
+};
+
+struct NodeProviderDescription {
+    std::string providerId;
+    std::string name;
+    std::vector<ScalarPort> inputs;
+    std::vector<ScalarPort> outputs;
 };
 
 struct InitializationContext {
@@ -73,6 +81,37 @@ public:
     [[nodiscard]] virtual RelationshipDescription describe() const = 0;
     virtual void initialize(const InitializationContext&) {}
     virtual void evaluate(const EvaluationContext&, OutputCollector&) = 0;
+    virtual void shutdown() noexcept {}
+};
+
+class NodeOutputCollector {
+public:
+    void addGradient(std::string_view key, double value) {
+        for (auto& output : gradients_) {
+            if (output.first == key) {
+                output.second += value;
+                return;
+            }
+        }
+        gradients_.emplace_back(std::string(key), value);
+    }
+
+    [[nodiscard]] const std::vector<std::pair<std::string, double>>& gradients() const noexcept {
+        return gradients_;
+    }
+
+private:
+    std::vector<std::pair<std::string, double>> gradients_;
+};
+
+class NodeProvider {
+public:
+    virtual ~NodeProvider() = default;
+    [[nodiscard]] virtual NodeProviderDescription describe() const = 0;
+    virtual void initialize(const InitializationContext&) {}
+    virtual void evaluate(const EvaluationContext&, NodeOutputCollector&) = 0;
+    [[nodiscard]] virtual std::vector<std::byte> checkpoint() const = 0;
+    virtual void restore(std::span<const std::byte>) = 0;
     virtual void shutdown() noexcept {}
 };
 

@@ -56,3 +56,19 @@ additive contribution through `OutputCollector`. It does not receive mutable
 engine memory, a project object or an ambient filesystem/network capability.
 Keep provider source deterministic unless the model explicitly documents an
 external dependency.
+
+## Checkpointable node-provider contract
+
+The [accumulator node](accumulatorNode.py) demonstrates the next provider
+capability: multiple named outputs and deterministic checkpoint/restore state.
+Run its cross-platform conformance check from the repository root:
+
+```bash
+npm run test:node-provider
+```
+
+This verifies one evaluation, serializes the provider state, changes the live
+state, restores the checkpoint and confirms the original value is recovered.
+The current engine does not launch `NodeProvider` instances from `.kjt` models
+yet; the command is the supported author-facing contract test until the
+protocol and execution-plan lifecycle are implemented.

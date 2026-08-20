@@ -82,11 +82,69 @@ class RelationshipProvider(ABC):
         pass
 
 
+@dataclass(frozen=True)
+class NodeProviderDescription:
+    provider_id: str
+    name: str
+    inputs: Sequence[ScalarPort]
+    outputs: Sequence[ScalarPort]
+
+
+class NodeOutputCollector:
+    """Collect derivative contributions keyed by declared output port."""
+
+    def __init__(self):
+        self._gradients = {}
+
+    def add_gradient(self, key: str, value: float) -> None:
+        self._gradients[key] = self._gradients.get(key, 0.0) + float(value)
+
+    @property
+    def gradients(self) -> Mapping[str, float]:
+        return MappingProxyType(dict(self._gradients))
+
+
+class NodeProvider(ABC):
+    """Checkpointable contract for future stateful computational-node providers."""
+
+    @abstractmethod
+    def describe(self) -> NodeProviderDescription:
+        raise NotImplementedError
+
+    def initialize(self, context: InitializationContext) -> None:
+        del context
+
+    @abstractmethod
+    def evaluate(
+        self,
+        context: EvaluationContext,
+        inputs: InputView,
+        outputs: NodeOutputCollector,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def checkpoint(self) -> bytes:
+        """Return deterministic provider state for a simulation checkpoint."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def restore(self, payload: bytes) -> None:
+        """Restore state produced by checkpoint()."""
+        raise NotImplementedError
+
+    def shutdown(self) -> None:
+        pass
+
+
 __all__ = [
     "EvaluationContext",
     "InitializationContext",
     "InputView",
     "OutputCollector",
+    "NodeOutputCollector",
+    "NodeProvider",
+    "NodeProviderDescription",
     "RelationshipDescription",
     "RelationshipProvider",
     "ScalarPort",

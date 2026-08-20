@@ -6,6 +6,7 @@
 #include "providerRuntime.hpp"
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <cstdlib>
 #include <boost/property_tree/json_parser.hpp>
 #include <span>
@@ -143,6 +144,46 @@ void sdkProvidesStableKeyedReadOnlyInputsAndAdditiveOutput() {
     provider.evaluate({1.5, 0.01, {values, keys}}, output);
     require(output.gradient() == 8, "The public provider SDK did not preserve scalar input/output semantics.");
     require(provider.describe().inputs.front().key == "delta", "The provider description lost its stable input key.");
+}
+
+class CheckpointableAccumulatorNode final : public konjugate::sdk::v1::NodeProvider {
+public:
+    konjugate::sdk::v1::NodeProviderDescription describe() const override {
+        return {"test.accumulatorNode", "Accumulator node", {{"input", "Input", ""}}, {{"output", "Output", ""}}};
+    }
+
+    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
+                  konjugate::sdk::v1::NodeOutputCollector& output) override {
+        total_ += context.inputs.at("input") * context.stepSize;
+        output.addGradient("output", total_);
+    }
+
+    std::vector<std::byte> checkpoint() const override {
+        std::vector<std::byte> payload(sizeof(total_));
+        std::memcpy(payload.data(), &total_, sizeof(total_));
+        return payload;
+    }
+
+    void restore(std::span<const std::byte> payload) override {
+        require(payload.size() == sizeof(total_), "The node checkpoint payload has the wrong size.");
+        std::memcpy(&total_, payload.data(), sizeof(total_));
+    }
+
+    double total_ = 0;
+};
+
+void sdkProvidesCheckpointableNodeProviderContract() {
+    CheckpointableAccumulatorNode provider;
+    const double values[] = {4};
+    const std::string_view keys[] = {"input"};
+    konjugate::sdk::v1::NodeOutputCollector output;
+    provider.evaluate({0, 0.5, {values, keys}}, output);
+    require(output.gradients().size() == 1 && output.gradients().front().second == 2,
+        "The node provider did not collect its declared output gradient.");
+    const auto checkpoint = provider.checkpoint();
+    provider.total_ = 99;
+    provider.restore(checkpoint);
+    require(provider.total_ == 2, "The node provider checkpoint did not restore state.");
 }
 
 void validatorAcceptsACompleteProgrammableRelationship() {
@@ -954,6 +995,7 @@ void providerRuntimeExecutesAProgrammableSourceTermEndToEnd() {
 
 int main() {
     sdkProvidesStableKeyedReadOnlyInputsAndAdditiveOutput();
+    sdkProvidesCheckpointableNodeProviderContract();
     validatorAcceptsACompleteProgrammableRelationship();
     validatorRejectsAMissingProviderOutputState();
     validatorWarnsWithoutBlockingAnUntouchedProgrammableRelationshipTemplate();

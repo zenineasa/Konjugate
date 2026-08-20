@@ -40,6 +40,7 @@
         "benchmark:providers": "npm run build:engine && node tests/engine/providerExecutionBenchmark.mjs",
         "benchmark:protocol": "node scripts/benchmarkProtocolEncoding.mjs",
         "package:examples": "node scripts/packageExamples.mjs",
+        "test:node-provider": "node scripts/checkNodeProviderExample.mjs",
         "start": "npm run build:engine && electron .",
         "dev": "npm start",
         "build": "make build",

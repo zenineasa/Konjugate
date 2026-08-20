@@ -89,6 +89,17 @@ Relationships may be unidirectional, such as an electrical input, diode current 
 
 This project is currently in the early stages of development.
 
+## Installing a Release Build
+
+Konjugate isn't code-signed yet — an active choice while the project is in alpha, not an accident — so your OS may show a security warning the first time you open a downloaded release. This doesn't mean the download is corrupted.
+
+- **macOS**: if you see "Konjugate.app is damaged and can't be opened," move it to Applications, then in Terminal run:
+  ```bash
+  xattr -cr /Applications/Konjugate.app
+  ```
+  Alternatively, open System Settings → Privacy & Security → Open Anyway.
+- **Windows**: if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
+
 ## Development
 
 Konjugate supports development on macOS, Windows and Linux.

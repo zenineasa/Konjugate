@@ -253,6 +253,12 @@ ifneq ($(strip $(macSignIdentity)),)
 		--timestamp \
 		--sign "$(macSignIdentity)" \
 		$(releaseDir)/dmg/$(appName).app
+else
+	codesign \
+		--deep \
+		--force \
+		--sign - \
+		$(releaseDir)/dmg/$(appName).app
 endif
 	ln -s /Applications $(releaseDir)/dmg/Applications
 	rm -f $(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg

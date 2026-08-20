@@ -152,3 +152,8 @@ jobs:
               with:
                   files: out/release/*
                   generate_release_notes: true
+                  body: |
+                      > **Installation notes:** Konjugate isn't code-signed yet (an active choice while the project is in alpha), so your OS may show a security warning on first launch. This doesn't mean the download is corrupted.
+                      >
+                      > - **macOS** — if you see "is damaged and can't be opened": move Konjugate.app to Applications, then in Terminal run `xattr -cr /Applications/Konjugate.app`. Or: System Settings → Privacy & Security → Open Anyway.
+                      > - **Windows** — if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.

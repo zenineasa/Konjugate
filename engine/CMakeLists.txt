@@ -232,6 +232,12 @@ if(BUILD_TESTING)
                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
                 "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/pythonRelationshipProviderTest.py"
         )
+            add_test(
+                NAME nodeProviderWorkerTest
+                COMMAND "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
+                "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/nodeProviderWorkerTest.py"
+            )
     endif()
 
     # A manual perf tool, not a pass/fail test: intentionally left out of add_test/ctest.

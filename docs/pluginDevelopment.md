@@ -71,11 +71,11 @@ platform selection, external dependency declarations and stronger review for
 native code. A package being installed is not the same as a package being
 trusted by every project.
 
-The SDK also now exposes a checkpointable `NodeProvider` contract for the next
-runtime slice. See [examples/providers/accumulatorNode.py](../examples/providers/accumulatorNode.py).
-It is intentionally not launched by the current relationship-provider worker:
-the engine must add lifecycle, checkpoint and restore protocol messages before
-these providers can execute in a model.
+The SDK and Python worker now expose a checkpointable `NodeProvider` lifecycle.
+See [examples/providers/accumulatorNode.py](../examples/providers/accumulatorNode.py).
+The worker protocol supports node evaluation, multiple named outputs,
+checkpoint and restore. The native engine scheduler does not launch node
+providers from a model yet; that is the next integration boundary.
 
 ## Example
 

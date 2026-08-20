@@ -17,6 +17,8 @@ from pathlib import Path
 from konjugate import (
     EvaluationContext,
     InputView,
+    NodeOutputCollector,
+    NodeProvider,
     OutputCollector,
     RelationshipProvider,
 )
@@ -156,6 +158,30 @@ def _decode_evaluate_batch_request(data):
     return sequence, simulation_time, step_size, evaluations
 
 
+def _decode_node_evaluate_request(data):
+    sequence, simulation_time, step_size, evaluations = 0, 0.0, 0.0, []
+    for field, wire, value in _decode_fields(data):
+        if field == 1 and wire == 0: sequence = value
+        elif field == 2 and wire == 1: simulation_time = value
+        elif field == 3 and wire == 1: step_size = value
+        elif field == 4 and wire == 2: evaluations.append(_decode_evaluation(value))
+    return sequence, simulation_time, step_size, evaluations
+
+
+def _decode_checkpoint_request(data):
+    for field, wire, value in _decode_fields(data):
+        if field == 1 and wire == 0: return value
+    return 0
+
+
+def _decode_restore_request(data):
+    instance_id, payload = 0, b''
+    for field, wire, value in _decode_fields(data):
+        if field == 1 and wire == 0: instance_id = value
+        elif field == 2 and wire == 2: payload = value
+    return instance_id, payload
+
+
 def _decode_engine_to_provider(data):
     for field, wire, value in _decode_fields(data):
         if wire == 2:
@@ -167,13 +193,19 @@ def _decode_engine_to_provider(data):
                 return "evaluateBatch", _decode_evaluate_batch_request(value)
             if field == 4:
                 return "shutdown", None
+            if field == 6:
+                return "nodeEvaluate", _decode_node_evaluate_request(value)
+            if field == 7:
+                return "checkpoint", _decode_checkpoint_request(value)
+            if field == 8:
+                return "restore", _decode_restore_request(value)
     raise RuntimeError("Unrecognized EngineToProvider message.")
 
 
 # ── Message encoders ─────────────────────────────────────────────────────────
 
 
-def _encode_handshake_response(description):
+def _encode_handshake_response(description, node_provider=False):
     payload = b""
     payload += _encode_varint_field(1, 1)
     payload += _encode_varint_field(2, 1)
@@ -182,6 +214,15 @@ def _encode_handshake_response(description):
     for inp in description.inputs:
         payload += _encode_length_delimited(5, inp.key)
     payload += _encode_length_delimited(6, description.output.key)
+    if node_provider: payload += _encode_bool_field(7, True)
+    return _encode_length_delimited(1, payload)
+
+
+def _encode_node_handshake_response(description):
+    payload = _encode_varint_field(1, 1) + _encode_varint_field(2, 1)
+    payload += _encode_varint_field(3, 2) + _encode_length_delimited(4, description.provider_id)
+    for port in description.inputs: payload += _encode_length_delimited(5, port.key)
+    for port in description.outputs: payload += _encode_length_delimited(8, port.key)
     return _encode_length_delimited(1, payload)
 
 
@@ -203,6 +244,26 @@ def _encode_evaluate_batch_response(sequence, contributions):
 
 def _encode_shutdown_response():
     return _encode_length_delimited(4, b"")
+
+
+def _encode_node_evaluate_response(sequence, contributions):
+    payload = _encode_varint_field(1, sequence)
+    for instance_id, outputs in contributions:
+        item = _encode_varint_field(1, instance_id)
+        for key, value in outputs.items():
+            item += _encode_length_delimited(2, _encode_length_delimited(1, key) + _encode_double_field(2, value))
+        payload += _encode_length_delimited(2, item)
+    return _encode_length_delimited(6, payload)
+
+
+def _encode_checkpoint_response(instance_id, payload_bytes):
+    payload = _encode_varint_field(1, instance_id) + _encode_length_delimited(2, payload_bytes)
+    return _encode_length_delimited(7, payload)
+
+
+def _encode_restore_response(instance_id):
+    payload = _encode_varint_field(1, instance_id) + _encode_bool_field(2, True)
+    return _encode_length_delimited(8, payload)
 
 
 def _encode_provider_failure(sequence, code, message, fatal):
@@ -257,14 +318,15 @@ def _load_provider_class(module_path):
         obj = getattr(module, name)
         if (
             isinstance(obj, type)
-            and issubclass(obj, RelationshipProvider)
-            and obj is not RelationshipProvider
+            and ((issubclass(obj, RelationshipProvider) and obj is not RelationshipProvider)
+                 or (issubclass(obj, NodeProvider) and obj is not NodeProvider))
         ):
             return obj()
-    raise RuntimeError(f"No RelationshipProvider subclass found in {module_path}")
+    raise RuntimeError(f"No RelationshipProvider or NodeProvider subclass found in {module_path}")
 
 
 def _run_worker(provider, stdin_stream, stdout_stream):
+    node_provider = isinstance(provider, NodeProvider)
     description = provider.describe()
     instance_bindings = {}
     initialized = False
@@ -288,7 +350,10 @@ def _run_worker(provider, stdin_stream, stdout_stream):
                     ),
                 )
                 return 1
-            _write_framed(stdout_stream, _encode_handshake_response(description))
+            if node_provider:
+                _write_framed(stdout_stream, _encode_node_handshake_response(description))
+            else:
+                _write_framed(stdout_stream, _encode_handshake_response(description))
 
         elif kind == "initialize":
             instances = data
@@ -314,7 +379,42 @@ def _run_worker(provider, stdin_stream, stdout_stream):
             initialized = True
             _write_framed(stdout_stream, _encode_initialize_response(initialized_ids))
 
+        elif kind == "nodeEvaluate":
+            if not node_provider:
+                _write_framed(stdout_stream, _encode_provider_failure(data[0], "wrongProviderKind", "This provider is not a computational-node provider.", True))
+                return 1
+            sequence, simulation_time, step_size, evaluations = data
+            contributions = []
+            for instance_id, raw_inputs in evaluations:
+                binding = instance_bindings.get(instance_id)
+                if binding is None: raise RuntimeError("Evaluation references an uninitialized instance.")
+                input_keys, key_indexes = binding
+                ordered_values = [0.0] * len(description.inputs)
+                for index, key_index in enumerate(key_indexes):
+                    if index < len(raw_inputs): ordered_values[key_index] = raw_inputs[index]
+                inputs = InputView({description.inputs[index].key: ordered_values[index] for index in range(len(description.inputs))})
+                outputs = NodeOutputCollector()
+                provider.evaluate(EvaluationContext(simulation_time, step_size), inputs, outputs)
+                contributions.append((instance_id, dict(outputs.gradients)))
+            _write_framed(stdout_stream, _encode_node_evaluate_response(sequence, contributions))
+
+        elif kind == "checkpoint":
+            if not node_provider: raise RuntimeError("Checkpoint requested from a relationship provider.")
+            instance_id = data
+            if instance_id not in instance_bindings: raise RuntimeError("Checkpoint references an uninitialized instance.")
+            _write_framed(stdout_stream, _encode_checkpoint_response(instance_id, provider.checkpoint()))
+
+        elif kind == "restore":
+            if not node_provider: raise RuntimeError("Restore requested from a relationship provider.")
+            instance_id, payload = data
+            if instance_id not in instance_bindings: raise RuntimeError("Restore references an uninitialized instance.")
+            provider.restore(payload)
+            _write_framed(stdout_stream, _encode_restore_response(instance_id))
+
         elif kind == "evaluateBatch":
+            if node_provider:
+                _write_framed(stdout_stream, _encode_provider_failure(data[0], "wrongProviderKind", "This provider is a computational-node provider.", True))
+                return 1
             if not initialized:
                 sequence = data[0]
                 _write_framed(

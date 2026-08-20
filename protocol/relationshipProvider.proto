@@ -22,6 +22,8 @@ message HandshakeResponse {
     string provider_id = 4;
     repeated string input_keys = 5;
     string output_key = 6;
+    bool supports_node_provider = 7;
+    repeated string output_keys = 8;
 }
 
 message ProviderInstance {
@@ -62,6 +64,52 @@ message EvaluateBatchResponse {
 message ShutdownRequest {}
 message ShutdownResponse {}
 
+message NodeOutput {
+    string key = 1;
+    double value = 2;
+}
+
+message NodeEvaluation {
+    uint64 instance_id = 1;
+    repeated double inputs = 2;
+}
+
+message NodeEvaluateRequest {
+    uint64 sequence = 1;
+    double simulation_time = 2;
+    double step_size = 3;
+    repeated NodeEvaluation evaluations = 4;
+}
+
+message NodeGradientContribution {
+    uint64 instance_id = 1;
+    repeated NodeOutput outputs = 2;
+}
+
+message NodeEvaluateResponse {
+    uint64 sequence = 1;
+    repeated NodeGradientContribution contributions = 2;
+}
+
+message CheckpointRequest {
+    uint64 instance_id = 1;
+}
+
+message CheckpointResponse {
+    uint64 instance_id = 1;
+    bytes payload = 2;
+}
+
+message RestoreRequest {
+    uint64 instance_id = 1;
+    bytes payload = 2;
+}
+
+message RestoreResponse {
+    uint64 instance_id = 1;
+    bool restored = 2;
+}
+
 message ProviderFailure {
     uint64 sequence = 1;
     string code = 2;
@@ -75,6 +123,9 @@ message EngineToProvider {
         InitializeRequest initialize = 2;
         EvaluateBatchRequest evaluate_batch = 3;
         ShutdownRequest shutdown = 4;
+        NodeEvaluateRequest node_evaluate = 6;
+        CheckpointRequest checkpoint = 7;
+        RestoreRequest restore = 8;
     }
 }
 
@@ -85,5 +136,8 @@ message ProviderToEngine {
         EvaluateBatchResponse evaluate_batch = 3;
         ShutdownResponse shutdown = 4;
         ProviderFailure failure = 5;
+        NodeEvaluateResponse node_evaluate = 6;
+        CheckpointResponse checkpoint = 7;
+        RestoreResponse restore = 8;
     }
 }

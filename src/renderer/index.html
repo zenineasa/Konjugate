@@ -57,7 +57,9 @@
                 <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="dialog">
                     <span>Examples</span><i aria-hidden="true"></i>
                 </button>
-                <button id="installPackageButton" type="button" aria-label="Install add-on or plugin" data-tooltip="Install add-on or plugin">Install</button>
+                <button id="extensionsButton" type="button" aria-label="Manage extensions" aria-haspopup="dialog" data-tooltip="Extensions">
+        <img class="documentActionIcon" src="../../assets/extensions.svg" alt="">
+    </button>
                 <button id="exampleGuideButton" class="exampleGuideButton" type="button" aria-label="About this example" data-tooltip="About this example" hidden>?</button>
             </div>
         </div>
@@ -207,6 +209,45 @@
                 </div>
             </div>
             <footer><button id="examplesExplorerCancel" type="button">Close</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="extensionsDialog" class="passwordDialog extensionsDialog">
+        <form method="dialog">
+            <span class="contextKicker">Add-ons &amp; plugins</span>
+            <strong>Extensions</strong>
+            <div class="extensionsTabs" role="tablist">
+                <button type="button" class="extensionsTab active" data-extensions-tab="addon" role="tab">Add-ons</button>
+                <button type="button" class="extensionsTab" data-extensions-tab="plugin" role="tab">Plugins</button>
+            </div>
+            <p id="extensionsRestartNotice" class="assistantConfigurationStatus" role="status" hidden></p>
+            <div class="examplesExplorerBody extensionsBody">
+                <div class="examplesExplorerBrowse">
+                    <div id="extensionsResults" class="examplesExplorerResults extensionsResults"></div>
+                    <p id="extensionsEmpty" class="emptyEditorState" hidden>No add-ons are installed.</p>
+                </div>
+                <div class="examplesExplorerDetail">
+                    <p id="extensionsDetailEmpty" class="examplesExplorerDetailEmpty">Select an item to see its details.</p>
+                    <div id="extensionsDetailContent" hidden>
+                        <span id="extensionsDetailBadge" class="extensionsBadge"></span>
+                        <strong id="extensionsDetailTitle"></strong>
+                        <dl class="extensionsDetailFacts">
+                            <div><dt>Package ID</dt><dd id="extensionsDetailId"></dd></div>
+                            <div><dt>Version</dt><dd id="extensionsDetailVersion"></dd></div>
+                        </dl>
+                        <p class="extensionsDetailLabel">Permissions</p>
+                        <ul id="extensionsDetailPermissions" class="extensionsPermissionList"></ul>
+                        <footer class="extensionsDetailFooter">
+                            <button id="extensionsUninstall" type="button" class="extensionsDangerButton">Uninstall</button>
+                        </footer>
+                    </div>
+                </div>
+            </div>
+            <footer>
+                <button id="extensionsInstall" type="button" class="doneButton">Install…</button>
+                <span></span>
+                <button id="extensionsClose" type="button">Close</button>
+            </footer>
         </form>
     </dialog>
 

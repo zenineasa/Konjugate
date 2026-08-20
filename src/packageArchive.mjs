@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { validateAddonManifest } from './addonHost.mjs';
@@ -166,6 +166,50 @@ export async function installPackageArchive(archive, { extension, directory, ove
         throw new PackageArchiveError(`The package could not be installed: ${error.message}`, 'INSTALL_FAILED');
     }
     return { ...inspected, installPath: target };
+}
+
+export async function listInstalledPackages(directory) {
+    const results = [];
+    for (const packageType of ['addon', 'plugin']) {
+        const typeRoot = resolve(directory, `${packageType}s`);
+        const packageIds = await readdir(typeRoot, { withFileTypes: true }).catch(() => []);
+        for (const idEntry of packageIds) {
+            if (!idEntry.isDirectory()) continue;
+            const versions = await readdir(join(typeRoot, idEntry.name), { withFileTypes: true }).catch(() => []);
+            for (const versionEntry of versions) {
+                if (!versionEntry.isDirectory()) continue;
+                const installPath = join(typeRoot, idEntry.name, versionEntry.name);
+                try {
+                    const packageManifest = validatePackageManifest(
+                        JSON.parse(await readFile(join(installPath, 'package.json'), 'utf8'))
+                    );
+                    const contributionManifest = JSON.parse(
+                        await readFile(join(installPath, packageManifest.contents.manifest), 'utf8')
+                    );
+                    results.push({
+                        packageType, packageId: packageManifest.packageId, name: packageManifest.name,
+                        version: packageManifest.version, source: 'installed',
+                        permissions: contributionManifest.permissions ?? [],
+                        manifest: contributionManifest, installPath
+                    });
+                } catch (error) {
+                    console.warn(`Skipping installed package ${idEntry.name}/${versionEntry.name}: ${error.message}`);
+                }
+            }
+        }
+    }
+    return results;
+}
+
+export async function uninstallPackage({ directory, packageType, packageId, version }) {
+    const target = safeInstallPath(directory, packageType, packageId, version);
+    try {
+        await readFile(join(target, 'package.json'));
+    } catch (error) {
+        if (error.code === 'ENOENT') throw new PackageArchiveError('That package version is not installed.', 'NOT_INSTALLED');
+        throw error;
+    }
+    await rm(target, { recursive: true, force: true });
 }
 
 export function createPackageArchive({ packageManifest, contributionManifest, files = {} }) {

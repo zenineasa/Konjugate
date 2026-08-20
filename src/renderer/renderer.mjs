@@ -6425,16 +6425,125 @@ async function openExamplesExplorer() {
     $('#examplesExplorerSearch').focus();
 }
 
-$('#newWindowButton').addEventListener('click', () => window.windowControls.newWindow());
-$('#loadButton').addEventListener('click', openProject);
-$('#installPackageButton').addEventListener('click', async () => {
+let extensionsEntries = null;
+let extensionsTab = 'addon';
+let extensionsSelectedKey = null;
+
+function extensionsPackageKey(entry) {
+    return `${entry.packageType}:${entry.packageId}:${entry.version}`;
+}
+
+function showExtensionsNotice(message) {
+    $('#extensionsRestartNotice').textContent = message;
+    $('#extensionsRestartNotice').hidden = false;
+}
+
+function renderExtensionsResults() {
+    const matches = extensionsEntries.filter((entry) => entry.packageType === extensionsTab);
+    $('#extensionsResults').replaceChildren(...matches.map((entry) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'examplesExplorerItem extensionsItem';
+        button.dataset.packageKey = extensionsPackageKey(entry);
+        button.classList.toggle('selected', extensionsPackageKey(entry) === extensionsSelectedKey);
+        button.innerHTML = `<b>${escapeHtml(entry.name)}</b><span class="extensionsItemMeta">${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}</span>`;
+        return button;
+    }));
+    $('#extensionsEmpty').textContent = extensionsTab === 'addon' ? 'No add-ons are installed.' : 'No plugins are installed.';
+    $('#extensionsEmpty').hidden = matches.length > 0;
+}
+
+function renderExtensionsDetail() {
+    const entry = extensionsEntries.find((candidate) => extensionsPackageKey(candidate) === extensionsSelectedKey);
+    $('#extensionsDetailEmpty').hidden = Boolean(entry);
+    $('#extensionsDetailContent').hidden = !entry;
+    if (!entry) return;
+    $('#extensionsDetailBadge').textContent = entry.source === 'bundled' ? 'Bundled' : 'Installed';
+    $('#extensionsDetailBadge').classList.toggle('bundled', entry.source === 'bundled');
+    $('#extensionsDetailTitle').textContent = entry.name;
+    $('#extensionsDetailId').textContent = entry.packageId;
+    $('#extensionsDetailVersion').textContent = entry.version;
+    $('#extensionsDetailPermissions').replaceChildren(...entry.permissions.map((permission) => {
+        const item = document.createElement('li');
+        item.textContent = permission;
+        return item;
+    }));
+    $('#extensionsUninstall').hidden = entry.source === 'bundled';
+}
+
+async function refreshExtensionsList() {
+    extensionsEntries = await window.extensions.list();
+    renderExtensionsResults();
+    renderExtensionsDetail();
+}
+
+async function openExtensionsDialog() {
     try {
-        const installed = await window.projectFiles.installPackage();
-        if (installed) window.alert(`Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate new add-ons.`);
+        await refreshExtensionsList();
     } catch (error) {
-        window.alert(`Package installation failed: ${error.message}`);
+        console.error(error);
+        return;
+    }
+    extensionsTab = 'addon';
+    extensionsSelectedKey = null;
+    $('#extensionsRestartNotice').hidden = true;
+    $$('.extensionsTab').forEach((tab) => tab.classList.toggle('active', tab.dataset.extensionsTab === extensionsTab));
+    renderExtensionsResults();
+    renderExtensionsDetail();
+    $('#extensionsDialog').showModal();
+}
+
+$$('.extensionsTab').forEach((tab) => tab.addEventListener('click', () => {
+    extensionsTab = tab.dataset.extensionsTab;
+    extensionsSelectedKey = null;
+    $$('.extensionsTab').forEach((candidate) => candidate.classList.toggle('active', candidate === tab));
+    renderExtensionsResults();
+    renderExtensionsDetail();
+}));
+
+$('#extensionsResults').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-package-key]');
+    if (!button) return;
+    extensionsSelectedKey = button.dataset.packageKey;
+    $$('#extensionsResults .extensionsItem').forEach((item) => item.classList.toggle('selected', item === button));
+    renderExtensionsDetail();
+});
+
+$('#extensionsInstall').addEventListener('click', async () => {
+    try {
+        const installed = await window.extensions.install();
+        if (!installed) return;
+        extensionsTab = installed.packageType;
+        extensionsSelectedKey = `${installed.packageType}:${installed.packageId}:${installed.version}`;
+        await refreshExtensionsList();
+        $$('.extensionsTab').forEach((tab) => tab.classList.toggle('active', tab.dataset.extensionsTab === extensionsTab));
+        renderExtensionsResults();
+        renderExtensionsDetail();
+        showExtensionsNotice(`Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate it.`);
+    } catch (error) {
+        showExtensionsNotice(`Installation failed: ${error.message}`);
     }
 });
+
+$('#extensionsUninstall').addEventListener('click', async () => {
+    const entry = extensionsEntries.find((candidate) => extensionsPackageKey(candidate) === extensionsSelectedKey);
+    if (!entry) return;
+    if (!window.confirm(`Uninstall ${entry.name} ${entry.version}? This cannot be undone.`)) return;
+    try {
+        await window.extensions.uninstall(entry.packageType, entry.packageId, entry.version);
+        extensionsSelectedKey = null;
+        await refreshExtensionsList();
+        showExtensionsNotice(`Uninstalled ${entry.packageId} ${entry.version}. Restart Konjugate if it was active.`);
+    } catch (error) {
+        showExtensionsNotice(`Uninstall failed: ${error.message}`);
+    }
+});
+
+$('#extensionsClose').addEventListener('click', () => $('#extensionsDialog').close());
+
+$('#newWindowButton').addEventListener('click', () => window.windowControls.newWindow());
+$('#loadButton').addEventListener('click', openProject);
+$('#extensionsButton').addEventListener('click', openExtensionsDialog);
 $('#saveButton').addEventListener('click', () => saveProject());
 $('#saveEncryptedButton').addEventListener('click', async (event) => {
     if (!currentProjectPassword) {

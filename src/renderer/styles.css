@@ -164,6 +164,37 @@ input, select { user-select: text; }
 #examplesExplorerLoad:hover { background: var(--accent-bright) !important; }
 #examplesExplorerDetailDescription { margin: 0; color: #8199a3; font-size: 8px; line-height: 1.6; }
 
+.extensionsDialog { width: 760px; }
+.extensionsDialog footer span { flex: 1; }
+.extensionsTabs { display: flex; gap: 4px; margin: 10px 0 0; }
+.extensionsTab { padding: 5px 11px; color: #7c909a; background: transparent; border: 1px solid transparent; border-radius: 999px; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.extensionsTab:hover { color: #aebdc5; background: #101c24; }
+.extensionsTab.active { color: #09201e; background: var(--accent, #42c9bc); border-color: transparent; }
+.extensionsBody { margin-top: 12px; }
+.extensionsResults { grid-template-columns: 1fr; max-height: 380px; }
+.extensionsItem b { display: block; }
+.extensionsItemMeta { display: block; margin-top: 2px; color: #647984; font-size: 7px; }
+#extensionsRestartNotice { margin-top: 8px; }
+/* The examplesExplorer detail-pane rules above are ID-scoped to that dialog; this dialog's
+   detail pane has a different structure (badge/facts/permissions instead of a thumbnail), so it
+   gets its own ID rules here rather than trying to share the examplesExplorer ones. */
+.examplesExplorerDetailEmpty { margin: 0; color: #5e747d; font-size: 8px; line-height: 1.5; }
+#extensionsDetailContent { display: grid; gap: 8px; }
+#extensionsDetailContent[hidden] { display: none; }
+#extensionsDetailTitle { color: #d8e4e9; font-size: 10px; }
+.extensionsBadge { display: inline-block; width: fit-content; padding: 2px 7px; color: #7c909a; background: #101c24; border: 1px solid #29404b; border-radius: 999px; font-size: 6.5px; text-transform: uppercase; letter-spacing: .06em; }
+.extensionsBadge.bundled { color: #78aaa7; background: rgb(66 201 188 / 8%); border-color: #2d484c; }
+.extensionsDetailFacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 0; }
+.extensionsDetailFacts dt { color: #566b76; font-size: 6.5px; text-transform: uppercase; letter-spacing: .05em; }
+.extensionsDetailFacts dd { margin: 2px 0 0; color: #c0cdd3; font-size: 8.5px; }
+.extensionsDetailLabel { margin: 10px 0 4px; color: #566b76; font-size: 7px; text-transform: uppercase; letter-spacing: .05em; }
+.extensionsPermissionList { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.extensionsPermissionList li { padding: 3px 7px; color: #8199a3; background: #0a151d; border: 1px solid #263b45; border-radius: 4px; font-size: 7px; }
+.extensionsPermissionList:empty::after { content: 'None requested'; color: #566b76; font-size: 7px; }
+.extensionsDetailFooter { display: flex; justify-content: flex-end; margin-top: 12px; }
+.extensionsDangerButton { padding: 0 10px; height: 28px; color: #c17980; background: transparent; border: 1px solid #4a2e30; border-radius: 4px; font-size: 8px; }
+.extensionsDangerButton:hover { color: #e39197; background: rgb(193 121 128 / 10%); border-color: #6a3c3f; }
+
 .componentLibraryPanel {
     position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); left: 10px;
     bottom: calc(var(--math-keyboard-inset) + 10px); display: flex; flex-direction: column; width: 300px;

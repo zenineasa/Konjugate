@@ -11,7 +11,9 @@ import {
     createPackageArchive,
     inspectPackageArchive,
     installPackageArchive,
-    PackageArchiveError
+    listInstalledPackages,
+    PackageArchiveError,
+    uninstallPackage
 } from '../src/packageArchive.mjs';
 
 const addonManifest = {
@@ -167,6 +169,59 @@ test('cleans the temporary install after a write failure', async () => {
         await rm(result.installPath, { recursive: true, force: true });
         const installed = await installPackageArchive(addonArchive({ version: '0.1.1' }), { extension: '.kja', directory });
         assert.ok(installed.installPath.endsWith('/0.1.1'));
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('lists installed packages, empty then populated across both types', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugate-packages-'));
+    try {
+        assert.deepEqual(await listInstalledPackages(directory), []);
+        await installPackageArchive(addonArchive(), { extension: '.kja', directory });
+        const pluginManifest = packageManifest('plugin');
+        const pluginContribution = {
+            pluginId: pluginManifest.packageId, name: pluginManifest.name, version: pluginManifest.version,
+            apiVersion: 1, contributes: [{ providerId: 'example.helloWorld', apiVersion: 1, runtime: 'python', entry: 'helloWorld.py' }]
+        };
+        await installPackageArchive(createPackageArchive({
+            packageManifest: pluginManifest, contributionManifest: pluginContribution, files: { 'helloWorld.py': 'source' }
+        }), { extension: '.kjp', directory });
+        const results = await listInstalledPackages(directory);
+        assert.equal(results.length, 2);
+        const addonEntry = results.find((entry) => entry.packageType === 'addon');
+        assert.equal(addonEntry.source, 'installed');
+        assert.equal(addonEntry.packageId, 'example.helloWorld');
+        assert.deepEqual(addonEntry.permissions, ['results.read']);
+        const pluginEntry = results.find((entry) => entry.packageType === 'plugin');
+        assert.equal(pluginEntry.packageId, 'example.helloProvider');
+        assert.deepEqual(pluginEntry.permissions, []);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('uninstall removes exactly the targeted version and leaves siblings', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugate-packages-'));
+    try {
+        await installPackageArchive(addonArchive(), { extension: '.kja', directory });
+        await installPackageArchive(addonArchive({ version: '0.2.0' }), { extension: '.kja', directory });
+        await uninstallPackage({ directory, packageType: 'addon', packageId: 'example.helloWorld', version: '0.1.0' });
+        const results = await listInstalledPackages(directory);
+        assert.equal(results.length, 1);
+        assert.equal(results[0].version, '0.2.0');
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('uninstalling a package that is not installed throws NOT_INSTALLED', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugate-packages-'));
+    try {
+        await assert.rejects(
+            uninstallPackage({ directory, packageType: 'addon', packageId: 'example.helloWorld', version: '9.9.9' }),
+            (error) => error instanceof PackageArchiveError && error.code === 'NOT_INSTALLED'
+        );
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { cppProviderSdkPath, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
@@ -30,7 +30,7 @@ import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
-import { inspectPackageArchive, installPackageArchive } from './packageArchive.mjs';
+import { inspectPackageArchive, installPackageArchive, listInstalledPackages, uninstallPackage } from './packageArchive.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -491,12 +491,11 @@ function visualizerCan(manifest, permission) {
 
 async function discoverAddons() {
     addonRegistry.clear();
-    const addonRoots = [
+    const flatAddonRoots = [
         join(currentDir, '..', 'addons'),
-        join(app.getPath('userData'), 'addons'),
-        join(app.getPath('userData'), 'packages', 'addons')
+        join(app.getPath('userData'), 'addons')
     ];
-    for (const addonsDirectory of addonRoots) {
+    for (const addonsDirectory of flatAddonRoots) {
         const entries = await readdir(addonsDirectory, { withFileTypes: true }).catch(() => []);
         for (const entry of entries) {
             if (!entry.isDirectory()) continue;
@@ -507,6 +506,26 @@ async function discoverAddons() {
                 addonRegistry.set(manifest.addonId, { addonDirectory, manifest });
             } catch (error) {
                 console.warn(`Skipping add-on ${entry.name}: ${error.message}`);
+            }
+        }
+    }
+    // Installed (packaged) add-ons live one level deeper than the bundled/flat-user roots above
+    // -- installPackageArchive() writes userData/packages/addons/<addonId>/<version>/addon.json,
+    // matching discoverComponentLibrary()'s equivalent two-level walk for plugins below.
+    const packagedAddonRoot = join(app.getPath('userData'), 'packages', 'addons');
+    const addonIds = await readdir(packagedAddonRoot, { withFileTypes: true }).catch(() => []);
+    for (const idEntry of addonIds) {
+        if (!idEntry.isDirectory()) continue;
+        const versions = await readdir(join(packagedAddonRoot, idEntry.name), { withFileTypes: true }).catch(() => []);
+        for (const versionEntry of versions) {
+            if (!versionEntry.isDirectory()) continue;
+            const addonDirectory = join(packagedAddonRoot, idEntry.name, versionEntry.name);
+            try {
+                const manifest = validateAddonManifest(JSON.parse(await readFile(join(addonDirectory, 'addon.json'), 'utf8')));
+                if (addonRegistry.has(manifest.addonId)) throw new Error(`Duplicate add-on ID: ${manifest.addonId}.`);
+                addonRegistry.set(manifest.addonId, { addonDirectory, manifest });
+            } catch (error) {
+                console.warn(`Skipping packaged add-on ${idEntry.name}/${versionEntry.name}: ${error.message}`);
             }
         }
     }
@@ -990,6 +1009,26 @@ ipcMain.handle('packageInstall', async (event) => {
         packageId: installed.packageManifest.packageId,
         version: installed.packageManifest.version
     };
+});
+
+ipcMain.handle('packageList', async () => {
+    await discoverAddons();
+    const packagedAddonRoot = join(app.getPath('userData'), 'packages', 'addons');
+    const bundled = [...addonRegistry.values()]
+        .filter(({ addonDirectory }) => !addonDirectory.startsWith(`${packagedAddonRoot}${sep}`))
+        .map(({ manifest }) => ({
+            packageType: 'addon', packageId: manifest.addonId, name: manifest.name, version: manifest.version,
+            source: 'bundled', permissions: manifest.permissions ?? [], manifest, installPath: null
+        }));
+    const installed = await listInstalledPackages(join(app.getPath('userData'), 'packages'));
+    return [...bundled, ...installed];
+});
+
+ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, version }) => {
+    await uninstallPackage({ directory: join(app.getPath('userData'), 'packages'), packageType, packageId, version });
+    await discoverAddons();
+    await discoverComponentLibrary();
+    return { packageType, packageId, version };
 });
 
 ipcMain.handle('projectUnlock', async (_event, { path, password }) => {

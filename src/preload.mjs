@@ -48,7 +48,6 @@ contextBridge.exposeInMainWorld('projectFiles', {
     listExamples: () => ipcRenderer.invoke('projectListExamples'),
     loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),
     openExampleGuide: (id) => ipcRenderer.invoke('projectOpenExampleGuide', id),
-    installPackage: () => ipcRenderer.invoke('packageInstall'),
     open: () => ipcRenderer.invoke('projectOpen'),
     pendingOpen: () => ipcRenderer.invoke('projectPendingOpen'),
     pathChanged: (path) => ipcRenderer.send('projectPathChanged', path),
@@ -56,6 +55,12 @@ contextBridge.exposeInMainWorld('projectFiles', {
     save: (path, content, suggestedFilename, password, resultSessionId) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password, resultSessionId }),
     exportResultsCsv: (suggestedFilename, csv) => ipcRenderer.invoke('projectExportResultsCsv', { suggestedFilename, csv }),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
+});
+
+contextBridge.exposeInMainWorld('extensions', {
+    list: () => ipcRenderer.invoke('packageList'),
+    install: () => ipcRenderer.invoke('packageInstall'),
+    uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version })
 });
 
 contextBridge.exposeInMainWorld('shapeLibrary', {

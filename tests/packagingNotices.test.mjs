@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
+import { createPackageOptions } from '../scripts/packageElectron.mjs';
 
 const rootDirectory = join(import.meta.dirname, '..');
 
@@ -21,7 +22,7 @@ test('tracked METIS notices contain the required attribution and Apache license'
     assert.match(apacheLicense, /APPENDIX: How to apply the Apache License/);
 });
 
-test('every Electron package target includes and verifies third-party notices', async () => {
+test('every Electron package target packages and verifies third-party notices', async () => {
     const makefile = await readFile(join(rootDirectory, 'Makefile'), 'utf8');
 
     for (const target of ['packageMacos', 'packageWindows', 'packageLinux']) {
@@ -29,11 +30,18 @@ test('every Electron package target includes and verifies third-party notices', 
         assert.notEqual(start, -1, `${target} must exist`);
         const nextTarget = makefile.indexOf('\n\n', start);
         const recipe = makefile.slice(start, nextTarget === -1 ? undefined : nextTarget);
-        assert.match(recipe, /--extra-resource=thirdPartyNotices\.md/);
-        assert.match(recipe, /--extra-resource=thirdPartyLicenses/);
-        assert.match(recipe, /--extra-resource=\$\(enginePackageDir\)/);
+        assert.match(recipe, /packageElectron\.mjs/);
         assert.match(recipe, /verifyPackagingNotices\.mjs/);
     }
+});
+
+test('packageElectron.mjs bundles third-party notices and the packaged engine as extra resources', () => {
+    const { extraResource } = createPackageOptions({
+        platform: 'darwin', arch: 'arm64', appVersion: '1.0.0', icon: 'icon.icns', name: 'Konjugate', appBundleId: 'com.konjugate.app'
+    });
+    assert.ok(extraResource.includes('out/packageResources/engine'));
+    assert.ok(extraResource.includes('thirdPartyNotices.md'));
+    assert.ok(extraResource.includes('thirdPartyLicenses'));
 });
 
 test('packaging verifies the installed engine and its effective METIS runtime', async () => {

@@ -71,9 +71,16 @@ int main(int argc, char** argv) {
         std::_Exit(0);
     }
     if (argc == 2 && std::string(argv[1]) == "capabilities") {
+        // std::cout is fully buffered (not line-buffered) once stdout isn't a terminal -- e.g.
+        // piped to a parent process, exactly this CLI's normal use -- so the trailing '\n' above
+        // does not itself force a flush the way it would interactively. std::_Exit() below
+        // skips the atexit flush that would otherwise cover this, so it must be explicit here
+        // (writeFramedMessage()/writeFramedEvent() already flush themselves; this was the one
+        // remaining stdout write in this file that didn't).
         std::cout << "{\"metis\":{\"available\":"
                   << (konjugate::metisPartitionerAvailable() ? "true" : "false")
                   << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}}\n";
+        std::cout.flush();
         std::_Exit(0);
     }
     if (argc < 3) {

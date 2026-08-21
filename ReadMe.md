@@ -106,9 +106,9 @@ Konjugate supports development on macOS, Windows and Linux.
 
 ### Prerequisites
 
-- **Windows**: Node.js 22+, Git, CMake, and Visual Studio 2022+ with **Desktop development with C++**. (Run commands in Developer PowerShell).
-- **macOS**: Node.js 22+, CMake (`brew install cmake`), Git, and Xcode Command Line Tools (`xcode-select --install`).
-- **Linux (Ubuntu/Debian)**: Node.js 22+, CMake, Git, and C++ build tools (`sudo apt install build-essential cmake git curl zip unzip tar pkg-config`).
+- **Windows**: Node.js 24+, Git, CMake, and Visual Studio 2022+ with **Desktop development with C++**. (Run commands in Developer PowerShell).
+- **macOS**: Node.js 24+, CMake (`brew install cmake`), Git, and Xcode Command Line Tools (`xcode-select --install`).
+- **Linux (Ubuntu/Debian)**: Node.js 24+, CMake, Git, and C++ build tools (`sudo apt install build-essential cmake git curl zip unzip tar pkg-config`).
 
 ### Quick Start
 

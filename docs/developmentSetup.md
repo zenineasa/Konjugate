@@ -8,12 +8,12 @@ it never silently substitutes the built-in partitioner.
 
 ## Platform prerequisites
 
-- **macOS:** Node.js 22.12 or newer, CMake 3.20 or newer, Git and the Xcode
+- **macOS:** Node.js 24.19 or newer, CMake 3.20 or newer, Git and the Xcode
   Command Line Tools (`xcode-select --install`).
-- **Windows:** Node.js 22.12 or newer, CMake 3.20 or newer, Git and Visual
+- **Windows:** Node.js 24.19 or newer, CMake 3.20 or newer, Git and Visual
   Studio 2022 Build Tools with **Desktop development with C++**. Run the
   commands from a Developer PowerShell or Developer Command Prompt.
-- **Linux:** Node.js 22.12 or newer, CMake 3.20 or newer, Git, a C++20 compiler
+- **Linux:** Node.js 24.19 or newer, CMake 3.20 or newer, Git, a C++20 compiler
   and the desktop libraries required by Electron. On Debian or Ubuntu, install
   `build-essential`, `cmake`, `git`, `curl`, `zip`, `unzip`, `tar` and `pkg-config`
   before following the common procedure.

@@ -40,6 +40,19 @@ test('resolves a version-pinned installed plugin to the provider runtime contrac
     }
 });
 
+test('rejects a plugin reference whose package key is disabled', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'konjugate-plugin-'));
+    try {
+        await installFixture(root);
+        await assert.rejects(
+            resolveInstalledPlugins(model, { pluginDirectory: root, disabledPluginKeys: ['plugin:example.helloProvider:0.1.0'] }),
+            (error) => error instanceof PluginResolutionError && error.code === 'PLUGIN_DISABLED'
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test('leaves models without plugin references unchanged', async () => {
     const content = JSON.stringify({ ...model, nodes: [], edges: [] });
     assert.equal(await resolveInstalledPlugins(content, { pluginDirectory: '/unused' }), content);

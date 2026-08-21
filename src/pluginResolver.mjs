@@ -2,6 +2,7 @@
 
 import { access, readFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { packageKey } from './packageArchive.mjs';
 
 export class PluginResolutionError extends Error {
     constructor(message, code = 'PLUGIN_RESOLUTION_FAILED') {
@@ -29,12 +30,15 @@ async function readJson(path, description) {
     }
 }
 
-async function resolvePluginSource(implementation, pluginDirectory) {
+async function resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys) {
     if (!pluginDirectory) throw new PluginResolutionError('Plugin execution requires an installed plugin directory.', 'PLUGIN_DIRECTORY_MISSING');
     const pluginId = implementation.pluginId;
     const version = implementation.pluginVersion;
     if (typeof pluginId !== 'string' || typeof version !== 'string' || !pluginIdPattern.test(pluginId) || !pluginVersionPattern.test(version)) {
         throw new PluginResolutionError('A plugin implementation requires pluginId and pluginVersion.', 'PLUGIN_REFERENCE_INVALID');
+    }
+    if (disabledPluginKeys.includes(packageKey('plugin', pluginId, version))) {
+        throw new PluginResolutionError(`Plugin ${pluginId} is disabled. Enable it from Extensions before running this model.`, 'PLUGIN_DISABLED');
     }
     const pluginRoot = resolve(pluginDirectory, 'plugins', pluginId, version);
     if (!pluginRoot.startsWith(`${resolve(pluginDirectory, 'plugins')}${sep}`)) {
@@ -59,13 +63,13 @@ async function resolvePluginSource(implementation, pluginDirectory) {
     return { ...implementation, kind: contribution.runtime, providerApiVersion: contribution.apiVersion, source: sourcePath };
 }
 
-export async function resolveInstalledPlugins(content, { pluginDirectory } = {}) {
+export async function resolveInstalledPlugins(content, { pluginDirectory, disabledPluginKeys = [] } = {}) {
     const document = typeof content === 'string' ? JSON.parse(content) : structuredClone(content);
     let changed = false;
     const resolveImplementation = async (implementation) => {
         if (implementation?.kind !== 'plugin') return implementation;
         changed = true;
-        return resolvePluginSource(implementation, pluginDirectory);
+        return resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys);
     };
     for (const node of document.nodes ?? []) {
         for (const term of node.sourceTerms ?? []) term.implementation = await resolveImplementation(term.implementation);

@@ -60,7 +60,8 @@ contextBridge.exposeInMainWorld('projectFiles', {
 contextBridge.exposeInMainWorld('extensions', {
     list: () => ipcRenderer.invoke('packageList'),
     install: () => ipcRenderer.invoke('packageInstall'),
-    uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version })
+    uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version }),
+    setEnabled: (packageType, packageId, version, enabled) => ipcRenderer.invoke('packageSetEnabled', { packageType, packageId, version, enabled })
 });
 
 contextBridge.exposeInMainWorld('shapeLibrary', {

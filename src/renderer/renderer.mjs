@@ -6446,7 +6446,9 @@ function renderExtensionsResults() {
         button.className = 'examplesExplorerItem extensionsItem';
         button.dataset.packageKey = extensionsPackageKey(entry);
         button.classList.toggle('selected', extensionsPackageKey(entry) === extensionsSelectedKey);
-        button.innerHTML = `<b>${escapeHtml(entry.name)}</b><span class="extensionsItemMeta">${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}</span>`;
+        button.classList.toggle('disabledItem', !entry.enabled);
+        const meta = `${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}${entry.enabled ? '' : ' · Disabled'}`;
+        button.innerHTML = `<b>${escapeHtml(entry.name)}</b><span class="extensionsItemMeta">${meta}</span>`;
         return button;
     }));
     $('#extensionsEmpty').textContent = extensionsTab === 'addon' ? 'No add-ons are installed.' : 'No plugins are installed.';
@@ -6460,6 +6462,7 @@ function renderExtensionsDetail() {
     if (!entry) return;
     $('#extensionsDetailBadge').textContent = entry.source === 'bundled' ? 'Bundled' : 'Installed';
     $('#extensionsDetailBadge').classList.toggle('bundled', entry.source === 'bundled');
+    $('#extensionsDetailEnabledBadge').hidden = entry.enabled;
     $('#extensionsDetailTitle').textContent = entry.name;
     $('#extensionsDetailId').textContent = entry.packageId;
     $('#extensionsDetailVersion').textContent = entry.version;
@@ -6468,6 +6471,7 @@ function renderExtensionsDetail() {
         item.textContent = permission;
         return item;
     }));
+    $('#extensionsToggleEnabled').textContent = entry.enabled ? 'Disable' : 'Enable';
     $('#extensionsUninstall').hidden = entry.source === 'bundled';
 }
 
@@ -6522,6 +6526,19 @@ $('#extensionsInstall').addEventListener('click', async () => {
         showExtensionsNotice(`Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate it.`);
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`);
+    }
+});
+
+$('#extensionsToggleEnabled').addEventListener('click', async () => {
+    const entry = extensionsEntries.find((candidate) => extensionsPackageKey(candidate) === extensionsSelectedKey);
+    if (!entry) return;
+    try {
+        await window.extensions.setEnabled(entry.packageType, entry.packageId, entry.version, !entry.enabled);
+        const verb = entry.enabled ? 'Disabled' : 'Enabled';
+        await refreshExtensionsList();
+        showExtensionsNotice(`${verb} ${entry.packageId} ${entry.version}. This takes effect immediately -- no restart needed.`);
+    } catch (error) {
+        showExtensionsNotice(`Could not update: ${error.message}`);
     }
 });
 

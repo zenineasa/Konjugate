@@ -230,6 +230,7 @@
                     <p id="extensionsDetailEmpty" class="examplesExplorerDetailEmpty">Select an item to see its details.</p>
                     <div id="extensionsDetailContent" hidden>
                         <span id="extensionsDetailBadge" class="extensionsBadge"></span>
+                        <span id="extensionsDetailEnabledBadge" class="extensionsBadge disabled" hidden>Disabled</span>
                         <strong id="extensionsDetailTitle"></strong>
                         <dl class="extensionsDetailFacts">
                             <div><dt>Package ID</dt><dd id="extensionsDetailId"></dd></div>
@@ -238,6 +239,7 @@
                         <p class="extensionsDetailLabel">Permissions</p>
                         <ul id="extensionsDetailPermissions" class="extensionsPermissionList"></ul>
                         <footer class="extensionsDetailFooter">
+                            <button id="extensionsToggleEnabled" type="button" class="extensionsToggleButton">Disable</button>
                             <button id="extensionsUninstall" type="button" class="extensionsDangerButton">Uninstall</button>
                         </footer>
                     </div>

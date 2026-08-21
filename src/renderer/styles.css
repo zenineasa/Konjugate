@@ -191,9 +191,13 @@ input, select { user-select: text; }
 .extensionsPermissionList { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .extensionsPermissionList li { padding: 3px 7px; color: #8199a3; background: #0a151d; border: 1px solid #263b45; border-radius: 4px; font-size: 7px; }
 .extensionsPermissionList:empty::after { content: 'None requested'; color: #566b76; font-size: 7px; }
-.extensionsDetailFooter { display: flex; justify-content: flex-end; margin-top: 12px; }
+.extensionsDetailFooter { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
+.extensionsToggleButton { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
+.extensionsToggleButton:hover { color: #dce9ee; background: #17232c; border-color: #293b46; }
 .extensionsDangerButton { padding: 0 10px; height: 28px; color: #c17980; background: transparent; border: 1px solid #4a2e30; border-radius: 4px; font-size: 8px; }
 .extensionsDangerButton:hover { color: #e39197; background: rgb(193 121 128 / 10%); border-color: #6a3c3f; }
+.extensionsBadge.disabled { color: #c17980; background: rgb(193 121 128 / 8%); border-color: #4a2e30; margin-left: 4px; }
+.extensionsItem.disabledItem { opacity: .55; }
 
 .componentLibraryPanel {
     position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); left: 10px;

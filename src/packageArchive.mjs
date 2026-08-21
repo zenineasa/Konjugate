@@ -9,6 +9,13 @@ import { validateAddonManifest } from './addonHost.mjs';
 export const packageArchiveFormat = 'konjugate-package';
 export const packageArchiveVersion = 1;
 export const packageExtensions = Object.freeze({ addon: '.kja', plugin: '.kjp' });
+
+// Shared identity key for a specific installed/bundled package version, used by the extension
+// state store, main.mjs's discovery/IPC handlers and pluginResolver.mjs's disabled-plugin check
+// so all three can't drift out of format.
+export function packageKey(packageType, packageId, version) {
+    return `${packageType}:${packageId}:${version}`;
+}
 const packageIdPattern = /^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/;
 const versionPattern = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 const maximumArchiveBytes = 64 * 1024 * 1024;

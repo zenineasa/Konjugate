@@ -30,7 +30,8 @@ import { findAvailableUpdate } from './updateCheck.mjs';
 import { auxiliaryWindowPresentation } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
-import { inspectPackageArchive, installPackageArchive, listInstalledPackages, uninstallPackage } from './packageArchive.mjs';
+import { inspectPackageArchive, installPackageArchive, listInstalledPackages, packageKey, uninstallPackage } from './packageArchive.mjs';
+import { createExtensionStateStore } from './extensionStateStore.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -131,6 +132,7 @@ const activeValidationOperations = new Set();
 let aiProviderRegistry = null;
 let aiConfigurationStore = null;
 let providerToolchainStore = null;
+let extensionStateStore = null;
 let applicationShutdownPromise = null;
 let applicationShutdownComplete = false;
 
@@ -489,6 +491,19 @@ function visualizerCan(manifest, permission) {
     return manifest?.permissions.includes(permission);
 }
 
+// Hello World ships disabled out of the box, but only for a brand-new userData directory --
+// extensionStateStore's own first-run-only seeding is what keeps a later re-enable sticky.
+// Derived from the live bundled manifest rather than a hardcoded version string, so a future
+// version bump to this add-on doesn't silently stop matching.
+async function defaultDisabledExtensionKeys() {
+    try {
+        const manifest = JSON.parse(await readFile(join(currentDir, '..', 'addons', 'helloWorld', 'addon.json'), 'utf8'));
+        return [packageKey('addon', manifest.addonId, manifest.version)];
+    } catch {
+        return [];
+    }
+}
+
 async function discoverAddons() {
     addonRegistry.clear();
     const flatAddonRoots = [
@@ -580,7 +595,10 @@ async function openResultsVisualizer(projectWindow, { addonDirectory, manifest }
 ipcMain.handle('addonListToolstripContributions', async (event) => {
     if (!senderIsProjectWindow(event)) return [];
     await discoverAddons();
-    return [...addonRegistry.values()].flatMap(({ manifest }) => publicToolstripContributions(manifest));
+    const disabledKeys = await extensionStateStore.list();
+    return [...addonRegistry.values()]
+        .filter(({ manifest }) => !disabledKeys.includes(packageKey('addon', manifest.addonId, manifest.version)))
+        .flatMap(({ manifest }) => publicToolstripContributions(manifest));
 });
 
 ipcMain.handle('addonInvokeCommand', async (event, { addonId, commandId, contexts = {} }) => {
@@ -589,6 +607,9 @@ ipcMain.handle('addonInvokeCommand', async (event, { addonId, commandId, context
     const addon = addonRegistry.get(addonId);
     const contribution = addon?.manifest.contributes?.toolstrip?.find((item) => item.commandId === commandId);
     if (!addon || !contribution) throw new Error('That add-on command is unavailable.');
+    if ((await extensionStateStore.list()).includes(packageKey('addon', addon.manifest.addonId, addon.manifest.version))) {
+        throw new Error('This add-on is disabled.');
+    }
     if (!(contribution.contexts ?? []).every((context) => contexts[context])) throw new Error('The add-on command requires unavailable context.');
     if (addon.manifest.kind === 'resultVisualizer') {
         const projectWindow = getWindowFromEvent(event);
@@ -915,6 +936,7 @@ async function discoverComponentLibrary() {
     }
     const pluginRoot = join(app.getPath('userData'), 'packages', 'plugins');
     const pluginIds = await readdir(pluginRoot, { withFileTypes: true }).catch(() => []);
+    const disabledKeys = await extensionStateStore.list();
     for (const pluginIdEntry of pluginIds) {
         if (!pluginIdEntry.isDirectory()) continue;
         const pluginVersions = await readdir(join(pluginRoot, pluginIdEntry.name), { withFileTypes: true }).catch(() => []);
@@ -923,6 +945,11 @@ async function discoverComponentLibrary() {
             const pluginDirectory = join(pluginRoot, pluginIdEntry.name, versionEntry.name);
             try {
                 const manifest = JSON.parse(await readFile(join(pluginDirectory, 'plugin.json'), 'utf8'));
+                // A disabled plugin has no other place to be filtered out (unlike add-ons, which
+                // stay in addonRegistry so packageList can still show them with a toggle) --
+                // componentLibraryRegistry IS the active-templates list consumed directly by the
+                // Component Library panel, so this is where it must be skipped.
+                if (disabledKeys.includes(packageKey('plugin', manifest.pluginId, manifest.version))) continue;
                 for (const contribution of manifest.contributes ?? []) {
                     if (contribution.kind !== 'component') continue;
                     const template = validateComponentTemplate(JSON.parse(await readFile(join(pluginDirectory, contribution.entry), 'utf8')));
@@ -1013,14 +1040,18 @@ ipcMain.handle('packageInstall', async (event) => {
 
 ipcMain.handle('packageList', async () => {
     await discoverAddons();
+    const disabledKeys = await extensionStateStore.list();
     const packagedAddonRoot = join(app.getPath('userData'), 'packages', 'addons');
     const bundled = [...addonRegistry.values()]
         .filter(({ addonDirectory }) => !addonDirectory.startsWith(`${packagedAddonRoot}${sep}`))
         .map(({ manifest }) => ({
             packageType: 'addon', packageId: manifest.addonId, name: manifest.name, version: manifest.version,
-            source: 'bundled', permissions: manifest.permissions ?? [], manifest, installPath: null
+            source: 'bundled', permissions: manifest.permissions ?? [], manifest, installPath: null,
+            enabled: !disabledKeys.includes(packageKey('addon', manifest.addonId, manifest.version))
         }));
-    const installed = await listInstalledPackages(join(app.getPath('userData'), 'packages'));
+    const installed = (await listInstalledPackages(join(app.getPath('userData'), 'packages'))).map((entry) => ({
+        ...entry, enabled: !disabledKeys.includes(packageKey(entry.packageType, entry.packageId, entry.version))
+    }));
     return [...bundled, ...installed];
 });
 
@@ -1029,6 +1060,13 @@ ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, vers
     await discoverAddons();
     await discoverComponentLibrary();
     return { packageType, packageId, version };
+});
+
+ipcMain.handle('packageSetEnabled', async (_event, { packageType, packageId, version, enabled }) => {
+    await extensionStateStore.setEnabled(packageKey(packageType, packageId, version), enabled);
+    await discoverAddons();
+    await discoverComponentLibrary();
+    return { packageType, packageId, version, enabled };
 });
 
 ipcMain.handle('projectUnlock', async (_event, { path, password }) => {
@@ -1553,6 +1591,7 @@ const engineOptions = async () => {
         resourcesPath: process.resourcesPath,
         packaged: app.isPackaged,
         pluginDirectory: join(app.getPath('userData'), 'packages'),
+        disabledPluginKeys: await extensionStateStore.list(),
         providerToolchains: {
             cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
             python: { interpreterPath: resolvedPython ?? '' },
@@ -1579,6 +1618,10 @@ async function runCliMode() {
     const flags = parseCliFlags(rest);
 
     providerToolchainStore = createProviderToolchainStore({ directory: join(app.getPath('userData'), 'providers') });
+    extensionStateStore = createExtensionStateStore({
+        directory: join(app.getPath('userData'), 'packages'),
+        defaultDisabled: await defaultDisabledExtensionKeys()
+    });
 
     let bundle;
     try {
@@ -1816,6 +1859,10 @@ app.whenReady().then(async () => {
     });
     providerToolchainStore = createProviderToolchainStore({
         directory: join(app.getPath('userData'), 'providers')
+    });
+    extensionStateStore = createExtensionStateStore({
+        directory: join(app.getPath('userData'), 'packages'),
+        defaultDisabled: await defaultDisabledExtensionKeys()
     });
 
     // A file passed on the initial launch (Windows/Linux double-click, or a path Electron

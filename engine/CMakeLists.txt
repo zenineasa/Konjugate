@@ -123,7 +123,7 @@ set_target_properties(konjugateEngine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
     RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
-    INSTALL_RPATH "$ORIGIN"
+    INSTALL_RPATH "$<IF:$<PLATFORM_ID:Darwin>,@loader_path,$ORIGIN>"
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads ${CMAKE_DL_LIBS})

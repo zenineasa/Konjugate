@@ -126,6 +126,8 @@ jobs:
               # involved. Ninja could work here too with CMAKE_C_COMPILER/CMAKE_CXX_COMPILER
               # explicitly pinned to cl, but that's unverified -- revisit deliberately, not blindly.
               run: make distributable
+            - name: Verify packaged engine
+              run: make verifyPackagedEngine
             - uses: actions/upload-artifact@v4
               with:
                   # runner.arch disambiguates the two macOS runners (macos-latest and

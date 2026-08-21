@@ -200,11 +200,6 @@ else
 	@exit 1
 endif
 
-# Runs the engine/interaction test suites against the packaged app rather than the dev build --
-# catches packaging-only failures (missing bundled libraries, resource paths that only resolve
-# once actually laid out the way the packager produces, code-signing side effects) that dev-mode
-# testing structurally cannot. Slower than the dev-mode suites since each depends on a fresh
-# package build; treat as a pre-release check, not a fast dev-loop one.
 verifyPackagedEngine: packageApp
 	node scripts/testPackagedEngine.mjs
 
@@ -246,6 +241,10 @@ distributableMacos: packageMacos
 	rm -rf $(releaseDir)/dmg/$(appName).app $(releaseDir)/dmg/Applications
 	cp -R $(packageDir)/$(appName)-darwin-$(hostArch)/$(appName).app $(releaseDir)/dmg/
 ifneq ($(strip $(macSignIdentity)),)
+	for f in $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/konjugateEngine \
+	         $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/libmetis.dylib; do \
+		[ -f "$$f" ] && codesign --force --options runtime --timestamp --sign "$(macSignIdentity)" "$$f"; \
+	done; true
 	codesign \
 		--deep \
 		--force \
@@ -254,12 +253,22 @@ ifneq ($(strip $(macSignIdentity)),)
 		--sign "$(macSignIdentity)" \
 		$(releaseDir)/dmg/$(appName).app
 else
+	for f in $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/konjugateEngine \
+	         $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/libmetis.dylib; do \
+		[ -f "$$f" ] && codesign --force --sign - "$$f"; \
+	done; true
 	codesign \
 		--deep \
 		--force \
 		--sign - \
 		$(releaseDir)/dmg/$(appName).app
 endif
+	codesign -dv $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/konjugateEngine 2>&1 | grep -q "^Signature=" \
+		|| { echo "konjugateEngine is not signed inside the packaged app."; exit 1; }
+	@if [ -f $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/libmetis.dylib ]; then \
+		codesign -dv $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/libmetis.dylib 2>&1 | grep -q "^Signature=" \
+			|| { echo "libmetis.dylib is not signed inside the packaged app."; exit 1; }; \
+	fi
 	ln -s /Applications $(releaseDir)/dmg/Applications
 	rm -f $(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg
 	hdiutil create \

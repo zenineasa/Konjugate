@@ -1,6 +1,6 @@
 {
     "name": "konjugate",
-    "version": "0.6.3",
+    "version": "0.6.4",
     "private": true,
     "description": "A graph-native simulation engine for composable engineering simulations and digital twins.",
     "type": "module",

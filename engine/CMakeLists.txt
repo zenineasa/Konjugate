@@ -73,6 +73,13 @@ if(KONJUGATE_HAS_METIS AND APPLE AND METIS_LIBRARY MATCHES "\\.dylib$")
     if(NOT METIS_INSTALL_NAME_RESULT EQUAL 0)
         message(FATAL_ERROR "Could not prepare the METIS runtime library for application packaging")
     endif()
+    execute_process(
+        COMMAND codesign --force --sign - "${METIS_PREPARED_LIBRARY}"
+        RESULT_VARIABLE METIS_CODESIGN_RESULT
+    )
+    if(NOT METIS_CODESIGN_RESULT EQUAL 0)
+        message(FATAL_ERROR "Could not re-sign the METIS runtime library after install_name_tool modification")
+    endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${METIS_PREPARED_LIBRARY}" "${METIS_BUNDLED_LIBRARY}")
     file(REMOVE "${METIS_PREPARED_LIBRARY}")
     set(KONJUGATE_METIS_LINK_LIBRARY "${METIS_BUNDLED_LIBRARY}")

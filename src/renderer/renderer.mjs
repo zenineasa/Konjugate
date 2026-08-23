@@ -2450,6 +2450,12 @@ function domainLabel(domain) {
     return `${domain.charAt(0).toUpperCase()}${domain.slice(1)}`;
 }
 
+function shapeDomains(shape) {
+    if (Array.isArray(shape?.domains) && shape.domains.length) return shape.domains;
+    if (shape?.domain) return [shape.domain];
+    return ['general'];
+}
+
 function shapeLibraryThumbnailMarkup(id) {
     if (shapeLibraryThumbnailCache.has(id)) {
         const dataUrl = shapeLibraryThumbnailCache.get(id);
@@ -2463,9 +2469,10 @@ function shapeLibraryThumbnailMarkup(id) {
 function renderShapeLibraryResults() {
     const query = $('#shapeLibrarySearch').value.trim().toLowerCase();
     const matches = shapeLibraryEntries.filter((shape) => {
-        if (shapeLibraryDomain !== 'all' && shape.domain !== shapeLibraryDomain) return false;
+        const domains = shapeDomains(shape);
+        if (shapeLibraryDomain !== 'all' && !domains.includes(shapeLibraryDomain)) return false;
         if (!query) return true;
-        const haystack = [shape.name, shape.domain, ...(shape.tags ?? [])].join(' ').toLowerCase();
+        const haystack = [shape.name, ...domains, ...(shape.tags ?? [])].join(' ').toLowerCase();
         return haystack.includes(query);
     });
     // Old buttons are about to be discarded -- drop the observer's references to them first so
@@ -2478,7 +2485,9 @@ function renderShapeLibraryResults() {
         button.className = 'shapeLibraryItem';
         button.dataset.shapeId = shape.id;
         button.classList.toggle('selected', shape.id === shapeLibrarySelectedId);
-        button.innerHTML = `${shapeLibraryThumbnailMarkup(shape.id)}<b>${escapeHtml(shape.name)}</b><small>${escapeHtml(domainLabel(shape.domain))}<span class="shapeFormatBadge">${escapeHtml(shape.format.toUpperCase())}</span></small>`;
+        const domains = shapeDomains(shape);
+        const domainText = domains.map(domainLabel).join(', ');
+        button.innerHTML = `${shapeLibraryThumbnailMarkup(shape.id)}<b>${escapeHtml(shape.name)}</b><small>${escapeHtml(domainText)}<span class="shapeFormatBadge">${escapeHtml(shape.format.toUpperCase())}</span></small>`;
         if (!shapeLibraryThumbnailCache.has(shape.id)) observer.observe(button);
         return button;
     }));
@@ -2493,7 +2502,7 @@ async function openShapeLibrary(target) {
     $('#shapeLibrarySearch').value = '';
     $('#shapeLibraryDetailEmpty').hidden = false;
     $('#shapeLibraryDetailContent').hidden = true;
-    const domains = ['all', ...new Set(shapeLibraryEntries.map((shape) => shape.domain))];
+    const domains = ['all', ...new Set(shapeLibraryEntries.flatMap((shape) => shapeDomains(shape)))];
     $('#shapeLibraryDomains').replaceChildren(...domains.map((domain) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -2617,8 +2626,10 @@ async function selectShapeLibraryPreview(id) {
     const shape = shapeLibraryEntries.find((entry) => entry.id === id);
     $('#shapeLibraryDetailEmpty').hidden = true;
     $('#shapeLibraryDetailContent').hidden = false;
+    const domains = shapeDomains(shape);
+    const domainText = domains.map(domainLabel).join(' · ');
     $('#shapeLibraryDetailTitle').textContent = shape?.name ?? '';
-    $('#shapeLibraryDetailMeta').textContent = shape ? `${domainLabel(shape.domain)} · ${shape.format.toUpperCase()} · Loading…` : '';
+    $('#shapeLibraryDetailMeta').textContent = shape ? `${domainText} · ${shape.format.toUpperCase()} · Loading…` : '';
     ensureShapeLibraryPreview();
     resizeShapeLibraryPreview();
     // A later click while this load is still in flight must win -- discard a now-stale result
@@ -2640,7 +2651,7 @@ async function selectShapeLibraryPreview(id) {
     shapeLibraryPreviewMesh = new THREE.Mesh(geometry, material);
     shapeLibraryPreviewScene.add(shapeLibraryPreviewMesh);
     frameShapeLibraryPreview();
-    $('#shapeLibraryDetailMeta').textContent = shape ? `${domainLabel(shape.domain)} · ${shape.format.toUpperCase()}` : '';
+    $('#shapeLibraryDetailMeta').textContent = shape ? `${domainText} · ${shape.format.toUpperCase()}` : '';
     // Guarded so switching between several shapes never spawns more than one concurrent
     // requestAnimationFrame chain -- animateShapeLibraryPreview() re-schedules itself as long as
     // this stays true, so it only needs to be (re)started when nothing is running yet.

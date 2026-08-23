@@ -4,7 +4,7 @@
         {
             "id": "mechanical/hexStandoff",
             "name": "Hex Standoff",
-            "domain": "mechanical",
+            "domains": ["mechanical", "structural", "robotics"],
             "format": "step",
             "file": "mechanical/hexStandoff.step",
             "tags": ["hex", "standoff", "spacer", "fastener"]
@@ -12,7 +12,7 @@
         {
             "id": "mechanical/lBracket",
             "name": "L-Bracket",
-            "domain": "mechanical",
+            "domains": ["mechanical", "structural", "robotics"],
             "format": "step",
             "file": "mechanical/lBracket.step",
             "tags": ["bracket", "angle", "mounting", "corner"]
@@ -20,7 +20,7 @@
         {
             "id": "mechanical/spurGear",
             "name": "Spur Gear",
-            "domain": "mechanical",
+            "domains": ["mechanical", "robotics"],
             "format": "stl",
             "file": "mechanical/spurGear.stl",
             "tags": ["gear", "teeth", "transmission", "cog"]
@@ -28,7 +28,7 @@
         {
             "id": "structural/iBeamSegment",
             "name": "I-Beam Segment",
-            "domain": "structural",
+            "domains": ["structural", "mechanical"],
             "format": "step",
             "file": "structural/iBeamSegment.step",
             "tags": ["beam", "girder", "steel", "i-beam"]
@@ -36,7 +36,7 @@
         {
             "id": "structural/mountingPlate",
             "name": "Mounting Plate",
-            "domain": "structural",
+            "domains": ["structural", "mechanical", "electrical", "robotics"],
             "format": "step",
             "file": "structural/mountingPlate.step",
             "tags": ["plate", "panel", "chamfered", "base"]
@@ -44,7 +44,7 @@
         {
             "id": "structural/angleGusset",
             "name": "Angle Gusset",
-            "domain": "structural",
+            "domains": ["structural", "mechanical", "robotics"],
             "format": "step",
             "file": "structural/angleGusset.step",
             "tags": ["gusset", "triangle", "brace", "reinforcement"]
@@ -52,7 +52,7 @@
         {
             "id": "electrical/batteryCell",
             "name": "Battery Cell",
-            "domain": "electrical",
+            "domains": ["electrical", "robotics"],
             "format": "stl",
             "file": "electrical/batteryCell.stl",
             "tags": ["battery", "cell", "cylindrical", "power"]
@@ -60,7 +60,7 @@
         {
             "id": "electrical/terminalBlock",
             "name": "Terminal Block",
-            "domain": "electrical",
+            "domains": ["electrical", "robotics"],
             "format": "step",
             "file": "electrical/terminalBlock.step",
             "tags": ["terminal", "connector", "block", "wiring"]
@@ -68,7 +68,7 @@
         {
             "id": "electrical/motorHousing",
             "name": "Motor Housing",
-            "domain": "electrical",
+            "domains": ["electrical", "mechanical", "robotics"],
             "format": "stl",
             "file": "electrical/motorHousing.stl",
             "tags": ["motor", "housing", "actuator", "enclosure"]
@@ -76,7 +76,7 @@
         {
             "id": "fluid/pipeSegment",
             "name": "Pipe Segment",
-            "domain": "fluid",
+            "domains": ["fluid"],
             "format": "stl",
             "file": "fluid/pipeSegment.stl",
             "tags": ["pipe", "tube", "conduit", "straight"]
@@ -84,7 +84,7 @@
         {
             "id": "fluid/pipeElbow",
             "name": "Pipe Elbow",
-            "domain": "fluid",
+            "domains": ["fluid"],
             "format": "stl",
             "file": "fluid/pipeElbow.stl",
             "tags": ["elbow", "bend", "pipe", "90-degree"]
@@ -92,7 +92,7 @@
         {
             "id": "fluid/valveBody",
             "name": "Valve Body",
-            "domain": "fluid",
+            "domains": ["fluid", "mechanical"],
             "format": "stl",
             "file": "fluid/valveBody.stl",
             "tags": ["valve", "port", "fitting", "control"]
@@ -100,7 +100,7 @@
         {
             "id": "fluid/tank",
             "name": "Tank",
-            "domain": "fluid",
+            "domains": ["fluid", "structural"],
             "format": "stl",
             "file": "fluid/tank.stl",
             "tags": ["tank", "vessel", "reservoir", "storage"]
@@ -108,7 +108,7 @@
         {
             "id": "fluid/meteringPump",
             "name": "Metering Pump",
-            "domain": "fluid",
+            "domains": ["fluid", "mechanical", "electrical"],
             "format": "stl",
             "file": "fluid/meteringPump.stl",
             "tags": ["pump", "metering", "positive-displacement", "suction"]
@@ -116,10 +116,50 @@
         {
             "id": "fluid/concentricReducer",
             "name": "Concentric Reducer",
-            "domain": "fluid",
+            "domains": ["fluid"],
             "format": "stl",
             "file": "fluid/concentricReducer.stl",
             "tags": ["reducer", "fitting", "transition", "pipe"]
+        },
+        {
+            "id": "robotics/servoActuator",
+            "name": "Servo Actuator",
+            "domains": ["robotics", "electrical", "mechanical"],
+            "format": "stl",
+            "file": "robotics/servoActuator.stl",
+            "tags": ["robotics", "servo", "motor", "actuator", "joint"]
+        },
+        {
+            "id": "robotics/articulatedLink",
+            "name": "Articulated Link",
+            "domains": ["robotics", "structural", "mechanical"],
+            "format": "stl",
+            "file": "robotics/articulatedLink.stl",
+            "tags": ["robotics", "link", "arm", "clevis", "manipulator"]
+        },
+        {
+            "id": "robotics/parallelGripper",
+            "name": "Parallel Gripper",
+            "domains": ["robotics", "mechanical"],
+            "format": "stl",
+            "file": "robotics/parallelGripper.stl",
+            "tags": ["robotics", "gripper", "end-effector", "jaw", "clamp"]
+        },
+        {
+            "id": "robotics/driveWheel",
+            "name": "Drive Wheel",
+            "domains": ["robotics", "mechanical"],
+            "format": "stl",
+            "file": "robotics/driveWheel.stl",
+            "tags": ["robotics", "wheel", "tire", "mobile", "rover", "traction"]
+        },
+        {
+            "id": "robotics/propellerRotor",
+            "name": "Propeller Rotor",
+            "domains": ["robotics", "fluid"],
+            "format": "stl",
+            "file": "robotics/propellerRotor.stl",
+            "tags": ["robotics", "propeller", "rotor", "drone", "quadrotor", "aerodynamic"]
         }
     ]
 }

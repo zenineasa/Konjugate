@@ -827,7 +827,17 @@ const shapeFormatPattern = /\.(stl|step|stp)$/i;
 // something that's supposed to "just show up" the moment a file is saved into userShapesDir.
 async function shapeLibraryManifest() {
     const bundled = (JSON.parse(await readFile(join(shapesDir, 'manifest.json'), 'utf8')).shapes)
-        .map((shape) => ({ ...shape, source: 'bundled' }));
+        .map((shape) => {
+            const domains = Array.isArray(shape.domains)
+                ? shape.domains
+                : (shape.domain ? [shape.domain] : []);
+            return {
+                ...shape,
+                domains,
+                domain: domains[0] ?? 'general',
+                source: 'bundled'
+            };
+        });
     const uploadedEntries = await readdir(userShapesDir, { withFileTypes: true }).catch(() => []);
     const uploaded = uploadedEntries
         .filter((entry) => entry.isFile() && shapeFormatPattern.test(entry.name))
@@ -836,6 +846,7 @@ async function shapeLibraryManifest() {
             return {
                 id: `userUploaded/${entry.name}`,
                 name: entry.name.slice(0, -(format.length + 1)),
+                domains: ['userUploaded'],
                 domain: 'userUploaded',
                 format,
                 file: entry.name,

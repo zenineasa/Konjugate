@@ -19,6 +19,7 @@ jobs:
             # Caches vcpkg's built dependency binaries in GitHub's own Actions cache instead of
             # rebuilding all of them from source on every run -- see release.yml for the same.
             VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+            MACOSX_DEPLOYMENT_TARGET: '11.0'
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4

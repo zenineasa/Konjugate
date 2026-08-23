@@ -1,6 +1,11 @@
 # Copyright © 2026 Zenin Easa Panthakkalakath
 
 cmake_minimum_required(VERSION 3.20)
+
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment target" FORCE)
+endif()
+
 project(konjugateEngine VERSION 0.2.0 LANGUAGES CXX)
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)

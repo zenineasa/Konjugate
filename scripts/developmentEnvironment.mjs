@@ -34,6 +34,8 @@ if (process.platform === 'win32') {
         }
         process.env[envVar] = current.join(';');
     }
+} else if (process.platform === 'darwin') {
+    process.env.MACOSX_DEPLOYMENT_TARGET ??= '11.0';
 }
 
 export function run(command, args, options = {}) {

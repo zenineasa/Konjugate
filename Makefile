@@ -76,6 +76,7 @@ endif
 
 ifeq ($(hostSystem),Darwin)
 	hostPlatform := darwin
+	export MACOSX_DEPLOYMENT_TARGET ?= 11.0
 else ifeq ($(hostSystem),Linux)
 	hostPlatform := linux
 else ifeq ($(hostSystem),Windows)

@@ -13,6 +13,7 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/../.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
                 "VCPKG_MANIFEST_DIR": "${sourceDir}/..",
                 "KONJUGATE_REQUIRE_METIS": "ON"
             }

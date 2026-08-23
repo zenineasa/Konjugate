@@ -18,6 +18,7 @@ env:
     # for the same code. The first run after this is added still populates the cache from cold;
     # every run after that should reuse it.
     VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+    MACOSX_DEPLOYMENT_TARGET: '11.0'
 
 jobs:
     build:

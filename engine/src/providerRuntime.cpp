@@ -486,6 +486,7 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
                 arguments.push_back("-isysroot");
                 arguments.push_back(sysroot);
             }
+            arguments.push_back("-mmacosx-version-min=11.0");
 #endif
             arguments.push_back(sourcePath.string());
             arguments.push_back((sdkRoot / "src" / glueFile).string());

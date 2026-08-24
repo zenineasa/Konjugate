@@ -2468,7 +2468,10 @@ export async function runInteractionTests(window) {
                 field.dispatchEvent(new Event('input', { bubbles: true }));
             })()`);
             await waitFor(window, `document.querySelector('#groupEquationDiagnostics').classList.contains('valid')`, 'The group equation did not validate.');
-            await evaluate(window, `document.querySelector('#saveEdgeGroup').click()`);
+            // Autosaves live, like the node/edge editors -- the "change" event (matching a real
+            // blur) is what finishes the equation-typing session and commits its undo step,
+            // there is no separate Save action to click anymore.
+            await evaluate(window, `document.querySelector('#groupMathField').dispatchEvent(new Event('change', { bubbles: true }))`);
         });
         assert.deepEqual(consoleMessages, [], 'Saving the edge group logged unexpected console messages.');
         assert.equal(await evaluate(window, `document.querySelector('#groupEquationDiagnostics').classList.contains('valid')`), true);

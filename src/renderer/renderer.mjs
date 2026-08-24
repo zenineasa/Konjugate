@@ -5703,6 +5703,7 @@ renderer.domElement.addEventListener('contextmenu', (event) => {
 $$('[data-close-card]').forEach((button) => {
     button.addEventListener('click', () => {
         if (button.closest('#edgeEditor')) finishEquationEdit();
+        if (button.closest('#edgeGroupEditor')) finishEquationEdit();
         if (button.closest('#edgeBuilder')) finishEndpointPick();
         if (button.closest('#sourceTermEditor')) {
             finishEquationEdit();
@@ -5938,11 +5939,10 @@ window.providerEditor.onApplied(({ source }) => {
         return succeed();
     }
     if (providerEditTarget.type === 'group') {
-        // Like 'builder': the edge group editor is also a not-yet-saved form -- write the field,
-        // let the group's own "Save changes" button persist and re-expand the mesh.
-        if ($('#edgeGroupEditor').classList.contains('hidden')) return fail('The edge group editor was closed.');
-        $('#groupProviderSource').value = source;
-        $('#groupInsertProviderTemplate').hidden = !source.trim();
+        if (activeResult) return fail('Results are locked — close them to apply changes.');
+        const group = model.edgeGroups.find((candidate) => candidate.id === providerEditTarget.groupId && !candidate.deleted);
+        if (!group?.definition.implementation) return fail('This edge group no longer exists.');
+        changeEdgeGroupModel(group, (snapshot) => { snapshot.definition.implementation.source = source; });
         return succeed();
     }
     return fail('Unknown edit target.');
@@ -7402,45 +7402,70 @@ function currentEdgeGroup() {
     return model.edgeGroups.find((group) => group.id === activeEdgeGroupId && !group.deleted) ?? null;
 }
 
-function addGroupParameterRow(container, values = {}) {
-    const control = normalizedParameterControl({ value: Number(values.value) || 0, control: values.control });
+// Mirrors the single-edge editor's inline .editorParameterRow pattern (renderEdgeEditor): every
+// field commits live through changeEdgeGroupModel, matched by the parameter's own stable id
+// rather than position -- addGroupParameterRow is only ever called against a parameter that
+// already exists in group.definition.parameters (see the "+" button below, which pushes a stub
+// parameter through changeEdgeGroupModel first, the same way #editAddEdgeParameter does).
+function addGroupParameterRow(container, parameter, group) {
+    const control = normalizedParameterControl({ value: Number(parameter.value) || 0, control: parameter.control });
     const row = document.createElement('div');
     row.className = 'builderRow parameterRow';
     row.innerHTML = `
-        <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(values.name ?? '')}"></label>
-        <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(values.symbol ?? '')}"></label>
-        <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(values.value ?? '')}"></label>
-        <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(values.unit ?? '')}"></label>
+        <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(parameter.name ?? '')}"></label>
+        <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(parameter.symbol ?? '')}"></label>
+        <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value ?? '')}"></label>
+        <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
         <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
-        <div class="parameterControlFields" ${values.mode === 'live' ? '' : 'hidden'}>
+        <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
             <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
             <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
             <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
             <span class="parameterControlError" role="status"></span>
         </div>
     `;
-    $('[data-field="mode"]', row).value = values.mode ?? 'constant';
+    $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
     container.appendChild(row);
-    $('[data-field="mode"]', row).addEventListener('change', () => {
-        $('.parameterControlFields', row).hidden = $('[data-field="mode"]', row).value !== 'live';
-    });
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
+    const readControl = () => Object.fromEntries($$('[data-control-field]', row)
+        .map((input) => [input.dataset.controlField, Number(input.value)]));
+    const showControlError = () => {
+        const error = $('[data-field="mode"]', row).value === 'live'
+            ? parameterControlError(Number($('[data-field="value"]', row).value), readControl()) : '';
+        $('.parameterControlError', row).textContent = error;
+        return error;
+    };
+    $$('[data-control-field], [data-field="value"]', row).forEach((input) => input.addEventListener('input', showControlError));
+    $$('[data-field]', row).forEach((input) => input.addEventListener('change', () => {
+        if (input.dataset.field === 'mode') $('.parameterControlFields', row).hidden = input.value !== 'live';
+        if (showControlError()) return;
+        changeEdgeGroupModel(group, (snapshot) => {
+            const target = snapshot.definition.parameters.find((candidate) => candidate.id === parameter.id);
+            target[input.dataset.field] = input.dataset.field === 'value' ? Number(input.value) || 0 : input.value.trim();
+            if (target.mode === 'live') target.control = readControl();
+            else delete target.control;
+        });
+    }));
+    $$('[data-control-field]', row).forEach((input) => input.addEventListener('change', () => {
+        if (showControlError()) return;
+        changeEdgeGroupModel(group, (snapshot) => {
+            const target = snapshot.definition.parameters.find((candidate) => candidate.id === parameter.id);
+            target.value = Number($('[data-field="value"]', row).value) || 0;
+            target.control = readControl();
+        });
+    }));
+    row.querySelector('.removeBuilderRow').addEventListener('click', () => changeEdgeGroupModel(group, (snapshot) => {
+        snapshot.definition.parameters = snapshot.definition.parameters.filter((candidate) => candidate.id !== parameter.id);
+    }));
 }
 
-function readGroupParameters(container) {
-    return $$('.parameterRow', container).map((row) => ({
-        id: allocateModelEntityId(),
-        name: $('[data-field="name"]', row).value.trim(),
-        symbol: $('[data-field="symbol"]', row).value.trim(),
-        value: Number($('[data-field="value"]', row).value) || 0,
-        unit: $('[data-field="unit"]', row).value.trim(),
-        mode: $('[data-field="mode"]', row).value,
-        ...($('[data-field="mode"]', row).value === 'live' ? {
-            control: Object.fromEntries($$('[data-control-field]', row)
-                .map((input) => [input.dataset.controlField, Number(input.value)]))
-        } : {})
-    })).filter((parameter) => parameter.name && parameter.symbol);
+// Converts one auto-bind candidate (concrete nodeId/stateId, from providerReferenceCandidates)
+// into the group's own symbol-keyed provider binding shape -- the inverse of what
+// renderGroupProviderBindingRows does to pre-select a row's reference dropdown.
+function candidateToGroupBinding(key, candidate, previewSource, previewTarget) {
+    if (candidate.kind === 'parameter') return { key, kind: 'parameter', parameterId: candidate.parameterId };
+    const node = candidate.role === 'source' ? previewSource : previewTarget;
+    return { key, kind: 'state', role: candidate.role, symbol: node?.states.find((state) => state.id === candidate.stateId)?.symbol ?? '' };
 }
 
 function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
@@ -7451,7 +7476,7 @@ function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
         source: previewSource?.id, target: previewTarget?.id, parameters: group.definition.parameters
     });
     if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
-    bindings.forEach((binding) => {
+    bindings.forEach((binding, index) => {
         const row = document.createElement('div');
         row.className = 'builderRow providerBindingRow';
         row.innerHTML = `
@@ -7468,28 +7493,28 @@ function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
             const state = node?.states.find((candidate) => candidate.symbol === binding.symbol);
             if (state) select.value = `state:${binding.role}:${node.id}:${state.id}`;
         }
-        row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
+        $('[data-field="key"]', row).addEventListener('change', (event) => {
+            changeEdgeGroupModel(group, (snapshot) => {
+                snapshot.definition.implementation.bindings[index] = { ...snapshot.definition.implementation.bindings[index], key: event.target.value.trim() };
+            });
+        });
+        select.addEventListener('change', (event) => {
+            const candidate = candidates.find((option) => providerReferenceValue(option) === event.target.value);
+            if (!candidate) return;
+            changeEdgeGroupModel(group, (snapshot) => {
+                snapshot.definition.implementation.bindings[index] = candidateToGroupBinding($('[data-field="key"]', row).value.trim(), candidate, previewSource, previewTarget);
+            });
+        });
+        row.querySelector('.removeBuilderRow').addEventListener('click', () => changeEdgeGroupModel(group, (snapshot) => {
+            snapshot.definition.implementation.bindings = snapshot.definition.implementation.bindings.filter((candidate, i) => i !== index);
+        }));
         container.appendChild(row);
     });
 }
 
-function readGroupProviderBindings(previewSource, previewTarget) {
-    return $$('.providerBindingRow', $('#groupProviderBindingRows')).map((row) => {
-        const key = $('[data-field="key"]', row).value.trim();
-        const referenceValue = $('[data-field="reference"]', row).value;
-        if (referenceValue.startsWith('parameter:')) {
-            return { key, kind: 'parameter', parameterId: Number(referenceValue.slice('parameter:'.length)) };
-        }
-        const [, role, , stateId] = referenceValue.split(':');
-        const node = role === 'source' ? previewSource : previewTarget;
-        const state = node?.states.find((candidate) => candidate.id === Number(stateId));
-        return { key, kind: 'state', role, symbol: state?.symbol ?? '' };
-    });
-}
-
-function renderGroupEquationDiagnostics(previewSource, previewTarget) {
-    const parameters = readGroupParameters($('#groupParameterRows'));
-    const bindings = reconcileEquationBindings([], previewSource, previewTarget, parameters);
+function renderGroupEquationDiagnostics(group) {
+    const [previewSource, previewTarget] = groupPreviewPair(group);
+    const bindings = reconcileEquationBindings([], previewSource, previewTarget, group.definition.parameters);
     const latex = ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).value;
     const validation = validateEquationLatex(latex, bindings);
     const diagnostics = $('#groupEquationDiagnostics');
@@ -7544,7 +7569,7 @@ function renderEdgeGroupEditor(group) {
     const parameterContainer = $('#groupParameterRows');
     parameterContainer.replaceChildren();
     if (!group.definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
-    else group.definition.parameters.forEach((parameter) => addGroupParameterRow(parameterContainer, parameter));
+    else group.definition.parameters.forEach((parameter) => addGroupParameterRow(parameterContainer, parameter, group));
 
     const mathField = $('#groupMathField');
     const latexSource = $('#groupEquation');
@@ -7560,7 +7585,7 @@ function renderEdgeGroupEditor(group) {
         $('#groupReferenceHint').textContent = previewSource && previewTarget
             ? `Available references (from "${previewSource.title}"/"${previewTarget.title}"): ${portList('source', previewSource)}, ${portList('target', previewTarget)}. Every member must supply the state named in "Updates" below.`
             : 'Add at least two members to see available equation references.';
-        renderGroupEquationDiagnostics(previewSource, previewTarget);
+        renderGroupEquationDiagnostics(group);
     } else {
         mathField.hidden = true;
         latexSource.hidden = true;
@@ -7577,8 +7602,11 @@ function captureEdgeGroupModel(group) {
 
 // Pure apply: mutates the group's own record, re-resolves every *existing* member edge's fields
 // (never regenerates one that was individually deleted -- see deleteSelected's edge branch), and
-// refreshes visuals. Shared by the save flow below and by every membership action's undo/redo.
-function applyEdgeGroupModel(group, snapshot) {
+// refreshes visuals. Shared by every live field edit below and by every membership action's
+// undo/redo. `rerenderEditor: false` skips the full form re-render -- used only while a field is
+// actively being typed into (previewGroupEquation/previewGroupProviderSource), so an in-progress
+// keystroke's own field doesn't get clobbered/reset mid-edit the way a full re-render would.
+function applyEdgeGroupModel(group, snapshot, { rerenderEditor = true } = {}) {
     group.name = snapshot.name;
     group.color = snapshot.color;
     group.definition = structuredClone(snapshot.definition);
@@ -7600,64 +7628,78 @@ function applyEdgeGroupModel(group, snapshot) {
     });
     updateRelationships();
     updateValidationStatus();
-    if (currentEdgeGroup()?.id === group.id) renderEdgeGroupEditor(group);
+    if (rerenderEditor && currentEdgeGroup()?.id === group.id) renderEdgeGroupEditor(group);
 }
 
-function saveEdgeGroupFromForm(group) {
+// The group editor's equivalent of changeEdgeModel: capture, mutate a clone, validate, apply, and
+// record one undo step -- used by every discrete field commit (name, colour, implementation kind,
+// parameter/binding rows). Continuously-typed fields (equation text, provider source) go through
+// previewGroupEquation/previewGroupProviderSource instead, which batch keystrokes into one
+// undo step via beginEquationEditSession/finishEquationEdit, the same session mechanism the
+// single-edge editor's own live equation typing already uses -- reused here unchanged.
+function changeEdgeGroupModel(group, mutate) {
     if (activeResult) return false;
-    const name = $('#groupName').value.trim() || 'Untitled edge group';
-    const color = Number.parseInt($('#groupColor').value.replace('#', ''), 16);
-    const parameters = readGroupParameters($('#groupParameterRows'));
-    if (parameters.some((parameter) => !modelSymbolPattern.test(parameter.symbol)) ||
-        new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
-        $('#groupParameterRows [data-field="symbol"]')?.focus();
+    finishEquationEdit();
+    const before = captureEdgeGroupModel(group);
+    const after = structuredClone(before);
+    mutate(after);
+    const parameterSymbols = after.definition.parameters.map((parameter) => parameter.symbol);
+    if (parameterSymbols.some((symbol) => !modelSymbolPattern.test(symbol)) ||
+        new Set(parameterSymbols).size !== parameterSymbols.length) {
+        renderEdgeGroupEditor(group);
         return false;
     }
-    const invalidLiveParameter = parameters.find((parameter) => parameter.mode === 'live' &&
-        parameterControlError(parameter.value, parameter.control));
-    if (invalidLiveParameter) return false;
+    applyEdgeGroupModel(group, after);
+    recordHistory({
+        undo: () => applyEdgeGroupModel(group, before),
+        redo: () => applyEdgeGroupModel(group, after)
+    });
+    return true;
+}
 
-    const [previewSource, previewTarget] = groupPreviewPair(group);
+function previewGroupEquation(latex, origin) {
+    const group = currentEdgeGroup();
+    if (activeResult || !group) return;
+    beginEquationEditSession(`group:${group.id}`, () => captureEdgeGroupModel(group), (snapshot) => applyEdgeGroupModel(group, snapshot));
+    group.definition.equation = latex;
+    applyEdgeGroupModel(group, captureEdgeGroupModel(group), { rerenderEditor: false });
+    if (origin !== 'visual') $('#groupMathField').setValue(latex, { silenceNotifications: true });
+    if (origin !== 'latex') $('#groupEquation').value = latex;
+    renderGroupEquationDiagnostics(group);
+}
+
+function previewGroupProviderSource(source) {
+    const group = currentEdgeGroup();
+    if (activeResult || !group?.definition.implementation) return;
+    beginEquationEditSession(`group:${group.id}`, () => captureEdgeGroupModel(group), (snapshot) => applyEdgeGroupModel(group, snapshot));
+    group.definition.implementation = { ...group.definition.implementation, source };
+    applyEdgeGroupModel(group, captureEdgeGroupModel(group), { rerenderEditor: false });
+    $('#groupInsertProviderTemplate').hidden = !source.trim();
+}
+
+// The one field whose commit isn't a plain changeEdgeGroupModel call: picking a different
+// "Updates" state can require adding that state to a member node first, and doing so must land in
+// the same undo step as the output-symbol change itself -- a lone state-add with no matching
+// definition change would leave the model in a shape that was never actually valid at any point
+// in history.
+function changeGroupOutputSymbol(group) {
+    if (activeResult) return;
+    finishEquationEdit();
     const outputSymbol = $('#groupEquationOutput').value;
-    if (!outputSymbol) {
-        $('#groupEquationOutput').focus();
-        return false;
-    }
-    const implementationKind = $('#groupImplementationKind').value;
-    let equation = '';
-    let implementation = null;
-    if (implementationKind === 'equation') {
-        equation = ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).value.trim();
-        const { validation } = renderGroupEquationDiagnostics(previewSource, previewTarget);
-        if (equation && !validation.valid) {
-            ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).focus();
-            return false;
-        }
-    } else {
-        implementation = {
-            kind: implementationKind,
-            providerApiVersion: 1,
-            source: $('#groupProviderSource').value,
-            bindings: readGroupProviderBindings(previewSource, previewTarget),
-            output: { key: $('#groupProviderOutputKey').value.trim() }
-        };
-    }
-    const definition = { parameters, output: { symbol: outputSymbol }, equation, implementation };
+    if (!outputSymbol || outputSymbol === group.definition.output.symbol) return;
+    const before = captureEdgeGroupModel(group);
+    const after = structuredClone(before);
+    after.definition.output = { symbol: outputSymbol };
 
-    // A member missing the output state gets it added inside this same undo step: adding the
-    // state and re-pointing every member edge's bindings at it are one indivisible action from
-    // the user's perspective, not two -- a lone state-add with no matching definition change
-    // would leave the model in a shape that was never actually valid at any point in history.
     const autoAdd = $('#groupAutoAddStates').checked;
     const affectedNodes = autoAdd
         ? group.memberNodeIds
             .map((id) => model.nodes.find((node) => node.id === id))
-            .filter((node) => node && !node.deleted && unresolvedGroupSymbols({ group: { definition }, node }).length)
+            .filter((node) => node && !node.deleted && unresolvedGroupSymbols({ group: { definition: after.definition }, node }).length)
         : [];
     const nodeStatesBefore = new Map(affectedNodes.map((node) => [node.id, structuredClone(node.states)]));
     affectedNodes.forEach((node) => {
-        const symbol = definition.output.symbol;
-        node.states.push({ id: allocateModelEntityId(), label: symbol, symbol, initialValue: 0, unit: '', value: '0', className: '' });
+        node.states.push({ id: allocateModelEntityId(), label: outputSymbol, symbol: outputSymbol, initialValue: 0, unit: '', value: '0', className: '' });
     });
     const nodeStatesAfter = new Map(affectedNodes.map((node) => [node.id, structuredClone(node.states)]));
     const applyNodeStates = (statesById) => statesById.forEach((states, nodeId) => {
@@ -7665,15 +7707,11 @@ function saveEdgeGroupFromForm(group) {
         if (node) node.states = structuredClone(states);
     });
 
-    const before = captureEdgeGroupModel(group);
-    applyEdgeGroupModel(group, { name, color, definition });
-    const after = captureEdgeGroupModel(group);
+    applyEdgeGroupModel(group, after);
     recordHistory({
-        undo: () => { applyNodeStates(nodeStatesBefore); applyEdgeGroupModel(group, before); updateModelStatus(); },
-        redo: () => { applyNodeStates(nodeStatesAfter); applyEdgeGroupModel(group, after); updateModelStatus(); }
+        undo: () => { applyNodeStates(nodeStatesBefore); applyEdgeGroupModel(group, before); },
+        redo: () => { applyNodeStates(nodeStatesAfter); applyEdgeGroupModel(group, after); }
     });
-    updateModelStatus();
-    return true;
 }
 
 function openEdgeGroupEditor(groupId) {
@@ -7901,10 +7939,6 @@ $('#groupAddMember').addEventListener('click', () => {
     const group = currentEdgeGroup();
     if (group && selectedNodeIds.size === 1) addNodeToGroup(group, [...selectedNodeIds][0]);
 });
-$('#saveEdgeGroup').addEventListener('click', () => {
-    const group = currentEdgeGroup();
-    if (group) saveEdgeGroupFromForm(group);
-});
 $('#toggleEdgeGroupEnabled').addEventListener('click', () => {
     const group = currentEdgeGroup();
     if (group) toggleEdgeGroupEnabledAction(group);
@@ -7913,7 +7947,28 @@ $('[data-delete-edge-group]').addEventListener('click', () => {
     const group = currentEdgeGroup();
     if (group) deleteEdgeGroupAction(group);
 });
-$('#groupAddParameter').addEventListener('click', () => addGroupParameterRow($('#groupParameterRows')));
+$('#groupName').addEventListener('change', (event) => {
+    const group = currentEdgeGroup();
+    if (group) changeEdgeGroupModel(group, (snapshot) => { snapshot.name = event.target.value.trim() || 'Untitled edge group'; });
+});
+$('#groupColor').addEventListener('change', (event) => {
+    const group = currentEdgeGroup();
+    if (group) changeEdgeGroupModel(group, (snapshot) => { snapshot.color = Number.parseInt(event.target.value.replace('#', ''), 16); });
+});
+$('#groupAddParameter').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (!group) return;
+    changeEdgeGroupModel(group, (snapshot) => {
+        snapshot.definition.parameters.push({
+            id: allocateModelEntityId(), name: 'Parameter', symbol: `p${snapshot.definition.parameters.length + 1}`,
+            value: 0, unit: '', mode: 'constant'
+        });
+    });
+});
+$('#groupEquationOutput').addEventListener('change', () => {
+    const group = currentEdgeGroup();
+    if (group) changeGroupOutputSymbol(group);
+});
 $('#groupImplementationKind').addEventListener('change', (event) => {
     const group = currentEdgeGroup();
     const isEquation = event.target.value === 'equation';
@@ -7924,68 +7979,75 @@ $('#groupImplementationKind').addEventListener('change', (event) => {
     const latexMode = $('[data-group-equation-mode="latex"]').classList.contains('active');
     $('#groupMathField').hidden = !isEquation || latexMode;
     $('#groupEquation').hidden = !isEquation || !latexMode;
-    if (!isEquation && !$('#groupProviderSource').value.trim() && group) {
-        $('#groupProviderSource').value = defaultProviderSource(
-            event.target.value,
-            $$('.providerBindingRow [data-field="key"]', $('#groupProviderBindingRows')).map((input) => ({ key: input.value })),
-            $('#groupProviderOutputKey').value,
-            $('#groupName').value
-        );
-    }
-    $('#groupInsertProviderTemplate').hidden = !$('#groupProviderSource').value.trim();
+    if (!group) return;
+    const kind = event.target.value;
+    changeEdgeGroupModel(group, (snapshot) => {
+        if (kind === 'equation') {
+            snapshot.definition.implementation = null;
+            return;
+        }
+        const bindings = snapshot.definition.implementation?.bindings ?? [];
+        const output = snapshot.definition.implementation?.output ?? { key: 'output' };
+        snapshot.definition.implementation = {
+            kind,
+            providerApiVersion: 1,
+            source: snapshot.definition.implementation?.source || defaultProviderSource(kind, bindings, output.key, snapshot.name),
+            bindings,
+            output
+        };
+    });
 });
 $('#groupInsertProviderTemplate').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (!group?.definition.implementation) return;
+    const { kind, bindings, output } = group.definition.implementation;
     if ($('#groupProviderSource').value.trim() &&
         !window.confirm('Replace the current provider source with a freshly generated template?')) return;
-    $('#groupProviderSource').value = defaultProviderSource(
-        $('#groupImplementationKind').value,
-        $$('.providerBindingRow [data-field="key"]', $('#groupProviderBindingRows')).map((input) => ({ key: input.value })),
-        $('#groupProviderOutputKey').value,
-        $('#groupName').value
-    );
-    $('#groupInsertProviderTemplate').hidden = !$('#groupProviderSource').value.trim();
+    changeEdgeGroupModel(group, (snapshot) => {
+        snapshot.definition.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.name);
+    });
 });
 $('#groupProviderSource').addEventListener('input', (event) => {
-    $('#groupInsertProviderTemplate').hidden = !event.target.value.trim();
+    previewGroupProviderSource(event.target.value);
+});
+$('#groupProviderSource').addEventListener('change', () => finishEquationEdit());
+$('#groupProviderOutputKey').addEventListener('change', (event) => {
+    const group = currentEdgeGroup();
+    if (group) changeEdgeGroupModel(group, (snapshot) => {
+        if (snapshot.definition.implementation) snapshot.definition.implementation.output = { key: event.target.value.trim() };
+    });
 });
 $('#groupOpenProviderEditor').addEventListener('click', () => {
-    providerEditTarget = { type: 'group' };
+    const group = currentEdgeGroup();
+    if (!group) return;
+    providerEditTarget = { type: 'group', groupId: group.id };
     window.providerEditor.openWindow({
         source: $('#groupProviderSource').value,
         kind: $('#groupImplementationKind').value,
-        title: $('#groupName').value
+        title: group.name
     });
 });
 $('#groupAddProviderBinding').addEventListener('click', () => {
     const group = currentEdgeGroup();
     if (!group) return;
     const [previewSource, previewTarget] = groupPreviewPair(group);
-    const container = $('#groupProviderBindingRows');
-    if ($('.emptyEditorState', container)) container.replaceChildren();
-    const candidates = providerReferenceCandidates({
-        source: previewSource?.id, target: previewTarget?.id, parameters: group.definition.parameters
+    changeEdgeGroupModel(group, (snapshot) => {
+        const candidates = providerReferenceCandidates({
+            source: previewSource?.id, target: previewTarget?.id, parameters: snapshot.definition.parameters
+        });
+        if (!candidates.length) return;
+        snapshot.definition.implementation.bindings.push(
+            candidateToGroupBinding(`input${snapshot.definition.implementation.bindings.length + 1}`, candidates[0], previewSource, previewTarget));
     });
-    const row = document.createElement('div');
-    row.className = 'builderRow providerBindingRow';
-    row.innerHTML = `
-        <label class="parameterField"><span>Key</span><input data-field="key"></label>
-        <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
-        <button class="removeBuilderRow" type="button" title="Remove">×</button>
-    `;
-    $('[data-field="reference"]', row).replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
-    container.appendChild(row);
 });
 $('#groupMathField').addEventListener('input', (event) => {
-    $('#groupEquation').value = event.target.value;
-    const group = currentEdgeGroup();
-    if (group) renderGroupEquationDiagnostics(...groupPreviewPair(group));
+    previewGroupEquation(event.target.value, 'visual');
 });
+$('#groupMathField').addEventListener('change', () => finishEquationEdit());
 $('#groupEquation').addEventListener('input', (event) => {
-    $('#groupMathField').setValue(event.target.value, { silenceNotifications: true });
-    const group = currentEdgeGroup();
-    if (group) renderGroupEquationDiagnostics(...groupPreviewPair(group));
+    previewGroupEquation(event.target.value, 'latex');
 });
+$('#groupEquation').addEventListener('change', () => finishEquationEdit());
 $$('[data-group-equation-mode]').forEach((button) => button.addEventListener('click', () => {
     $$('[data-group-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
     const latexMode = button.dataset.groupEquationMode === 'latex';

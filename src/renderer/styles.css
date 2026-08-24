@@ -509,20 +509,23 @@ input, select { user-select: text; }
 .diagnosticsEntry-error .diagnosticsEntryMessage { color: #e0929a; }
 .diagnosticsEntry-warning .diagnosticsEntryMessage { color: #d9b06b; }
 .editorCard { width: 390px; }
-.edgeEditor { width: 440px; }
+.edgeEditor, .edgeGroupEditor { width: 440px; }
 .contextCard.nodeEditor,
 .contextCard.edgeEditor,
-.contextCard.edgeBuilder {
+.contextCard.edgeBuilder,
+.contextCard.edgeGroupEditor {
     position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); right: 10px;
     bottom: calc(var(--math-keyboard-inset) + 10px); left: auto; max-height: none; overflow: auto;
     overscroll-behavior: contain; transition: bottom .2s ease, opacity .14s ease, transform .14s ease;
 }
 .contextCard.nodeEditor > header,
 .contextCard.edgeEditor > header,
-.contextCard.edgeBuilder > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
+.contextCard.edgeBuilder > header,
+.contextCard.edgeGroupEditor > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
 .contextCard.nodeEditor > footer,
 .contextCard.edgeEditor > footer,
-.contextCard.edgeBuilder > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
+.contextCard.edgeBuilder > footer,
+.contextCard.edgeGroupEditor > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
 .contextCard.nodeEditor > footer[hidden] { display: none; }
 .editorCard > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; }
 .editorCard > header strong, .contextKicker { display: block; }
@@ -558,6 +561,13 @@ input, select { user-select: text; }
 .stateRow b { color: #b8c7ce; font-size: 8px; font-weight: 600; }
 .stateRow em { color: #5f7480; font-style: normal; font-weight: 400; }
 .emptyEditorState { margin: 0; padding: 9px; color: #566b76; background: #0f1c24; border-radius: 4px; font-size: 8px; }
+.groupMemberRow { display: flex; height: 30px; align-items: center; justify-content: space-between; padding: 0 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 8px; }
+.groupMemberRow:first-of-type { border-radius: 4px 4px 0 0; }
+.groupMemberRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
+.groupMemberRow > span { color: #b8c7ce; }
+.editorField.checkboxField { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; }
+.checkboxField input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.checkboxField span { color: #9fb0b8; font-size: 8px; }
 .editorStateRow { display: grid; grid-template-columns: 1.25fr .65fr .7fr .55fr 18px; gap: 4px; margin-bottom: 5px; }
 .editorStateRow input { width: 100%; min-width: 0; height: 27px; padding: 0 5px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; }
 .editorStateRow button { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }

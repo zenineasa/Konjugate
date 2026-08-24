@@ -22,6 +22,13 @@ import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
 import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
+import {
+    expandEdgeGroup,
+    hydrateEdgeGroups,
+    resolveGroupEdgeForPair,
+    stripEdgeGroups,
+    unresolvedGroupSymbols
+} from '../edgeGroups.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
 import {
     CSS2DObject,
@@ -207,6 +214,12 @@ function hydrateProjectDocument(document) {
         });
         stateIdsByNode.set(node.id, stateIds);
     });
+    const subsystems = hydrateSubsystems(document, registerId);
+    // Registered before the edges loop below: a group's shared parameters are registered exactly
+    // once here, against the group's own definition, so a member edge's own copy of those same
+    // parameter ids (see edgeGroups.mjs) is recognized and skipped rather than rejected as a
+    // duplicate.
+    const edgeGroups = hydrateEdgeGroups(document, registerId);
     document.edges.forEach((edge) => {
         registerId(edge.id, 'Every edge must have a unique positive integer id.');
         if (!nodeIds.has(edge.source?.nodeId) || !nodeIds.has(edge.target?.nodeId)) {
@@ -218,6 +231,7 @@ function hydrateProjectDocument(document) {
         if (edge.target.stateId && !stateIdsByNode.get(edge.target.nodeId)?.has(edge.target.stateId)) {
             throw new Error(`Edge “${edge.name ?? edge.id}” references a missing target state.`);
         }
+        if (edge.groupId != null) return;
         const parameterSymbols = new Set();
         (edge.parameters ?? []).forEach((parameter) => {
             registerId(parameter.id, `Every parameter in “${edge.name ?? edge.id}” must have a unique positive integer id.`);
@@ -240,7 +254,6 @@ function hydrateProjectDocument(document) {
     (document.runConfigurations ?? []).forEach((configuration) => {
         registerId(configuration.id, 'Every run configuration must have a unique positive integer id.');
     });
-    const subsystems = hydrateSubsystems(document, registerId);
 
     const nodes = document.nodes.map((node) => {
         const appearance = node.appearance ?? {};
@@ -277,6 +290,7 @@ function hydrateProjectDocument(document) {
     });
     const relationships = document.edges.map((edge) => ({
         id: edge.id,
+        groupId: edge.groupId ?? null,
         title: edge.name || 'Untitled relationship',
         source: edge.source.nodeId,
         sourceStateId: edge.source.stateId ?? null,
@@ -314,7 +328,8 @@ function hydrateProjectDocument(document) {
             ? document.activeRunConfigurationId : runConfigurations[0].id,
         nodes,
         relationships,
-        subsystems
+        subsystems,
+        edgeGroups
     };
 }
 
@@ -326,7 +341,8 @@ const emptyProjectDocument = {
     runConfigurations: [],
     nodes: [],
     edges: [],
-    subsystems: []
+    subsystems: [],
+    edgeGroups: []
 };
 const model = hydrateProjectDocument(emptyProjectDocument);
 let currentProjectPath = null;
@@ -376,6 +392,7 @@ const waypointHandleObjects = new Map();
 let selectedNode = null;
 const selectedNodeIds = new Set();
 let selectedRelationship = null;
+let activeEdgeGroupId = null;
 let activeSubsystemId = null;
 let currentTool = 'select';
 let currentView = 'orbit';
@@ -463,6 +480,7 @@ function updateSelectionActionControls() {
     const locked = Boolean(activeResult);
     $('#copySelection').disabled = locked || !selectedNodeIds.size;
     $('#createSubsystem').disabled = locked || !selectedNodeIds.size;
+    $('#createEdgeGroup').disabled = locked || selectedNodeIds.size < 2;
     $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship);
     let canPaste = false;
     if (!locked) {
@@ -2278,7 +2296,14 @@ function insertEquationBinding(binding) {
     }
 }
 
+// A group-member edge is never edited on its own -- no override without detaching, per
+// docs/edgeGroups.md -- so every path that would otherwise open the single-edge editor
+// on one routes here to the group's own editor instead.
 function openRelationshipEditor(definition, clientX, clientY) {
+    if (definition.groupId != null) {
+        openEdgeGroupEditor(definition.groupId);
+        return;
+    }
     const editor = $('#edgeEditor');
     selectRelationship(definition);
     hideCards(editor);
@@ -2304,6 +2329,13 @@ function openNodeContextMenu(clientX, clientY) {
     $('#nodeContextToggle').hidden = multi;
     $('#nodeContextDisableAll').hidden = !multi;
     $('#nodeContextEnableAll').hidden = !multi;
+    $('#nodeContextCreateEdgeGroup').hidden = !multi;
+    // Scoped to whichever group is currently open for editing -- a node can technically belong
+    // to more than one group, but a single context click can only unambiguously mean "this one".
+    const activeGroup = currentEdgeGroup();
+    const soleSelectedId = !multi ? selectedNode?.userData.id : null;
+    $('#nodeContextAddToGroup').hidden = multi || !activeGroup || activeGroup.memberNodeIds.includes(soleSelectedId);
+    $('#nodeContextDetachFromGroup').hidden = multi || !activeGroup || !activeGroup.memberNodeIds.includes(soleSelectedId);
     if (multi) {
         $('#nodeContextDeleteLabel').textContent = `Delete ${selectedNodeIds.size} nodes`;
     } else {
@@ -2317,9 +2349,13 @@ function openNodeContextMenu(clientX, clientY) {
 function openEdgeContextMenu(clientX, clientY) {
     const menu = $('#edgeContextMenu');
     hideCards(menu);
+    const grouped = selectedRelationship?.groupId != null;
     const enabled = selectedRelationship?.enabled !== false;
     $('#edgeContextToggleLabel').textContent = enabled ? 'Disable edge' : 'Enable edge';
-    $('#edgeContextAddWaypoint').hidden = !pendingWaypoint;
+    $('#edgeContextAddWaypoint').hidden = grouped || !pendingWaypoint;
+    $('#edgeContextToggle').hidden = grouped;
+    $('#edgeContextDelete').hidden = grouped;
+    $('#edgeContextOpenGroup').hidden = !grouped;
     positionCard(menu, clientX, clientY);
 }
 
@@ -3318,7 +3354,7 @@ function scheduleEngineValidation(projectDocument = null) {
     renderValidationPending();
     engineValidationTimer = setTimeout(async () => {
         try {
-            const result = await window.engine.validate(JSON.stringify(executionProjectDocument(projectDocument ?? serializeProjectDocument())));
+            const result = await window.engine.validate(JSON.stringify(stripEdgeGroups(executionProjectDocument(projectDocument ?? serializeProjectDocument()))));
             if (revision !== validationRevision) return;
             if (!result.available) {
                 renderValidationFailure('The C++ validation engine is unavailable. Build the engine before editing or running models.');
@@ -3504,10 +3540,10 @@ function selectSuggestedPlaybackRate() {
 function applyInspectorReadOnly() {
     const locked = Boolean(activeResult);
     $$('[data-result-readonly]').forEach((notice) => { notice.hidden = !locked; });
-    $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button), #edgeEditor > footer button').forEach((control) => {
+    $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button), #edgeEditor > footer button, #edgeGroupEditor section :is(input, select, textarea, button), #edgeGroupEditor > footer button').forEach((control) => {
         control.disabled = locked;
     });
-    $$('#nodeEditor math-field, #edgeEditor math-field').forEach((field) => {
+    $$('#nodeEditor math-field, #edgeEditor math-field, #edgeGroupEditor math-field').forEach((field) => {
         field.readOnly = locked;
         field.toggleAttribute('read-only', locked);
     });
@@ -4024,7 +4060,7 @@ async function startSimulation() {
     const previousResultSessionId = activeEngineJobId;
     try {
         const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
-        const execution = await window.engine.start(JSON.stringify(executionProjectDocument(serializeProjectDocument())), {
+        const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(serializeProjectDocument()))), {
             ...configuration,
             targetTime: runLaunchSettings.targetTime,
             pacing: runLaunchSettings.pacing,
@@ -4472,6 +4508,7 @@ function serializeProjectDocument() {
             ))
             .map((edge) => ({
                 id: edge.id,
+                ...(edge.groupId == null ? {} : { groupId: edge.groupId }),
                 name: edge.title,
                 source: { nodeId: edge.source, stateId: edge.sourceStateId ?? '' },
                 target: { nodeId: edge.target, stateId: edge.targetStateId ?? '' },
@@ -4493,6 +4530,13 @@ function serializeProjectDocument() {
             parentSubsystemId: subsystem.parentSubsystemId,
             position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
             ports: structuredClone(subsystem.ports)
+        })),
+        edgeGroups: model.edgeGroups.filter((group) => !group.deleted).map((group) => ({
+            id: group.id,
+            name: group.name,
+            memberNodeIds: [...group.memberNodeIds],
+            color: `#${group.color.toString(16).padStart(6, '0')}`,
+            definition: structuredClone(group.definition)
         }))
     };
 }
@@ -4615,7 +4659,7 @@ function hideAssistantPanel() {
 }
 
 function visibleModelInspector() {
-    return [$('#nodeEditor'), $('#edgeEditor')].find((editor) => !editor.classList.contains('hidden')) ?? null;
+    return [$('#nodeEditor'), $('#edgeEditor'), $('#edgeGroupEditor')].find((editor) => !editor.classList.contains('hidden')) ?? null;
 }
 
 function assistantBounds(left, top) {
@@ -5891,6 +5935,14 @@ window.providerEditor.onApplied(({ source }) => {
         if (!document.body.contains(providerEditTarget.sourceElement)) return fail('The source term builder was closed.');
         providerEditTarget.sourceElement.value = source;
         providerEditTarget.sourceElement.dispatchEvent(new Event('input', { bubbles: true }));
+        return succeed();
+    }
+    if (providerEditTarget.type === 'group') {
+        // Like 'builder': the edge group editor is also a not-yet-saved form -- write the field,
+        // let the group's own "Save changes" button persist and re-expand the mesh.
+        if ($('#edgeGroupEditor').classList.contains('hidden')) return fail('The edge group editor was closed.');
+        $('#groupProviderSource').value = source;
+        $('#groupInsertProviderTemplate').hidden = !source.trim();
         return succeed();
     }
     return fail('Unknown edit target.');
@@ -7323,6 +7375,455 @@ function pasteGraph() {
     }
 }
 
+// Edge groups: one shared relationship definition (docs/edgeGroups.md) expanded into a
+// complete mesh -- one bidirectional edge per member pair, each an ordinary edge carrying groupId.
+// The card at #edgeGroupEditor is a batch/"Save changes" form (like #edgeBuilder), not the
+// #edgeEditor's live-per-field-undo pattern -- a group's shared definition has no single concrete
+// node pair to bind against while editing, so live diagnostics/candidates are driven off the
+// group's first two resolvable members as a representative preview pair.
+
+function memberEdgesForGroup(groupId) {
+    return model.relationships.filter((edge) => edge.groupId === groupId && !edge.deleted);
+}
+
+function groupPreviewPair(group) {
+    const resolvable = group.memberNodeIds
+        .map((id) => model.nodes.find((node) => node.id === id))
+        .filter((node) => node && !node.deleted);
+    return [resolvable[0] ?? null, resolvable[1] ?? null];
+}
+
+// Only counts as "the active group" while its editor card is actually visible -- mirrors how
+// selectedRelationship/#edgeEditor already interact, so opening any other card implicitly clears
+// it without needing a hook into every hideCards() call site.
+function currentEdgeGroup() {
+    if ($('#edgeGroupEditor').classList.contains('hidden')) return null;
+    return model.edgeGroups.find((group) => group.id === activeEdgeGroupId && !group.deleted) ?? null;
+}
+
+function addGroupParameterRow(container, values = {}) {
+    const control = normalizedParameterControl({ value: Number(values.value) || 0, control: values.control });
+    const row = document.createElement('div');
+    row.className = 'builderRow parameterRow';
+    row.innerHTML = `
+        <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(values.name ?? '')}"></label>
+        <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(values.symbol ?? '')}"></label>
+        <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(values.value ?? '')}"></label>
+        <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(values.unit ?? '')}"></label>
+        <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
+        <button class="removeBuilderRow" type="button" title="Remove">×</button>
+        <div class="parameterControlFields" ${values.mode === 'live' ? '' : 'hidden'}>
+            <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
+            <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
+            <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+            <span class="parameterControlError" role="status"></span>
+        </div>
+    `;
+    $('[data-field="mode"]', row).value = values.mode ?? 'constant';
+    container.appendChild(row);
+    $('[data-field="mode"]', row).addEventListener('change', () => {
+        $('.parameterControlFields', row).hidden = $('[data-field="mode"]', row).value !== 'live';
+    });
+    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
+}
+
+function readGroupParameters(container) {
+    return $$('.parameterRow', container).map((row) => ({
+        id: allocateModelEntityId(),
+        name: $('[data-field="name"]', row).value.trim(),
+        symbol: $('[data-field="symbol"]', row).value.trim(),
+        value: Number($('[data-field="value"]', row).value) || 0,
+        unit: $('[data-field="unit"]', row).value.trim(),
+        mode: $('[data-field="mode"]', row).value,
+        ...($('[data-field="mode"]', row).value === 'live' ? {
+            control: Object.fromEntries($$('[data-control-field]', row)
+                .map((input) => [input.dataset.controlField, Number(input.value)]))
+        } : {})
+    })).filter((parameter) => parameter.name && parameter.symbol);
+}
+
+function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
+    const container = $('#groupProviderBindingRows');
+    container.replaceChildren();
+    const bindings = group.definition.implementation?.bindings ?? [];
+    const candidates = providerReferenceCandidates({
+        source: previewSource?.id, target: previewTarget?.id, parameters: group.definition.parameters
+    });
+    if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
+    bindings.forEach((binding) => {
+        const row = document.createElement('div');
+        row.className = 'builderRow providerBindingRow';
+        row.innerHTML = `
+            <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(binding.key ?? '')}"></label>
+            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
+            <button class="removeBuilderRow" type="button" title="Remove">×</button>
+        `;
+        const select = $('[data-field="reference"]', row);
+        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
+        if (binding.kind === 'parameter') {
+            select.value = `parameter:${binding.parameterId}`;
+        } else {
+            const node = binding.role === 'source' ? previewSource : previewTarget;
+            const state = node?.states.find((candidate) => candidate.symbol === binding.symbol);
+            if (state) select.value = `state:${binding.role}:${node.id}:${state.id}`;
+        }
+        row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
+        container.appendChild(row);
+    });
+}
+
+function readGroupProviderBindings(previewSource, previewTarget) {
+    return $$('.providerBindingRow', $('#groupProviderBindingRows')).map((row) => {
+        const key = $('[data-field="key"]', row).value.trim();
+        const referenceValue = $('[data-field="reference"]', row).value;
+        if (referenceValue.startsWith('parameter:')) {
+            return { key, kind: 'parameter', parameterId: Number(referenceValue.slice('parameter:'.length)) };
+        }
+        const [, role, , stateId] = referenceValue.split(':');
+        const node = role === 'source' ? previewSource : previewTarget;
+        const state = node?.states.find((candidate) => candidate.id === Number(stateId));
+        return { key, kind: 'state', role, symbol: state?.symbol ?? '' };
+    });
+}
+
+function renderGroupEquationDiagnostics(previewSource, previewTarget) {
+    const parameters = readGroupParameters($('#groupParameterRows'));
+    const bindings = reconcileEquationBindings([], previewSource, previewTarget, parameters);
+    const latex = ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).value;
+    const validation = validateEquationLatex(latex, bindings);
+    const diagnostics = $('#groupEquationDiagnostics');
+    diagnostics.classList.toggle('valid', validation.valid);
+    diagnostics.textContent = validation.valid ? 'Valid expression · MathJSON ready' : validation.errors.join(' ');
+    return { validation, bindings };
+}
+
+function renderEdgeGroupEditor(group) {
+    $('#editGroupHeading').textContent = group.name;
+    $('#groupName').value = group.name;
+    $('#groupColor').value = `#${group.color.toString(16).padStart(6, '0')}`;
+    const edges = memberEdgesForGroup(group.id);
+    $('#toggleEdgeGroupEnabled').textContent = edges.length && edges.every((edge) => edge.enabled === false) ? 'Enable all' : 'Disable all';
+
+    const membersList = $('#groupMembersList');
+    membersList.replaceChildren();
+    const members = group.memberNodeIds
+        .map((id) => model.nodes.find((node) => node.id === id))
+        .filter((node) => node && !node.deleted);
+    if (!members.length) membersList.innerHTML = '<p class="emptyEditorState">No members</p>';
+    members.forEach((node) => {
+        const row = document.createElement('div');
+        row.className = 'groupMemberRow';
+        row.innerHTML = `<span>${escapeHtml(node.title)}</span><button class="removeBuilderRow" type="button" title="Detach">×</button>`;
+        row.querySelector('.removeBuilderRow').addEventListener('click', () => detachNodeFromGroup(group, node.id));
+        membersList.appendChild(row);
+    });
+    const soleSelectedId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
+    $('#groupAddMember').disabled = Boolean(activeResult) || soleSelectedId === null || group.memberNodeIds.includes(soleSelectedId);
+
+    const [previewSource, previewTarget] = groupPreviewPair(group);
+    const implementationKind = group.definition.implementation?.kind ?? 'equation';
+    const isEquation = implementationKind === 'equation';
+    $('#groupImplementationKind').value = implementationKind;
+    $('#groupEquationHeading').hidden = !isEquation;
+    $('#groupEquationDiagnostics').hidden = !isEquation;
+    $('#groupReferenceHint').hidden = !isEquation;
+    $('#groupProviderSection').hidden = isEquation;
+
+    const output = $('#groupEquationOutput');
+    output.replaceChildren();
+    [['source', previewSource], ['target', previewTarget]].forEach(([role, node]) => {
+        node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.symbol}`)));
+    });
+    output.value = `${group.definition.output.role}:${group.definition.output.symbol}`;
+
+    const parameterContainer = $('#groupParameterRows');
+    parameterContainer.replaceChildren();
+    if (!group.definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
+    else group.definition.parameters.forEach((parameter) => addGroupParameterRow(parameterContainer, parameter));
+
+    const mathField = $('#groupMathField');
+    const latexSource = $('#groupEquation');
+    if (isEquation) {
+        const latexMode = $('[data-group-equation-mode="latex"]').classList.contains('active');
+        mathField.hidden = latexMode;
+        latexSource.hidden = !latexMode;
+        mathField.value = group.definition.equation;
+        latexSource.value = group.definition.equation;
+        const portList = (role, node) => node?.states.length
+            ? node.states.map((state) => `${role}${state.symbol[0].toUpperCase()}${state.symbol.slice(1)}`).join(', ')
+            : 'none';
+        $('#groupReferenceHint').textContent = previewSource && previewTarget
+            ? `Available references (from "${previewSource.title}"/"${previewTarget.title}"): ${portList('source', previewSource)}, ${portList('target', previewTarget)}. Every member must supply the state named in "Updates" below.`
+            : 'Add at least two members to see available equation references.';
+        renderGroupEquationDiagnostics(previewSource, previewTarget);
+    } else {
+        mathField.hidden = true;
+        latexSource.hidden = true;
+        $('#groupProviderSource').value = group.definition.implementation?.source ?? '';
+        $('#groupInsertProviderTemplate').hidden = !group.definition.implementation?.source?.trim();
+        $('#groupProviderOutputKey').value = group.definition.implementation?.output?.key ?? '';
+        renderGroupProviderBindingRows(group, previewSource, previewTarget);
+    }
+}
+
+function captureEdgeGroupModel(group) {
+    return { name: group.name, color: group.color, definition: structuredClone(group.definition) };
+}
+
+// Pure apply: mutates the group's own record, re-resolves every *existing* member edge's fields
+// (never regenerates one that was individually deleted -- see deleteSelected's edge branch), and
+// refreshes visuals. Shared by the save flow below and by every membership action's undo/redo.
+function applyEdgeGroupModel(group, snapshot) {
+    group.name = snapshot.name;
+    group.color = snapshot.color;
+    group.definition = structuredClone(snapshot.definition);
+    const nodesById = new Map(model.nodes.map((node) => [node.id, node]));
+    memberEdgesForGroup(group.id).forEach((edge) => {
+        const sourceNode = nodesById.get(edge.source);
+        const targetNode = nodesById.get(edge.target);
+        if (!sourceNode || !targetNode) return;
+        const resolved = resolveGroupEdgeForPair({ group, sourceNode, targetNode, allocateId: () => edge.id });
+        edge.title = resolved.title;
+        edge.color = resolved.color;
+        edge.equation = resolved.equation;
+        edge.equationModel = resolved.equationModel;
+        edge.implementation = resolved.implementation ?? null;
+        edge.parameters = resolved.parameters;
+        edge.sourceStateId = resolved.sourceStateId;
+        edge.targetStateId = resolved.targetStateId;
+        refreshRelationshipVisual(edge);
+    });
+    updateRelationships();
+    updateValidationStatus();
+    if (currentEdgeGroup()?.id === group.id) renderEdgeGroupEditor(group);
+}
+
+function saveEdgeGroupFromForm(group) {
+    if (activeResult) return false;
+    const name = $('#groupName').value.trim() || 'Untitled edge group';
+    const color = Number.parseInt($('#groupColor').value.replace('#', ''), 16);
+    const parameters = readGroupParameters($('#groupParameterRows'));
+    if (parameters.some((parameter) => !modelSymbolPattern.test(parameter.symbol)) ||
+        new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
+        $('#groupParameterRows [data-field="symbol"]')?.focus();
+        return false;
+    }
+    const invalidLiveParameter = parameters.find((parameter) => parameter.mode === 'live' &&
+        parameterControlError(parameter.value, parameter.control));
+    if (invalidLiveParameter) return false;
+
+    const [previewSource, previewTarget] = groupPreviewPair(group);
+    const [outputRole, outputSymbol] = $('#groupEquationOutput').value.split(':');
+    if (!outputRole || !outputSymbol) {
+        $('#groupEquationOutput').focus();
+        return false;
+    }
+    const implementationKind = $('#groupImplementationKind').value;
+    let equation = '';
+    let implementation = null;
+    if (implementationKind === 'equation') {
+        equation = ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).value.trim();
+        const { validation } = renderGroupEquationDiagnostics(previewSource, previewTarget);
+        if (equation && !validation.valid) {
+            ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).focus();
+            return false;
+        }
+    } else {
+        implementation = {
+            kind: implementationKind,
+            providerApiVersion: 1,
+            source: $('#groupProviderSource').value,
+            bindings: readGroupProviderBindings(previewSource, previewTarget),
+            output: { key: $('#groupProviderOutputKey').value.trim() }
+        };
+    }
+    const definition = { parameters, output: { role: outputRole, symbol: outputSymbol }, equation, implementation };
+
+    // A member missing the output state gets it added inside this same undo step: adding the
+    // state and re-pointing every member edge's bindings at it are one indivisible action from
+    // the user's perspective, not two -- a lone state-add with no matching definition change
+    // would leave the model in a shape that was never actually valid at any point in history.
+    const autoAdd = $('#groupAutoAddStates').checked;
+    const affectedNodes = autoAdd
+        ? group.memberNodeIds
+            .map((id) => model.nodes.find((node) => node.id === id))
+            .filter((node) => node && !node.deleted && unresolvedGroupSymbols({ group: { definition }, node }).length)
+        : [];
+    const nodeStatesBefore = new Map(affectedNodes.map((node) => [node.id, structuredClone(node.states)]));
+    affectedNodes.forEach((node) => {
+        const symbol = definition.output.symbol;
+        node.states.push({ id: allocateModelEntityId(), label: symbol, symbol, initialValue: 0, unit: '', value: '0', className: '' });
+    });
+    const nodeStatesAfter = new Map(affectedNodes.map((node) => [node.id, structuredClone(node.states)]));
+    const applyNodeStates = (statesById) => statesById.forEach((states, nodeId) => {
+        const node = model.nodes.find((candidate) => candidate.id === nodeId);
+        if (node) node.states = structuredClone(states);
+    });
+
+    const before = captureEdgeGroupModel(group);
+    applyEdgeGroupModel(group, { name, color, definition });
+    const after = captureEdgeGroupModel(group);
+    recordHistory({
+        undo: () => { applyNodeStates(nodeStatesBefore); applyEdgeGroupModel(group, before); updateModelStatus(); },
+        redo: () => { applyNodeStates(nodeStatesAfter); applyEdgeGroupModel(group, after); updateModelStatus(); }
+    });
+    updateModelStatus();
+    return true;
+}
+
+function openEdgeGroupEditor(groupId) {
+    const group = model.edgeGroups.find((item) => item.id === groupId && !item.deleted);
+    if (!group) return;
+    activeEdgeGroupId = groupId;
+    selectedRelationship = null;
+    const editor = $('#edgeGroupEditor');
+    hideCards(editor);
+    renderEdgeGroupEditor(group);
+    editor.style.removeProperty('left');
+    editor.style.removeProperty('top');
+    editor.classList.remove('hidden');
+    applyInspectorReadOnly();
+    requestAnimationFrame(avoidAssistantInspectorOverlap);
+}
+
+// N member nodes expand to C(N,2) edges -- confirm before it grows large, and refuse outright
+// past a point with no engine- or validator-side guard against the blowup (docs/edgeGroups.md).
+function confirmEdgeGroupSize(nodeCount) {
+    if (nodeCount > 40) {
+        window.alert('An edge group can have at most 40 member nodes (780 edges in the mesh).');
+        return false;
+    }
+    const pairCount = (nodeCount * (nodeCount - 1)) / 2;
+    if (nodeCount > 10) {
+        return window.confirm(`This will create ${pairCount} edges between ${nodeCount} nodes. Continue?`);
+    }
+    return true;
+}
+
+function createEdgeGroupFromSelection() {
+    if (activeResult || selectedNodeIds.size < 2) return false;
+    const nodeIds = [...selectedNodeIds];
+    if (!confirmEdgeGroupSize(nodeIds.length)) return false;
+    const id = allocateModelEntityId();
+    const group = {
+        id,
+        name: `Edge group ${model.edgeGroups.filter((item) => !item.deleted).length + 1}`,
+        memberNodeIds: nodeIds,
+        color: 0x2fb8a4,
+        deleted: false,
+        definition: { parameters: [], output: { role: 'target', symbol: '' }, equation: '', implementation: null }
+    };
+    model.edgeGroups.push(group);
+    const nodesById = new Map(model.nodes.map((node) => [node.id, node]));
+    const edges = expandEdgeGroup({ group, nodesById, allocateId: allocateModelEntityId });
+    model.relationships.push(...edges);
+    edges.forEach(createRelationship);
+    updateRelationships();
+    updateModelStatus();
+    const edgeIds = edges.map((edge) => edge.id);
+    const apply = (created) => {
+        group.deleted = !created;
+        edgeIds.forEach((edgeId) => setRelationshipVisibility(edgeId, created));
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    openEdgeGroupEditor(id);
+    return true;
+}
+
+function addNodeToGroup(group, nodeId) {
+    if (activeResult || group.memberNodeIds.includes(nodeId)) return false;
+    const node = model.nodes.find((candidate) => candidate.id === nodeId && !candidate.deleted);
+    if (!node) return false;
+    if (!confirmEdgeGroupSize(group.memberNodeIds.length + 1)) return false;
+    const autoAdd = $('#groupAutoAddStates').checked;
+    const symbol = group.definition.output.symbol;
+    const needsState = autoAdd && symbol && unresolvedGroupSymbols({ group, node }).length > 0;
+    // Allocated once, up front, and reused verbatim by both directions of the undo step below --
+    // never re-allocated inside apply(), or redo would mint a second, different state each time.
+    const newState = needsState
+        ? { id: allocateModelEntityId(), label: symbol, symbol, initialValue: 0, unit: '', value: '0', className: '' }
+        : null;
+    const previewNode = newState ? { ...node, states: [...node.states, newState] } : node;
+    const nodesById = new Map(model.nodes.map((candidate) => [candidate.id, candidate.id === nodeId ? previewNode : candidate]));
+    const newEdges = group.memberNodeIds.map((existingId) => resolveGroupEdgeForPair({
+        group,
+        sourceNode: nodesById.get(Math.min(existingId, nodeId)),
+        targetNode: nodesById.get(Math.max(existingId, nodeId)),
+        allocateId: allocateModelEntityId
+    }));
+    const apply = (added) => {
+        if (added) {
+            group.memberNodeIds.push(nodeId);
+            if (newState) node.states.push(newState);
+            model.relationships.push(...newEdges);
+            newEdges.forEach(createRelationship);
+        } else {
+            group.memberNodeIds = group.memberNodeIds.filter((id) => id !== nodeId);
+            if (newState) node.states = node.states.filter((state) => state.id !== newState.id);
+            newEdges.forEach((edge) => setRelationshipVisibility(edge.id, false));
+        }
+        updateRelationships();
+        updateModelStatus();
+        if (currentEdgeGroup()?.id === group.id) renderEdgeGroupEditor(group);
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    return true;
+}
+
+// Leaves the detached node's own edges to the rest of the group behind as ordinary edges, exactly
+// as authored -- only clears groupId, per docs/edgeGroups.md. The rest of the mesh is
+// untouched.
+function detachNodeFromGroup(group, nodeId) {
+    if (activeResult || !group.memberNodeIds.includes(nodeId)) return false;
+    const touchedEdges = memberEdgesForGroup(group.id).filter((edge) => edge.source === nodeId || edge.target === nodeId);
+    const apply = (detached) => {
+        group.memberNodeIds = detached
+            ? group.memberNodeIds.filter((id) => id !== nodeId)
+            : [...group.memberNodeIds, nodeId];
+        touchedEdges.forEach((edge) => { edge.groupId = detached ? null : group.id; });
+        updateRelationships();
+        updateModelStatus();
+        if (currentEdgeGroup()?.id === group.id) renderEdgeGroupEditor(group);
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    return true;
+}
+
+function deleteEdgeGroupAction(group) {
+    if (activeResult) return false;
+    const edgeIds = memberEdgesForGroup(group.id).map((edge) => edge.id);
+    const apply = (deleted) => {
+        group.deleted = deleted;
+        edgeIds.forEach((id) => setRelationshipVisibility(id, !deleted));
+        updateModelStatus();
+    };
+    apply(true);
+    $('#edgeGroupEditor').classList.add('hidden');
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    return true;
+}
+
+function toggleEdgeGroupEnabledAction(group) {
+    if (activeResult) return false;
+    const edges = memberEdgesForGroup(group.id);
+    if (!edges.length) return false;
+    const nextEnabled = edges.some((edge) => edge.enabled === false);
+    const previous = new Map(edges.map((edge) => [edge.id, edge.enabled !== false]));
+    const apply = (enabled) => {
+        edges.forEach((edge) => setRelationshipEnabled(edge.id, enabled));
+        if (currentEdgeGroup()?.id === group.id) renderEdgeGroupEditor(group);
+    };
+    apply(nextEnabled);
+    recordHistory({
+        undo: () => edges.forEach((edge) => setRelationshipEnabled(edge.id, previous.get(edge.id))),
+        redo: () => apply(nextEnabled)
+    });
+    return true;
+}
+
 function createSubsystemFromSelection(name) {
     if (activeResult || !selectedNodeIds.size) return false;
     const nodeIds = [...selectedNodeIds];
@@ -7367,6 +7868,124 @@ $('#subsystemDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
     if (createSubsystemFromSelection($('#subsystemName').value)) $('#subsystemDialog').close();
 });
+
+$('#createEdgeGroup').addEventListener('click', () => createEdgeGroupFromSelection());
+$('#nodeContextCreateEdgeGroup').addEventListener('click', () => {
+    hideCards();
+    createEdgeGroupFromSelection();
+});
+$('#nodeContextAddToGroup').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    hideCards($('#edgeGroupEditor'));
+    if (group && selectedNode) addNodeToGroup(group, selectedNode.userData.id);
+});
+$('#nodeContextDetachFromGroup').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    hideCards($('#edgeGroupEditor'));
+    if (group && selectedNode) detachNodeFromGroup(group, selectedNode.userData.id);
+});
+$('#edgeContextOpenGroup').addEventListener('click', () => {
+    const groupId = selectedRelationship?.groupId;
+    hideCards();
+    if (groupId != null) openEdgeGroupEditor(groupId);
+});
+
+$('#groupAddMember').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (group && selectedNodeIds.size === 1) addNodeToGroup(group, [...selectedNodeIds][0]);
+});
+$('#saveEdgeGroup').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (group) saveEdgeGroupFromForm(group);
+});
+$('#toggleEdgeGroupEnabled').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (group) toggleEdgeGroupEnabledAction(group);
+});
+$('[data-delete-edge-group]').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (group) deleteEdgeGroupAction(group);
+});
+$('#groupAddParameter').addEventListener('click', () => addGroupParameterRow($('#groupParameterRows')));
+$('#groupImplementationKind').addEventListener('change', (event) => {
+    const group = currentEdgeGroup();
+    const isEquation = event.target.value === 'equation';
+    $('#groupEquationHeading').hidden = !isEquation;
+    $('#groupEquationDiagnostics').hidden = !isEquation;
+    $('#groupReferenceHint').hidden = !isEquation;
+    $('#groupProviderSection').hidden = isEquation;
+    const latexMode = $('[data-group-equation-mode="latex"]').classList.contains('active');
+    $('#groupMathField').hidden = !isEquation || latexMode;
+    $('#groupEquation').hidden = !isEquation || !latexMode;
+    if (!isEquation && !$('#groupProviderSource').value.trim() && group) {
+        $('#groupProviderSource').value = defaultProviderSource(
+            event.target.value,
+            $$('.providerBindingRow [data-field="key"]', $('#groupProviderBindingRows')).map((input) => ({ key: input.value })),
+            $('#groupProviderOutputKey').value,
+            $('#groupName').value
+        );
+    }
+    $('#groupInsertProviderTemplate').hidden = !$('#groupProviderSource').value.trim();
+});
+$('#groupInsertProviderTemplate').addEventListener('click', () => {
+    if ($('#groupProviderSource').value.trim() &&
+        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+    $('#groupProviderSource').value = defaultProviderSource(
+        $('#groupImplementationKind').value,
+        $$('.providerBindingRow [data-field="key"]', $('#groupProviderBindingRows')).map((input) => ({ key: input.value })),
+        $('#groupProviderOutputKey').value,
+        $('#groupName').value
+    );
+    $('#groupInsertProviderTemplate').hidden = !$('#groupProviderSource').value.trim();
+});
+$('#groupProviderSource').addEventListener('input', (event) => {
+    $('#groupInsertProviderTemplate').hidden = !event.target.value.trim();
+});
+$('#groupOpenProviderEditor').addEventListener('click', () => {
+    providerEditTarget = { type: 'group' };
+    window.providerEditor.openWindow({
+        source: $('#groupProviderSource').value,
+        kind: $('#groupImplementationKind').value,
+        title: $('#groupName').value
+    });
+});
+$('#groupAddProviderBinding').addEventListener('click', () => {
+    const group = currentEdgeGroup();
+    if (!group) return;
+    const [previewSource, previewTarget] = groupPreviewPair(group);
+    const container = $('#groupProviderBindingRows');
+    if ($('.emptyEditorState', container)) container.replaceChildren();
+    const candidates = providerReferenceCandidates({
+        source: previewSource?.id, target: previewTarget?.id, parameters: group.definition.parameters
+    });
+    const row = document.createElement('div');
+    row.className = 'builderRow providerBindingRow';
+    row.innerHTML = `
+        <label class="parameterField"><span>Key</span><input data-field="key"></label>
+        <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
+        <button class="removeBuilderRow" type="button" title="Remove">×</button>
+    `;
+    $('[data-field="reference"]', row).replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
+    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
+    container.appendChild(row);
+});
+$('#groupMathField').addEventListener('input', (event) => {
+    $('#groupEquation').value = event.target.value;
+    const group = currentEdgeGroup();
+    if (group) renderGroupEquationDiagnostics(...groupPreviewPair(group));
+});
+$('#groupEquation').addEventListener('input', (event) => {
+    $('#groupMathField').setValue(event.target.value, { silenceNotifications: true });
+    const group = currentEdgeGroup();
+    if (group) renderGroupEquationDiagnostics(...groupPreviewPair(group));
+});
+$$('[data-group-equation-mode]').forEach((button) => button.addEventListener('click', () => {
+    $$('[data-group-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+    const latexMode = button.dataset.groupEquationMode === 'latex';
+    $('#groupMathField').hidden = latexMode;
+    $('#groupEquation').hidden = !latexMode;
+    (latexMode ? $('#groupEquation') : $('#groupMathField')).focus();
+}));
 
 $('#copySelection').addEventListener('click', copySelectedGraph);
 $('#pasteSelection').addEventListener('click', pasteGraph);

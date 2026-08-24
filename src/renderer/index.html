@@ -360,6 +360,7 @@
         </div>
         <div class="toolGroup" role="group" aria-label="Selection actions">
             <button id="createSubsystem" class="squareTool" type="button" aria-label="Create subsystem from selected nodes" data-tooltip="Create subsystem" disabled>▤</button>
+            <button id="createEdgeGroup" class="squareTool" type="button" aria-label="Create edge group from selected nodes" data-tooltip="Create edge group" disabled>⬡</button>
             <button id="copySelection" class="squareTool clipboardTool" type="button" aria-label="Copy selected nodes" data-tooltip="Copy selected" disabled>⧉</button>
             <button id="pasteSelection" class="squareTool clipboardTool" type="button" aria-label="Paste copied nodes" data-tooltip="Paste" disabled>▣</button>
             <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
@@ -582,6 +583,54 @@
             <footer><button data-delete-edge type="button">Delete edge</button><button id="toggleEdgeEnabled" type="button">Disable edge</button></footer>
         </div>
 
+        <div id="edgeGroupEditor" class="contextCard editorCard edgeGroupEditor hidden">
+            <header><div><span class="contextKicker">Edge Group</span><strong id="editGroupHeading">Edge group</strong></div><button data-close-card type="button">×</button></header>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <section>
+                <label class="editorField"><span>Name</span><input id="groupName" autocomplete="off"></label>
+                <label class="editorField"><span>Colour</span><input id="groupColor" type="color"></label>
+                <h3>Members <button id="groupAddMember" type="button" disabled>＋</button></h3>
+                <p class="builderHint">Select exactly one other node on the canvas to enable adding it here.</p>
+                <div id="groupMembersList"></div>
+                <label class="editorField checkboxField"><input id="groupAutoAddStates" type="checkbox" checked><span>Automatically add missing state variables</span></label>
+            </section>
+            <section>
+                <label class="editorField"><span>Implementation</span><select id="groupImplementationKind">
+                    <option value="equation">Equation</option>
+                    <option value="cpp">C++ program</option>
+                    <option value="python">Python program</option>
+                </select></label>
+                <label class="editorField"><span>Updates</span><select id="groupEquationOutput"></select></label>
+                <div id="groupEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-group-equation-mode="visual" type="button">Visual</button><button data-group-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <math-field id="groupMathField" class="equationMathField" aria-label="Equation expression"></math-field>
+                <textarea id="groupEquation" class="equationSource" rows="3" placeholder="Choose references below, or enter LaTeX" hidden></textarea>
+                <div id="groupEquationDiagnostics" class="equationDiagnostics" role="status"></div>
+                <p id="groupReferenceHint" class="builderHint"></p>
+                <div id="groupProviderSection" hidden>
+                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                        <button id="groupOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
+                        <button id="groupInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                    </div></div>
+                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                    <textarea id="groupProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <h3>Bindings <button id="groupAddProviderBinding" type="button">＋</button></h3>
+                    <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
+                    <div id="groupProviderBindingRows" class="builderRows"></div>
+                    <label class="editorField"><span>Output key</span><input id="groupProviderOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
+                </div>
+            </section>
+            <section>
+                <h3>Shared parameters <button id="groupAddParameter" type="button">＋</button></h3>
+                <p class="builderHint">Applied identically to every edge in the mesh -- a member can't override a parameter without detaching.</p>
+                <div id="groupParameterRows" class="builderRows"></div>
+            </section>
+            <footer>
+                <button data-delete-edge-group type="button">Delete group</button>
+                <button id="toggleEdgeGroupEnabled" type="button">Disable all</button>
+                <button id="saveEdgeGroup" class="doneButton" type="button">Save changes</button>
+            </footer>
+        </div>
+
         <div id="addPalette" class="contextCard addPalette hidden">
             <span class="contextKicker">Add to model</span>
             <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and source terms</small></span><b>›</b></button>
@@ -595,8 +644,11 @@
             <span class="contextKicker">Node</span>
             <button id="nodeContextConnect" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Connect from here</strong><small>Start a new edge at this node</small></span><b>›</b></button>
             <button id="nodeContextToggle" type="button"><i class="primitiveIcon">⏻</i><span><strong id="nodeContextToggleLabel">Disable node</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
+            <button id="nodeContextAddToGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Add to edge group</strong><small>Join the group currently open for editing</small></span><b>›</b></button>
+            <button id="nodeContextDetachFromGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Detach from edge group</strong><small>Its edges to the group stay, as ordinary edges</small></span><b>›</b></button>
             <button id="nodeContextDisableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Disable all</strong><small>Disable every selected node</small></span><b>›</b></button>
             <button id="nodeContextEnableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Enable all</strong><small>Enable every selected node</small></span><b>›</b></button>
+            <button id="nodeContextCreateEdgeGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Create edge group</strong><small>One relationship, meshed across the selection</small></span><b>›</b></button>
             <hr>
             <button id="nodeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong id="nodeContextDeleteLabel">Delete node</strong></span><b>›</b></button>
         </div>
@@ -605,6 +657,7 @@
             <span class="contextKicker">Edge</span>
             <button id="edgeContextAddWaypoint" type="button"><i class="primitiveIcon edgeIcon">✛</i><span><strong>Add waypoint here</strong><small>Route the edge around this point</small></span><b>›</b></button>
             <button id="edgeContextToggle" type="button"><i class="primitiveIcon edgeIcon">⏻</i><span><strong id="edgeContextToggleLabel">Disable edge</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
+            <button id="edgeContextOpenGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Open edge group</strong><small>Detach a member from its own row in the editor</small></span><b>›</b></button>
             <hr>
             <button id="edgeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete edge</strong></span><b>›</b></button>
         </div>

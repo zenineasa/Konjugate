@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { cppProviderSdkPath, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
+import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
 import { matchRunConfiguration, parseCliFlags } from './cliArgs.mjs';
 import {
@@ -1683,7 +1684,7 @@ async function runCliMode() {
     let execution;
     try {
         execution = await startEngineRun(
-            JSON.stringify(executionProjectDocument(document)), configuration, options, { retainResult: true }
+            JSON.stringify(stripEdgeGroups(executionProjectDocument(document))), configuration, options, { retainResult: true }
         );
     } catch (error) {
         console.error(`The simulation failed: ${error.message}`);

@@ -2375,5 +2375,125 @@ export async function runInteractionTests(window) {
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
     });
 
+    await run('edge group meshes a selection, saves a shared equation, and supports detach/delete/undo', async () => {
+        const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
+        const nodeIdFor = (name) => `Number(${nodeLabel(name)}.closest('.node-label-container').dataset.node)`;
+        // The move tool is active so #createNode's own "attach the gizmo to whatever was just
+        // created" behavior lets simulateDragTo spread each node to a distinct position --
+        // #createNode always spawns at the same [0, -0.7, 0], and three nodes left coincident
+        // would leave every one of their CSS2D labels (and, in turn, every mesh edge's midpoint
+        // bundle label) stacked at the same screen point, making click targeting ambiguous.
+        await evaluate(window, `document.querySelector('[data-tool="move"]').click()`);
+        const addNode = async (name, x) => {
+            await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+            await evaluate(window, `(() => {
+                document.querySelector('#newNodeName').value = ${JSON.stringify(name)};
+                const values = { name: 'Temperature', symbol: 'temperature', value: '300', unit: 'K' };
+                Object.entries(values).forEach(([field, value]) => {
+                    const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]');
+                    input.value = value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+                document.querySelector('#createNode').click();
+            })()`);
+            // A newly created node's CSS2D label isn't inserted into the DOM synchronously with
+            // model.nodes.push() -- CSS2DRenderer only appends it on the next throttled render
+            // tick (~30fps). Three nodes created back to back with little work between them can
+            // otherwise all fire before that tick ever lands.
+            await waitFor(window, `Boolean(${nodeLabel(name)})`, `The label for "${name}" did not render.`);
+            await evaluate(window, `window.__debugTransform.simulateDragTo(${x}, 0, 0)`);
+        };
+        const bundleLabel = (name) => `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}))`;
+        const relationshipCount = async () => Number((await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`)).match(/\d+/)[0]);
+        // Real Shift-click's own screen-coordinate targeting is already covered by the
+        // multi-selection copy/paste and bulk-disable tests above; this test's own subject is
+        // edge-group behavior, so selection is built the same debug-hook way the multi-node
+        // rotate/scale tests above build theirs.
+        const selectAll = async (...names) => {
+            await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
+            // A real, exclusive click on the first node -- reliable now that addNode spreads
+            // nodes apart -- clears whatever the selection happened to be left at by a prior
+            // step; selectAdditive then builds the rest without depending on any more real
+            // screen-coordinate targeting.
+            await clickElement(window, nodeLabel(names[0]));
+            await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 1`,
+                'The exclusive click did not select the first node.');
+            let expected = 1;
+            for (const name of names.slice(1)) {
+                expected += 1;
+                await evaluate(window, `window.__debugTransform.selectAdditive(${nodeIdFor(name)})`);
+                // Confirmed via instrumented runs: reading selection state again immediately
+                // after selectAdditive can occasionally observe a stale count under this
+                // environment's SwiftShader-throttled render loop -- wait for each addition to
+                // actually land before issuing the next one, rather than assuming it's synchronous.
+                await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === ${expected}`,
+                    `selectAdditive did not add "${name}" to the selection.`);
+            }
+        };
+
+        await addNode('Group test A', 0);
+        await addNode('Group test B', 3);
+        await addNode('Group test C', 6);
+        const before = await relationshipCount();
+
+        await selectAll('Group test A', 'Group test B', 'Group test C');
+        assert.equal(await evaluate(window, `document.querySelector('#createEdgeGroup').disabled`), false);
+
+        const consoleMessages = await captureConsoleMessages(window, async () => {
+            await evaluate(window, `document.querySelector('#createEdgeGroup').click()`);
+            await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'The edge group editor did not open.');
+            // 3 members -> C(3,2) = 3 mesh edges.
+            await waitFor(window, `document.querySelectorAll('.modelStatus span')[1].textContent === '${before + 3} relationships'`, 'The mesh did not create 3 edges.');
+
+            await evaluate(window, `(() => {
+                const output = document.querySelector('#groupEquationOutput');
+                output.value = [...output.options].find((option) => option.value.startsWith('target:')).value;
+                output.dispatchEvent(new Event('change', { bubbles: true }));
+                const field = document.querySelector('#groupMathField');
+                field.setValue('\\\\mathrm{sourceTemperature}-\\\\mathrm{targetTemperature}');
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await waitFor(window, `document.querySelector('#groupEquationDiagnostics').classList.contains('valid')`, 'The group equation did not validate.');
+            await evaluate(window, `document.querySelector('#saveEdgeGroup').click()`);
+        });
+        assert.deepEqual(consoleMessages, [], 'Saving the edge group logged unexpected console messages.');
+        assert.equal(await evaluate(window, `document.querySelector('#groupEquationDiagnostics').classList.contains('valid')`), true);
+
+        await waitFor(window, `Boolean(${bundleLabel('Group test A')})`, 'A mesh edge bundle label was not available.');
+        await waitForStableRect(window,
+            `(() => { const el = ${bundleLabel('Group test A')}; const rect = el?.getBoundingClientRect(); return rect && JSON.stringify(rect); })()`,
+            'The mesh edge bundle label did not settle into a stable position.');
+        await rightClickElement(window, bundleLabel('Group test A'));
+        await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking a mesh edge did not open its context menu.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextOpenGroup').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextDelete').hidden`), true);
+        await evaluate(window, `document.querySelector('#edgeContextOpenGroup').click()`);
+        await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'Opening the edge group from its context menu failed.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#groupMembersList .builderRow').length`), 3);
+
+        await evaluate(window, `[...document.querySelectorAll('#groupMembersList .builderRow')].find((row) => row.textContent.includes('Group test C')).querySelector('.removeBuilderRow').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupMembersList .builderRow').length === 2`, 'Detach did not remove the member row.');
+        // Detaching C from the 3-member mesh un-groups its 2 edges (to A and to B) as ordinary
+        // edges -- nothing is deleted, so the total is still all 3 original mesh edges.
+        assert.equal(await relationshipCount(), before + 3, 'Detaching a member should leave its edges behind as ordinary edges, not delete them.');
+
+        await evaluate(window, `document.querySelector('[data-delete-edge-group]').click()`);
+        await waitFor(window, `document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'Deleting the group did not close its editor.');
+        // Only the group's own remaining mesh (A-B, the sole pair with both endpoints still
+        // members) is removed; C's 2 now-ordinary edges are untouched.
+        assert.equal(await relationshipCount(), before + 2, 'Deleting the group should remove only its remaining mesh edge, leaving the 2 detached ones.');
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await relationshipCount(), before + 3, 'Undoing the group deletion did not restore its edges.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await relationshipCount(), before + 3, 'Undoing the detach did not restore membership.');
+
+        // Cleanup: delete the three throwaway nodes (and, with them, every mesh/detached edge)
+        // so this test doesn't leave the canvas mutated for whatever runs after it.
+        await selectAll('Group test A', 'Group test B', 'Group test C');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+        assert.equal(await relationshipCount(), before);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

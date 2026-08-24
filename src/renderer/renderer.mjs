@@ -7376,7 +7376,8 @@ function pasteGraph() {
 }
 
 // Edge groups: one shared relationship definition (docs/edgeGroups.md) expanded into a
-// complete mesh -- one bidirectional edge per member pair, each an ordinary edge carrying groupId.
+// complete mesh -- one directed edge per ordered member pair, both directions independently
+// evaluated (docs/edgeDirectionality.md), each an ordinary edge carrying groupId.
 // The card at #edgeGroupEditor is a batch/"Save changes" form (like #edgeBuilder), not the
 // #edgeEditor's live-per-field-undo pattern -- a group's shared definition has no single concrete
 // node pair to bind against while editing, so live diagnostics/candidates are driven off the
@@ -7529,12 +7530,16 @@ function renderEdgeGroupEditor(group) {
     $('#groupReferenceHint').hidden = !isEquation;
     $('#groupProviderSection').hidden = isEquation;
 
+    // No source/target role choice here, unlike a hand-authored edge's own "Updates" picker --
+    // every generated member edge contributes to its own target by construction (see
+    // docs/edgeDirectionality.md), so a group only ever needs to name *which state*, deduplicated
+    // across both preview nodes.
     const output = $('#groupEquationOutput');
     output.replaceChildren();
-    [['source', previewSource], ['target', previewTarget]].forEach(([role, node]) => {
-        node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.symbol}`)));
-    });
-    output.value = `${group.definition.output.role}:${group.definition.output.symbol}`;
+    const outputSymbols = [...new Set([...(previewSource?.states ?? []), ...(previewTarget?.states ?? [])]
+        .map((state) => state.symbol))];
+    outputSymbols.forEach((symbol) => output.add(new Option(symbol, symbol)));
+    output.value = group.definition.output.symbol;
 
     const parameterContainer = $('#groupParameterRows');
     parameterContainer.replaceChildren();
@@ -7613,8 +7618,8 @@ function saveEdgeGroupFromForm(group) {
     if (invalidLiveParameter) return false;
 
     const [previewSource, previewTarget] = groupPreviewPair(group);
-    const [outputRole, outputSymbol] = $('#groupEquationOutput').value.split(':');
-    if (!outputRole || !outputSymbol) {
+    const outputSymbol = $('#groupEquationOutput').value;
+    if (!outputSymbol) {
         $('#groupEquationOutput').focus();
         return false;
     }
@@ -7637,7 +7642,7 @@ function saveEdgeGroupFromForm(group) {
             output: { key: $('#groupProviderOutputKey').value.trim() }
         };
     }
-    const definition = { parameters, output: { role: outputRole, symbol: outputSymbol }, equation, implementation };
+    const definition = { parameters, output: { symbol: outputSymbol }, equation, implementation };
 
     // A member missing the output state gets it added inside this same undo step: adding the
     // state and re-pointing every member edge's bindings at it are one indivisible action from
@@ -7686,16 +7691,17 @@ function openEdgeGroupEditor(groupId) {
     requestAnimationFrame(avoidAssistantInspectorOverlap);
 }
 
-// N member nodes expand to C(N,2) edges -- confirm before it grows large, and refuse outright
+// N member nodes expand to N(N-1) edges -- confirm before it grows large, and refuse outright
 // past a point with no engine- or validator-side guard against the blowup (docs/edgeGroups.md).
 function confirmEdgeGroupSize(nodeCount) {
+    // N(N-1), not C(N,2): one directed edge each way per member pair (docs/edgeDirectionality.md).
+    const edgeCount = nodeCount * (nodeCount - 1);
     if (nodeCount > 40) {
-        window.alert('An edge group can have at most 40 member nodes (780 edges in the mesh).');
+        window.alert(`An edge group can have at most 40 member nodes (${40 * 39} edges in the mesh).`);
         return false;
     }
-    const pairCount = (nodeCount * (nodeCount - 1)) / 2;
     if (nodeCount > 10) {
-        return window.confirm(`This will create ${pairCount} edges between ${nodeCount} nodes. Continue?`);
+        return window.confirm(`This will create ${edgeCount} edges between ${nodeCount} nodes. Continue?`);
     }
     return true;
 }
@@ -7711,7 +7717,7 @@ function createEdgeGroupFromSelection() {
         memberNodeIds: nodeIds,
         color: 0x2fb8a4,
         deleted: false,
-        definition: { parameters: [], output: { role: 'target', symbol: '' }, equation: '', implementation: null }
+        definition: { parameters: [], output: { symbol: '' }, equation: '', implementation: null }
     };
     model.edgeGroups.push(group);
     const nodesById = new Map(model.nodes.map((node) => [node.id, node]));
@@ -7746,12 +7752,13 @@ function addNodeToGroup(group, nodeId) {
         : null;
     const previewNode = newState ? { ...node, states: [...node.states, newState] } : node;
     const nodesById = new Map(model.nodes.map((candidate) => [candidate.id, candidate.id === nodeId ? previewNode : candidate]));
-    const newEdges = group.memberNodeIds.map((existingId) => resolveGroupEdgeForPair({
-        group,
-        sourceNode: nodesById.get(Math.min(existingId, nodeId)),
-        targetNode: nodesById.get(Math.max(existingId, nodeId)),
-        allocateId: allocateModelEntityId
-    }));
+    // One edge in each direction against every existing member -- see memberPairs/expandEdgeGroup
+    // and docs/edgeDirectionality.md for why a group's mesh uses directed pairs rather than one
+    // bidirectional edge per member.
+    const newEdges = group.memberNodeIds.flatMap((existingId) => [
+        resolveGroupEdgeForPair({ group, sourceNode: nodesById.get(nodeId), targetNode: nodesById.get(existingId), allocateId: allocateModelEntityId }),
+        resolveGroupEdgeForPair({ group, sourceNode: nodesById.get(existingId), targetNode: nodesById.get(nodeId), allocateId: allocateModelEntityId })
+    ]);
     const apply = (added) => {
         if (added) {
             group.memberNodeIds.push(nodeId);

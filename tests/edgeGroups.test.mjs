@@ -21,45 +21,60 @@ function makeGroup() {
         name: 'Coolant loop',
         color: '#2fb8a4',
         memberNodeIds: [1, 2, 3],
-        definition: { parameters: [parameter], output: { role: 'target', symbol: 'temperature' }, equation, implementation: null }
+        definition: { parameters: [parameter], output: { symbol: 'temperature' }, equation, implementation: null }
     };
 }
 
-test('enumerates every unordered member pair, sorted by node id', () => {
+test('enumerates every ordered member pair, sorted by node id', () => {
     assert.deepEqual(memberPairs([3, 1, 2]), [
         { sourceNodeId: 1, targetNodeId: 2 },
         { sourceNodeId: 1, targetNodeId: 3 },
-        { sourceNodeId: 2, targetNodeId: 3 }
+        { sourceNodeId: 2, targetNodeId: 1 },
+        { sourceNodeId: 2, targetNodeId: 3 },
+        { sourceNodeId: 3, targetNodeId: 1 },
+        { sourceNodeId: 3, targetNodeId: 2 }
     ]);
     assert.deepEqual(memberPairs([1]), []);
     assert.deepEqual(memberPairs([]), []);
 });
 
-test('resolves one bidirectional edge per pair, bound like a hand-authored edge', () => {
+test('resolves one directed edge per ordered pair, bound like a hand-authored edge', () => {
     const group = makeGroup();
     let nextId = 500;
     const edge = resolveGroupEdgeForPair({ group, sourceNode: nodeA, targetNode: nodeB, allocateId: () => nextId++ });
     assert.equal(edge.id, 500);
     assert.equal(edge.groupId, 100);
     assert.equal(edge.color, '#2fb8a4');
-    assert.equal(edge.directionality, 'bidirectional');
+    assert.equal(edge.directionality, 'directed');
     assert.equal(edge.source, 1);
     assert.equal(edge.target, 2);
-    assert.equal(edge.sourceStateId, 10);
+    assert.equal(edge.sourceStateId, null);
     assert.equal(edge.targetStateId, 20);
     assert.deepEqual(edge.equationModel.output, { role: 'target', stateId: 20 });
     assert.deepEqual(edge.equationModel.mathJson, ['Multiply', 'conductance', ['Add', 'sourceTemperature', ['Negate', 'targetTemperature']]]);
     assert.deepEqual(edge.parameters, [parameter]);
 });
 
-test('expands a group into exactly C(N,2) edges', () => {
+test('the reverse-direction edge for the same pair contributes to the other node instead', () => {
+    const group = makeGroup();
+    let nextId = 500;
+    const edge = resolveGroupEdgeForPair({ group, sourceNode: nodeB, targetNode: nodeA, allocateId: () => nextId++ });
+    assert.equal(edge.source, 2);
+    assert.equal(edge.target, 1);
+    assert.deepEqual(edge.equationModel.output, { role: 'target', stateId: 10 });
+});
+
+test('expands a group into exactly N(N-1) edges, one per ordered pair', () => {
     const group = makeGroup();
     const nodesById = new Map([[1, nodeA], [2, nodeB], [3, { id: 3, states: [{ id: 30, symbol: 'temperature' }] }]]);
     let nextId = 1;
     const edges = expandEdgeGroup({ group, nodesById, allocateId: () => nextId++ });
-    assert.equal(edges.length, 3);
-    assert.deepEqual(edges.map((edge) => [edge.source, edge.target]), [[1, 2], [1, 3], [2, 3]]);
-    assert.equal(new Set(edges.map((edge) => edge.id)).size, 3);
+    assert.equal(edges.length, 6);
+    assert.deepEqual(edges.map((edge) => [edge.source, edge.target]), [
+        [1, 2], [1, 3], [2, 1], [2, 3], [3, 1], [3, 2]
+    ]);
+    assert.equal(new Set(edges.map((edge) => edge.id)).size, 6);
+    assert.ok(edges.every((edge) => edge.directionality === 'directed'));
 });
 
 test('reports the output symbol as unresolved only when a member node lacks it', () => {
@@ -76,20 +91,21 @@ test('hydrates edge groups and rejects a group referencing a missing node', () =
         edges: [],
         edgeGroups: [{
             id: 100, name: 'Coolant loop', memberNodeIds: [1, 2], color: '#2fb8a4',
-            definition: { parameters: [parameter], output: { role: 'target', symbol: 'temperature' }, equation: 'x', implementation: null }
+            definition: { parameters: [parameter], output: { symbol: 'temperature' }, equation: 'x', implementation: null }
         }]
     };
     const groups = hydrateEdgeGroups(document, registerId);
     assert.equal(groups.length, 1);
     assert.deepEqual(groups[0].memberNodeIds, [1, 2]);
     assert.equal(groups[0].color, 0x2fb8a4);
+    assert.deepEqual(groups[0].definition.output, { symbol: 'temperature' });
     assert.deepEqual(registered, [100, 900]);
 
     const badNodeDocument = {
         ...document,
         edgeGroups: [{
             id: 101, name: 'Bad', memberNodeIds: [1, 99], color: '#2fb8a4',
-            definition: { parameters: [], output: { role: 'target', symbol: 'x' }, equation: '', implementation: null }
+            definition: { parameters: [], output: { symbol: 'x' }, equation: '', implementation: null }
         }]
     };
     assert.throws(() => hydrateEdgeGroups(badNodeDocument, () => {}), /missing node/);

@@ -2421,13 +2421,25 @@ export async function runInteractionTests(window) {
             let expected = 1;
             for (const name of names.slice(1)) {
                 expected += 1;
-                await evaluate(window, `window.__debugTransform.selectAdditive(${nodeIdFor(name)})`);
-                // Confirmed via instrumented runs: reading selection state again immediately
-                // after selectAdditive can occasionally observe a stale count under this
-                // environment's SwiftShader-throttled render loop -- wait for each addition to
-                // actually land before issuing the next one, rather than assuming it's synchronous.
-                await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === ${expected}`,
-                    `selectAdditive did not add "${name}" to the selection.`);
+                const id = await evaluate(window, nodeIdFor(name));
+                const isSelected = () => evaluate(window, `document.querySelector('.node-label-container[data-node="${id}"]')?.classList.contains('selected')`);
+                // Confirmed via instrumented runs: this environment's SwiftShader-throttled
+                // render loop can occasionally leave a call's effect un-landed even several
+                // seconds later (not just briefly stale). Retry the call itself, not just the
+                // wait -- but only when this specific node's own selected state genuinely never
+                // flipped; selectAdditive toggles, so re-issuing it after a call that actually
+                // landed (just slow to be observed) would deselect the node instead of fixing
+                // anything.
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    if (!(await isSelected())) await evaluate(window, `window.__debugTransform.selectAdditive(${id})`);
+                    try {
+                        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === ${expected}`,
+                            `selectAdditive did not add "${name}" to the selection.`, 2000);
+                        break;
+                    } catch (error) {
+                        if (attempt === 2) throw error;
+                    }
+                }
             }
         };
 
@@ -2442,12 +2454,14 @@ export async function runInteractionTests(window) {
         const consoleMessages = await captureConsoleMessages(window, async () => {
             await evaluate(window, `document.querySelector('#createEdgeGroup').click()`);
             await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'The edge group editor did not open.');
-            // 3 members -> C(3,2) = 3 mesh edges.
-            await waitFor(window, `document.querySelectorAll('.modelStatus span')[1].textContent === '${before + 3} relationships'`, 'The mesh did not create 3 edges.');
+            // 3 members -> N(N-1) = 6 mesh edges: one directed edge each way per pair (see
+            // docs/edgeDirectionality.md for why groups use directed pairs, not one bidirectional
+            // edge per pair).
+            await waitFor(window, `document.querySelectorAll('.modelStatus span')[1].textContent === '${before + 6} relationships'`, 'The mesh did not create 6 edges.');
 
             await evaluate(window, `(() => {
                 const output = document.querySelector('#groupEquationOutput');
-                output.value = [...output.options].find((option) => option.value.startsWith('target:')).value;
+                output.value = 'temperature';
                 output.dispatchEvent(new Event('change', { bubbles: true }));
                 const field = document.querySelector('#groupMathField');
                 field.setValue('\\\\mathrm{sourceTemperature}-\\\\mathrm{targetTemperature}');
@@ -2469,24 +2483,24 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#edgeContextDelete').hidden`), true);
         await evaluate(window, `document.querySelector('#edgeContextOpenGroup').click()`);
         await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'Opening the edge group from its context menu failed.');
-        assert.equal(await evaluate(window, `document.querySelectorAll('#groupMembersList .builderRow').length`), 3);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#groupMembersList .groupMemberRow').length`), 3);
 
-        await evaluate(window, `[...document.querySelectorAll('#groupMembersList .builderRow')].find((row) => row.textContent.includes('Group test C')).querySelector('.removeBuilderRow').click()`);
-        await waitFor(window, `document.querySelectorAll('#groupMembersList .builderRow').length === 2`, 'Detach did not remove the member row.');
-        // Detaching C from the 3-member mesh un-groups its 2 edges (to A and to B) as ordinary
-        // edges -- nothing is deleted, so the total is still all 3 original mesh edges.
-        assert.equal(await relationshipCount(), before + 3, 'Detaching a member should leave its edges behind as ordinary edges, not delete them.');
+        await evaluate(window, `[...document.querySelectorAll('#groupMembersList .groupMemberRow')].find((row) => row.textContent.includes('Group test C')).querySelector('.removeBuilderRow').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupMembersList .groupMemberRow').length === 2`, 'Detach did not remove the member row.');
+        // Detaching C from the 3-member mesh un-groups its 4 edges (both directions to A and to
+        // B) as ordinary edges -- nothing is deleted, so the total is still all 6 mesh edges.
+        assert.equal(await relationshipCount(), before + 6, 'Detaching a member should leave its edges behind as ordinary edges, not delete them.');
 
         await evaluate(window, `document.querySelector('[data-delete-edge-group]').click()`);
         await waitFor(window, `document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'Deleting the group did not close its editor.');
-        // Only the group's own remaining mesh (A-B, the sole pair with both endpoints still
-        // members) is removed; C's 2 now-ordinary edges are untouched.
-        assert.equal(await relationshipCount(), before + 2, 'Deleting the group should remove only its remaining mesh edge, leaving the 2 detached ones.');
+        // Only the group's own remaining mesh (A<->B, the sole pair with both endpoints still
+        // members: 2 directed edges) is removed; C's 4 now-ordinary edges are untouched.
+        assert.equal(await relationshipCount(), before + 4, 'Deleting the group should remove only its remaining mesh edges, leaving the 4 detached ones.');
 
         await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await relationshipCount(), before + 3, 'Undoing the group deletion did not restore its edges.');
+        assert.equal(await relationshipCount(), before + 6, 'Undoing the group deletion did not restore its edges.');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await relationshipCount(), before + 3, 'Undoing the detach did not restore membership.');
+        assert.equal(await relationshipCount(), before + 6, 'Undoing the detach did not restore membership.');
 
         // Cleanup: delete the three throwaway nodes (and, with them, every mesh/detached edge)
         // so this test doesn't leave the canvas mutated for whatever runs after it.

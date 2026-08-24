@@ -6,40 +6,40 @@ function symbolState(node, symbol) {
     return node?.states.find((state) => state.symbol === symbol) ?? null;
 }
 
-// All C(N,2) unordered member pairs, sorted by node id so re-expanding an unchanged membership
-// list always produces the same pairing (stable ids/order across edits and reloads).
+// All N(N-1) ordered member pairs (both (i,j) and (j,i) for every unordered pair), sorted by node
+// id so re-expanding an unchanged membership list always produces the same pairing (stable
+// ids/order across edits and reloads). Ordered, not the C(N,2) unordered pairs a single
+// bidirectional edge would need: see docs/edgeDirectionality.md for why -- in short, a group has
+// no user-chosen source/target per pair the way a hand-authored edge does, so instead of one
+// bidirectional edge with an arbitrarily-assigned direction, every member gets its own directed
+// edge *to* every other member, evaluating the same equation independently in each direction.
 export function memberPairs(memberNodeIds) {
     const sorted = [...memberNodeIds].sort((a, b) => a - b);
     const pairs = [];
-    for (let i = 0; i < sorted.length; i++) {
-        for (let j = i + 1; j < sorted.length; j++) {
-            pairs.push({ sourceNodeId: sorted[i], targetNodeId: sorted[j] });
+    for (const sourceNodeId of sorted) {
+        for (const targetNodeId of sorted) {
+            if (sourceNodeId !== targetNodeId) pairs.push({ sourceNodeId, targetNodeId });
         }
     }
     return pairs;
 }
 
-// Builds one concrete, ordinary-shaped edge definition for a member pair from the group's shared,
-// symbol-keyed definition. `output.role` is always resolved against `output.symbol` on both nodes:
-// the named role's node supplies equationModel.output, and the other node's matching-symbol state
-// (when it has one) is recorded as the mirror stateId the engine's bidirectional handling reads
-// directly from the edge's own source/target.stateId fields (engine/src/executionPlan.cpp) --
-// every group edge is bidirectional, so both sides always receive the same computed value with the
-// sign flipped on the far side.
+// Builds one concrete, ordinary directed edge for a member pair from the group's shared,
+// symbol-keyed definition -- resolved exactly the way a hand-authored edge's bindings are (see
+// reconcileEquationBindings), just against this specific pair's two nodes. The contribution always
+// lands on this edge's own target (see docs/edgeDirectionality.md): there is no separate "mirror"
+// side to compute, since the group's mesh already has a second edge in the opposite direction
+// covering that.
 export function resolveGroupEdgeForPair({ group, sourceNode, targetNode, allocateId }) {
     const { definition } = group;
     const bindings = reconcileEquationBindings([], sourceNode, targetNode, definition.parameters);
-    const outputRole = definition.output?.role === 'source' ? 'source' : 'target';
-    const primaryNode = outputRole === 'source' ? sourceNode : targetNode;
-    const mirrorNode = outputRole === 'source' ? targetNode : sourceNode;
-    const outputState = symbolState(primaryNode, definition.output?.symbol);
-    const mirrorState = symbolState(mirrorNode, definition.output?.symbol);
+    const outputState = symbolState(targetNode, definition.output?.symbol);
     const usesImplementation = Boolean(definition.implementation);
     const equation = usesImplementation ? '' : (definition.equation ?? '');
     const validation = usesImplementation ? null : validateEquationLatex(equation, bindings);
     const equationModel = usesImplementation ? null : {
         latex: equation,
-        output: { role: outputRole, stateId: outputState?.id ?? null },
+        output: { role: 'target', stateId: outputState?.id ?? null },
         bindings,
         mathJson: validation?.valid ? validation.mathJson : null
     };
@@ -56,7 +56,7 @@ export function resolveGroupEdgeForPair({ group, sourceNode, targetNode, allocat
                 nodeId: (binding.role === 'source' ? sourceNode : targetNode)?.id ?? null,
                 stateId: symbolState(binding.role === 'source' ? sourceNode : targetNode, binding.symbol)?.id ?? null
             }),
-        output: { key: definition.implementation.output?.key ?? '', role: outputRole, stateId: outputState?.id ?? null }
+        output: { key: definition.implementation.output?.key ?? '', role: 'target', stateId: outputState?.id ?? null }
     } : null;
     return {
         id: allocateId(),
@@ -64,9 +64,9 @@ export function resolveGroupEdgeForPair({ group, sourceNode, targetNode, allocat
         title: group.name,
         source: sourceNode.id,
         target: targetNode.id,
-        sourceStateId: (outputRole === 'source' ? outputState : mirrorState)?.id ?? null,
-        targetStateId: (outputRole === 'target' ? outputState : mirrorState)?.id ?? null,
-        directionality: 'bidirectional',
+        sourceStateId: null,
+        targetStateId: outputState?.id ?? null,
+        directionality: 'directed',
         color: group.color,
         offset: 0,
         enabled: true,
@@ -77,7 +77,7 @@ export function resolveGroupEdgeForPair({ group, sourceNode, targetNode, allocat
     };
 }
 
-// Full mesh for a group's current membership -- one bidirectional edge per unordered pair.
+// Full mesh for a group's current membership -- one directed edge per ordered member pair.
 export function expandEdgeGroup({ group, nodesById, allocateId }) {
     return memberPairs(group.memberNodeIds).map(({ sourceNodeId, targetNodeId }) => resolveGroupEdgeForPair({
         group,
@@ -131,7 +131,7 @@ export function hydrateEdgeGroups(document, registerId) {
             deleted: false,
             definition: {
                 parameters,
-                output: group.definition?.output ? { ...group.definition.output } : { role: 'target', symbol: '' },
+                output: { symbol: group.definition?.output?.symbol ?? '' },
                 equation: group.definition?.implementation ? '' : (group.definition?.equation ?? ''),
                 implementation: group.definition?.implementation ? { ...group.definition.implementation } : null
             }

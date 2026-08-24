@@ -2911,9 +2911,16 @@ function applyNodeTemplate(template) {
         shape: template.shape ?? 'box',
         importedGeometry: null,
         geometryFileName: null,
-        // Biased toward positive X: the component library sidebar docks over the left side of the
-        // canvas while it's open, so placing new nodes there would put them behind it on screen.
-        position: [1.5 + ((componentLibraryPlacementCount - 1) % 5) * 1.6, -0.7, 0],
+        // X is deliberately biased toward positive and cascaded, not plane-matched: the component
+        // library sidebar docks over the left side of the canvas while it's open, so placing new
+        // nodes there would put them behind it on screen, and successive drops need to not land
+        // exactly on top of each other. Y/Z still follow whatever plane the rest of the model is
+        // already in, the same as the "Add node" builder.
+        position: [
+            1.5 + ((componentLibraryPlacementCount - 1) % 5) * 1.6,
+            sharedVisibleNodeAxisValue(1) ?? -0.7,
+            sharedVisibleNodeAxisValue(2) ?? 0
+        ],
         subsystemId: activeSubsystemId,
         deleted: false,
         enabled: true,
@@ -6817,6 +6824,21 @@ $('#connectFromNode').addEventListener('click', () => {
     if (!activeResult && selectedNode) connectFromNode(selectedNode);
 });
 
+// The position component (x=0, y=1, z=2) every currently visible node happens to share, or null
+// if they don't all agree -- used so a freshly created node lands in whatever plane the rest of
+// the model is already sitting in, rather than always the same fixed default regardless of what's
+// on screen (most relevant while 2D-locked, but not conditional on it: a model that's flat for
+// any reason should stay flat for a new node the same way pasting now respects it).
+function sharedVisibleNodeAxisValue(axisIndex) {
+    // Requires at least 2 nodes to agree, not 1 -- a lone existing node trivially "shares" every
+    // axis with itself, which would otherwise drop every subsequent new node exactly on top of it
+    // instead of at a predictable default.
+    const values = model.nodes
+        .filter((node) => !node.deleted && nodeObjects.get(node.id)?.visible !== false)
+        .map((node) => nodeObjects.get(node.id).position.getComponent(axisIndex));
+    return values.length > 1 && values.every((value) => value === values[0]) ? values[0] : null;
+}
+
 $('#createNode').addEventListener('click', () => {
     if (activeResult) return;
     const states = stateVariablesFromBuilder();
@@ -6851,7 +6873,11 @@ $('#createNode').addEventListener('click', () => {
         shape: $('#newNodeShape').value,
         importedGeometry: pendingImportedGeometry?.clone() ?? null,
         geometryFileName: pendingGeometryFileName || null,
-        position: [0, -0.7, 0],
+        position: [
+            sharedVisibleNodeAxisValue(0) ?? 0,
+            sharedVisibleNodeAxisValue(1) ?? -0.7,
+            sharedVisibleNodeAxisValue(2) ?? 0
+        ],
         subsystemId: activeSubsystemId,
         deleted: false,
         enabled: true,
@@ -7338,12 +7364,25 @@ function hydrateFragmentRelationship(edge) {
     };
 }
 
+// The default [1, 0, 1] paste offset shifts a pasted copy along X and Z, leaving Y untouched --
+// which only happens to stay in-plane for a Top/Bottom 2D lock. Locked into Front/Back or
+// Left/Right instead, that same offset pushes the copy along whatever axis is "depth" for that
+// view, out of the plane every other node is visibly sitting in. Zero out that one axis instead
+// of leaving it to coincidence.
+function pasteOffsetForCurrentView() {
+    const offset = [1, 0, 1];
+    if (!is2DLocked) return offset;
+    const depthAxis = faceDirections[nearestOrthogonalView()].toArray().findIndex((component) => component !== 0);
+    offset[depthAxis] = 0;
+    return offset;
+}
+
 function pasteGraph() {
     if (activeResult) return false;
     const fragment = window.modelClipboard.read();
     if (!validateGraphFragment(fragment)) return false;
     try {
-        const remapped = remapGraphFragment(fragment, nextModelEntityId);
+        const remapped = remapGraphFragment(fragment, nextModelEntityId, pasteOffsetForCurrentView());
         nextModelEntityId = remapped.nextId;
         const nodes = remapped.nodes.map(hydrateFragmentNode);
         const relationships = remapped.edges.map(hydrateFragmentRelationship);

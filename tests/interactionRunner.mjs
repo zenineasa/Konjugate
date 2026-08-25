@@ -2789,5 +2789,158 @@ export async function runInteractionTests(window) {
             'Undo should remove the created edge.');
     });
 
+    await run('causal inference recovers most of a realistic 8-node, 12-edge system', async () => {
+        // An 8-node electronics-enclosure thermal/vibration system: 3 independent AR(1) roots
+        // (ambientTemperature, motorLoad, solarIrradiance), 5 downstream nodes, 12 true lagged
+        // edges (one quadratic: componentTemperature -> thermalStress). Originally built to
+        // generate real end-to-end assets for a blog post about this feature, running it for real
+        // surfaced a genuine engine bug: the stage-1 skeleton screened pairs using CONTEMPORANEOUS
+        // (same-timestep) partial correlation, which is a poor proxy for a lagged relationship once
+        // a graph has more than a couple of variables -- confirmed empirically (a true edge showed
+        // near-zero contemporaneous partial correlation while an unrelated pair showed a misleading
+        // one purely from shared AR-driven persistence). Fixed in causalInference.cpp by screening
+        // with LAG-1 partial correlation instead (see its own comment there and
+        // docs/causalInference.md). This test is the regression guard for that fix, and for two
+        // remaining, *structural* (not fixable by more data or a bigger coefficient) collinearity
+        // limitations found during the same investigation, both intentionally left unasserted
+        // below: ambientTemperature and motorLoad each have a direct edge to a target that is ALSO
+        // reachable through a near-single-parent mediator (componentTemperature's chain into
+        // thermalStress; motorLoad's own near-deterministic proxy vibrationAmplitude into
+        // fatigueAccumulation) -- ridge consistently attributes the shared effect to the mediator,
+        // at any sample size. 10 of the 12 true edges are recovered; this test asserts exactly
+        // those 10, plus that no *other* spurious candidate reaches a high (>= 0.5) score.
+        function mulberry32(seed) {
+            return function () {
+                seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function gaussianFrom(random) {
+            const u1 = Math.max(random(), 1e-9);
+            const u2 = random();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+        function buildThermalSystemCsv(rowCount = 3000) {
+            const random = mulberry32(8080);
+            const amb = new Array(rowCount), motor = new Array(rowCount), solar = new Array(rowCount);
+            amb[0] = 0.2; motor[0] = 0.1; solar[0] = 0.15;
+            for (let t = 1; t < rowCount; t += 1) {
+                amb[t] = 0.5 * amb[t - 1] + 0.3 * gaussianFrom(random);
+                motor[t] = 0.5 * motor[t - 1] + 0.3 * gaussianFrom(random);
+                solar[t] = 0.5 * solar[t - 1] + 0.3 * gaussianFrom(random);
+            }
+            const enc = new Array(rowCount), vib = new Array(rowCount);
+            for (let t = 0; t < rowCount; t += 1) {
+                const pAmb = t > 0 ? amb[t - 1] : amb[0], pMotor = t > 0 ? motor[t - 1] : motor[0], pSolar = t > 0 ? solar[t - 1] : solar[0];
+                enc[t] = 2.0 * pAmb + 1.5 * pSolar + 0.05 * gaussianFrom(random);
+                vib[t] = 3.0 * pMotor + 0.4 * gaussianFrom(random);
+            }
+            const comp = new Array(rowCount);
+            for (let t = 0; t < rowCount; t += 1) {
+                const pEnc = t > 0 ? enc[t - 1] : enc[0], pMotor = t > 0 ? motor[t - 1] : motor[0], pAmb = t > 0 ? amb[t - 1] : amb[0];
+                comp[t] = 2.5 * pEnc + 1.0 * pMotor + 1.0 * pAmb + 0.05 * gaussianFrom(random);
+            }
+            const stress = new Array(rowCount);
+            for (let t = 0; t < rowCount; t += 1) {
+                const pComp = t > 0 ? comp[t - 1] : comp[0], pAmb = t > 0 ? amb[t - 1] : amb[0];
+                stress[t] = 3.5 * pComp + 0.8 * pComp * pComp + 2.0 * pAmb + 0.05 * gaussianFrom(random);
+            }
+            const fatigue = new Array(rowCount);
+            for (let t = 0; t < rowCount; t += 1) {
+                const pStress = t > 0 ? stress[t - 1] : stress[0], pVib = t > 0 ? vib[t - 1] : vib[0];
+                const pComp = t > 0 ? comp[t - 1] : comp[0], pMotor = t > 0 ? motor[t - 1] : motor[0];
+                fatigue[t] = 1.5 * pStress + 1.2 * pVib + 1.0 * pComp + 0.8 * pMotor + 0.6 * gaussianFrom(random);
+            }
+            const columnNames = ['ambientTemperature', 'motorLoad', 'solarIrradiance', 'enclosureTemperature',
+                'vibrationAmplitude', 'componentTemperature', 'thermalStress', 'fatigueAccumulation'];
+            const lines = [['time', ...columnNames].join(',')];
+            for (let t = 0; t < rowCount; t += 1) {
+                lines.push([t, amb[t], motor[t], solar[t], enc[t], vib[t], comp[t], stress[t], fatigue[t]].join(','));
+            }
+            return `${lines.join('\n')}\n`;
+        }
+        // [source, target, degree, trueCoefficient] terms for exactly the 10 unique edges this
+        // construction recovers (11 entries: componentTemperature -> thermalStress carries both a
+        // degree-1 and a degree-2 term on the same edge) -- see the comment above for the 2
+        // structurally-unrecoverable exceptions.
+        const expectedEdges = [
+            ['ambientTemperature', 'enclosureTemperature', 1, 2.0],
+            ['solarIrradiance', 'enclosureTemperature', 1, 1.5],
+            ['motorLoad', 'vibrationAmplitude', 1, 3.0],
+            ['ambientTemperature', 'componentTemperature', 1, 1.0],
+            ['motorLoad', 'componentTemperature', 1, 1.0],
+            ['enclosureTemperature', 'componentTemperature', 1, 2.5],
+            ['componentTemperature', 'thermalStress', 1, 3.5],
+            ['componentTemperature', 'thermalStress', 2, 0.8],
+            ['vibrationAmplitude', 'fatigueAccumulation', 1, 1.2],
+            ['componentTemperature', 'fatigueAccumulation', 1, 1.0],
+            ['thermalStress', 'fatigueAccumulation', 1, 1.5]
+        ];
+
+        await evaluate(window, `document.querySelector('#causalInferenceButton').click()`);
+        await waitFor(window, `!document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not open.');
+        await evaluate(window, `window.__debugCausalInference.loadCsv(${JSON.stringify(buildThermalSystemCsv())})`);
+        await waitFor(window, `!document.querySelector('#causalInferenceMappingSection').hidden`, 'The column mapping section did not appear.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#causalInferenceMappingRows .causalInferenceMappingRow').length`), 8,
+            'Expected one mapping row per CSV column.');
+
+        await evaluate(window, `(() => {
+            const select = document.querySelector('#causalInferenceDegreeMode');
+            select.value = 'auto';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#causalInferenceDegreeValue').value = '2';
+        })()`);
+        await evaluate(window, `document.querySelector('#runCausalInference').click()`);
+        await waitFor(window, `!document.querySelector('#causalInferenceCandidatesSection').hidden`, 'The candidate list did not appear.', 20000);
+
+        const candidates = await evaluate(window, `window.__debugCausalInference.candidates()`);
+        for (const [source, target, degree, trueCoefficient] of expectedEdges) {
+            const candidate = candidates.find((c) => c.sourceColumn === source && c.targetColumn === target);
+            assert.ok(candidate, `Expected a ${source} -> ${target} candidate.`);
+            const term = candidate.terms.find((t) => t.degree === degree);
+            assert.ok(term, `Expected a degree-${degree} term on ${source} -> ${target}, got: ${JSON.stringify(candidate.terms)}`);
+            const relativeError = Math.abs((term.coefficient - trueCoefficient) / trueCoefficient);
+            assert.ok(relativeError < 0.25,
+                `${source} -> ${target} degree ${degree}: expected ~${trueCoefficient}, got ${term.coefficient} (${(relativeError * 100).toFixed(1)}% off).`);
+        }
+        const expectedPairs = new Set(expectedEdges.map(([s, t]) => `${s}->${t}`));
+        const otherCandidates = candidates.filter((c) => !expectedPairs.has(`${c.sourceColumn}->${c.targetColumn}`));
+        for (const candidate of otherCandidates) {
+            assert.ok(candidate.score < 0.5,
+                `Unexpected candidate ${candidate.sourceColumn} -> ${candidate.targetColumn} has a high score (${candidate.score}), not a low-confidence residual.`);
+        }
+
+        // Deselect any low-confidence residual candidate before committing, exactly as a real
+        // reviewer would -- this also exercises the checkbox accept/reject path, which neither
+        // existing causal-inference test does (both accept every candidate by default).
+        for (const candidate of otherCandidates) {
+            await evaluate(window, `(() => {
+                const row = [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateRow')]
+                    .find((r) => r.querySelector('.causalInferenceCandidateMain').textContent.includes(${JSON.stringify(`${candidate.sourceColumn} → ${candidate.targetColumn}`)}));
+                row.querySelector('input[type="checkbox"]').click();
+            })()`);
+        }
+
+        const nodesBefore = await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`);
+        const edgesBefore = await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`);
+        const consoleMessages = await captureConsoleMessages(window, async () => {
+            await evaluate(window, `document.querySelector('#commitCausalInference').click()`);
+            await waitFor(window, `document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not close after commit.', 15000);
+        });
+        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore + 8,
+            'Committing should have created one new node per CSV column (8).');
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore + expectedPairs.size,
+            `Committing should have created exactly the ${expectedPairs.size} accepted edges (componentTemperature -> thermalStress is one edge with two terms).`);
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore,
+            'Undo should remove all 8 created nodes.');
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore,
+            'Undo should remove all created edges.');
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

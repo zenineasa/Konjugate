@@ -204,11 +204,35 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
     const std::size_t variableCount = series.columnNames.size();
     const std::size_t rowCount = series.rows.size();
 
+    // Stage 1 screens with LAG-1 partial correlation, not the contemporaneous (same-timestep)
+    // matrix computed just above -- that matrix is kept only for the fallback tier further down.
+    // A same-timestep partial correlation is a poor proxy for "does a genuine lag-1 relationship
+    // exist" once a graph has more than a couple of variables: confirmed empirically on an 8-node
+    // synthetic system with known ground truth (see docs/causalInference.md) where a true lag-1
+    // edge showed near-zero contemporaneous partial correlation (wrongly pruned here before stage
+    // 2 ever got a chance) while an unrelated pair showed a misleadingly large one purely from
+    // sharing an AR-driven persistence pattern (wrongly admitted). Built by stacking [x(t) |
+    // x(t-1)] into one wider matrix and reusing computePartialCorrelation unchanged -- conditioning
+    // on every other current AND lagged variable at once is what makes this a meaningful skeleton
+    // signal rather than raw pairwise lag-1 correlation. The lag-1 relationship is directional
+    // (source[t-1] vs target[t] need not equal target[t-1] vs source[t]), so an unordered pair
+    // survives if *either* direction clears the threshold -- stage 2's own per-target fit still
+    // resolves which direction(s), if any, actually hold.
+    const auto laggedRowCount = static_cast<Eigen::Index>(rowCount) - 1;
+    const Eigen::MatrixXd currentBlock = standardized.values.bottomRows(laggedRowCount);
+    const Eigen::MatrixXd previousBlock = standardized.values.topRows(laggedRowCount);
+    Eigen::MatrixXd stackedForSkeleton(laggedRowCount, currentBlock.cols() + previousBlock.cols());
+    stackedForSkeleton << currentBlock, previousBlock;
+    const Eigen::MatrixXd lagPartial = computePartialCorrelation(stackedForSkeleton);
+    const auto skeletonColumnCount = static_cast<Eigen::Index>(variableCount);
+
     // Stage 1: which unordered pairs are related at all.
     std::vector<std::vector<bool>> survivedSkeleton(variableCount, std::vector<bool>(variableCount, false));
     for (std::size_t i = 0; i < variableCount; ++i) {
         for (std::size_t j = i + 1; j < variableCount; ++j) {
-            if (std::abs(partial(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j))) >= config.skeletonThreshold) {
+            const double iToJ = lagPartial(static_cast<Eigen::Index>(j), skeletonColumnCount + static_cast<Eigen::Index>(i));
+            const double jToI = lagPartial(static_cast<Eigen::Index>(i), skeletonColumnCount + static_cast<Eigen::Index>(j));
+            if (std::abs(iToJ) >= config.skeletonThreshold || std::abs(jToI) >= config.skeletonThreshold) {
                 survivedSkeleton[i][j] = survivedSkeleton[j][i] = true;
             }
         }

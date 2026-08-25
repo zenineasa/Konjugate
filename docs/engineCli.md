@@ -8,9 +8,12 @@ The installed command will be `konjugate`; the development binary is `konjugateE
 konjugate inspect model.kjt --report report.json
 konjugate validate model.kjt --report validation.json
 konjugate run model.kjt --configuration runConfiguration.json --output simulationResult.bin
+konjugate infer series.csv --report inference.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0]
 ```
 
 Reports are written atomically. Machine consumers should always provide `--report`; concise human output may be added later.
+
+`infer` is the one command that does not take a `.kjt` project: its input is a CSV of multivariate time-series data (a numeric, strictly increasing, evenly spaced time column, then one numeric column per variable) and its report is a candidate-edge list, not a project report. It has no knowledge of Konjugate node/state IDs — its output is keyed by CSV column name, and a caller resolves those to concrete nodes/states itself. See [Time-series graph inference](timeSeriesGraphInference.md) for the algorithm and [Project schema](projectSchema.md) for how a candidate becomes a real edge.
 
 Exit codes:
 

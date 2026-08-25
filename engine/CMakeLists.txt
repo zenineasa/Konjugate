@@ -20,6 +20,7 @@ find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(Threads REQUIRED)
+find_package(Eigen3 CONFIG REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
 
 protobuf_generate_cpp(PROTOCOL_SOURCES PROTOCOL_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/engineProtocol.proto")
@@ -120,6 +121,8 @@ add_executable(konjugateEngine
     src/dependencyGraph.cpp
     src/executionBackend.cpp
     src/executionPlan.cpp
+    src/graphInference.cpp
+    src/graphInferenceReport.cpp
     src/main.cpp
     src/modelValidator.cpp
     src/partitionPlan.cpp
@@ -138,7 +141,7 @@ set_target_properties(konjugateEngine PROPERTIES
     INSTALL_RPATH "$<IF:$<PLATFORM_ID:Darwin>,@loader_path,$ORIGIN>"
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads Eigen3::Eigen ${CMAKE_DL_LIBS})
 target_compile_definitions(konjugateEngine PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
 if(KONJUGATE_HAS_METIS)
     target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
@@ -270,6 +273,20 @@ if(BUILD_TESTING)
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
     )
 
+    add_executable(graphInferenceTests
+        tests/graphInferenceTests.cpp
+        src/graphInference.cpp
+    )
+    set_target_properties(graphInferenceTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(graphInferenceTests PRIVATE include)
+    target_link_libraries(graphInferenceTests PRIVATE Eigen3::Eigen)
+    add_test(NAME graphInferenceTests COMMAND graphInferenceTests)
+
     # A manual perf tool, not a pass/fail test: intentionally left out of add_test/ctest.
     add_executable(providerBatchingBenchmark
         tests/providerBatchingBenchmark.cpp
@@ -288,6 +305,7 @@ if(MSVC)
         target_compile_options(executionPlanTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(relationshipProviderTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(nodeProviderRuntimeTests PRIVATE /W4 /permissive- /MP)
+        target_compile_options(graphInferenceTests PRIVATE /W4 /permissive- /MP)
     endif()
 else()
     target_compile_options(konjugateEngine PRIVATE -Wall -Wextra -Wpedantic)
@@ -295,6 +313,7 @@ else()
         target_compile_options(executionPlanTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(relationshipProviderTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(nodeProviderRuntimeTests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(graphInferenceTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
@@ -305,5 +324,6 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(executionPlanTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(relationshipProviderTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(nodeProviderRuntimeTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+        target_compile_options(graphInferenceTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
     endif()
 endif()

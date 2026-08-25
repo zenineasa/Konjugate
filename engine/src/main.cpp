@@ -1,5 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+#include "graphInference.hpp"
+#include "graphInferenceReport.hpp"
 #include "modelValidator.hpp"
 #include "partitionPlan.hpp"
 #include "projectContainer.hpp"
@@ -9,6 +11,7 @@
 #include <boost/property_tree/json_parser.hpp>
 #include <filesystem>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -41,6 +44,45 @@ bool hasKjtExtension(const std::filesystem::path& path) {
         return static_cast<char>(std::tolower(character));
     });
     return extension == ".kjt";
+}
+
+std::string readTextFile(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("The input file could not be opened.");
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
+}
+
+std::vector<int> parseIntList(const std::string& csv) {
+    std::vector<int> values;
+    std::istringstream stream(csv);
+    std::string item;
+    while (std::getline(stream, item, ',')) values.push_back(std::stoi(item));
+    return values;
+}
+
+std::vector<double> parseDoubleList(const std::string& csv) {
+    std::vector<double> values;
+    std::istringstream stream(csv);
+    std::string item;
+    while (std::getline(stream, item, ',')) values.push_back(std::stod(item));
+    return values;
+}
+
+konjugate::InferenceConfig inferenceConfigFromArgs(int argc, char** argv) {
+    konjugate::InferenceConfig config;
+    const auto skeletonThreshold = optionPath(argc, argv, "--skeleton-threshold").string();
+    if (!skeletonThreshold.empty()) config.skeletonThreshold = std::stod(skeletonThreshold);
+    const auto coefficientThreshold = optionPath(argc, argv, "--coefficient-threshold").string();
+    if (!coefficientThreshold.empty()) config.coefficientThreshold = std::stod(coefficientThreshold);
+    const auto validationFraction = optionPath(argc, argv, "--validation-fraction").string();
+    if (!validationFraction.empty()) config.validationFraction = std::stod(validationFraction);
+    const auto lags = optionPath(argc, argv, "--lags").string();
+    if (!lags.empty()) config.candidateLags = parseIntList(lags);
+    const auto ridgePenalties = optionPath(argc, argv, "--ridge-penalties").string();
+    if (!ridgePenalties.empty()) config.ridgePenalties = parseDoubleList(ridgePenalties);
+    return config;
 }
 }
 
@@ -84,24 +126,34 @@ int main(int argc, char** argv) {
         std::_Exit(0);
     }
     if (argc < 3) {
-        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n";
+        std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
+                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0]\n";
         std::_Exit(64);
     }
     const std::string command = argv[1];
     const auto report = optionPath(argc, argv, "--report");
     const auto configurationPath = optionPath(argc, argv, "--configuration");
     const auto outputPath = optionPath(argc, argv, "--output");
-    if ((command != "inspect" && command != "validate" && command != "run") ||
-        ((command == "inspect" || command == "validate") && report.empty()) ||
+    if ((command != "inspect" && command != "validate" && command != "run" && command != "infer") ||
+        ((command == "inspect" || command == "validate" || command == "infer") && report.empty()) ||
         (command == "run" && (configurationPath.empty() || outputPath.empty()))) {
         std::cerr << "The selected command requires its report, configuration, and output paths.\n";
         std::_Exit(64);
     }
-    if (!hasKjtExtension(argv[2])) {
+    // infer takes a CSV, not a .kjt project -- every other command still requires the container
+    // extension check below.
+    if (command != "infer" && !hasKjtExtension(argv[2])) {
         std::cerr << "UNSUPPORTED_FILE_FORMAT: Only .kjt project files are supported.\n";
         std::_Exit(3);
     }
     try {
+        if (command == "infer") {
+            const auto series = konjugate::parseInferenceCsv(readTextFile(argv[2]));
+            const auto config = inferenceConfigFromArgs(argc, argv);
+            const auto inferenceResult = konjugate::inferGraph(series, config);
+            konjugate::writeInferenceReport(report, inferenceResult);
+            std::_Exit(0);
+        }
         if (command == "inspect") {
             const auto inspection = konjugate::inspectProject(argv[2]);
             konjugate::writeInspectionReport(report, inspection.format, inspection.version, inspection.encrypted);

@@ -1,0 +1,117 @@
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+
+# Time-series graph inference: constructing a model from data
+
+**Status: v1 shipped.** This document records the design brainstorm that led to the implementation; [Time-series graph inference](../timeSeriesGraphInference.md) is now the reference for the actual shipped mathematics and code. Everything below "Resolved so far" and "Decided for v1" describes what shipped; "Planned next" is still genuinely unimplemented and is the committed v2 -- kept here rather than deleted, unlike a fully-resolved proposal, because that plan is still live.
+
+## Problem
+
+Building a model by hand means the user already knows the graph: which nodes exist and which pairs of them interact. Often they don't — they have a CSV of multivariate time-series data (one column per sensor/variable, one row per timestamp) and want to know what the dependency structure even is before they can start authoring equations. Today Konjugate offers no path from "I have data" to "I have a graph"; the user has to reverse-engineer the structure themselves first.
+
+## Grounding
+
+This proposal draws on two sources read in preparation:
+
+- A prior research prototype (`/Users/mac/Downloads/graphicalModelingAndNetworkScience-NewAttempt`) that already implements lagged ridge regression over multivariate time series, with held-out predictive-loss-based edge scoring, an additive-polynomial nonlinear extension, and an explicit, reasoned rejection of the PC algorithm and of naive KL-divergence-based edge scoring.
+- A course text on graphical models and network science (`/Users/mac/Downloads/GMNS-coursenotes.pdf`), which situates that prototype's approach within the broader methodology landscape and supplies the vocabulary and justification below.
+
+## Not an add-on — a core import feature
+
+Konjugate add-ons are deliberately sandboxed: API version 1 grants "no ability to edit the active model" ([Add-on development](../addonDevelopment.md)). Constructing a graph means writing nodes and edges into the live model, which no add-on can do. This has to be a first-party import feature, following the same principle [Component library](componentLibrary.md) already commits to: call the *same* node/edge creation functions manual authoring calls, so undo/redo and validation work automatically — and land the result through a review-before-commit step (propose, let the user inspect and prune, then materialize), not a silent automatic write.
+
+## This overlaps, but doesn't duplicate, the planned digital-twin import
+
+[Product strategy](../productStrategy.md) already plans a CSV-import workflow under "Digital twin tuning and data comparison": import a CSV, map columns to model states, then calibrate/validate/estimate against an **existing** model structure. That workflow assumes the graph is already known. This proposal is upstream of it — inferring the graph *before* it exists — and the two should **share the column-mapping step** (which CSV column is which signal) rather than each inventing their own. The five-item taxonomy that document defines (calibration, state estimation, validation, monitoring, prediction) doesn't have a slot for this; it needs a sixth: **structure discovery**.
+
+It also fits the strategy doc's decision filter directly: "reduces the effort required to create a physically meaningful model" is the first listed prioritization criterion.
+
+## Methodology landscape
+
+The course notes cover a wider space of graph-inference methods than the prototype implements. Organized by what kind of Konjugate edge each one naturally produces:
+
+### Directed, lagged (temporal) edges — the prototype's approach
+
+Granger-causal / VAR-style inference: node *i*'s value at time *t* is regressed on all nodes' values at time *t−1* (and earlier lags); a nonzero coefficient from *j* to *i* becomes a directed edge. This is what the prototype does, and it's the right fit for Konjugate's directed edges — a temporal effect has an inherent direction.
+
+Crucially, this sidesteps a real identifiability problem the course notes work through in detail: pure observational (non-temporal) causal discovery — the PC-algorithm family — often **cannot** recover edge direction at all. Two or more causal graphs can be observationally indistinguishable (the same "Markov equivalence class"), and no amount of additional data resolves the ambiguity without either an intervention or a temporal ordering. The prototype's explicit rejection of PC-style discovery, and its use of time series instead, is validated by this: time gives the ordering that breaks the symmetry.
+
+### Contemporaneous (same-timestep) correlation — used for the skeleton, never materialized as its own edge
+
+**Decided:** no undirected/bidirectional edges, and no new "contemporaneous edge" kind either. When two nodes genuinely relate to each other in both directions, that's **two separate directed edges**, one each way — not one bidirectional edge. This is a direct continuation of the reasoning already settled for [Edge groups](../edgeGroups.md): a bidirectional edge's engine-level sign-flip is only correct if the relationship is anti-symmetric, which a fitted, generally-asymmetric pair of regression coefficients has no reason to be. Two independently-fit directed edges are correct by construction; a bidirectional edge fit from data would silently misrepresent the asymmetric case, exactly the bug that motivated the edge-groups redesign.
+
+This also resolves the caveat an earlier draft of this document raised about contemporaneous correlation not obviously being a dynamical edge: it's still never converted into an edge that looks like an ordinary lagged one. VAR's residual precision matrix (the contemporaneous/undirected signal, same machinery as a Gaussian graphical model) drives two distinct outcomes, not one:
+
+- Primarily, it's an *upstream candidate filter* for stage 2 below — deciding which pairs are worth the expensive lagged fit.
+- A pair that's contemporaneously correlated but has **no lagged/directional evidence in either direction** is not dropped. It gets the same treatment as a pair with lagged evidence both ways: **two directed edges**, one each way, built from the (symmetric, by construction) contemporaneous coefficient rather than a lagged one. Dropping it outright would be inconsistent with the "represent mutual relationships as a matched directed pair, not a special case" decision just made above — a correlation-only pair is exactly that case, just with a different source coefficient.
+
+The one thing this must not lose is **provenance**: two edges built from lagged evidence in both directions and two edges built from contemporaneous-only evidence look the same on the canvas unless something distinguishes them, and a user genuinely needs to know "these drive each other" from "these move together for reasons the data can't identify." Every generated edge should carry which stage produced it (lagged-directional vs. correlation-only) and its score, surfaced at minimum as a distinct confidence tier or tag — never silently merged into one undifferentiated edge kind.
+
+## Two-stage design: correlation for the skeleton, causation for direction
+
+The overall shape of this is a two-stage pipeline, and it's worth naming explicitly: **stage 1 finds correlation (which pairs are related at all — cheap, symmetric, no direction claimed), stage 2 finds causation (which of those pairs has directional/lagged evidence, and which way)**. This mirrors the causal-discovery literature's own two-step structure (skeleton discovery, then edge orientation) and gives the design a natural, principled place to put the "no undirected edges" decision above: stage 1's contemporaneous/partial-correlation signal decides *whether to even test a pair*, and also supplies the fallback edge pair when stage 2 finds nothing directional; stage 2's lagged regression decides whether a higher-confidence directed edge (or matched pair) replaces that fallback, and in which direction(s). Every pair that survives stage 1 ends up represented by edges of one confidence tier or another — stage 2 upgrades the evidence, it doesn't gate whether an edge exists at all.
+
+This split also directly serves the speed goal. Full lagged regression with cross-validated regularization, run independently for every one of O(N²) ordered pairs, is the expensive part. A cheap stage-1 pass (plain or partial correlation — no regression, no CV, no lag features) prunes that O(N²) set down to only the pairs worth the expensive fit, before any of the costly work runs.
+
+**The stage-1 skeleton method is user-selectable, not fixed.** Same pattern as the stage-2 polynomial-degree choice: offer a method picker rather than hardcoding one. Candidates, all cheap relative to the stage-2 fit:
+
+- **Partial correlation** (Gaussian graphical model machinery, section above) — the default; linear, well-understood, matches the linear v1 scope.
+- **Graphical lasso** — a sparser, symmetric variant of the same idea.
+- **Mutual information** (KL divergence between the joint distribution and the product of the marginals — the prototype's own `Notes.md` names this explicitly as a legitimate later experiment, distinct from what it calls "naive KL divergence") — catches nonlinear dependence a linear correlation measure would miss, at the cost of needing density estimation.
+
+See "A note on KL divergence as a skeleton score" below for how this one specifically should — and should not — be scored.
+
+### A note on KL divergence as a skeleton score
+
+Worth working through explicitly, since it's a real correction to what was asked for, not a stylistic preference. `Notes.md` already names the specific hazard: "do not use the reciprocal of KL divergence: KL approaches zero for similar distributions, so its reciprocal becomes numerically unstable." That's real, but there's a second, independent problem with the reciprocal, specific to using it as a *skeleton/edge-existence* score: mutual information — KL between the joint distribution and the product of the marginals, which is what `Notes.md` says this divergence actually is here — **increases** with dependence. Two independent variables have MI ≈ 0; two strongly coupled ones have large MI. An edge-existence score needs to rank *high* MI as "likely an edge." The reciprocal does the opposite: it's largest exactly where MI is smallest, i.e. it would rank near-independent pairs as the strongest edge candidates and genuinely coupled pairs as the weakest — backwards, independent of the numerical-stability question.
+
+Both problems have the same fix: use the KL/mutual-information value **directly**, not its reciprocal, as the stage-1 score — rank or threshold pairs by MI itself, higher is more likely an edge. If a bounded 0–1 score is wanted for display alongside the other stage-1 methods' scores, a saturating transform like `1 − exp(−MI)` gets that (0 at independence, approaching 1 for strong dependence) without either reintroducing the blow-up near zero or inverting the ranking. Flagging this now since it changes what actually gets implemented, not just how it's phrased — let me know if "inverse" was pointing at something else I'm not accounting for (e.g. an independence/pruning score in the *other* direction, where high-independence-first ranking would actually be the intent).
+
+### Regularization and model selection
+
+The prototype uses ridge regression with a held-out validation split — a reasonable, working default. The course text supplies the broader picture and a specific reason to keep that choice rather than switch to something structure-recovery-oriented:
+
+- **Ridge** shrinks but never zeroes coefficients (needs an external threshold, which is what the prototype does). **Lasso** zeroes coefficients directly (sparse by construction, but not guaranteed symmetric — an edge can appear predicting *i* from *j* but not the reverse, needing an explicit AND/OR reconciliation rule — moot here since every direction is already its own independent edge by decision above). **Graphical lasso** enforces a symmetric sparse solution by penalizing the precision matrix directly — this is a plausible stage-1 skeleton method (see below), since stage 1 only needs "related or not," not a directed coefficient.
+- Tuning-parameter selection splits into two philosophies: **KL-divergence/predictive** criteria (AIC, cross-validation — minimize prediction error) versus **posterior-probability/structure-recovery** criteria (BIC, eBIC — maximize probability of the *true* graph). The course text states the choice explicitly: "when the interest is on building a predictive model, AIC or CV are recommended, whereas if the purpose is selecting the true network structure, BIC/eBIC are more appropriate." Since the whole point of a Konjugate graph is to be **run forward as a simulation**, not archived as a scientific claim about ground truth, the predictive/held-out-loss family is the correct one — which is exactly what the prototype already does. Worth keeping, now with a named justification rather than just an empirical preference.
+- Lag order itself can be selected the same way (AIC/BIC/HQ/FPE), rather than the prototype's current fixed lag of 1 — a concrete, bounded upgrade if multi-lag effects turn out to matter for the systems users bring in.
+
+### Continuous time — a real fork in direction
+
+Konjugate is a continuous-time ODE/SDE simulation engine, not a fixed-timestep discrete framework. A lag-1 VAR is implicitly a discrete-time approximation; a **continuous-time** formulation (the course text calls this a continuous-time VAR / SDE) would map onto Konjugate's actual execution model more directly and would handle irregularly-sampled CSVs (a common problem the text spends real space on) without the grid-discretization workaround discrete VAR needs. The tradeoff: the course text notes current software support for continuous-time inference is weak, especially as the number of variables grows — this would be genuinely new work, not "just switch a library." Decided against for v1, below — the biggest fork in this whole document, but not the next one in line.
+
+### Data hygiene, directly relevant to arbitrary user CSVs
+
+Real-world CSVs will have gaps and uneven sampling; the course text's practical-estimation chapter is squarely about this:
+
+- **Missing values**: three tiers — drop rows (simplest, biases results if missingness isn't random and wastes data), impute (mean/median/interpolation for a first pass; multiple imputation or EM for something more principled later), or model it away entirely with a state-space/Kalman formulation.
+- **Irregular sampling**: treat the irregular series as a regular grid with gaps marked missing (approximates continuous time reasonably well per the cited literature, even with a large fraction of points missing), or use a genuinely continuous-time model as above.
+- **Standardization**: rescale each signal to unit variance before fitting, so a sparsity penalty doesn't shrink a real but small-magnitude relationship purely because of its unit choice — this one is cheap and should just be a default, not an option to design around.
+
+## Running it fast: engine-native, no Python subprocess
+
+**Decided:** no Python subprocess. The existing pattern for programmable behavior elsewhere in Konjugate — shelling out to a Python interpreter via `pipeWorker`, used today for `python` providers (see [Provider execution](../providerExecution.md)) — is not used here. That transport exists for occasional per-run provider evaluation; making a routine, fast, always-available import step depend on a Python runtime at all would work against the actual goal, which is speed.
+
+This is implemented natively in the engine instead — ridge regression is not exotic, it reduces to a regularized linear least-squares solve. One real cost worth being honest about: `engine/` currently has **zero** linear-algebra dependency (no Eigen, BLAS, or LAPACK anywhere in `engine/include` or `engine/src` — confirmed by search), so this is new engine surface, not a small addition to existing machinery. A permissively-licensed, header-only library (Eigen is the standard choice here) keeps this from becoming a build/packaging problem, but the dependency still needs to be added deliberately.
+
+This also matches an existing precedent: the planned digital-twin calibration workflow already wants its fitting process to "run through the same engine and CLI contract as normal simulation," not through a side channel — the same reasoning applies here.
+
+## Resolved so far
+
+- **No Python subprocess — engine-native only.** See above.
+- **No bidirectional or contemporaneous edge kind — multiple unidirectional edges only.** See "Contemporaneous correlation" above. A pair with lagged evidence in both directions becomes two directed edges built from those lagged coefficients; a pair with only contemporaneous (non-directional) evidence *also* becomes two directed edges, but built from the symmetric contemporaneous coefficient instead — every generated edge carries which of the two it came from, so the two cases stay visibly distinct.
+- **Two-stage pipeline: cheap correlation-based skeleton, then per-surviving-pair causal/directional fit.** A design principle (a pair only ever gets a dynamical-looking edge when lagged evidence actually backs it — correlation-only pairs are still represented, just tagged lower-confidence) and a performance necessity (avoids running the expensive regression on every one of O(N²) pairs).
+
+## Decided for v1
+
+1. **Discrete lag-based fit, not continuous-time.** Continuous-time is the more correct fit for an ODE/SDE engine, but the course text is explicit that tooling support for it is thin even in specialized statistical software, and building it natively from scratch on top of a linear-algebra library that doesn't exist yet is a lot of unproven surface for a first version. A discrete fit (data resampled onto an approximately-regular grid, gaps treated as missing per the course text's own recommended practice) gets real numbers into the app while the genuinely new plumbing — engine-side linear algebra, the two-stage pipeline, the review-and-materialize UI — gets proven out. Continuous-time stays a candidate for later, once that foundation exists.
+2. **Linear/ridge only, not the additive-polynomial extension.** The two-stage design above is naturally linear-friendly (partial correlation for the skeleton, linear lagged regression for direction), and the nonlinear case multiplies the per-pair fitting cost (multiple candidate degrees, per-target model selection) right at the step just decided to make fast and native. This is deliberately scoped down, not dropped — see "Planned next" below, since the nonlinear extension is the committed follow-up, not a maybe.
+3. **Require complete, regularly-sampled input; reject with a clear message otherwise.** Imputation and grid-discretization are real techniques the course text covers well, but they're additional engine surface for a problem no real user CSV has demonstrated yet. Validate on import and fail loudly rather than silently interpolating.
+4. **Review-before-commit UX: a candidate list, one row per proposed directed edge, with its score and its provenance** (lagged-directional vs. correlation-only), individually checked in or out before materializing — not an all-or-nothing accept. Consistent with the product strategy's own decision filter ("makes a modeling or numerical assumption more visible"), and the provenance tag is exactly where a user tells apart "confident, causal" edges from "these move together, direction unclear" edges before either lands in their model.
+
+## Planned next: additive-polynomial nonlinear extension
+
+Not a someday-maybe — this is the committed v2, to be implemented right after v1 lands, so it's worth designing now while the reasoning is fresh rather than rediscovering it later.
+
+- **What it is.** The reference prototype's `relationshipModels.py` already implements this: an *additive* polynomial model expands each source variable into its own polynomial basis (`x`, `x²`, ... up to a chosen degree) with no cross terms between different sources. That additivity is what keeps it tractable — the fit is still an ordinary linear least-squares/ridge solve, just against an expanded feature matrix, not a genuinely nonlinear optimization. This means v1's engine-native linear-algebra work (the Eigen-based ridge solve) is **directly reused**, not replaced — v2 adds feature expansion and degree selection on top of it, it doesn't need a new class of solver. That's also the reason it was safe to defer past v1 rather than needing to be designed in from day one: the two are additive in effort the same way the model is additive in features.
+- **User-selectable, not silently automatic.** Per your steer, this needs to be a real UI choice at import time, not a fixed backend decision — e.g. "Linear only" / "Allow curvature up to degree *N*" / "Let the tool decide per relationship." The reference prototype already has a `mode: auto` that picks the best degree per target via the same held-out predictive-loss criterion v1 uses for edge scoring (see "Regularization and model selection" above) — that auto mode is a good default, with the user able to cap or override it.
+- **No new equation-engine capability needed.** [Project schema](../projectSchema.md) already lists `Power` among the supported `mathJson` node kinds. An additive polynomial relationship — a sum of `coefficient * Power(sourceSymbol, degree)` terms — is directly expressible with `Add`, `Multiply` and `Power`, the same primitives an ordinary hand-authored equation already uses. Nothing about the equation model, validator, or engine execution needs to change to consume a fitted polynomial's output.
+- **Cost to budget for.** Per-pair fitting cost scales with the degree search (multiple candidate degrees fit and compared per target when `mode: auto`), so this does make the stage-2 fit more expensive than the linear-only v1 — worth profiling against the two-stage pruning (stage 1's cheap correlation filter) once real usage patterns exist, rather than guessing at a degree cap up front.

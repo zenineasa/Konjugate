@@ -2512,5 +2512,118 @@ export async function runInteractionTests(window) {
         assert.equal(await relationshipCount(), before);
     });
 
+    await run('time-series import proposes a lagged edge and materializes it as one undoable step', async () => {
+        // Deterministic pseudo-random generator (mulberry32), used instead of a smooth formula
+        // like a sinusoid: a smooth curve is strongly autocorrelated with itself, which the
+        // engine-side unit tests (engine/tests/graphInferenceTests.cpp) found leaks information
+        // across lags in exactly the way real noise must not, producing a spurious reverse edge.
+        function mulberry32(seed) {
+            return function () {
+                seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function gaussianFrom(random) {
+            const u1 = Math.max(random(), 1e-9);
+            const u2 = random();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+        // columnA follows a genuine AR(1) process, and columnB[t] = 3*columnA[t-1] + noise, with
+        // columnA independent of columnB -- the same one-directional generative shape validated
+        // in engine/tests/graphInferenceTests.cpp's inferGraphFindsAOneDirectionalLaggedEdge.
+        function buildLaggedPairCsv(rowCount = 60) {
+            const random = mulberry32(2002);
+            const a = [0.2];
+            for (let t = 1; t < rowCount; t += 1) a.push(0.5 * a[t - 1] + 0.3 * gaussianFrom(random));
+            const lines = ['time,columnA,columnB'];
+            for (let t = 0; t < rowCount; t += 1) {
+                const previousA = t > 0 ? a[t - 1] : a[0];
+                lines.push(`${t},${a[t]},${3.0 * previousA + 0.05 * gaussianFrom(random)}`);
+            }
+            return `${lines.join('\n')}\n`;
+        }
+
+        const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
+        const nodeCount = async () => Number((await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`)).match(/\d+/)[0]);
+        const relationshipCount = async () => Number((await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`)).match(/\d+/)[0]);
+
+        // An existing node whose state symbol exactly matches the CSV's "columnA" header --
+        // exercising the "match an existing state, don't create a new node" mapping path.
+        // "columnB" has no existing match, exercising "create a new node" instead.
+        await evaluate(window, `document.querySelector('[data-tool="move"]').click()`);
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#newNodeName').value = 'Import test A';
+            const values = { name: 'Column A', symbol: 'columnA', value: '0', unit: '' };
+            Object.entries(values).forEach(([field, value]) => {
+                const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]');
+                input.value = value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            document.querySelector('#createNode').click();
+        })()`);
+        await waitFor(window, `Boolean(${nodeLabel('Import test A')})`, 'The label for "Import test A" did not render.');
+        await evaluate(window, `window.__debugTransform.simulateDragTo(0, 0, 0)`);
+
+        const nodesBefore = await nodeCount();
+        const edgesBefore = await relationshipCount();
+
+        await evaluate(window, `document.querySelector('#importTimeSeriesButton').click()`);
+        await waitFor(window, `!document.querySelector('#timeSeriesImport').classList.contains('hidden')`, 'The import card did not open.');
+
+        // A real OS file-picker dialog can't be driven by this harness (no Playwright
+        // setInputFiles/CDP bridge) -- window.__debugTimeSeriesImport.loadCsv exercises the exact
+        // same code path the real file input's change handler calls.
+        await evaluate(window, `window.__debugTimeSeriesImport.loadCsv(${JSON.stringify(buildLaggedPairCsv())})`);
+        await waitFor(window, `!document.querySelector('#timeSeriesMappingSection').hidden`, 'The column mapping section did not appear.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#timeSeriesMappingRows .timeSeriesMappingRow').length`), 2);
+        const mappingSelectValue = (index) => evaluate(window, `document.querySelectorAll('#timeSeriesMappingRows select')[${index}].value`);
+        assert.notEqual(await mappingSelectValue(0), 'create', 'columnA should auto-match the existing node/state, not default to creating one.');
+        assert.equal(await mappingSelectValue(1), 'create', 'columnB has no existing match and should default to creating a new node.');
+
+        await evaluate(window, `document.querySelector('#runTimeSeriesInference').click()`);
+        await waitFor(window, `!document.querySelector('#timeSeriesCandidatesSection').hidden`, 'The candidate list did not appear.', 15000);
+        assert.equal(await evaluate(window, `
+            [...document.querySelectorAll('#timeSeriesCandidateRows .timeSeriesCandidateMain')].some((span) => span.textContent.includes('columnA → columnB'))
+        `), true, 'Expected a columnA -> columnB candidate.');
+        assert.equal(await evaluate(window, `
+            [...document.querySelectorAll('#timeSeriesCandidateRows .timeSeriesCandidateMain')].some((span) => span.textContent.includes('columnB → columnA'))
+        `), false, 'Did not expect a spurious columnB -> columnA candidate.');
+        assert.equal(await evaluate(window, `document.querySelector('#timeSeriesCandidateRows .timeSeriesCandidateTag.lagged') !== null`), true,
+            'Expected the accepted candidate to be tagged lagged.');
+
+        const consoleMessages = await captureConsoleMessages(window, async () => {
+            await evaluate(window, `document.querySelector('#commitTimeSeriesImport').click()`);
+            await waitFor(window, `document.querySelector('#timeSeriesImport').classList.contains('hidden')`, 'The import card did not close after commit.', 15000);
+        });
+        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+
+        assert.equal(await nodeCount(), nodesBefore + 1, 'Committing should have created exactly one new node for columnB.');
+        assert.equal(await relationshipCount(), edgesBefore + 1, 'Committing should have created exactly one new edge.');
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await nodeCount(), nodesBefore, 'Undo should remove the created node.');
+        assert.equal(await relationshipCount(), edgesBefore, 'Undo should remove the created edge.');
+
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+        assert.equal(await nodeCount(), nodesBefore + 1, 'Redo should restore the created node.');
+        assert.equal(await relationshipCount(), edgesBefore + 1, 'Redo should restore the created edge.');
+
+        // Cleanup: undo the import again, then delete the throwaway "Import test A" node so this
+        // test doesn't leave the canvas mutated for whatever runs after it. replaceModelContents
+        // (which every undo/redo above runs through) rebuilds every CSS2D label from scratch,
+        // and that render is throttled to ~30fps -- after three rapid-fire history operations,
+        // clickElement's own getBoundingClientRect() needs the label to have actually reappeared
+        // in the DOM first.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await nodeCount(), nodesBefore);
+        await waitFor(window, `Boolean(${nodeLabel('Import test A')})`, 'The label for "Import test A" did not re-render after undo.');
+        await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
+        await clickElement(window, nodeLabel('Import test A'));
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

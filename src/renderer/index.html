@@ -346,6 +346,7 @@
         <div class="toolGroup createToolGroup" role="group" aria-label="Create">
             <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
             <button id="componentLibraryButton" class="toolButton" type="button" aria-expanded="false" aria-controls="componentLibraryPanel"><span>▤</span> Library</button>
+            <button id="importTimeSeriesButton" class="toolButton" type="button" aria-controls="timeSeriesImport"><span>⇩</span> Import</button>
         </div>
         <div class="toolGroup" role="group" aria-label="History">
             <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
@@ -627,6 +628,31 @@
             <footer>
                 <button data-delete-edge-group type="button">Delete group</button>
                 <button id="toggleEdgeGroupEnabled" type="button">Disable all</button>
+            </footer>
+        </div>
+
+        <div id="timeSeriesImport" class="contextCard editorCard timeSeriesImport hidden">
+            <header><div><span class="contextKicker">Import</span><strong>Time-series graph inference</strong></div><button data-close-card type="button">×</button></header>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <section>
+                <p class="builderHint">Import a CSV of multivariate time-series data -- a numeric, evenly spaced time column, then one column per variable -- and propose candidate directed relationships from it.</p>
+                <label class="editorField"><span>CSV file</span><input id="timeSeriesFile" type="file" accept=".csv"></label>
+                <div id="timeSeriesImportStatus" class="equationDiagnostics" role="status"></div>
+            </section>
+            <section id="timeSeriesMappingSection" hidden>
+                <h3>Column mapping</h3>
+                <p class="builderHint">Each column is matched to an existing node's state by exact name, or creates a new node.</p>
+                <div id="timeSeriesMappingRows"></div>
+                <button id="runTimeSeriesInference" type="button" disabled>Run inference</button>
+            </section>
+            <section id="timeSeriesCandidatesSection" hidden>
+                <h3>Candidate relationships</h3>
+                <p class="builderHint">One row per proposed directed edge. <strong>Lagged</strong> means the source's past value predicts the target; <strong>correlation-only</strong> means the two are related but no clear direction was found.</p>
+                <div id="timeSeriesCandidateRows"></div>
+            </section>
+            <footer>
+                <button id="cancelTimeSeriesImport" type="button">Cancel</button>
+                <button id="commitTimeSeriesImport" class="doneButton" type="button" disabled>Import selected</button>
             </footer>
         </div>
 

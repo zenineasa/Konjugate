@@ -67,6 +67,33 @@ export async function validateWithEngine(content, options) {
     }
 }
 
+export async function inferWithEngine(csvContent, config, options) {
+    const executable = await resolveEnginePath(options);
+    if (!executable) return { available: false };
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateInference-'));
+    const inputPath = join(directory, 'series.csv');
+    const reportPath = join(directory, 'inference.json');
+    try {
+        await writeFile(inputPath, csvContent, 'utf8');
+        const args = ['infer', inputPath, '--report', reportPath];
+        // Only the flags the caller actually set are passed through -- the engine's own
+        // InferenceConfig defaults apply to anything omitted, so a partial config here never
+        // silently zeroes out a value the engine would otherwise pick sensibly.
+        if (config?.skeletonThreshold !== undefined) args.push('--skeleton-threshold', String(config.skeletonThreshold));
+        if (config?.coefficientThreshold !== undefined) args.push('--coefficient-threshold', String(config.coefficientThreshold));
+        if (config?.validationFraction !== undefined) args.push('--validation-fraction', String(config.validationFraction));
+        if (config?.candidateLags !== undefined) args.push('--lags', config.candidateLags.join(','));
+        if (config?.ridgePenalties !== undefined) args.push('--ridge-penalties', config.ridgePenalties.join(','));
+        const execution = await runEngine(executable, args, {}, options.signal);
+        if (execution.code !== 0) {
+            throw new Error(execution.diagnostics || `The inference engine exited with code ${execution.code}.`);
+        }
+        return { available: true, report: JSON.parse(await readFile(reportPath, 'utf8')) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}
+
 export async function runWithEngine(content, configuration, options) {
     const execution = await startEngineRun(content, configuration, options);
     if (!execution.available) return execution;

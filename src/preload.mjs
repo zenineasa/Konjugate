@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('modelClipboard', {
 
 contextBridge.exposeInMainWorld('engine', {
     validate: (content) => ipcRenderer.invoke('engineValidate', content),
+    infer: (csv, config) => ipcRenderer.invoke('engineInfer', csv, config),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),
     setPacing: (jobId, pacing) => ipcRenderer.invoke('engineSetPacing', jobId, pacing),

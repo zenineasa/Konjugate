@@ -30,6 +30,7 @@ import {
     unresolvedGroupSymbols
 } from '../edgeGroups.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
+import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -4538,13 +4539,26 @@ function serializeProjectDocument() {
             position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
             ports: structuredClone(subsystem.ports)
         })),
-        edgeGroups: model.edgeGroups.filter((group) => !group.deleted).map((group) => ({
-            id: group.id,
-            name: group.name,
-            memberNodeIds: [...group.memberNodeIds],
-            color: `#${group.color.toString(16).padStart(6, '0')}`,
-            definition: structuredClone(group.definition)
-        }))
+        // Node deletion (deleteSelected) only toggles visibility -- it has no reason to know
+        // about edgeGroups, and doesn't touch group.memberNodeIds -- so a group whose members
+        // were deleted directly (rather than via "detach"/"delete group") would otherwise still
+        // list now-invisible node ids here. hydrateEdgeGroups() throws on a member id that isn't
+        // in the exported nodes array, which single-edge/node edits never re-trigger mid-session,
+        // but any full-document round trip does -- a save+reload, or (already possible today,
+        // independent of this) the AI assistant's own commit path, both call
+        // hydrateProjectDocument() on exactly this output. Filtering to currently-visible members
+        // here keeps every serialization self-consistent regardless of how a member became
+        // invisible, without needing every hiding path to separately know about group membership.
+        edgeGroups: model.edgeGroups
+            .filter((group) => !group.deleted)
+            .map((group) => ({
+                id: group.id,
+                name: group.name,
+                memberNodeIds: group.memberNodeIds.filter((id) => visibleNodeIds.has(id)),
+                color: `#${group.color.toString(16).padStart(6, '0')}`,
+                definition: structuredClone(group.definition)
+            }))
+            .filter((group) => group.memberNodeIds.length >= 2)
     };
 }
 
@@ -4969,6 +4983,278 @@ function commitAssistantProposal() {
     hideAssistantPanel();
     return true;
 }
+
+// { csvContent, mapping: [{columnName, nodeId|null, stateId|null, createNew, suggestedSymbol?}],
+//   candidates: [{sourceColumn, targetColumn, lag, coefficient, intercept, score, provenance, accepted}] | null }
+let timeSeriesImportState = null;
+
+function existingNodesForMapping() {
+    // A plain-data projection decoupled from the live Three.js-backed model, matching what
+    // src/csvImport.mjs's pure functions expect -- state.label is this app's live-model field
+    // for what csvImport.mjs (and the on-disk document) call "name".
+    return model.nodes.filter((node) => !node.deleted).map((node) => ({
+        id: node.id,
+        states: node.states.map((state) => ({ id: state.id, symbol: state.symbol, name: state.label }))
+    }));
+}
+
+function resetTimeSeriesImport() {
+    timeSeriesImportState = null;
+    $('#timeSeriesFile').value = '';
+    $('#timeSeriesImportStatus').className = 'equationDiagnostics';
+    $('#timeSeriesImportStatus').textContent = '';
+    $('#timeSeriesMappingSection').hidden = true;
+    $('#timeSeriesMappingRows').replaceChildren();
+    $('#runTimeSeriesInference').disabled = true;
+    $('#timeSeriesCandidatesSection').hidden = true;
+    $('#timeSeriesCandidateRows').replaceChildren();
+    $('#commitTimeSeriesImport').disabled = true;
+}
+
+function openTimeSeriesImport() {
+    if (activeResult) return;
+    hideCards($('#timeSeriesImport'));
+    resetTimeSeriesImport();
+    $('#timeSeriesImport').classList.remove('hidden');
+}
+
+function renderTimeSeriesMapping() {
+    const container = $('#timeSeriesMappingRows');
+    container.replaceChildren();
+    const nodesForMapping = existingNodesForMapping();
+    timeSeriesImportState.mapping.forEach((entry, index) => {
+        const row = document.createElement('div');
+        row.className = 'timeSeriesMappingRow';
+        const label = document.createElement('span');
+        label.textContent = entry.columnName;
+        row.append(label);
+        const select = document.createElement('select');
+        select.append(new Option(`Create node “${entry.suggestedSymbol ?? suggestSymbol(entry.columnName)}”`, 'create'));
+        nodesForMapping.forEach((node) => {
+            const modelNode = model.nodes.find((candidate) => candidate.id === node.id);
+            node.states.forEach((state) => {
+                select.append(new Option(`${modelNode.title} · ${state.name}`, `${node.id}:${state.id}`));
+            });
+        });
+        select.value = entry.createNew ? 'create' : `${entry.nodeId}:${entry.stateId}`;
+        select.addEventListener('change', () => {
+            if (select.value === 'create') {
+                timeSeriesImportState.mapping[index] =
+                    { columnName: entry.columnName, nodeId: null, stateId: null, createNew: true, suggestedSymbol: suggestSymbol(entry.columnName) };
+            } else {
+                const [nodeId, stateId] = select.value.split(':').map(Number);
+                timeSeriesImportState.mapping[index] = { columnName: entry.columnName, nodeId, stateId, createNew: false };
+            }
+        });
+        row.append(select);
+        container.append(row);
+    });
+}
+
+function renderTimeSeriesCandidates() {
+    const container = $('#timeSeriesCandidateRows');
+    container.replaceChildren();
+    if (!timeSeriesImportState.candidates.length) {
+        const empty = document.createElement('p');
+        empty.className = 'builderHint';
+        empty.textContent = 'No candidate relationships were found.';
+        container.append(empty);
+        $('#commitTimeSeriesImport').disabled = true;
+        return;
+    }
+    timeSeriesImportState.candidates.forEach((candidate, index) => {
+        const row = document.createElement('label');
+        row.className = 'timeSeriesCandidateRow';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = candidate.accepted;
+        checkbox.addEventListener('change', () => {
+            timeSeriesImportState.candidates[index].accepted = checkbox.checked;
+            $('#commitTimeSeriesImport').disabled = !timeSeriesImportState.candidates.some((item) => item.accepted);
+        });
+        const main = document.createElement('span');
+        main.className = 'timeSeriesCandidateMain';
+        main.textContent = `${candidate.sourceColumn} → ${candidate.targetColumn}`;
+        const meta = document.createElement('span');
+        meta.className = 'timeSeriesCandidateMeta';
+        meta.textContent = candidate.provenance === 'lagged'
+            ? `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`
+            : `score ${candidate.score.toFixed(2)}`;
+        main.append(meta);
+        const tag = document.createElement('span');
+        tag.className = `timeSeriesCandidateTag ${candidate.provenance}`;
+        tag.textContent = candidate.provenance === 'lagged' ? 'Lagged' : 'Correlation-only';
+        row.append(checkbox, main, tag);
+        container.append(row);
+    });
+    $('#commitTimeSeriesImport').disabled = !timeSeriesImportState.candidates.some((item) => item.accepted);
+}
+
+function upperFirst(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function formatFittedNumber(value) {
+    if (value === 0) return '0';
+    return String(Number(value.toPrecision(6)));
+}
+
+// symbolLatex is null for a bare constant term (the intercept).
+function signedTermLatex(value, symbolLatex) {
+    const magnitude = formatFittedNumber(Math.abs(value));
+    const term = symbolLatex ? `${magnitude} \\cdot ${symbolLatex}` : magnitude;
+    return value < 0 ? `- ${term}` : `+ ${term}`;
+}
+
+// Generates LaTeX text, not a hand-built mathJson tree -- validateEquationLatex()/ComputeEngine
+// already parses programmatically-interpolated numeric literals (decimals, negatives,
+// scientific notation) with no special-casing, and every symbol reference here is one of
+// reconcileEquationBindings()'s own auto-generated role-prefixed names (e.g. "sourceTemperature"),
+// which are always multi-letter by construction and so never trip the \mathrm{} single-letter
+// "_upright" parsing quirk documented in docs/proposals/timeSeriesGraphInference.md.
+function latexForFittedEdge(candidate, sourceStateSymbol) {
+    const sourceSymbol = `\\mathrm{source${upperFirst(sourceStateSymbol)}}`;
+    const coefficientTerm = signedTermLatex(candidate.coefficient, sourceSymbol).replace(/^\+ /, '');
+    const interceptTerm = signedTermLatex(candidate.intercept, null);
+    return `${coefficientTerm} ${interceptTerm}`;
+}
+
+async function commitTimeSeriesImport() {
+    if (!timeSeriesImportState?.candidates || activeResult) return;
+    const acceptedCandidates = timeSeriesImportState.candidates.filter((candidate) => candidate.accepted);
+    if (!acceptedCandidates.length) return;
+    const status = $('#timeSeriesImportStatus');
+
+    const operations = [];
+    const resolvedColumns = new Map();
+    timeSeriesImportState.mapping.forEach((entry, mappingIndex) => {
+        if (entry.createNew) {
+            const symbol = entry.suggestedSymbol ?? suggestSymbol(entry.columnName);
+            const nodeRef = `timeSeriesNode${mappingIndex}`;
+            const stateRef = `${nodeRef}State`;
+            operations.push({ kind: 'addNode', ref: nodeRef, name: entry.columnName });
+            operations.push({ kind: 'addState', nodeRef, ref: stateRef, name: symbol, symbol, initialValue: 0, unit: '' });
+            resolvedColumns.set(entry.columnName, { nodeRef, stateRef, symbol });
+        } else {
+            const node = model.nodes.find((candidate) => candidate.id === entry.nodeId);
+            const state = node.states.find((candidate) => candidate.id === entry.stateId);
+            resolvedColumns.set(entry.columnName, { nodeId: entry.nodeId, stateId: entry.stateId, symbol: state.symbol });
+        }
+    });
+    acceptedCandidates.forEach((candidate, index) => {
+        const source = resolvedColumns.get(candidate.sourceColumn);
+        const target = resolvedColumns.get(candidate.targetColumn);
+        const edgeRef = `timeSeriesEdge${index}`;
+        operations.push({
+            kind: 'addEdge', ref: edgeRef, name: `${candidate.sourceColumn} → ${candidate.targetColumn}`,
+            sourceNodeRef: source.nodeRef ?? source.nodeId, targetNodeRef: target.nodeRef ?? target.nodeId,
+            directionality: 'directed'
+        });
+        operations.push({
+            kind: 'setEdgeEquation', edgeRef, outputStateRef: target.stateRef ?? target.stateId,
+            latex: latexForFittedEdge(candidate, source.symbol)
+        });
+    });
+
+    const baseDocument = serializeProjectDocument();
+    let prepared;
+    try {
+        prepared = buildAssistantProposal(baseDocument, { proposalVersion: 1, operations });
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = error.message;
+        return;
+    }
+    const validation = await window.engine.validate(JSON.stringify(prepared.document));
+    if (!validation.available || !validation.report.valid) {
+        status.className = 'equationDiagnostics';
+        status.textContent = validation.available
+            ? (validation.report.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.message).join(' ')
+                || 'The native validator rejected this import.')
+            : 'The native validation engine is unavailable.';
+        return;
+    }
+
+    const before = baseDocument;
+    const after = prepared.document;
+    replaceModelContents(after);
+    recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
+    resetTimeSeriesImport();
+    $('#timeSeriesImport').classList.add('hidden');
+}
+
+$('#importTimeSeriesButton').addEventListener('click', openTimeSeriesImport);
+
+async function loadTimeSeriesCsv(content) {
+    const status = $('#timeSeriesImportStatus');
+    try {
+        const parsed = parseCsv(content);
+        timeSeriesImportState = {
+            csvContent: content,
+            mapping: mapColumnsToNodes(parsed.columnNames, existingNodesForMapping()),
+            candidates: null
+        };
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `Parsed ${parsed.columnNames.length} column${parsed.columnNames.length === 1 ? '' : 's'}, ${parsed.rows.length} rows.`;
+        $('#timeSeriesMappingSection').hidden = false;
+        $('#timeSeriesCandidatesSection').hidden = true;
+        $('#timeSeriesCandidateRows').replaceChildren();
+        $('#commitTimeSeriesImport').disabled = true;
+        renderTimeSeriesMapping();
+        $('#runTimeSeriesInference').disabled = false;
+    } catch (error) {
+        timeSeriesImportState = null;
+        status.className = 'equationDiagnostics';
+        status.textContent = error.message;
+        $('#timeSeriesMappingSection').hidden = true;
+        $('#runTimeSeriesInference').disabled = true;
+    }
+}
+
+$('#timeSeriesFile').addEventListener('change', async () => {
+    const file = $('#timeSeriesFile').files[0];
+    if (!file) return;
+    await loadTimeSeriesCsv(await file.text());
+});
+
+// A real OS file-picker dialog behind <input type="file"> can't be driven by this app's
+// interaction-test harness (a raw Electron BrowserWindow driven via webContents.executeJavaScript
+// -- no Playwright setInputFiles/CDP bridge here, and .files can't be set from page-context JS
+// for security reasons). This exposes the exact same CSV-loading path the real file input's
+// change handler calls above, so a test can exercise parsing, column mapping, inference and
+// commit end to end without a real file-picker -- the same reasoning as window.__debugTransform
+// above for the 3D transform gizmo.
+window.__debugTimeSeriesImport = { loadCsv: (content) => loadTimeSeriesCsv(content) };
+
+$('#runTimeSeriesInference').addEventListener('click', async () => {
+    if (!timeSeriesImportState || activeResult) return;
+    const button = $('#runTimeSeriesInference');
+    const status = $('#timeSeriesImportStatus');
+    button.disabled = true;
+    status.className = 'equationDiagnostics';
+    status.textContent = 'Running inference…';
+    try {
+        const result = await window.engine.infer(timeSeriesImportState.csvContent, {});
+        if (!result.available) throw new Error('The native inference engine is unavailable.');
+        timeSeriesImportState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `Found ${timeSeriesImportState.candidates.length} candidate relationship${timeSeriesImportState.candidates.length === 1 ? '' : 's'}.`;
+        $('#timeSeriesCandidatesSection').hidden = false;
+        renderTimeSeriesCandidates();
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+});
+
+$('#cancelTimeSeriesImport').addEventListener('click', () => {
+    resetTimeSeriesImport();
+    $('#timeSeriesImport').classList.add('hidden');
+});
+
+$('#commitTimeSeriesImport').addEventListener('click', () => { commitTimeSeriesImport(); });
 
 function assistantModelSummary() {
     const document = serializeProjectDocument();

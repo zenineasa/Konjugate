@@ -85,6 +85,14 @@ Relationships may be unidirectional, such as an electrical input, diode current 
 
 ![Advanced multigraph with parallel thermal relationships and unidirectional electrical interactions](assets/ForReadme/advancedGraphRepresentation.png)
 
+## Causal inference
+
+Building a model by hand assumes you already know its structure, which components exist and how they interact. Often you don't; you have a CSV of timeseries data (sensor logs, monitoring exports, historical records) and want to know what's actually driving what before you can start authoring a model.
+
+Konjugate can propose a starting graph from that data directly. Import a CSV of multivariate timeseries, and it finds which columns are related, in which direction, and whether the relationship is linear or curved; then builds real nodes, edges and equations from it, reviewed and accepted before anything is added to your model.
+
+It works in two stages: a lagged partial-correlation pass cheaply screens which variables are worth testing at all, then a joint ridge regression determines each surviving relationship's direction and fits its equation, linear or polynomial. See [Causal inference](docs/causalInference.md) for the full method.
+
 ## Current Status
 
 This project is currently in the early stages of development.

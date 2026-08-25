@@ -82,6 +82,8 @@ konjugate::InferenceConfig inferenceConfigFromArgs(int argc, char** argv) {
     if (!lags.empty()) config.candidateLags = parseIntList(lags);
     const auto ridgePenalties = optionPath(argc, argv, "--ridge-penalties").string();
     if (!ridgePenalties.empty()) config.ridgePenalties = parseDoubleList(ridgePenalties);
+    const auto degrees = optionPath(argc, argv, "--degrees").string();
+    if (!degrees.empty()) config.candidateDegrees = parseIntList(degrees);
     return config;
 }
 }
@@ -127,7 +129,7 @@ int main(int argc, char** argv) {
     }
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
-                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0]\n";
+                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]\n";
         std::_Exit(64);
     }
     const std::string command = argv[1];

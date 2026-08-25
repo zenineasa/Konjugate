@@ -2687,5 +2687,89 @@ export async function runInteractionTests(window) {
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
     });
 
+    await run('causal inference with curvature allowed recovers a quadratic edge equation', async () => {
+        // Same deterministic-noise reasoning and AR(1)-driven columnP as the lagged-pair test
+        // above, but columnQ[t] = 2*columnP[t-1] + 0.5*columnP[t-1]^2 + noise -- an exact
+        // quadratic relationship, matching engine/tests/causalInferenceTests.cpp's
+        // makeQuadraticPairSeries. That C++ test found 300 rows necessary for a robust fit at
+        // this construction (fewer let a spurious reverse edge slip through finite-sample
+        // overfitting on the richer degree-2 feature set); this test uses the same row count.
+        function mulberry32(seed) {
+            return function () {
+                seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function gaussianFrom(random) {
+            const u1 = Math.max(random(), 1e-9);
+            const u2 = random();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+        function buildQuadraticPairCsv(rowCount = 300) {
+            const random = mulberry32(5005);
+            const p = [0.2];
+            for (let t = 1; t < rowCount; t += 1) p.push(0.5 * p[t - 1] + 0.3 * gaussianFrom(random));
+            const lines = ['time,columnP,columnQ'];
+            for (let t = 0; t < rowCount; t += 1) {
+                const previousP = t > 0 ? p[t - 1] : p[0];
+                lines.push(`${t},${p[t]},${2.0 * previousP + 0.5 * previousP * previousP + 0.05 * gaussianFrom(random)}`);
+            }
+            return `${lines.join('\n')}\n`;
+        }
+
+        await evaluate(window, `document.querySelector('#causalInferenceButton').click()`);
+        await waitFor(window, `!document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not open.');
+
+        await evaluate(window, `window.__debugCausalInference.loadCsv(${JSON.stringify(buildQuadraticPairCsv())})`);
+        await waitFor(window, `!document.querySelector('#causalInferenceMappingSection').hidden`, 'The column mapping section did not appear.');
+
+        await evaluate(window, `(() => {
+            const select = document.querySelector('#causalInferenceDegreeMode');
+            select.value = 'fixed';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#causalInferenceDegreeValue').value = '2';
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#causalInferenceDegreeValueField').hidden`), false,
+            'Selecting "Allow curvature up to degree..." should reveal the degree input.');
+
+        await evaluate(window, `document.querySelector('#runCausalInference').click()`);
+        await waitFor(window, `!document.querySelector('#causalInferenceCandidatesSection').hidden`, 'The candidate list did not appear.', 15000);
+        assert.equal(await evaluate(window, `
+            [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateMain')].some((span) => span.textContent.includes('columnP → columnQ'))
+        `), true, 'Expected a columnP -> columnQ candidate.');
+        assert.equal(await evaluate(window, `
+            [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateMain')].some((span) => span.textContent.includes('columnQ → columnP'))
+        `), false, 'Did not expect a spurious columnQ -> columnP candidate.');
+
+        // The candidate list UI has no dedicated display for fitted polynomial terms (only
+        // source/target/lag/score/provenance), so this reads the raw candidate data the "Allow
+        // curvature" config actually produced -- the real thing this test needs to prove, since
+        // committing and reopening the resulting edge only re-renders the same terms through
+        // latexForFittedEdge, not an independent check.
+        const candidates = await evaluate(window, `window.__debugCausalInference.candidates()`);
+        const aToB = candidates.find((candidate) => candidate.sourceColumn === 'columnP' && candidate.targetColumn === 'columnQ');
+        assert.ok(aToB, 'Expected a columnP -> columnQ candidate in the raw candidate data.');
+        assert.ok(aToB.terms.some((term) => term.degree === 2),
+            `Expected a degree-2 term with "Allow curvature up to degree 2" selected, got terms: ${JSON.stringify(aToB.terms)}`);
+
+        const consoleMessages = await captureConsoleMessages(window, async () => {
+            await evaluate(window, `document.querySelector('#commitCausalInference').click()`);
+            await waitFor(window, `document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not close after commit.', 15000);
+        });
+        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+
+        // Cleanup: undo the commit (removes both new nodes and the edge in one step, mirroring
+        // how commitCausalInference records a single history entry), leaving the canvas as found.
+        const nodesBefore = await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`);
+        const edgesBefore = await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore - 2,
+            'Undo should remove both nodes created for columnP and columnQ.');
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore - 1,
+            'Undo should remove the created edge.');
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

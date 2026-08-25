@@ -5005,6 +5005,9 @@ function resetCausalInference() {
     $('#causalInferenceStatus').textContent = '';
     $('#causalInferenceMappingSection').hidden = true;
     $('#causalInferenceMappingRows').replaceChildren();
+    $('#causalInferenceDegreeMode').value = 'linear';
+    $('#causalInferenceDegreeValueField').hidden = true;
+    $('#causalInferenceDegreeValue').value = '3';
     $('#runCausalInference').disabled = true;
     $('#causalInferenceCandidatesSection').hidden = true;
     $('#causalInferenceCandidateRows').replaceChildren();
@@ -5111,12 +5114,20 @@ function signedTermLatex(value, symbolLatex) {
 // scientific notation) with no special-casing, and every symbol reference here is one of
 // reconcileEquationBindings()'s own auto-generated role-prefixed names (e.g. "sourceTemperature"),
 // which are always multi-letter by construction and so never trip the \mathrm{} single-letter
-// "_upright" parsing quirk documented in docs/proposals/causalInference.md.
+// "_upright" parsing quirk documented in docs/proposals/causalInference.md. candidate.terms is one
+// entry per fitted polynomial degree (always at least a degree-1 entry); degree 1 renders as the
+// bare source symbol, degree >= 2 as the symbol raised to that power -- Power is already a
+// supported mathJson primitive, so no equation-engine changes are needed for this.
 function latexForFittedEdge(candidate, sourceStateSymbol) {
     const sourceSymbol = `\\mathrm{source${upperFirst(sourceStateSymbol)}}`;
-    const coefficientTerm = signedTermLatex(candidate.coefficient, sourceSymbol).replace(/^\+ /, '');
+    const termsLatex = candidate.terms
+        .slice()
+        .sort((a, b) => a.degree - b.degree)
+        .map((term) => signedTermLatex(term.coefficient, term.degree === 1 ? sourceSymbol : `${sourceSymbol}^{${term.degree}}`))
+        .join(' ')
+        .replace(/^\+ /, '');
     const interceptTerm = signedTermLatex(candidate.intercept, null);
-    return `${coefficientTerm} ${interceptTerm}`;
+    return `${termsLatex} ${interceptTerm}`;
 }
 
 async function commitCausalInference() {
@@ -5224,7 +5235,28 @@ $('#causalInferenceFile').addEventListener('change', async () => {
 // change handler calls above, so a test can exercise parsing, column mapping, inference and
 // commit end to end without a real file-picker -- the same reasoning as window.__debugTransform
 // above for the 3D transform gizmo.
-window.__debugCausalInference = { loadCsv: (content) => loadCausalInferenceCsv(content) };
+window.__debugCausalInference = {
+    loadCsv: (content) => loadCausalInferenceCsv(content),
+    // A candidate's fitted polynomial terms have no dedicated review-list UI to assert against
+    // (renderCausalInferenceCandidates only shows source/target/lag/score/provenance) and the
+    // resulting edge's equation is otherwise only readable by clicking its canvas line open --
+    // fragile this deep into the interaction suite, where accumulated camera/geometry state from
+    // 60+ prior tests can leave a relationship's projected midpoint raycasting to the wrong
+    // object. Exposing the raw candidate data lets a test verify a fitted term (e.g. a degree >=
+    // 2 one) reached the UI without depending on canvas hit-testing at all.
+    candidates: () => structuredClone(causalInferenceState?.candidates ?? null)
+};
+
+$('#causalInferenceDegreeMode').addEventListener('change', () => {
+    $('#causalInferenceDegreeValueField').hidden = $('#causalInferenceDegreeMode').value === 'linear';
+});
+
+function causalInferenceDegreesFromUi() {
+    const mode = $('#causalInferenceDegreeMode').value;
+    if (mode === 'linear') return [1];
+    const degree = Number($('#causalInferenceDegreeValue').value);
+    return mode === 'auto' ? [1, degree] : [degree];
+}
 
 $('#runCausalInference').addEventListener('click', async () => {
     if (!causalInferenceState || activeResult) return;
@@ -5234,7 +5266,8 @@ $('#runCausalInference').addEventListener('click', async () => {
     status.className = 'equationDiagnostics';
     status.textContent = 'Running inference…';
     try {
-        const result = await window.engine.infer(causalInferenceState.csvContent, {});
+        const config = { candidateDegrees: causalInferenceDegreesFromUi() };
+        const result = await window.engine.infer(causalInferenceState.csvContent, config);
         if (!result.available) throw new Error('The native inference engine is unavailable.');
         causalInferenceState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));
         status.className = 'equationDiagnostics valid';

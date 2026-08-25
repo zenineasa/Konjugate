@@ -23,16 +23,30 @@ struct InferenceConfig {
     std::string skeletonMethod = "partialCorrelation";
     std::vector<int> candidateLags = {1, 2, 3};
     double skeletonThreshold = 0.1;      // |partial correlation| a pair must clear to survive stage 1
-    double coefficientThreshold = 0.05;  // |standardized coefficient| a source must clear to become an edge
+    double coefficientThreshold = 0.05;  // aggregate (L2-norm across degrees) |standardized coefficient| a source must clear
     double validationFraction = 0.2;     // chronological held-out split, applied per target fit
     std::vector<double> ridgePenalties = {0.01, 0.1, 1.0, 10.0};
+    // The array *is* the UI mode: {1} = linear only (default, byte-identical to the original v1
+    // behavior), {N} = force degree N (no linear comparison), {1, N} = auto -- fit both and keep
+    // whichever scores better per target, reusing the same held-out-score selection already used
+    // for lag/penalty rather than adding a second selection mechanism. See
+    // docs/proposals/causalInference.md's "Planned next" section.
+    std::vector<int> candidateDegrees = {1};
+};
+
+// One polynomial term of a fitted relationship: coefficient * sourceColumn^degree, in the
+// original (unstandardized) units of the two columns. A purely linear edge has exactly one
+// entry with degree == 1; a fitted curve has one entry per degree 1..selected.
+struct PolynomialTerm {
+    int degree = 1;
+    double coefficient = 0.0;
 };
 
 struct InferredEdge {
     std::string sourceColumn;
     std::string targetColumn;
     int lag = 0;                // 0 for a correlationOnly edge, which has no lag concept
-    double coefficient = 0.0;   // in the original (unstandardized) units of the two columns
+    std::vector<PolynomialTerm> terms; // always non-empty; see PolynomialTerm
     double intercept = 0.0;     // in the original units of the target column
     double score = 0.0;         // held-out variance-explained, roughly (-inf, 1]; higher is better
     std::string provenance;     // "lagged" | "correlationOnly"

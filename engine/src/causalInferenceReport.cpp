@@ -43,8 +43,14 @@ void writeInferenceReport(const std::filesystem::path& path, const InferenceResu
         if (index) json << ',';
         const auto& edge = result.edges[index];
         json << "{\"sourceColumn\":\"" << escape(edge.sourceColumn) << "\",\"targetColumn\":\"" << escape(edge.targetColumn)
-             << "\",\"lag\":" << edge.lag << ",\"coefficient\":" << edge.coefficient << ",\"intercept\":" << edge.intercept
-             << ",\"score\":" << edge.score << ",\"provenance\":\"" << escape(edge.provenance) << "\"}";
+             << "\",\"lag\":" << edge.lag << ",\"terms\":[";
+        for (std::size_t termIndex = 0; termIndex < edge.terms.size(); ++termIndex) {
+            if (termIndex) json << ',';
+            const auto& term = edge.terms[termIndex];
+            json << "{\"degree\":" << term.degree << ",\"coefficient\":" << term.coefficient << "}";
+        }
+        json << "],\"intercept\":" << edge.intercept << ",\"score\":" << edge.score
+             << ",\"provenance\":\"" << escape(edge.provenance) << "\"}";
     }
     json << "]}";
     atomicWrite(path, json.str());

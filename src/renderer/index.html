@@ -646,6 +646,12 @@
                 <h3>Column mapping</h3>
                 <p class="builderHint">Each column is matched to an existing node's state by exact name, or creates a new node.</p>
                 <div id="causalInferenceMappingRows"></div>
+                <label class="editorField"><span>Nonlinearity</span><select id="causalInferenceDegreeMode">
+                    <option value="linear" selected>Linear only</option>
+                    <option value="fixed">Allow curvature up to degree…</option>
+                    <option value="auto">Let the tool decide</option>
+                </select></label>
+                <label class="editorField" id="causalInferenceDegreeValueField" hidden><span>Degree</span><input id="causalInferenceDegreeValue" type="number" min="2" max="6" value="3"></label>
                 <button id="runCausalInference" class="templateButton" type="button" disabled>Run inference</button>
             </section>
             <section id="causalInferenceCandidatesSection" hidden>

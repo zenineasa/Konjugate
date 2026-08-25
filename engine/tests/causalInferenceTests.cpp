@@ -25,6 +25,14 @@ const konjugate::InferredEdge* findEdge(const konjugate::InferenceResult& result
     return nullptr;
 }
 
+// The degree-1 (linear) term's coefficient, or 0 if the edge has none -- every test in this file
+// that predates the polynomial extension only ever produced a single linear term, so this is a
+// drop-in stand-in for the old InferredEdge::coefficient scalar field.
+double linearCoefficient(const konjugate::InferredEdge& edge) {
+    for (const auto& term : edge.terms) if (term.degree == 1) return term.coefficient;
+    return 0.0;
+}
+
 // A fixed-seed generator, used throughout instead of a smooth deterministic formula (e.g. a sum
 // of sinusoids) for "noise" terms below. Reproducibility (same seed -> same sequence every run)
 // is kept, but the earlier sinusoidal approach was tried first and failed: a smooth curve is
@@ -77,6 +85,33 @@ konjugate::InferenceSeries makeLaggedPairSeries(std::size_t rowCount) {
     for (std::size_t t = 0; t < rowCount; ++t) {
         const double previousA = t > 0 ? a[t - 1] : a[0];
         series.rows.push_back({a[t], 3.0 * previousA + noiseSample(generator, 0.05)});
+    }
+    return series;
+}
+
+konjugate::InferenceSeries makeQuadraticPairSeries(std::size_t rowCount) {
+    // Same AR(1)-driven "a" as makeLaggedPairSeries above, but b[t] = 2*a[t-1] + 0.5*a[t-1]^2
+    // *exactly* -- no noise term on b at all. This is the test that actually proves the
+    // scale-only destandardization math for degree >= 2 terms (see causalInference.hpp's
+    // InferenceConfig::candidateDegrees comment): with a known, exact relationship, the
+    // recovered polynomial coefficients must land close to the true (2.0, 0.5), not just
+    // "plausible."
+    //
+    // Needs more rows than makeLaggedPairSeries's 60: b's lag is a near-deterministic function of
+    // a[t-2], and the degree-2 feature it contributes gives ridge's inevitable shrinkage of the
+    // self-lag control extra room to leave a residual that a richer feature set can latch onto,
+    // producing a spurious b -> a edge at smaller sample sizes even after inferGraph's
+    // degrees-of-freedom-adjusted acceptance gate. 300 rows was confirmed clean across several
+    // independent generator seeds at this construction; smaller counts were not.
+    std::mt19937 generator(5005);
+    konjugate::InferenceSeries series;
+    series.columnNames = {"a", "b"};
+    std::vector<double> a(rowCount);
+    a[0] = 0.2;
+    for (std::size_t t = 1; t < rowCount; ++t) a[t] = 0.5 * a[t - 1] + noiseSample(generator, 0.3);
+    for (std::size_t t = 0; t < rowCount; ++t) {
+        const double previousA = t > 0 ? a[t - 1] : a[0];
+        series.rows.push_back({a[t], 2.0 * previousA + 0.5 * previousA * previousA});
     }
     return series;
 }
@@ -242,7 +277,7 @@ void inferGraphFindsAOneDirectionalLaggedEdge() {
     require(aToB != nullptr, "Expected an edge from a to b.");
     require(aToB->provenance == "lagged", "The a-to-b edge should be backed by lagged evidence.");
     require(aToB->lag >= 1, "The a-to-b edge should have a positive lag.");
-    require(aToB->coefficient > 1.5 && aToB->coefficient < 4.5, "The a-to-b coefficient should be roughly 3.0.");
+    require(linearCoefficient(*aToB) > 1.5 && linearCoefficient(*aToB) < 4.5, "The a-to-b coefficient should be roughly 3.0.");
     require(aToB->score > 0.5, "The a-to-b fit should explain a majority of the held-out variance.");
 
     require(findEdge(result, "b", "a") == nullptr, "b should not Granger-cause a in this construction.");
@@ -273,8 +308,47 @@ void inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold(
     // Both coefficients are de-standardized from the same shared, symmetric partial-correlation
     // value (coefficient = partialCorrelation * sigmaTarget / sigmaSource), so they must agree
     // in sign even though the two sigma ratios differ.
-    require((aToB->coefficient > 0.0) == (bToA->coefficient > 0.0), "Both fallback coefficients should share the sign of the underlying partial correlation.");
-    require(std::abs(aToB->coefficient) > 1e-6 && std::abs(bToA->coefficient) > 1e-6, "Neither fallback coefficient should be degenerately zero.");
+    require((linearCoefficient(*aToB) > 0.0) == (linearCoefficient(*bToA) > 0.0),
+        "Both fallback coefficients should share the sign of the underlying partial correlation.");
+    require(std::abs(linearCoefficient(*aToB)) > 1e-6 && std::abs(linearCoefficient(*bToA)) > 1e-6,
+        "Neither fallback coefficient should be degenerately zero.");
+}
+
+void inferGraphRecoversAnExactQuadraticRelationship() {
+    const auto series = makeQuadraticPairSeries(300);
+    konjugate::InferenceConfig config;
+    config.candidateDegrees = {1, 2};
+    const auto result = konjugate::inferGraph(series, config);
+
+    const auto* aToB = findEdge(result, "a", "b");
+    require(aToB != nullptr, "Expected an edge from a to b.");
+    require(aToB->provenance == "lagged", "The a-to-b edge should be backed by lagged evidence.");
+    require(aToB->score > 0.9, "An exact (noise-free) relationship should fit almost perfectly.");
+    require(findEdge(result, "b", "a") == nullptr, "b should not Granger-cause a in this construction.");
+
+    double linear = 0.0;
+    double quadratic = 0.0;
+    for (const auto& term : aToB->terms) {
+        if (term.degree == 1) linear = term.coefficient;
+        else if (term.degree == 2) quadratic = term.coefficient;
+    }
+    require(approxEqual(linear, 2.0, 0.2), "The recovered linear coefficient should be close to the true value of 2.0.");
+    require(approxEqual(quadratic, 0.5, 0.1), "The recovered quadratic coefficient should be close to the true value of 0.5.");
+}
+
+void inferGraphWithDefaultConfigStaysLinearOnly() {
+    // candidateDegrees defaults to {1} -- even fit against a genuinely quadratic relationship,
+    // the result must never contain a degree >= 2 term, since this is what keeps existing
+    // callers (and every other test in this file, all written before this extension) getting
+    // byte-identical behavior to the original linear-only implementation.
+    const auto series = makeQuadraticPairSeries(300);
+    konjugate::InferenceConfig config;
+    const auto result = konjugate::inferGraph(series, config);
+    const auto* aToB = findEdge(result, "a", "b");
+    require(aToB != nullptr, "Expected an edge from a to b even under a linear-only fit.");
+    for (const auto& term : aToB->terms) {
+        require(term.degree == 1, "candidateDegrees defaulting to {1} should never produce a degree >= 2 term.");
+    }
 }
 
 }
@@ -294,6 +368,8 @@ int main() {
         inferGraphFindsAOneDirectionalLaggedEdge();
         inferGraphFindsBothDirectionsForAMutualRelationship();
         inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold();
+        inferGraphRecoversAnExactQuadraticRelationship();
+        inferGraphWithDefaultConfigStaysLinearOnly();
         std::cout << "Graph inference tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

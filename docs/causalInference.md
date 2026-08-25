@@ -24,7 +24,7 @@ Stage 1 decides which unordered pairs of columns are related at all, cheaply, be
 
 ## Stage 2: lagged ridge regression, per target
 
-For each column acting as a target *i*, `sources(i)` is the set of columns that survived stage 1 against *i*. If it's empty, *i* gets no lagged candidates at all. Otherwise, every source in `sources(i)` is fit **jointly** against target *i*, along with target *i*'s own previous value as a control term -- the *self-lag* -- so that a source's correlation with the target's own persistence is never mistaken for the source's own effect. For a candidate lag `L` and row `t`, the feature row is `[x_j(t−L) for j in sources(i)] ++ [x_i(t−L)]` and the response is `x_i(t)`, all in standardized units.
+For each column acting as a target *i*, `sources(i)` is the set of columns that survived stage 1 against *i*. If it's empty, *i* gets no lagged candidates at all. Otherwise, every source in `sources(i)` is fit **jointly** against target *i*, along with target *i*'s own previous value as a control term -- the *self-lag* -- so that a source's correlation with the target's own persistence is never mistaken for the source's own effect. For a candidate lag `L`, degree `d` (`InferenceConfig::candidateDegrees`, default `{1}` -- see "Additive polynomial terms" below) and row `t`, the feature row is `[x_j(t−L), x_j(t−L)², …, x_j(t−L)^d for j in sources(i)] ++ [x_i(t−L)]` and the response is `x_i(t)`, all in standardized units. The self-lag control term is always linear only, regardless of `d`: its job is absorbing the target's own persistence as a nuisance variable, not something reported as an edge, and giving it its own polynomial expansion would risk it soaking up variance that should go to genuine source relationships for no benefit.
 
 ### Ridge with an unpenalized intercept
 
@@ -39,34 +39,65 @@ Xc = X_train − x̄,      yc = y_train − ȳ
 
 `(XcᵀXc + λI)` is always symmetric positive definite for `λ > 0`, solved via `Eigen::LDLT`. This matters here specifically because a chronological train split is not itself exactly zero-mean, even though the full series was standardized to be -- centering only the training rows, not relying on the whole-series standardization alone, is what keeps the fit correct on that subset.
 
-### Choosing the lag and penalty by held-out score, not in-sample fit
+### Additive polynomial terms (v2)
 
-Each candidate lag (`InferenceConfig::candidateLags`, default `1,2,3`) is split chronologically into a training prefix and a validation suffix (`InferenceConfig::validationFraction`, default `0.2`) -- never shuffled, since shuffling would leak future information into the fit exactly the way it would for any time series. For every `(lag, λ)` pair (`λ` from `InferenceConfig::ridgePenalties`, default `0.01, 0.1, 1.0, 10.0`), the score is
+`InferenceConfig::candidateDegrees` controls whether, and how far, curvature is allowed: `{1}` (the default) is linear only, `{N}` forces degree `N` with no linear comparison, and `{1, N}` lets the fit pick whichever of linear or degree-`N` scores better per target -- the array *is* the UI's three-way choice ("Linear only" / "Allow curvature up to degree *N*" / "Let the tool decide"). The model stays **additive**: each source expands into its own power basis (`x, x², …, x^d`) with no cross terms between different sources or between a source's own degrees, so the fit is still an ordinary ridge solve against a wider feature matrix, not a new class of solver.
 
-```
-score = 1 − MSE(validation) / Var(validation target)
-```
+Degree 1 reuses the mean+scale standardized column exactly as above -- this is what keeps `candidateDegrees == {1}` byte-identical to the original linear-only behavior. Degree ≥ 2 features use a *different*, scale-only normalization instead: `v = x/σ_source` (no mean subtraction -- cheaply recovered from the mean-centered standardized column as `v = x_std + μ_source/σ_source`), then `v^p`, then divided by a per-power scalar `s_p` (the RMS of `v^p` over the training rows) purely so the ridge penalty treats every degree fairly -- a raw `v²`'s natural scale differs substantially from `v¹`'s even when `v` itself is unit-scale.
 
--- a held-out variance-explained measure, unbounded below but capped at `1` for a perfect fit. This is the same reasoning the design proposal gives for preferring a predictive/held-out criterion (AIC/cross-validation family) over a structure-recovery one (BIC family): the resulting graph is meant to be run forward as a simulation, so a criterion that rewards genuinely predictive relationships is the right one, not one that rewards recovering some assumed "true" sparse structure. The `(lag, λ)` combination with the best score across the whole search is kept as that target's fit.
-
-**A fit that scores at or below zero is discarded entirely** -- every coefficient from it, no matter how large any individual one looks, since a non-positive score means the joint fit does not even beat predicting the target's own held-out mean. This gate exists because of a concrete failure mode found while testing it: a target whose own dynamics are already well explained by its self-lag term can still show a small but nonzero standardized coefficient on an unrelated source, purely from finite-sample overfitting under a weak ridge penalty, even though the joint fit is clearly worse than the null model. Thresholding coefficient magnitude alone does not catch this; requiring the fit to actually explain held-out variance does.
-
-### From a surviving coefficient to a candidate edge
-
-For a fit that passes the score gate, each source *j*'s own standardized coefficient `β_j` is kept as a directed edge `j → i` only if `|β_j| ≥ InferenceConfig::coefficientThreshold` (default `0.05`). Its coefficient is de-standardized back to the original units of the two columns:
+The reason for the split is destandardization. A mean-centered `x_std = (x−μ)/σ` raised to a power `p` spreads into *every* degree `0..p` of `x` once expanded (binomial expansion) -- real algebra, but complexity this design has no need for. Because scale-only `v` was never mean-centered, `v^p = x^p/σ^p` stays a single clean term with no cross-degree mixing, so recovering the original-units coefficient for a degree-`p` term is one division:
 
 ```
-coefficient = β_j · σ_i / σ_j
+coefficient_p = w_p · σ_target / (σ_source^p · s_p)
 ```
 
-The joint intercept is de-standardized the same way and then split evenly across every accepted source for that target, so their sum reconstructs the full de-standardized intercept exactly (this is what makes the split well-defined regardless of how many of the target's sources end up accepted) -- consistent with how Konjugate already sums every edge's own contribution into a node's derivative ([Project schema](projectSchema.md): "Multiple relationships targeting the same state contribute additively"). The self-lag's own coefficient is discarded once it has served its purpose as a control term; it never becomes part of any edge.
+with **no intercept correction** -- only the mean-centered degree-1 term needs one, exactly as in the linear case above. `fitRidgeRegression` needs no changes to support any of this: it already centers whatever `x`/`y` it is given internally, per call, so a design matrix mixing a mean-centered degree-1 column with non-mean-centered degree-≥2 columns is already handled correctly by its existing internal centering step.
+
+The stage 1 skeleton pass stays linear-correlation-based even when polynomial degrees are enabled -- a purely nonlinear relationship with near-zero *linear* correlation could in principle be filtered out before stage 2 ever gets a chance to fit a polynomial to it. A nonlinear-aware skeleton (e.g. mutual information) would close this gap but is not implemented; it is a known boundary, not a solved one.
+
+### Choosing the lag, degree and penalty by held-out score, not in-sample fit
+
+Each candidate lag (`InferenceConfig::candidateLags`, default `1,2,3`) is split chronologically into a training prefix and a validation suffix (`InferenceConfig::validationFraction`, default `0.2`) -- never shuffled, since shuffling would leak future information into the fit exactly the way it would for any time series. For every `(lag, degree, λ)` combination (`λ` from `InferenceConfig::ridgePenalties`, default `0.01, 0.1, 1.0, 10.0`), the raw score is
+
+```
+rawScore = 1 − MSE(validation) / Var(validation target)
+```
+
+-- a held-out variance-explained measure, unbounded below but capped at `1` for a perfect fit. This is the same reasoning the design proposal gives for preferring a predictive/held-out criterion (AIC/cross-validation family) over a structure-recovery one (BIC family): the resulting graph is meant to be run forward as a simulation, so a criterion that rewards genuinely predictive relationships is the right one, not one that rewards recovering some assumed "true" sparse structure.
+
+**Selecting the best `(lag, degree, λ)` and gating whether the result is kept at all both use a degrees-of-freedom-adjusted score instead of the raw one**, the classical adjusted-R² correction:
+
+```
+adjustedScore = 1 − (1 − rawScore) · (n−1) / (n−p−1)
+```
+
+for `n` validation rows and `p` features (source columns × degree, plus the self-lag). Everything downstream -- the score gate, the reported `edge.score` -- otherwise works exactly as the raw-score version described next; only *which* score decides the winning combination and whether it clears zero has changed. This exists because of a concrete failure mode found while extending the fit to degree ≥ 2: a richer feature set gives ridge's inevitable shrinkage of the self-lag coefficient more room to leave a residual that an unrelated but informative source (one whose own lag happens to correlate with an *earlier* lag of the target, e.g. because the target is itself autoregressive) can fit, producing a spurious reverse edge with a positive raw score that a plain `rawScore ≤ 0` gate does not catch -- and, being a shrinkage-bias effect rather than pure finite-sample noise, one that does not reliably vanish with more rows either. The adjustment shrinks toward the raw score as the validation split grows relative to the feature count (so a degree-1 fit, with few parameters, is barely affected -- this is why `candidateDegrees == {1}`'s selected fit is unchanged from v1) and toward `−∞` as the feature count approaches the validation split size, holding a degree ≥ 2 fit on a modest sample to a meaningfully higher bar. `edge.score`, as reported on the resulting candidate, is still the **raw**, more readable held-out score of whichever fit won under the adjusted comparison -- the adjustment is a selection and gating tool, not a user-facing number.
+
+**A fit whose adjusted score is at or below zero is discarded entirely** -- every coefficient from it, no matter how large any individual one looks, since a non-positive adjusted score means the joint fit does not beat predicting the target's own held-out mean by more than its own parameter count would explain by chance. Thresholding coefficient magnitude alone does not catch this; requiring the fit to actually explain held-out variance, judged against its own complexity, does.
+
+### From a surviving fit to a candidate edge
+
+For a fit that passes the score gate, each source *j* is kept as a directed edge `j → i` based on the **aggregate** magnitude across all of its fitted degrees, not each one individually -- a curved relationship is one edge with a multi-term equation, not independent per-degree decisions (mirroring the reference prototype's own `edge_scores()`, an L2 norm across a source's degree block). Writing `β_{j,p}` for source *j*'s standardized coefficient at degree `p` (`p` ranging over whatever `bestDegree` the winning fit used):
+
+```
+aggregate_j = sqrt(Σ_p β_{j,p}²)
+```
+
+*j* is accepted only if `aggregate_j ≥ InferenceConfig::coefficientThreshold` (default `0.05`). Each accepted degree then de-standardizes independently -- degree 1 exactly as before, degree ≥ 2 via the scale-only formula above:
+
+```
+coefficient_{j,1} = β_{j,1} · σ_i / σ_j                              (degree 1)
+coefficient_{j,p} = β_{j,p} · σ_i / (σ_j^p · s_p)          (degree p ≥ 2)
+```
+
+producing one `{degree, coefficient}` term per fitted degree on the edge (`InferredEdge::terms`), rather than the single scalar coefficient v1 shipped. The joint intercept is de-standardized the same way as before and then split evenly across every accepted source's **degree-1 term only** for that target (degree ≥ 2 terms contribute no intercept correction, per the derivation above), so the accepted degree-1 terms' share of it still sums to the full de-standardized intercept exactly -- consistent with how Konjugate already sums every edge's own contribution into a node's derivative ([Project schema](projectSchema.md): "Multiple relationships targeting the same state contribute additively"). The self-lag's own coefficient is discarded once it has served its purpose as a control term; it never becomes part of any edge.
 
 ## The fallback tier: correlation without a direction
 
-A pair that survives stage 1 but has no lagged evidence in either direction (neither `i → j` nor `j → i` clears the score gate and coefficient threshold) is not dropped. It still produces two directed edges -- one each way -- built from the shared, symmetric partial-correlation coefficient `π_ij` instead of a lagged one, de-standardized with the same formula (`π_ij · σ_target/σ_source`), tagged `provenance = "correlationOnly"` rather than `"lagged"`.
+A pair that survives stage 1 but has no lagged evidence in either direction (neither `i → j` nor `j → i` clears the score gate and coefficient threshold) is not dropped. It still produces two directed edges -- one each way -- built from the shared, symmetric partial-correlation coefficient `π_ij` instead of a lagged one, de-standardized with the same degree-1 formula (`π_ij · σ_target/σ_source`) as a single-term `terms = [{degree: 1, coefficient: …}]`, tagged `provenance = "correlationOnly"` rather than `"lagged"`. This tier is always linear (degree 1) regardless of `candidateDegrees` -- it is built from partial correlation, an inherently linear measure, so there is no natural nonlinear counterpart to it here.
 
 This mirrors a decision already made for [edge groups](edgeGroups.md): a mutual relationship is represented as two independent directed edges, never a single bidirectional one, since a bidirectional edge's engine-level sign-flip is only correct for an anti-symmetric relationship, which a fitted (or correlation-derived) coefficient has no reason to be -- see [Edge and relationship directionality](edgeDirectionality.md). The provenance tag is what keeps this case visibly distinct from a lagged pair in the review UI: "these move together, direction unclear" should never look identical to "these drive each other."
 
 ## From a candidate to a real equation
 
-The renderer resolves `sourceColumn`/`targetColumn` to concrete node states (existing, matched by exact symbol/name, or newly created) and generates LaTeX text for the accepted candidate -- not a hand-built `mathJson` tree, since `validateEquationLatex`/`ComputeEngine` already parses programmatically-interpolated numeric literals (decimals, negatives, scientific notation) with no special-casing needed. The source symbol is always `reconcileEquationBindings`'s own auto-generated role-prefixed name (e.g. `sourceTemperature`), which is multi-letter by construction and so never trips the `\mathrm{}` single-letter `_upright` parsing quirk. The generated equation is exactly `coefficient · sourceX ± intercept`, submitted as one `addEdge` + `setEdgeEquation` operation pair (plus `addNode`/`addState` operations for any column with no existing match) through the same `applyAssistantProposal` → native-`validate` → `replaceModelContents` pipeline the AI assistant already uses, so the import lands as one undoable step with the same validation guarantees as any other model edit.
+The renderer resolves `sourceColumn`/`targetColumn` to concrete node states (existing, matched by exact symbol/name, or newly created) and generates LaTeX text for the accepted candidate -- not a hand-built `mathJson` tree, since `validateEquationLatex`/`ComputeEngine` already parses programmatically-interpolated numeric literals (decimals, negatives, scientific notation) with no special-casing needed. The source symbol is always `reconcileEquationBindings`'s own auto-generated role-prefixed name (e.g. `sourceTemperature`), which is multi-letter by construction and so never trips the `\mathrm{}` single-letter `_upright` parsing quirk. `Power` is already a supported `mathJson` primitive, so a degree ≥ 2 term needs no equation-engine changes either: it renders as `sourceX^{degree}`, degree 1 as the bare symbol. The generated equation is `coefficient₁ · sourceX ± coefficient₂ · sourceX² ± … ± intercept`, one term per entry in `InferredEdge::terms`, submitted as one `addEdge` + `setEdgeEquation` operation pair (plus `addNode`/`addState` operations for any column with no existing match) through the same `applyAssistantProposal` → native-`validate` → `replaceModelContents` pipeline the AI assistant already uses, so the import lands as one undoable step with the same validation guarantees as any other model edit.

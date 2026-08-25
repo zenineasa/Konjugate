@@ -451,11 +451,19 @@ let playing = false;
 let playbackTimer = null;
 let playbackStartedAt = 0;
 let playbackStartedFrom = 0;
+// Set on the final scheduled tick, once seek() has been sent for the run's end time but before
+// its round trip back through onTimelineChange (see that handler below) has actually landed --
+// stopping here instead of synchronously after seek() would flip #playPause to "done" while
+// #timeline still shows the previous frame's value, a real (if narrow) visible race, not just a
+// test-timing artifact: seek() is one-way IPC (ipcRenderer.send, addonPreload.cjs), so there is
+// no completion signal to await directly.
+let awaitingPlaybackEnd = false;
 
 function stopPlayback() {
     clearTimeout(playbackTimer);
     playbackTimer = null;
     playing = false;
+    awaitingPlaybackEnd = false;
     $('#playPause').textContent = '▶';
     $('#playPause').ariaLabel = 'Play';
 }
@@ -467,9 +475,9 @@ function schedulePlayback() {
     playbackTimer = setTimeout(() => {
         const elapsed = (performance.now() - playbackStartedAt) / 1000;
         const targetTime = Math.min(finalTime, playbackStartedFrom + elapsed * rate);
-        window.konjugateVisualizer.seek(targetTime);
-        if (targetTime >= finalTime) stopPlayback();
+        if (targetTime >= finalTime) awaitingPlaybackEnd = true;
         else schedulePlayback();
+        window.konjugateVisualizer.seek(targetTime);
     }, preferredPlaybackFrameMilliseconds);
 }
 
@@ -494,6 +502,7 @@ window.konjugateVisualizer.onTimelineChange((time) => {
     $('#timeline').value = String(time);
     $('#currentTime').value = formatTime(time);
     applyAllPoses(context.time);
+    if (awaitingPlaybackEnd) stopPlayback();
 });
 window.konjugateVisualizer.onSamplesAvailable(async ({ availableResultTime }) => {
     if (!context) return;

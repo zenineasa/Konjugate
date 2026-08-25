@@ -116,6 +116,38 @@ async function findCanvasPoint(window, point, maxRadius = 40) {
     return point;
 }
 
+// Generalizes the same spiral-until-clear idea to an arbitrary CSS2D label, rather than the
+// WebGL canvas specifically. Two overlapping CSS2D overlays (e.g. a relationship bundle label
+// whose midpoint happens to land near one of its own endpoint nodes' labels) can leave a point
+// that's inside one element's bounding rect but actually owned by the *other* one for
+// hit-testing purposes -- confirmed via document.elementFromPoint() returning the node's own
+// objectLabel instead of the intended bundle label at the naive center point. Searches only
+// within the target element's own bounding rect (not an unbounded radius), since wandering
+// outside it would just find some other element's clear space, not a still-valid point on this
+// one.
+async function findUnoccludedPoint(window, elementExpression, maxRadius = 30) {
+    const rect = await evaluate(window, `(() => {
+        const el = ${elementExpression};
+        const r = el?.getBoundingClientRect();
+        return r && { x: r.left + r.width / 2, y: r.top + r.height / 2, halfWidth: r.width / 2, halfHeight: r.height / 2 };
+    })()`);
+    if (!rect) return null;
+    for (let radius = 0; radius <= maxRadius; radius += 3) {
+        const offsets = radius === 0 ? [[0, 0]] : [[radius, 0], [-radius, 0], [0, radius], [0, -radius], [radius, radius], [-radius, -radius], [radius, -radius], [-radius, radius]];
+        for (const [dx, dy] of offsets) {
+            if (Math.abs(dx) > rect.halfWidth || Math.abs(dy) > rect.halfHeight) continue;
+            const candidate = { x: Math.round(rect.x + dx), y: Math.round(rect.y + dy) };
+            const owned = await evaluate(window, `(() => {
+                const el = ${elementExpression};
+                const hit = document.elementFromPoint(${candidate.x}, ${candidate.y});
+                return Boolean(el && hit && el.contains(hit));
+            })()`);
+            if (owned) return candidate;
+        }
+    }
+    return { x: Math.round(rect.x), y: Math.round(rect.y) };
+}
+
 // A handful of raw, pixel-coordinate pointer gestures (as opposed to clicking a known DOM
 // element) grow occasionally flaky this deep into the suite -- accumulated frame-timing
 // variance across 50+ prior tests, not a bug in the gesture itself: the same sequence is
@@ -1079,8 +1111,12 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open.');
         const shapeCount = await evaluate(window, `document.querySelectorAll('.shapeLibraryItem').length`);
         assert.ok(shapeCount > 0, 'Shape library did not list any shapes.');
+        // Domain chip order follows first-appearance order in assets/shapes/manifest.json, not
+        // alphabetical order -- "Robotics" was added between the structural and electrical
+        // shapes when the robotics shape set was bundled, which is why it lands here rather than
+        // at the end.
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#shapeLibraryDomains button')].map((button) => button.textContent)`),
-            ['All', 'Mechanical', 'Structural', 'Electrical', 'Fluid']);
+            ['All', 'Mechanical', 'Structural', 'Robotics', 'Electrical', 'Fluid']);
         assert.equal(await evaluate(window, `document.querySelector('#shapeLibraryDetailEmpty').hidden`), false, 'The detail pane should start with nothing selected.');
         assert.equal(await evaluate(window, `document.querySelector('#shapeLibraryDetailContent').hidden`), true);
 
@@ -1109,8 +1145,13 @@ export async function runInteractionTests(window) {
         // not throw trying to write into its now-detached card -- only the console (captured
         // here) would catch that, since it happens asynchronously well after these calls return.
         assert.deepEqual(searchMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
-        const fluidShapes = await evaluate(window, `[...document.querySelectorAll('.shapeLibraryItem')].map((item) => item.dataset.shapeId)`);
-        assert.ok(fluidShapes.length > 0 && fluidShapes.every((id) => id.startsWith('fluid/')));
+        // A shape's id path prefix reflects where its file lives, not every domain it's tagged
+        // under -- a multi-domain shape like robotics/propellerRotor (tagged both "robotics" and
+        // "fluid", since a propeller genuinely is an aerodynamic part) correctly appears here
+        // despite its "robotics/" id. Check the rendered domain text instead of the id prefix.
+        const fluidShapes = await evaluate(window,
+            `[...document.querySelectorAll('.shapeLibraryItem')].map((item) => item.querySelector('small').textContent)`);
+        assert.ok(fluidShapes.length > 0 && fluidShapes.every((domainText) => domainText.includes('Fluid')));
 
         // Switching back to "All" must show the Spur Gear thumbnail immediately from cache,
         // rather than a blank tile that gets refilled -- proving it wasn't regenerated.
@@ -2292,6 +2333,16 @@ export async function runInteractionTests(window) {
         const selectPivot = `document.querySelector('.node-label-container[data-node="${pivotId}"] .objectLabel').click()`;
         const selectOther = `document.querySelector('.node-label-container[data-node="${otherId}"] .objectLabel').click()`;
 
+        // CSS2D labels for freshly-created nodes aren't inserted into the DOM synchronously --
+        // CSS2DRenderer only appends them on the next throttled render tick (~30fps), the same
+        // reasoning documented on addNode() in the edge-groups test below. Both nodes were
+        // created back to back with little work between them, so without this wait, the clicks
+        // further down can intermittently fire before one or both labels have actually rendered.
+        await waitFor(window,
+            `Boolean(document.querySelector('.node-label-container[data-node="${pivotId}"] .objectLabel')) `
+            + `&& Boolean(document.querySelector('.node-label-container[data-node="${otherId}"] .objectLabel'))`,
+            'The free body nodes\' labels did not render.');
+
         // Earlier tests in the suite pan and zoom the camera and never reset it, so by this
         // point it can be framed anywhere -- fit it to the model first so both freshly-placed
         // nodes are reliably on screen and clickable for the real mouse clicks below, rather
@@ -2480,8 +2531,19 @@ export async function runInteractionTests(window) {
         await waitForStableRect(window,
             `(() => { const el = ${bundleLabel('Group test A')}; const rect = el?.getBoundingClientRect(); return rect && JSON.stringify(rect); })()`,
             'The mesh edge bundle label did not settle into a stable position.');
-        await rightClickElement(window, bundleLabel('Group test A'));
-        await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking a mesh edge did not open its context menu.');
+        // The bundle label's naive center point can be occluded by one of its own endpoint
+        // nodes' labels at this camera framing (confirmed: document.elementFromPoint() there
+        // resolves to the node's objectLabel, not the bundle label) -- find a point within the
+        // bundle label's own rect that it actually owns for hit-testing before clicking it.
+        const openedGroupMenu = await retryGesture(window,
+            async () => {
+                const point = await findUnoccludedPoint(window, bundleLabel('Group test A'));
+                window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+                window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'right', clickCount: 1 });
+                window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'right', clickCount: 1 });
+            },
+            `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
+        assert.ok(openedGroupMenu, 'Right-clicking a mesh edge did not open its context menu after 5 attempts.');
         assert.equal(await evaluate(window, `document.querySelector('#edgeContextOpenGroup').hidden`), false);
         assert.equal(await evaluate(window, `document.querySelector('#edgeContextDelete').hidden`), true);
         await evaluate(window, `document.querySelector('#edgeContextOpenGroup').click()`);

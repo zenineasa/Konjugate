@@ -576,7 +576,6 @@ input, select { user-select: text; }
     flex: 1; min-width: 0; height: 22px; padding: 0 5px; color: #aab9c1; background: #0a151d;
     border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px;
 }
-#runCausalInference { margin-top: 9px; }
 .causalInferenceCandidateRow { display: flex; align-items: center; gap: 8px; padding: 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 8px; cursor: pointer; }
 .causalInferenceCandidateRow:first-of-type { border-radius: 4px 4px 0 0; }
 .causalInferenceCandidateRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
@@ -614,6 +613,7 @@ input, select { user-select: text; }
 .editorCard footer .connectButton:hover { color: #a1e8e2; background: rgb(66 201 188 / 8%); }
 .doneButton { color: #09201e !important; background: var(--accent) !important; border-color: var(--accent) !important; font-weight: 700; }
 .editorField { display: grid; gap: 5px; margin-bottom: 10px; color: #6c818d; font-size: 8px; }
+.editorField[hidden] { display: none; }
 .editorField select, .editorField input { width: 100%; height: 29px; padding: 0 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .editorField input[type="color"] { padding: 3px; cursor: pointer; }
 .editorCard textarea { width: 100%; padding: 7px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.45; }

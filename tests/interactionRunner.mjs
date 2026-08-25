@@ -2725,13 +2725,21 @@ export async function runInteractionTests(window) {
         await evaluate(window, `window.__debugCausalInference.loadCsv(${JSON.stringify(buildQuadraticPairCsv())})`);
         await waitFor(window, `!document.querySelector('#causalInferenceMappingSection').hidden`, 'The column mapping section did not appear.');
 
+        // Checks actual rendered visibility (getComputedStyle), not just the hidden DOM property --
+        // .editorField's own `display: grid` is an author-stylesheet rule and so overrides the
+        // browser's default `[hidden] { display: none }` regardless of selector specificity
+        // (author rules beat user-agent rules at equal specificity); asserting only the property
+        // previously let a real "field stays visible under Linear" bug pass silently.
+        assert.equal(await isRenderedVisible(window, '#causalInferenceDegreeValueField'), false,
+            '"Linear only" (the default) should not show the degree input.');
+
         await evaluate(window, `(() => {
             const select = document.querySelector('#causalInferenceDegreeMode');
             select.value = 'fixed';
             select.dispatchEvent(new Event('change', { bubbles: true }));
             document.querySelector('#causalInferenceDegreeValue').value = '2';
         })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#causalInferenceDegreeValueField').hidden`), false,
+        assert.equal(await isRenderedVisible(window, '#causalInferenceDegreeValueField'), true,
             'Selecting "Allow curvature up to degree..." should reveal the degree input.');
 
         await evaluate(window, `document.querySelector('#runCausalInference').click()`);
@@ -2759,6 +2767,16 @@ export async function runInteractionTests(window) {
             await waitFor(window, `document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not close after commit.', 15000);
         });
         assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+
+        // A node created by causal inference should default to a sphere (commitCausalInference's
+        // addNode operations), not the generic assistant/manual default of a box.
+        const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
+        await waitFor(window, `Boolean(${nodeLabel('columnP')})`, 'The label for the newly-created "columnP" node did not render.');
+        await clickElement(window, nodeLabel('columnP'));
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Clicking the new columnP node did not open the node editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'sphere',
+            'A node created by causal inference should default to a sphere shape.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         // Cleanup: undo the commit (removes both new nodes and the edge in one step, mirroring
         // how commitCausalInference records a single history entry), leaving the canvas as found.

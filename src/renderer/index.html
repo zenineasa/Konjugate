@@ -649,10 +649,9 @@
                 <label class="editorField"><span>Nonlinearity</span><select id="causalInferenceDegreeMode">
                     <option value="linear" selected>Linear only</option>
                     <option value="fixed">Allow curvature up to degree…</option>
-                    <option value="auto">Let the tool decide</option>
+                    <option value="auto">Let the tool decide, up to degree…</option>
                 </select></label>
                 <label class="editorField" id="causalInferenceDegreeValueField" hidden><span>Degree</span><input id="causalInferenceDegreeValue" type="number" min="2" max="6" value="3"></label>
-                <button id="runCausalInference" class="templateButton" type="button" disabled>Run inference</button>
             </section>
             <section id="causalInferenceCandidatesSection" hidden>
                 <h3>Candidate relationships</h3>
@@ -661,7 +660,8 @@
             </section>
             <footer>
                 <button id="cancelCausalInference" type="button">Cancel</button>
-                <button id="commitCausalInference" class="doneButton" type="button" disabled>Import selected</button>
+                <button id="runCausalInference" type="button" disabled hidden>Run inference</button>
+                <button id="commitCausalInference" class="doneButton" type="button" disabled hidden>Import selected</button>
             </footer>
         </div>
 

@@ -4998,6 +4998,12 @@ function existingNodesForMapping() {
     }));
 }
 
+// Every footer button below follows the same rule as the section it belongs to: hidden until
+// the step it acts on is actually reachable (there is nothing to click yet, so don't show a
+// button for it), disabled only once reachable but currently inactionable (e.g. candidates exist
+// but none are checked). "Run inference" appears together with the mapping section and then
+// stays available for as long as it's shown, since re-running with different settings once you've
+// reached that point is a real, ongoing capability, not a one-shot step.
 function resetCausalInference() {
     causalInferenceState = null;
     $('#causalInferenceFile').value = '';
@@ -5008,9 +5014,11 @@ function resetCausalInference() {
     $('#causalInferenceDegreeMode').value = 'linear';
     $('#causalInferenceDegreeValueField').hidden = true;
     $('#causalInferenceDegreeValue').value = '3';
+    $('#runCausalInference').hidden = true;
     $('#runCausalInference').disabled = true;
     $('#causalInferenceCandidatesSection').hidden = true;
     $('#causalInferenceCandidateRows').replaceChildren();
+    $('#commitCausalInference').hidden = true;
     $('#commitCausalInference').disabled = true;
 }
 
@@ -5136,6 +5144,32 @@ async function commitCausalInference() {
     if (!acceptedCandidates.length) return;
     const status = $('#causalInferenceStatus');
 
+    // New nodes land on a circle -- every edge between two imported nodes is then a chord inside
+    // it, so nothing crosses through the middle of an unrelated node the way the generic 4-column
+    // grid default (assistantOperations.mjs's defaultPosition) can. Existing nodes the CSV matched
+    // keep whatever position they already have; only genuinely new nodes are placed, and the
+    // circle is centered on those existing nodes (if any) so the new ones appear near what they
+    // actually connect to rather than at an unrelated part of the model.
+    const newEntryCount = causalInferenceState.mapping.filter((entry) => entry.createNew).length;
+    const existingPositions = causalInferenceState.mapping
+        .filter((entry) => !entry.createNew)
+        .map((entry) => model.nodes.find((node) => node.id === entry.nodeId)?.position)
+        .filter((position) => position?.length === 3);
+    const circleCenter = existingPositions.length
+        ? existingPositions.reduce((sum, position) => [0, 1, 2].map((axis) => sum[axis] + position[axis] / existingPositions.length), [0, 0, 0])
+        : [0, 0, 0];
+    // Radius derived from the chord-length formula (chord = 2*radius*sin(pi/n)) so adjacent new
+    // nodes stay a constant ~3.6 units apart -- the same spacing defaultPosition's grid columns
+    // use -- regardless of how many columns this CSV creates.
+    const nodeSpacing = 3.6;
+    const circleRadius = newEntryCount > 1 ? nodeSpacing / (2 * Math.sin(Math.PI / newEntryCount)) : 0;
+    let newNodeIndex = 0;
+    const nextCirclePosition = () => {
+        const angle = (2 * Math.PI * newNodeIndex) / newEntryCount;
+        newNodeIndex += 1;
+        return [circleCenter[0] + circleRadius * Math.cos(angle), circleCenter[1] + circleRadius * Math.sin(angle), circleCenter[2]];
+    };
+
     const operations = [];
     const resolvedColumns = new Map();
     causalInferenceState.mapping.forEach((entry, mappingIndex) => {
@@ -5143,7 +5177,7 @@ async function commitCausalInference() {
             const symbol = entry.suggestedSymbol ?? suggestSymbol(entry.columnName);
             const nodeRef = `causalInferenceNode${mappingIndex}`;
             const stateRef = `${nodeRef}State`;
-            operations.push({ kind: 'addNode', ref: nodeRef, name: entry.columnName });
+            operations.push({ kind: 'addNode', ref: nodeRef, name: entry.columnName, position: nextCirclePosition(), shape: 'sphere' });
             operations.push({ kind: 'addState', nodeRef, ref: stateRef, name: symbol, symbol, initialValue: 0, unit: '' });
             resolvedColumns.set(entry.columnName, { nodeRef, stateRef, symbol });
         } else {
@@ -5210,14 +5244,17 @@ async function loadCausalInferenceCsv(content) {
         $('#causalInferenceMappingSection').hidden = false;
         $('#causalInferenceCandidatesSection').hidden = true;
         $('#causalInferenceCandidateRows').replaceChildren();
+        $('#commitCausalInference').hidden = true;
         $('#commitCausalInference').disabled = true;
         renderCausalInferenceMapping();
+        $('#runCausalInference').hidden = false;
         $('#runCausalInference').disabled = false;
     } catch (error) {
         causalInferenceState = null;
         status.className = 'equationDiagnostics';
         status.textContent = error.message;
         $('#causalInferenceMappingSection').hidden = true;
+        $('#runCausalInference').hidden = true;
         $('#runCausalInference').disabled = true;
     }
 }
@@ -5273,6 +5310,7 @@ $('#runCausalInference').addEventListener('click', async () => {
         status.className = 'equationDiagnostics valid';
         status.textContent = `Found ${causalInferenceState.candidates.length} candidate relationship${causalInferenceState.candidates.length === 1 ? '' : 's'}.`;
         $('#causalInferenceCandidatesSection').hidden = false;
+        $('#commitCausalInference').hidden = false;
         renderCausalInferenceCandidates();
     } catch (error) {
         status.className = 'equationDiagnostics';

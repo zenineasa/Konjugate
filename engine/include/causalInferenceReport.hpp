@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "graphInference.hpp"
+#include "causalInference.hpp"
 #include <filesystem>
 
 namespace konjugate {

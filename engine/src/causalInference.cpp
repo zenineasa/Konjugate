@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-#include "graphInference.hpp"
+#include "causalInference.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -77,7 +77,7 @@ InferenceSeries parseInferenceCsv(const std::string& csvContent) {
     }
 
     // Regular-spacing validation: v1 requires complete, evenly sampled input and rejects
-    // otherwise rather than imputing or resampling (docs/proposals/timeSeriesGraphInference.md,
+    // otherwise rather than imputing or resampling (docs/proposals/causalInference.md,
     // "Decided for v1").
     const double step = time[1] - time[0];
     if (!(step > kEpsilon)) throw std::runtime_error("The time column must be strictly increasing.");

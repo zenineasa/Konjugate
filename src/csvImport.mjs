@@ -3,7 +3,7 @@
 // Hand-rolled CSV reader, symmetric with resultExport.mjs's csvField() writer. Deliberately
 // minimal -- no quoted-field/embedded-newline/BOM handling -- malformed input is rejected with a
 // clear message rather than repaired, matching the "require complete, regularly sampled input"
-// v1 decision in docs/proposals/timeSeriesGraphInference.md.
+// v1 decision in docs/proposals/causalInference.md.
 
 function splitLine(line) {
     return line.split(',');
@@ -65,7 +65,7 @@ export function suggestSymbol(columnName) {
 //
 // existingNodes: [{ id, states: [{ id, symbol, name }] }], a plain-data projection of the live
 // model -- this function has no dependency on the renderer's Three.js-backed model shape, so it
-// stays reusable by the future digital-twin CSV importer (docs/proposals/timeSeriesGraphInference.md).
+// stays reusable by the future digital-twin CSV importer (docs/proposals/causalInference.md).
 export function mapColumnsToNodes(columnNames, existingNodes) {
     return columnNames.map((columnName) => {
         const normalized = columnName.trim().toLowerCase();

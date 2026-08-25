@@ -2,7 +2,7 @@
 
 # Time-series graph inference: constructing a model from data
 
-**Status: v1 shipped.** This document records the design brainstorm that led to the implementation; [Time-series graph inference](../timeSeriesGraphInference.md) is now the reference for the actual shipped mathematics and code. Everything below "Resolved so far" and "Decided for v1" describes what shipped; "Planned next" is still genuinely unimplemented and is the committed v2 -- kept here rather than deleted, unlike a fully-resolved proposal, because that plan is still live.
+**Status: v1 shipped.** This document records the design brainstorm that led to the implementation; [Causal inference](../causalInference.md) is now the reference for the actual shipped mathematics and code. Everything below "Resolved so far" and "Decided for v1" describes what shipped; "Planned next" is still genuinely unimplemented and is the committed v2 -- kept here rather than deleted, unlike a fully-resolved proposal, because that plan is still live.
 
 ## Problem
 

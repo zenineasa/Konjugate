@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-#include "graphInference.hpp"
-#include "graphInferenceReport.hpp"
+#include "causalInference.hpp"
+#include "causalInferenceReport.hpp"
 #include "modelValidator.hpp"
 #include "partitionPlan.hpp"
 #include "projectContainer.hpp"

@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-#include "graphInferenceReport.hpp"
+#include "causalInferenceReport.hpp"
 #include <fstream>
 #include <sstream>
 

@@ -4986,7 +4986,7 @@ function commitAssistantProposal() {
 
 // { csvContent, mapping: [{columnName, nodeId|null, stateId|null, createNew, suggestedSymbol?}],
 //   candidates: [{sourceColumn, targetColumn, lag, coefficient, intercept, score, provenance, accepted}] | null }
-let timeSeriesImportState = null;
+let causalInferenceState = null;
 
 function existingNodesForMapping() {
     // A plain-data projection decoupled from the live Three.js-backed model, matching what
@@ -4998,33 +4998,33 @@ function existingNodesForMapping() {
     }));
 }
 
-function resetTimeSeriesImport() {
-    timeSeriesImportState = null;
-    $('#timeSeriesFile').value = '';
-    $('#timeSeriesImportStatus').className = 'equationDiagnostics';
-    $('#timeSeriesImportStatus').textContent = '';
-    $('#timeSeriesMappingSection').hidden = true;
-    $('#timeSeriesMappingRows').replaceChildren();
-    $('#runTimeSeriesInference').disabled = true;
-    $('#timeSeriesCandidatesSection').hidden = true;
-    $('#timeSeriesCandidateRows').replaceChildren();
-    $('#commitTimeSeriesImport').disabled = true;
+function resetCausalInference() {
+    causalInferenceState = null;
+    $('#causalInferenceFile').value = '';
+    $('#causalInferenceStatus').className = 'equationDiagnostics';
+    $('#causalInferenceStatus').textContent = '';
+    $('#causalInferenceMappingSection').hidden = true;
+    $('#causalInferenceMappingRows').replaceChildren();
+    $('#runCausalInference').disabled = true;
+    $('#causalInferenceCandidatesSection').hidden = true;
+    $('#causalInferenceCandidateRows').replaceChildren();
+    $('#commitCausalInference').disabled = true;
 }
 
-function openTimeSeriesImport() {
+function openCausalInference() {
     if (activeResult) return;
-    hideCards($('#timeSeriesImport'));
-    resetTimeSeriesImport();
-    $('#timeSeriesImport').classList.remove('hidden');
+    hideCards($('#causalInference'));
+    resetCausalInference();
+    $('#causalInference').classList.remove('hidden');
 }
 
-function renderTimeSeriesMapping() {
-    const container = $('#timeSeriesMappingRows');
+function renderCausalInferenceMapping() {
+    const container = $('#causalInferenceMappingRows');
     container.replaceChildren();
     const nodesForMapping = existingNodesForMapping();
-    timeSeriesImportState.mapping.forEach((entry, index) => {
+    causalInferenceState.mapping.forEach((entry, index) => {
         const row = document.createElement('div');
-        row.className = 'timeSeriesMappingRow';
+        row.className = 'causalInferenceMappingRow';
         const label = document.createElement('span');
         label.textContent = entry.columnName;
         row.append(label);
@@ -5039,11 +5039,11 @@ function renderTimeSeriesMapping() {
         select.value = entry.createNew ? 'create' : `${entry.nodeId}:${entry.stateId}`;
         select.addEventListener('change', () => {
             if (select.value === 'create') {
-                timeSeriesImportState.mapping[index] =
+                causalInferenceState.mapping[index] =
                     { columnName: entry.columnName, nodeId: null, stateId: null, createNew: true, suggestedSymbol: suggestSymbol(entry.columnName) };
             } else {
                 const [nodeId, stateId] = select.value.split(':').map(Number);
-                timeSeriesImportState.mapping[index] = { columnName: entry.columnName, nodeId, stateId, createNew: false };
+                causalInferenceState.mapping[index] = { columnName: entry.columnName, nodeId, stateId, createNew: false };
             }
         });
         row.append(select);
@@ -5051,43 +5051,43 @@ function renderTimeSeriesMapping() {
     });
 }
 
-function renderTimeSeriesCandidates() {
-    const container = $('#timeSeriesCandidateRows');
+function renderCausalInferenceCandidates() {
+    const container = $('#causalInferenceCandidateRows');
     container.replaceChildren();
-    if (!timeSeriesImportState.candidates.length) {
+    if (!causalInferenceState.candidates.length) {
         const empty = document.createElement('p');
         empty.className = 'builderHint';
         empty.textContent = 'No candidate relationships were found.';
         container.append(empty);
-        $('#commitTimeSeriesImport').disabled = true;
+        $('#commitCausalInference').disabled = true;
         return;
     }
-    timeSeriesImportState.candidates.forEach((candidate, index) => {
+    causalInferenceState.candidates.forEach((candidate, index) => {
         const row = document.createElement('label');
-        row.className = 'timeSeriesCandidateRow';
+        row.className = 'causalInferenceCandidateRow';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = candidate.accepted;
         checkbox.addEventListener('change', () => {
-            timeSeriesImportState.candidates[index].accepted = checkbox.checked;
-            $('#commitTimeSeriesImport').disabled = !timeSeriesImportState.candidates.some((item) => item.accepted);
+            causalInferenceState.candidates[index].accepted = checkbox.checked;
+            $('#commitCausalInference').disabled = !causalInferenceState.candidates.some((item) => item.accepted);
         });
         const main = document.createElement('span');
-        main.className = 'timeSeriesCandidateMain';
+        main.className = 'causalInferenceCandidateMain';
         main.textContent = `${candidate.sourceColumn} → ${candidate.targetColumn}`;
         const meta = document.createElement('span');
-        meta.className = 'timeSeriesCandidateMeta';
+        meta.className = 'causalInferenceCandidateMeta';
         meta.textContent = candidate.provenance === 'lagged'
             ? `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`
             : `score ${candidate.score.toFixed(2)}`;
         main.append(meta);
         const tag = document.createElement('span');
-        tag.className = `timeSeriesCandidateTag ${candidate.provenance}`;
+        tag.className = `causalInferenceCandidateTag ${candidate.provenance}`;
         tag.textContent = candidate.provenance === 'lagged' ? 'Lagged' : 'Correlation-only';
         row.append(checkbox, main, tag);
         container.append(row);
     });
-    $('#commitTimeSeriesImport').disabled = !timeSeriesImportState.candidates.some((item) => item.accepted);
+    $('#commitCausalInference').disabled = !causalInferenceState.candidates.some((item) => item.accepted);
 }
 
 function upperFirst(text) {
@@ -5111,7 +5111,7 @@ function signedTermLatex(value, symbolLatex) {
 // scientific notation) with no special-casing, and every symbol reference here is one of
 // reconcileEquationBindings()'s own auto-generated role-prefixed names (e.g. "sourceTemperature"),
 // which are always multi-letter by construction and so never trip the \mathrm{} single-letter
-// "_upright" parsing quirk documented in docs/proposals/timeSeriesGraphInference.md.
+// "_upright" parsing quirk documented in docs/proposals/causalInference.md.
 function latexForFittedEdge(candidate, sourceStateSymbol) {
     const sourceSymbol = `\\mathrm{source${upperFirst(sourceStateSymbol)}}`;
     const coefficientTerm = signedTermLatex(candidate.coefficient, sourceSymbol).replace(/^\+ /, '');
@@ -5119,18 +5119,18 @@ function latexForFittedEdge(candidate, sourceStateSymbol) {
     return `${coefficientTerm} ${interceptTerm}`;
 }
 
-async function commitTimeSeriesImport() {
-    if (!timeSeriesImportState?.candidates || activeResult) return;
-    const acceptedCandidates = timeSeriesImportState.candidates.filter((candidate) => candidate.accepted);
+async function commitCausalInference() {
+    if (!causalInferenceState?.candidates || activeResult) return;
+    const acceptedCandidates = causalInferenceState.candidates.filter((candidate) => candidate.accepted);
     if (!acceptedCandidates.length) return;
-    const status = $('#timeSeriesImportStatus');
+    const status = $('#causalInferenceStatus');
 
     const operations = [];
     const resolvedColumns = new Map();
-    timeSeriesImportState.mapping.forEach((entry, mappingIndex) => {
+    causalInferenceState.mapping.forEach((entry, mappingIndex) => {
         if (entry.createNew) {
             const symbol = entry.suggestedSymbol ?? suggestSymbol(entry.columnName);
-            const nodeRef = `timeSeriesNode${mappingIndex}`;
+            const nodeRef = `causalInferenceNode${mappingIndex}`;
             const stateRef = `${nodeRef}State`;
             operations.push({ kind: 'addNode', ref: nodeRef, name: entry.columnName });
             operations.push({ kind: 'addState', nodeRef, ref: stateRef, name: symbol, symbol, initialValue: 0, unit: '' });
@@ -5144,7 +5144,7 @@ async function commitTimeSeriesImport() {
     acceptedCandidates.forEach((candidate, index) => {
         const source = resolvedColumns.get(candidate.sourceColumn);
         const target = resolvedColumns.get(candidate.targetColumn);
-        const edgeRef = `timeSeriesEdge${index}`;
+        const edgeRef = `causalInferenceEdge${index}`;
         operations.push({
             kind: 'addEdge', ref: edgeRef, name: `${candidate.sourceColumn} → ${candidate.targetColumn}`,
             sourceNodeRef: source.nodeRef ?? source.nodeId, targetNodeRef: target.nodeRef ?? target.nodeId,
@@ -5179,42 +5179,42 @@ async function commitTimeSeriesImport() {
     const after = prepared.document;
     replaceModelContents(after);
     recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
-    resetTimeSeriesImport();
-    $('#timeSeriesImport').classList.add('hidden');
+    resetCausalInference();
+    $('#causalInference').classList.add('hidden');
 }
 
-$('#importTimeSeriesButton').addEventListener('click', openTimeSeriesImport);
+$('#causalInferenceButton').addEventListener('click', openCausalInference);
 
-async function loadTimeSeriesCsv(content) {
-    const status = $('#timeSeriesImportStatus');
+async function loadCausalInferenceCsv(content) {
+    const status = $('#causalInferenceStatus');
     try {
         const parsed = parseCsv(content);
-        timeSeriesImportState = {
+        causalInferenceState = {
             csvContent: content,
             mapping: mapColumnsToNodes(parsed.columnNames, existingNodesForMapping()),
             candidates: null
         };
         status.className = 'equationDiagnostics valid';
         status.textContent = `Parsed ${parsed.columnNames.length} column${parsed.columnNames.length === 1 ? '' : 's'}, ${parsed.rows.length} rows.`;
-        $('#timeSeriesMappingSection').hidden = false;
-        $('#timeSeriesCandidatesSection').hidden = true;
-        $('#timeSeriesCandidateRows').replaceChildren();
-        $('#commitTimeSeriesImport').disabled = true;
-        renderTimeSeriesMapping();
-        $('#runTimeSeriesInference').disabled = false;
+        $('#causalInferenceMappingSection').hidden = false;
+        $('#causalInferenceCandidatesSection').hidden = true;
+        $('#causalInferenceCandidateRows').replaceChildren();
+        $('#commitCausalInference').disabled = true;
+        renderCausalInferenceMapping();
+        $('#runCausalInference').disabled = false;
     } catch (error) {
-        timeSeriesImportState = null;
+        causalInferenceState = null;
         status.className = 'equationDiagnostics';
         status.textContent = error.message;
-        $('#timeSeriesMappingSection').hidden = true;
-        $('#runTimeSeriesInference').disabled = true;
+        $('#causalInferenceMappingSection').hidden = true;
+        $('#runCausalInference').disabled = true;
     }
 }
 
-$('#timeSeriesFile').addEventListener('change', async () => {
-    const file = $('#timeSeriesFile').files[0];
+$('#causalInferenceFile').addEventListener('change', async () => {
+    const file = $('#causalInferenceFile').files[0];
     if (!file) return;
-    await loadTimeSeriesCsv(await file.text());
+    await loadCausalInferenceCsv(await file.text());
 });
 
 // A real OS file-picker dialog behind <input type="file"> can't be driven by this app's
@@ -5224,23 +5224,23 @@ $('#timeSeriesFile').addEventListener('change', async () => {
 // change handler calls above, so a test can exercise parsing, column mapping, inference and
 // commit end to end without a real file-picker -- the same reasoning as window.__debugTransform
 // above for the 3D transform gizmo.
-window.__debugTimeSeriesImport = { loadCsv: (content) => loadTimeSeriesCsv(content) };
+window.__debugCausalInference = { loadCsv: (content) => loadCausalInferenceCsv(content) };
 
-$('#runTimeSeriesInference').addEventListener('click', async () => {
-    if (!timeSeriesImportState || activeResult) return;
-    const button = $('#runTimeSeriesInference');
-    const status = $('#timeSeriesImportStatus');
+$('#runCausalInference').addEventListener('click', async () => {
+    if (!causalInferenceState || activeResult) return;
+    const button = $('#runCausalInference');
+    const status = $('#causalInferenceStatus');
     button.disabled = true;
     status.className = 'equationDiagnostics';
     status.textContent = 'Running inference…';
     try {
-        const result = await window.engine.infer(timeSeriesImportState.csvContent, {});
+        const result = await window.engine.infer(causalInferenceState.csvContent, {});
         if (!result.available) throw new Error('The native inference engine is unavailable.');
-        timeSeriesImportState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));
+        causalInferenceState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));
         status.className = 'equationDiagnostics valid';
-        status.textContent = `Found ${timeSeriesImportState.candidates.length} candidate relationship${timeSeriesImportState.candidates.length === 1 ? '' : 's'}.`;
-        $('#timeSeriesCandidatesSection').hidden = false;
-        renderTimeSeriesCandidates();
+        status.textContent = `Found ${causalInferenceState.candidates.length} candidate relationship${causalInferenceState.candidates.length === 1 ? '' : 's'}.`;
+        $('#causalInferenceCandidatesSection').hidden = false;
+        renderCausalInferenceCandidates();
     } catch (error) {
         status.className = 'equationDiagnostics';
         status.textContent = error.message;
@@ -5249,12 +5249,12 @@ $('#runTimeSeriesInference').addEventListener('click', async () => {
     }
 });
 
-$('#cancelTimeSeriesImport').addEventListener('click', () => {
-    resetTimeSeriesImport();
-    $('#timeSeriesImport').classList.add('hidden');
+$('#cancelCausalInference').addEventListener('click', () => {
+    resetCausalInference();
+    $('#causalInference').classList.add('hidden');
 });
 
-$('#commitTimeSeriesImport').addEventListener('click', () => { commitTimeSeriesImport(); });
+$('#commitCausalInference').addEventListener('click', () => { commitCausalInference(); });
 
 function assistantModelSummary() {
     const document = serializeProjectDocument();

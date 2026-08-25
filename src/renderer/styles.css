@@ -509,12 +509,12 @@ input, select { user-select: text; }
 .diagnosticsEntry-error .diagnosticsEntryMessage { color: #e0929a; }
 .diagnosticsEntry-warning .diagnosticsEntryMessage { color: #d9b06b; }
 .editorCard { width: 390px; }
-.edgeEditor, .edgeGroupEditor, .timeSeriesImport { width: 440px; }
+.edgeEditor, .edgeGroupEditor, .causalInference { width: 440px; }
 .contextCard.nodeEditor,
 .contextCard.edgeEditor,
 .contextCard.edgeBuilder,
 .contextCard.edgeGroupEditor,
-.contextCard.timeSeriesImport {
+.contextCard.causalInference {
     position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); right: 10px;
     bottom: calc(var(--math-keyboard-inset) + 10px); left: auto; max-height: none; overflow: auto;
     overscroll-behavior: contain; transition: bottom .2s ease, opacity .14s ease, transform .14s ease;
@@ -523,12 +523,12 @@ input, select { user-select: text; }
 .contextCard.edgeEditor > header,
 .contextCard.edgeBuilder > header,
 .contextCard.edgeGroupEditor > header,
-.contextCard.timeSeriesImport > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
+.contextCard.causalInference > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
 .contextCard.nodeEditor > footer,
 .contextCard.edgeEditor > footer,
 .contextCard.edgeBuilder > footer,
 .contextCard.edgeGroupEditor > footer,
-.contextCard.timeSeriesImport > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
+.contextCard.causalInference > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
 .contextCard.nodeEditor > footer[hidden] { display: none; }
 .editorCard > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; }
 .editorCard > header strong, .contextKicker { display: block; }
@@ -568,20 +568,24 @@ input, select { user-select: text; }
 .groupMemberRow:first-of-type { border-radius: 4px 4px 0 0; }
 .groupMemberRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
 .groupMemberRow > span { color: #b8c7ce; }
-.timeSeriesMappingRow { display: flex; height: 30px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 8px; }
-.timeSeriesMappingRow:first-of-type { border-radius: 4px 4px 0 0; }
-.timeSeriesMappingRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
-.timeSeriesMappingRow > span { flex-shrink: 0; overflow: hidden; color: #b8c7ce; text-overflow: ellipsis; white-space: nowrap; }
-.timeSeriesMappingRow > select { flex: 1; min-width: 0; }
-.timeSeriesCandidateRow { display: flex; align-items: center; gap: 8px; padding: 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 8px; cursor: pointer; }
-.timeSeriesCandidateRow:first-of-type { border-radius: 4px 4px 0 0; }
-.timeSeriesCandidateRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
-.timeSeriesCandidateRow input[type="checkbox"] { flex-shrink: 0; width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
-.timeSeriesCandidateMain { display: block; flex: 1; color: #d5e1e6; }
-.timeSeriesCandidateMeta { display: block; margin-top: 2px; color: #6e828e; font-size: 7px; }
-.timeSeriesCandidateTag { flex-shrink: 0; padding: 2px 6px; border-radius: 9px; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
-.timeSeriesCandidateTag.lagged { color: #78c9c2; background: rgb(66 201 188 / 12%); }
-.timeSeriesCandidateTag.correlationOnly { color: #d9b06b; background: rgb(217 176 107 / 12%); }
+.causalInferenceMappingRow { display: flex; height: 30px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 8px; }
+.causalInferenceMappingRow:first-of-type { border-radius: 4px 4px 0 0; }
+.causalInferenceMappingRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
+.causalInferenceMappingRow > span { flex-shrink: 0; max-width: 40%; overflow: hidden; color: #b8c7ce; text-overflow: ellipsis; white-space: nowrap; }
+.causalInferenceMappingRow > select {
+    flex: 1; min-width: 0; height: 22px; padding: 0 5px; color: #aab9c1; background: #0a151d;
+    border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px;
+}
+#runCausalInference { margin-top: 9px; }
+.causalInferenceCandidateRow { display: flex; align-items: center; gap: 8px; padding: 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 8px; cursor: pointer; }
+.causalInferenceCandidateRow:first-of-type { border-radius: 4px 4px 0 0; }
+.causalInferenceCandidateRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
+.causalInferenceCandidateRow input[type="checkbox"] { flex-shrink: 0; width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.causalInferenceCandidateMain { display: block; flex: 1; color: #d5e1e6; }
+.causalInferenceCandidateMeta { display: block; margin-top: 2px; color: #6e828e; font-size: 7px; }
+.causalInferenceCandidateTag { flex-shrink: 0; padding: 2px 6px; border-radius: 9px; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
+.causalInferenceCandidateTag.lagged { color: #78c9c2; background: rgb(66 201 188 / 12%); }
+.causalInferenceCandidateTag.correlationOnly { color: #d9b06b; background: rgb(217 176 107 / 12%); }
 .editorField.checkboxField { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; }
 .checkboxField input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
 .checkboxField span { color: #9fb0b8; font-size: 8px; }

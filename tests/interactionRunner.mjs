@@ -2512,10 +2512,10 @@ export async function runInteractionTests(window) {
         assert.equal(await relationshipCount(), before);
     });
 
-    await run('time-series import proposes a lagged edge and materializes it as one undoable step', async () => {
+    await run('causal inference proposes a lagged edge and materializes it as one undoable step', async () => {
         // Deterministic pseudo-random generator (mulberry32), used instead of a smooth formula
         // like a sinusoid: a smooth curve is strongly autocorrelated with itself, which the
-        // engine-side unit tests (engine/tests/graphInferenceTests.cpp) found leaks information
+        // engine-side unit tests (engine/tests/causalInferenceTests.cpp) found leaks information
         // across lags in exactly the way real noise must not, producing a spurious reverse edge.
         function mulberry32(seed) {
             return function () {
@@ -2532,7 +2532,7 @@ export async function runInteractionTests(window) {
         }
         // columnA follows a genuine AR(1) process, and columnB[t] = 3*columnA[t-1] + noise, with
         // columnA independent of columnB -- the same one-directional generative shape validated
-        // in engine/tests/graphInferenceTests.cpp's inferGraphFindsAOneDirectionalLaggedEdge.
+        // in engine/tests/causalInferenceTests.cpp's inferGraphFindsAOneDirectionalLaggedEdge.
         function buildLaggedPairCsv(rowCount = 60) {
             const random = mulberry32(2002);
             const a = [0.2];
@@ -2570,33 +2570,33 @@ export async function runInteractionTests(window) {
         const nodesBefore = await nodeCount();
         const edgesBefore = await relationshipCount();
 
-        await evaluate(window, `document.querySelector('#importTimeSeriesButton').click()`);
-        await waitFor(window, `!document.querySelector('#timeSeriesImport').classList.contains('hidden')`, 'The import card did not open.');
+        await evaluate(window, `document.querySelector('#causalInferenceButton').click()`);
+        await waitFor(window, `!document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not open.');
 
         // A real OS file-picker dialog can't be driven by this harness (no Playwright
-        // setInputFiles/CDP bridge) -- window.__debugTimeSeriesImport.loadCsv exercises the exact
+        // setInputFiles/CDP bridge) -- window.__debugCausalInference.loadCsv exercises the exact
         // same code path the real file input's change handler calls.
-        await evaluate(window, `window.__debugTimeSeriesImport.loadCsv(${JSON.stringify(buildLaggedPairCsv())})`);
-        await waitFor(window, `!document.querySelector('#timeSeriesMappingSection').hidden`, 'The column mapping section did not appear.');
-        assert.equal(await evaluate(window, `document.querySelectorAll('#timeSeriesMappingRows .timeSeriesMappingRow').length`), 2);
-        const mappingSelectValue = (index) => evaluate(window, `document.querySelectorAll('#timeSeriesMappingRows select')[${index}].value`);
+        await evaluate(window, `window.__debugCausalInference.loadCsv(${JSON.stringify(buildLaggedPairCsv())})`);
+        await waitFor(window, `!document.querySelector('#causalInferenceMappingSection').hidden`, 'The column mapping section did not appear.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#causalInferenceMappingRows .causalInferenceMappingRow').length`), 2);
+        const mappingSelectValue = (index) => evaluate(window, `document.querySelectorAll('#causalInferenceMappingRows select')[${index}].value`);
         assert.notEqual(await mappingSelectValue(0), 'create', 'columnA should auto-match the existing node/state, not default to creating one.');
         assert.equal(await mappingSelectValue(1), 'create', 'columnB has no existing match and should default to creating a new node.');
 
-        await evaluate(window, `document.querySelector('#runTimeSeriesInference').click()`);
-        await waitFor(window, `!document.querySelector('#timeSeriesCandidatesSection').hidden`, 'The candidate list did not appear.', 15000);
+        await evaluate(window, `document.querySelector('#runCausalInference').click()`);
+        await waitFor(window, `!document.querySelector('#causalInferenceCandidatesSection').hidden`, 'The candidate list did not appear.', 15000);
         assert.equal(await evaluate(window, `
-            [...document.querySelectorAll('#timeSeriesCandidateRows .timeSeriesCandidateMain')].some((span) => span.textContent.includes('columnA → columnB'))
+            [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateMain')].some((span) => span.textContent.includes('columnA → columnB'))
         `), true, 'Expected a columnA -> columnB candidate.');
         assert.equal(await evaluate(window, `
-            [...document.querySelectorAll('#timeSeriesCandidateRows .timeSeriesCandidateMain')].some((span) => span.textContent.includes('columnB → columnA'))
+            [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateMain')].some((span) => span.textContent.includes('columnB → columnA'))
         `), false, 'Did not expect a spurious columnB -> columnA candidate.');
-        assert.equal(await evaluate(window, `document.querySelector('#timeSeriesCandidateRows .timeSeriesCandidateTag.lagged') !== null`), true,
+        assert.equal(await evaluate(window, `document.querySelector('#causalInferenceCandidateRows .causalInferenceCandidateTag.lagged') !== null`), true,
             'Expected the accepted candidate to be tagged lagged.');
 
         const consoleMessages = await captureConsoleMessages(window, async () => {
-            await evaluate(window, `document.querySelector('#commitTimeSeriesImport').click()`);
-            await waitFor(window, `document.querySelector('#timeSeriesImport').classList.contains('hidden')`, 'The import card did not close after commit.', 15000);
+            await evaluate(window, `document.querySelector('#commitCausalInference').click()`);
+            await waitFor(window, `document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not close after commit.', 15000);
         });
         assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
 

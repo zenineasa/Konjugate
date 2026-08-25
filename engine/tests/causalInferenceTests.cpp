@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-#include "graphInference.hpp"
+#include "causalInference.hpp"
 #include <cmath>
 #include <iostream>
 #include <random>

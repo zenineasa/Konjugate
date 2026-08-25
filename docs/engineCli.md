@@ -13,7 +13,7 @@ konjugate infer series.csv --report inference.json [--skeleton-threshold X] [--c
 
 Reports are written atomically. Machine consumers should always provide `--report`; concise human output may be added later.
 
-`infer` is the one command that does not take a `.kjt` project: its input is a CSV of multivariate time-series data (a numeric, strictly increasing, evenly spaced time column, then one numeric column per variable) and its report is a candidate-edge list, not a project report. It has no knowledge of Konjugate node/state IDs — its output is keyed by CSV column name, and a caller resolves those to concrete nodes/states itself. See [Time-series graph inference](timeSeriesGraphInference.md) for the algorithm and [Project schema](projectSchema.md) for how a candidate becomes a real edge.
+`infer` is the one command that does not take a `.kjt` project: its input is a CSV of multivariate time-series data (a numeric, strictly increasing, evenly spaced time column, then one numeric column per variable) and its report is a candidate-edge list, not a project report. It has no knowledge of Konjugate node/state IDs — its output is keyed by CSV column name, and a caller resolves those to concrete nodes/states itself. See [Causal inference](causalInference.md) for the algorithm and [Project schema](projectSchema.md) for how a candidate becomes a real edge.
 
 Exit codes:
 

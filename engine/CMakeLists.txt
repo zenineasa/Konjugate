@@ -121,8 +121,8 @@ add_executable(konjugateEngine
     src/dependencyGraph.cpp
     src/executionBackend.cpp
     src/executionPlan.cpp
-    src/graphInference.cpp
-    src/graphInferenceReport.cpp
+    src/causalInference.cpp
+    src/causalInferenceReport.cpp
     src/main.cpp
     src/modelValidator.cpp
     src/partitionPlan.cpp
@@ -273,19 +273,19 @@ if(BUILD_TESTING)
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
     )
 
-    add_executable(graphInferenceTests
-        tests/graphInferenceTests.cpp
-        src/graphInference.cpp
+    add_executable(causalInferenceTests
+        tests/causalInferenceTests.cpp
+        src/causalInference.cpp
     )
-    set_target_properties(graphInferenceTests PROPERTIES
+    set_target_properties(causalInferenceTests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
         RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
     )
-    target_include_directories(graphInferenceTests PRIVATE include)
-    target_link_libraries(graphInferenceTests PRIVATE Eigen3::Eigen)
-    add_test(NAME graphInferenceTests COMMAND graphInferenceTests)
+    target_include_directories(causalInferenceTests PRIVATE include)
+    target_link_libraries(causalInferenceTests PRIVATE Eigen3::Eigen)
+    add_test(NAME causalInferenceTests COMMAND causalInferenceTests)
 
     # A manual perf tool, not a pass/fail test: intentionally left out of add_test/ctest.
     add_executable(providerBatchingBenchmark
@@ -305,7 +305,7 @@ if(MSVC)
         target_compile_options(executionPlanTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(relationshipProviderTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(nodeProviderRuntimeTests PRIVATE /W4 /permissive- /MP)
-        target_compile_options(graphInferenceTests PRIVATE /W4 /permissive- /MP)
+        target_compile_options(causalInferenceTests PRIVATE /W4 /permissive- /MP)
     endif()
 else()
     target_compile_options(konjugateEngine PRIVATE -Wall -Wextra -Wpedantic)
@@ -313,7 +313,7 @@ else()
         target_compile_options(executionPlanTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(relationshipProviderTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(nodeProviderRuntimeTests PRIVATE -Wall -Wextra -Wpedantic)
-        target_compile_options(graphInferenceTests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(causalInferenceTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
@@ -324,6 +324,6 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(executionPlanTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(relationshipProviderTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(nodeProviderRuntimeTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
-        target_compile_options(graphInferenceTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+        target_compile_options(causalInferenceTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
     endif()
 endif()

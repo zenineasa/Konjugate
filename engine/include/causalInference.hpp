@@ -19,7 +19,7 @@ struct InferenceSeries {
 struct InferenceConfig {
     // Only "partialCorrelation" is implemented in v1. Kept as a string (validated against a
     // fixed set, not a bare bool) so a second stage-1 skeleton method is a new case later, not a
-    // schema change -- see docs/proposals/timeSeriesGraphInference.md's scoping note.
+    // schema change -- see docs/proposals/causalInference.md's scoping note.
     std::string skeletonMethod = "partialCorrelation";
     std::vector<int> candidateLags = {1, 2, 3};
     double skeletonThreshold = 0.1;      // |partial correlation| a pair must clear to survive stage 1
@@ -61,8 +61,8 @@ StandardizedSeries standardizeSeries(const InferenceSeries& series);
 
 // πᵢⱼ = -θᵢⱼ / sqrt(θᵢᵢθⱼⱼ), θ the inverse of the correlation matrix of already-standardized
 // columns -- the Gaussian-graphical-model machinery behind stage 1's skeleton pass, exposed
-// directly for unit testing against a hand-computed example (see graphInferenceTests.cpp and
-// docs/timeSeriesGraphInference.md). Throws std::runtime_error if there are fewer than
+// directly for unit testing against a hand-computed example (see causalInferenceTests.cpp and
+// docs/causalInference.md). Throws std::runtime_error if there are fewer than
 // (columns + 2) rows, since the correlation matrix is not reliably invertible below that.
 Eigen::MatrixXd computePartialCorrelation(const Eigen::MatrixXd& standardizedValues);
 
@@ -80,7 +80,7 @@ RidgeFit fitRidgeRegression(const Eigen::MatrixXd& x, const Eigen::VectorXd& y, 
 // with higher meaning a better fit.
 double heldOutScore(const RidgeFit& fit, const Eigen::MatrixXd& xValidation, const Eigen::VectorXd& yValidation);
 
-// Runs the two-stage pipeline described in docs/proposals/timeSeriesGraphInference.md: a cheap
+// Runs the two-stage pipeline described in docs/proposals/causalInference.md: a cheap
 // partial-correlation skeleton pass over all pairs, then per-surviving-pair lagged ridge
 // regression (lag and penalty jointly chosen by held-out validation loss) to find direction. A
 // pair that survives stage 1 with no stage-2 evidence in either direction still produces two

@@ -2,7 +2,7 @@
 
 # Discrete fit vs. continuous rate: the math, side by side
 
-Companion note to [Causal inference (proposal)](causalInference.md)'s "Continuous time" section -- equations only, minimally explained. **Implemented, shipped as the opt-in "Fit for continuous-time simulation" mode** -- see [Causal inference](../causalInference.md)'s own "Continuous-time mode" section for the current, product-facing description. This doc keeps the math history: the approach that was tried, rejected, and the different, simpler approach that actually shipped.
+Companion note to [Causal inference (proposal)](causalInference.md)'s "Continuous time" section -- equations only, minimally explained. **Implemented and shipped as the default, only fitting behavior** (not an opt-in mode -- an earlier "Fit for continuous-time simulation" checkbox existed briefly before this was consolidated into the sole path, once it became clear a discrete coefficient placed directly as a rate never produced a usable equation regardless) -- see [Causal inference](../causalInference.md)'s "From a candidate to a real equation" section for the current, product-facing description. This doc keeps the math history: the approach that was tried, rejected, and the different, simpler approach that actually shipped.
 
 ## Two different update rules
 

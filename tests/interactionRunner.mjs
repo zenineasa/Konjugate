@@ -2700,8 +2700,8 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `
             [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateMain')].some((span) => span.textContent.includes('columnB → columnA'))
         `), false, 'Did not expect a spurious columnB -> columnA candidate.');
-        assert.equal(await evaluate(window, `document.querySelector('#causalInferenceCandidateRows .causalInferenceCandidateTag.lagged') !== null`), true,
-            'Expected the accepted candidate to be tagged lagged.');
+        assert.equal(await evaluate(window, `document.querySelector('#causalInferenceCandidateRows .causalInferenceCandidateTag.continuousLagged') !== null`), true,
+            'Expected the accepted candidate to be tagged continuousLagged.');
 
         const consoleMessages = await captureConsoleMessages(window, async () => {
             await evaluate(window, `document.querySelector('#commitCausalInference').click()`);
@@ -2842,7 +2842,11 @@ export async function runInteractionTests(window) {
         // thermalStress; motorLoad's own near-deterministic proxy vibrationAmplitude into
         // fatigueAccumulation) -- ridge consistently attributes the shared effect to the mediator,
         // at any sample size. 10 of the 12 true edges are recovered; this test asserts exactly
-        // those 10, plus that no *other* spurious candidate reaches a high (>= 0.5) score.
+        // those 10, plus that no *other* spurious candidate reaches a high (>= 0.5) score. Also
+        // doubles as the regression guard for the continuous-time rate transform (every fitted
+        // coefficient here is unit-compatible with Konjugate's dx/dt, not a raw discrete-step
+        // multiplier -- see docs/proposals/continuousTimeConversion.md) and for self-terms
+        // committing correctly as addSourceTerm operations, not edges.
         // [source, target, degree, trueCoefficient] terms for exactly the 10 unique edges this
         // construction recovers (11 entries: componentTemperature -> thermalStress carries both a
         // degree-1 and a degree-2 term on the same edge) -- see the comment above for the 2
@@ -2894,6 +2898,27 @@ export async function runInteractionTests(window) {
                 `Unexpected candidate ${candidate.sourceColumn} -> ${candidate.targetColumn} has a high score (${candidate.score}), not a low-confidence residual.`);
         }
 
+        // Every fitted coefficient here (and every target's own self-lag, otherwise discarded) is
+        // a continuous-time rate, not a raw discrete-step multiplier -- see
+        // docs/proposals/continuousTimeConversion.md. This CSV's own time column is 0,1,2,...
+        // (timeStep == 1), so the exact-Euler-match transform (rate = coefficient/timeStep) leaves
+        // cross-term coefficients numerically unchanged, which is why the direct trueCoefficient
+        // comparison above still holds; what's new here is provenance and the self-terms.
+        for (const candidate of candidates) {
+            assert.notEqual(candidate.provenance, 'lagged',
+                `A lagged candidate should be tagged continuousLagged, never the pre-consolidation discrete "lagged" `
+                + `tag (${candidate.sourceColumn} -> ${candidate.targetColumn} was tagged ${candidate.provenance}).`);
+        }
+        const selfTerms = await evaluate(window, `window.__debugCausalInference.selfTerms()`);
+        const laggedTargets = new Set(candidates.filter((c) => c.provenance === 'continuousLagged').map((c) => c.targetColumn));
+        const selfTermTargets = new Set(selfTerms.map((t) => t.targetColumn));
+        for (const target of laggedTargets) {
+            assert.ok(selfTermTargets.has(target), `Expected a self-term for ${target}, which has an accepted continuous-time edge.`);
+        }
+        for (const term of selfTerms) {
+            assert.ok(Number.isFinite(term.rate), `Self-term rate for ${term.targetColumn} should be a finite number, got ${term.rate}.`);
+        }
+
         // Deselect any low-confidence residual candidate before committing, exactly as a real
         // reviewer would -- this also exercises the checkbox accept/reject path, which neither
         // existing causal-inference test does (both accept every candidate by default).
@@ -2917,103 +2942,6 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore + expectedPairs.size,
             `Committing should have created exactly the ${expectedPairs.size} accepted edges (componentTemperature -> thermalStress is one edge with two terms).`);
 
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore,
-            'Undo should remove all 8 created nodes.');
-        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore,
-            'Undo should remove all created edges.');
-    });
-
-    await run('causal inference in continuous-time mode fits self terms and continuous-rate edges', async () => {
-        // Same 8-node system and same true discrete coefficients as the test above -- this
-        // system's own CSV time column is 0,1,2,...,rowCount-1, so timeStep == 1 and the
-        // exact-Euler-match transform (rate = coefficient/timeStep for a cross term, rate =
-        // (coefficient - 1)/timeStep for a self-lag) leaves every cross-term coefficient
-        // numerically unchanged -- a convenient, free extra check that the transform is being
-        // applied at all (a bug that silently skipped it would still pass the "close to
-        // trueCoefficient" checks below, since 1/1 == coefficient either way, so provenance and
-        // the self-terms are the checks that actually distinguish this from the discrete mode).
-        const expectedEdges = [
-            ['ambientTemperature', 'enclosureTemperature', 1, 2.0],
-            ['solarIrradiance', 'enclosureTemperature', 1, 1.5],
-            ['motorLoad', 'vibrationAmplitude', 1, 3.0],
-            ['ambientTemperature', 'componentTemperature', 1, 1.0],
-            ['motorLoad', 'componentTemperature', 1, 1.0],
-            ['enclosureTemperature', 'componentTemperature', 1, 2.5],
-            ['componentTemperature', 'thermalStress', 1, 3.5],
-            ['componentTemperature', 'thermalStress', 2, 0.8],
-            ['vibrationAmplitude', 'fatigueAccumulation', 1, 1.2],
-            ['componentTemperature', 'fatigueAccumulation', 1, 1.0],
-            ['thermalStress', 'fatigueAccumulation', 1, 1.5]
-        ];
-
-        await evaluate(window, `document.querySelector('#causalInferenceButton').click()`);
-        await waitFor(window, `!document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not open.');
-        await evaluate(window, `window.__debugCausalInference.loadCsv(${JSON.stringify(buildThermalSystemCsv())})`);
-        await waitFor(window, `!document.querySelector('#causalInferenceMappingSection').hidden`, 'The column mapping section did not appear.');
-
-        await evaluate(window, `(() => {
-            const select = document.querySelector('#causalInferenceDegreeMode');
-            select.value = 'auto';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-            document.querySelector('#causalInferenceDegreeValue').value = '2';
-            document.querySelector('#causalInferenceContinuousTime').click();
-        })()`);
-        assert.equal(await isRenderedVisible(window, '#causalInferenceContinuousTimeHint'), true,
-            'Checking the continuous-time box should reveal its calibration hint.');
-        await evaluate(window, `document.querySelector('#runCausalInference').click()`);
-        await waitFor(window, `!document.querySelector('#causalInferenceCandidatesSection').hidden`, 'The candidate list did not appear.', 20000);
-
-        const candidates = await evaluate(window, `window.__debugCausalInference.candidates()`);
-        for (const candidate of candidates) {
-            assert.notEqual(candidate.provenance, 'lagged',
-                `A lagged candidate should be tagged continuousLagged in this mode, never the discrete "lagged" tag `
-                + `(${candidate.sourceColumn} -> ${candidate.targetColumn} was tagged ${candidate.provenance}).`);
-        }
-        for (const [source, target, degree, trueCoefficient] of expectedEdges) {
-            const candidate = candidates.find((c) => c.sourceColumn === source && c.targetColumn === target);
-            assert.ok(candidate, `Expected a ${source} -> ${target} candidate.`);
-            const term = candidate.terms.find((t) => t.degree === degree);
-            assert.ok(term, `Expected a degree-${degree} term on ${source} -> ${target}, got: ${JSON.stringify(candidate.terms)}`);
-            const relativeError = Math.abs((term.coefficient - trueCoefficient) / trueCoefficient);
-            assert.ok(relativeError < 0.25,
-                `${source} -> ${target} degree ${degree}: expected a continuous rate close to ${trueCoefficient} (timeStep == 1), `
-                + `got ${term.coefficient} (${(relativeError * 100).toFixed(1)}% off).`);
-        }
-
-        // Every target that produced an accepted lagged candidate must also have a self-term --
-        // the engine pushes both from behind the same per-target fit gate (see
-        // causalInference.cpp's continuousTime block), so this holds regardless of which
-        // individual sources later clear the per-source coefficientThreshold.
-        const selfTerms = await evaluate(window, `window.__debugCausalInference.selfTerms()`);
-        const laggedTargets = new Set(candidates.filter((c) => c.provenance === 'continuousLagged').map((c) => c.targetColumn));
-        const selfTermTargets = new Set(selfTerms.map((t) => t.targetColumn));
-        for (const target of laggedTargets) {
-            assert.ok(selfTermTargets.has(target), `Expected a self-term for ${target}, which has an accepted continuous-time edge.`);
-        }
-        for (const term of selfTerms) {
-            assert.ok(Number.isFinite(term.rate), `Self-term rate for ${term.targetColumn} should be a finite number, got ${term.rate}.`);
-        }
-
-        const expectedPairs = new Set(expectedEdges.map(([s, t]) => `${s}->${t}`));
-        const otherCandidates = candidates.filter((c) => !expectedPairs.has(`${c.sourceColumn}->${c.targetColumn}`));
-        for (const candidate of otherCandidates) {
-            await evaluate(window, `(() => {
-                const row = [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateRow')]
-                    .find((r) => r.querySelector('.causalInferenceCandidateMain').textContent.includes(${JSON.stringify(`${candidate.sourceColumn} → ${candidate.targetColumn}`)}));
-                row.querySelector('input[type="checkbox"]').click();
-            })()`);
-        }
-
-        const nodesBefore = await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`);
-        const consoleMessages = await captureConsoleMessages(window, async () => {
-            await evaluate(window, `document.querySelector('#commitCausalInference').click()`);
-            await waitFor(window, `document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not close after commit.', 15000);
-        });
-        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
-        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore + 8,
-            'Committing should have created one new node per CSV column (8), same as the discrete-mode test.');
-
         // Candidates have no dedicated node/edge-style count to check self-terms landed correctly
         // against (a source term is local to a node, not a separate relationship on the canvas) --
         // read the committed document directly. Every self-term target should have exactly one
@@ -3032,6 +2960,8 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore,
             'Undo should remove all 8 created nodes, and with them every source term that lived on them.');
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore,
+            'Undo should remove all created edges.');
     });
 
     console.log(`Interaction tests passed: ${passed}`);

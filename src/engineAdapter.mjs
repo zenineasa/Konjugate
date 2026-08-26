@@ -85,7 +85,6 @@ export async function inferWithEngine(csvContent, config, options) {
         if (config?.candidateLags !== undefined) args.push('--lags', config.candidateLags.join(','));
         if (config?.ridgePenalties !== undefined) args.push('--ridge-penalties', config.ridgePenalties.join(','));
         if (config?.candidateDegrees !== undefined) args.push('--degrees', config.candidateDegrees.join(','));
-        if (config?.continuousTime) args.push('--continuous-time');
         const execution = await runEngine(executable, args, {}, options.signal);
         if (execution.code !== 0) {
             throw new Error(execution.diagnostics || `The inference engine exited with code ${execution.code}.`);

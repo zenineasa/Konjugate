@@ -307,7 +307,7 @@ void inferGraphFindsAOneDirectionalLaggedEdge() {
 
     const auto* aToB = findEdge(result, "a", "b");
     require(aToB != nullptr, "Expected an edge from a to b.");
-    require(aToB->provenance == "lagged", "The a-to-b edge should be backed by lagged evidence.");
+    require(aToB->provenance == "continuousLagged", "The a-to-b edge should be backed by lagged evidence.");
     require(aToB->lag >= 1, "The a-to-b edge should have a positive lag.");
     require(linearCoefficient(*aToB) > 1.5 && linearCoefficient(*aToB) < 4.5, "The a-to-b coefficient should be roughly 3.0.");
     require(aToB->score > 0.5, "The a-to-b fit should explain a majority of the held-out variance.");
@@ -323,7 +323,7 @@ void inferGraphFindsBothDirectionsForAMutualRelationship() {
     const auto* dToC = findEdge(result, "d", "c");
     const auto* cToD = findEdge(result, "c", "d");
     require(dToC != nullptr && cToD != nullptr, "Expected edges in both directions for a genuinely mutual relationship.");
-    require(dToC->provenance == "lagged" && cToD->provenance == "lagged", "Both edges should be backed by lagged evidence.");
+    require(dToC->provenance == "continuousLagged" && cToD->provenance == "continuousLagged", "Both edges should be backed by lagged evidence.");
 }
 
 void inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold() {
@@ -336,7 +336,7 @@ void inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold(
     const auto* bToA = findEdge(result, "b", "a");
     require(aToB != nullptr && bToA != nullptr, "A correlated pair with no direction clearing the threshold should still produce two edges.");
     require(aToB->provenance == "correlationOnly" && bToA->provenance == "correlationOnly",
-        "Both fallback edges should be tagged correlationOnly, not lagged.");
+        "Both fallback edges should be tagged correlationOnly, not continuousLagged.");
     // Both coefficients are de-standardized from the same shared, symmetric partial-correlation
     // value (coefficient = partialCorrelation * sigmaTarget / sigmaSource), so they must agree
     // in sign even though the two sigma ratios differ.
@@ -354,7 +354,7 @@ void inferGraphRecoversAnExactQuadraticRelationship() {
 
     const auto* aToB = findEdge(result, "a", "b");
     require(aToB != nullptr, "Expected an edge from a to b.");
-    require(aToB->provenance == "lagged", "The a-to-b edge should be backed by lagged evidence.");
+    require(aToB->provenance == "continuousLagged", "The a-to-b edge should be backed by lagged evidence.");
     require(aToB->score > 0.9, "An exact (noise-free) relationship should fit almost perfectly.");
     require(findEdge(result, "b", "a") == nullptr, "b should not Granger-cause a in this construction.");
 
@@ -383,35 +383,34 @@ void inferGraphWithDefaultConfigStaysLinearOnly() {
     }
 }
 
-void inferGraphRejectsContinuousTimeWithMultipleLags() {
+void inferGraphRejectsCandidateLagsOtherThanOne() {
     const auto series = makeContinuousTimeSeries(300);
     konjugate::InferenceConfig config;
-    config.continuousTime = true; // candidateLags left at its default {1, 2, 3}
+    config.candidateLags = {1, 2, 3};
     bool threw = false;
     try {
         konjugate::inferGraph(series, config);
     } catch (const std::runtime_error&) {
         threw = true;
     }
-    require(threw, "continuousTime with candidateLags other than exactly {1} should be rejected, not silently clamped.");
+    require(threw, "candidateLags other than exactly {1} should be rejected, not silently clamped -- see "
+        "InferenceConfig::candidateLags's doc comment for why lag > 1 could never produce a usable equation anyway.");
 }
 
-void inferGraphContinuousTimeTransformsCoefficientsAndSelfLagExactly() {
+void inferGraphTransformsCoefficientsAndSelfLagIntoContinuousRatesExactly() {
     // True discrete relationship: target[t] = 0.4*target[t-1] + 2.0*source[t-1] + noise, timeStep
     // == 1.0 (a hand-built series, not parsed from CSV). The exact-Euler-match transform predicts
     // crossRate == crossCoefficient/timeStep ~= 2.0, and selfRate == (selfLagCoefficient -
     // 1.0)/timeStep ~= (0.4 - 1.0)/1.0 == -0.6.
     const auto series = makeContinuousTimeSeries(300);
     konjugate::InferenceConfig config;
-    config.continuousTime = true;
-    config.candidateLags = {1};
     const auto result = konjugate::inferGraph(series, config);
 
     const auto* sourceToTarget = findEdge(result, "source", "target");
     require(sourceToTarget != nullptr, "Expected a source -> target edge.");
     require(sourceToTarget->provenance == "continuousLagged",
-        "A continuous-time edge should be tagged continuousLagged, not lagged, so it can never be confused with a "
-        "discrete-coefficient edge in the same terms[].coefficient field.");
+        "A lagged edge should be tagged continuousLagged, so it can never be confused with a raw discrete "
+        "coefficient in the same terms[].coefficient field.");
     require(approxEqual(linearCoefficient(*sourceToTarget), 2.0, 0.2),
         "The continuous-time cross rate should be close to the true value of 2.0 (coefficient/timeStep with timeStep == 1).");
 
@@ -424,15 +423,13 @@ void inferGraphContinuousTimeTransformsCoefficientsAndSelfLagExactly() {
         "The continuous-time self rate should be close to (0.4 - 1)/1 == -0.6.");
 }
 
-void inferGraphContinuousTimeAppliesToPolynomialDegrees() {
-    // Unlike a matrix-logarithm-based conversion (rejected -- see
+void inferGraphAppliesTheRateTransformToPolynomialDegrees() {
+    // Unlike a matrix-logarithm-based conversion (tried and rejected -- see
     // docs/proposals/continuousTimeConversion.md), the exact-Euler-match transform is exact for
-    // any polynomial degree: rate = coefficient/timeStep applies per term. continuousTime imposes
-    // no restriction on candidateDegrees.
+    // any polynomial degree: rate = coefficient/timeStep applies per term, with no restriction on
+    // candidateDegrees.
     const auto series = makeQuadraticPairSeries(300);
     konjugate::InferenceConfig config;
-    config.continuousTime = true;
-    config.candidateLags = {1};
     config.candidateDegrees = {1, 2};
     const auto result = konjugate::inferGraph(series, config);
 
@@ -470,9 +467,9 @@ int main() {
         inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold();
         inferGraphRecoversAnExactQuadraticRelationship();
         inferGraphWithDefaultConfigStaysLinearOnly();
-        inferGraphRejectsContinuousTimeWithMultipleLags();
-        inferGraphContinuousTimeTransformsCoefficientsAndSelfLagExactly();
-        inferGraphContinuousTimeAppliesToPolynomialDegrees();
+        inferGraphRejectsCandidateLagsOtherThanOne();
+        inferGraphTransformsCoefficientsAndSelfLagIntoContinuousRatesExactly();
+        inferGraphAppliesTheRateTransformToPolynomialDegrees();
         std::cout << "Graph inference tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

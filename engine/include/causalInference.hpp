@@ -22,7 +22,14 @@ struct InferenceConfig {
     // fixed set, not a bare bool) so a second stage-1 skeleton method is a new case later, not a
     // schema change -- see docs/proposals/causalInference.md's scoping note.
     std::string skeletonMethod = "partialCorrelation";
-    std::vector<int> candidateLags = {1, 2, 3};
+    // {1} only, by construction (inferGraph() throws otherwise): every accepted coefficient is
+    // transformed into a continuous-time rate (see PolynomialTerm/SelfTerm below), and a
+    // predictor from 2+ CSV rows back has no single-Euler-step interpretation for that transform
+    // -- Konjugate has no delay-buffer/DDE mechanism to represent it as a derivative at all, so a
+    // lag > 1 candidate could never become a correct equation regardless. Kept as a real,
+    // overridable config field (not hardcoded) for engine-level testing/analysis use, not because
+    // any other value is expected to work.
+    std::vector<int> candidateLags = {1};
     double skeletonThreshold = 0.1;      // |partial correlation| a pair must clear to survive stage 1
     double coefficientThreshold = 0.05;  // aggregate (L2-norm across degrees) |standardized coefficient| a source must clear
     double validationFraction = 0.2;     // chronological held-out split, applied per target fit
@@ -33,17 +40,6 @@ struct InferenceConfig {
     // for lag/penalty rather than adding a second selection mechanism. See
     // docs/proposals/causalInference.md's "Planned next" section.
     std::vector<int> candidateDegrees = {1};
-
-    // When true, every fitted coefficient (and each target's own self-lag, otherwise discarded)
-    // is transformed into a continuous-time rate via rate = coefficient/timeStep (rate =
-    // (coefficient-1)/timeStep for a self-lag) -- the exact solution to "what rate makes one
-    // Euler step at the CSV's own sampling interval reproduce this fitted discrete transition",
-    // so the resulting equations are unit-compatible with Konjugate's dx/dt edges instead of
-    // being a raw discrete-step multiplier. See docs/proposals/continuousTimeConversion.md.
-    // Requires candidateLags == {1} (inferGraph() throws otherwise) -- a predictor from 2+ CSV
-    // rows back has no single-Euler-step interpretation. No restriction on candidateDegrees: the
-    // transform is exact for any polynomial degree.
-    bool continuousTime = false;
 };
 
 // One polynomial term of a fitted relationship: coefficient * sourceColumn^degree, in the
@@ -61,15 +57,24 @@ struct InferredEdge {
     std::vector<PolynomialTerm> terms; // always non-empty; see PolynomialTerm
     double intercept = 0.0;     // in the original units of the target column
     double score = 0.0;         // held-out variance-explained, roughly (-inf, 1]; higher is better
-    std::string provenance;     // "lagged" | "correlationOnly" | "continuousLagged"
+    // "continuousLagged" | "correlationOnly". Every accepted lagged coefficient (any polynomial
+    // degree) is a continuous-time rate, not a raw discrete-step multiplier: rate =
+    // coefficient/timeStep, the exact solution to "what rate makes one Euler step at the CSV's
+    // own sampling interval reproduce this fitted discrete transition" -- see
+    // docs/proposals/continuousTimeConversion.md. "correlationOnly" is untransformed: it's built
+    // from contemporaneous (same-timestep) partial correlation, which has no lagged-transition
+    // structure for the transform to apply to.
+    std::string provenance;
 };
 
-// A target's own diagonal (self-lag) rate, continuous-time mode only -- source == target, so this
-// cannot be an InferredEdge (Konjugate's schema forbids self-loop edges; see docs/projectSchema.md's
-// sourceTerms, which is the mechanism used instead). No intercept: a target whose sources are all
-// rejected already loses its intercept in today's edge-only path (split only across accepted
-// edges) -- extending self-terms with their own share would mean propagating or fixing that
-// pre-existing gap, out of scope here. Known v1 limitation.
+// A target's own diagonal (self-lag) rate -- source == target, so this cannot be an InferredEdge
+// (Konjugate's schema forbids self-loop edges; see docs/projectSchema.md's sourceTerms, which is
+// the mechanism used instead). rate = (selfLagCoefficient - 1)/timeStep -- the self-lag
+// equivalent of InferredEdge's coefficient/timeStep transform (the "-1" is the discrete meaning
+// of "unchanged"; there's no equivalent baseline to subtract for a cross-term). No intercept: a
+// target whose sources are all rejected already loses its intercept in today's edge-only path
+// (split only across accepted edges) -- extending self-terms with their own share would mean
+// propagating or fixing that pre-existing gap, out of scope here. Known v1 limitation.
 struct SelfTerm {
     std::string targetColumn;
     double rate = 0.0; // per unit time, original units
@@ -77,7 +82,7 @@ struct SelfTerm {
 
 struct InferenceResult {
     std::vector<InferredEdge> edges;
-    std::vector<SelfTerm> selfTerms; // only populated when config.continuousTime == true
+    std::vector<SelfTerm> selfTerms; // one entry per target with at least one accepted lagged edge
 };
 
 // Parses CSV text whose first column is a numeric, strictly increasing, evenly spaced time
@@ -121,17 +126,18 @@ double heldOutScore(const RidgeFit& fit, const Eigen::MatrixXd& xValidation, con
 
 // Runs the two-stage pipeline described in docs/proposals/causalInference.md: a cheap
 // partial-correlation skeleton pass over all pairs, then per-surviving-pair lagged ridge
-// regression (lag and penalty jointly chosen by held-out validation loss) to find direction. A
-// pair that survives stage 1 with no stage-2 evidence in either direction still produces two
-// directed edges built from the (symmetric) partial-correlation coefficient, tagged
-// provenance == "correlationOnly" rather than "lagged", so the two cases stay visibly distinct
-// downstream. Throws std::runtime_error if there are not enough observations relative to the
-// number of variables for the correlation matrix to be invertible.
+// regression (penalty chosen by held-out validation loss) to find direction. A pair that
+// survives stage 1 with no stage-2 evidence in either direction still produces two directed
+// edges built from the (symmetric) partial-correlation coefficient, tagged
+// provenance == "correlationOnly" rather than "continuousLagged", so the two cases stay visibly
+// distinct downstream. Throws std::runtime_error if there are not enough observations relative
+// to the number of variables for the correlation matrix to be invertible, or if
+// config.candidateLags isn't exactly {1} (see its own doc comment for why).
 //
-// If config.continuousTime is set, every lagged coefficient (and each target's own kept
-// self-lag) is additionally transformed into a continuous-time rate -- see
-// InferenceConfig::continuousTime and docs/proposals/continuousTimeConversion.md. Throws
-// std::runtime_error if continuousTime is set with candidateLags other than exactly {1}.
+// Every accepted lagged coefficient (any polynomial degree) is transformed into a continuous-time
+// rate, and each target's own self-lag is kept (rather than discarded) and transformed the same
+// way into result.selfTerms -- see InferredEdge::provenance, SelfTerm, and
+// docs/proposals/continuousTimeConversion.md for the exact transform and why.
 InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig& config);
 
 }

@@ -583,9 +583,8 @@ input, select { user-select: text; }
 .causalInferenceCandidateMain { display: block; flex: 1; color: #d5e1e6; }
 .causalInferenceCandidateMeta { display: block; margin-top: 2px; color: #6e828e; font-size: 7px; }
 .causalInferenceCandidateTag { flex-shrink: 0; padding: 2px 6px; border-radius: 9px; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
-.causalInferenceCandidateTag.lagged { color: #78c9c2; background: rgb(66 201 188 / 12%); }
 .causalInferenceCandidateTag.correlationOnly { color: #d9b06b; background: rgb(217 176 107 / 12%); }
-.causalInferenceCandidateTag.continuousLagged { color: #7aa8d9; background: rgb(122 168 217 / 12%); }
+.causalInferenceCandidateTag.continuousLagged { color: #78c9c2; background: rgb(66 201 188 / 12%); }
 .editorField.checkboxField { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; }
 .checkboxField input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
 .checkboxField span { color: #9fb0b8; font-size: 8px; }

@@ -5014,8 +5014,6 @@ function resetCausalInference() {
     $('#causalInferenceDegreeMode').value = 'linear';
     $('#causalInferenceDegreeValueField').hidden = true;
     $('#causalInferenceDegreeValue').value = '3';
-    $('#causalInferenceContinuousTime').checked = false;
-    $('#causalInferenceContinuousTimeHint').hidden = true;
     $('#runCausalInference').hidden = true;
     $('#runCausalInference').disabled = true;
     $('#causalInferenceCandidatesSection').hidden = true;
@@ -5107,9 +5105,7 @@ function renderCausalInferenceCandidates() {
         main.append(meta);
         const tag = document.createElement('span');
         tag.className = `causalInferenceCandidateTag ${candidate.provenance}`;
-        tag.textContent = candidate.provenance === 'lagged' ? 'Lagged'
-            : candidate.provenance === 'continuousLagged' ? 'Continuous'
-            : 'Correlation-only';
+        tag.textContent = candidate.provenance === 'correlationOnly' ? 'Correlation-only' : 'Lagged';
         row.append(checkbox, main, tag);
         container.append(row);
     });
@@ -5140,7 +5136,7 @@ function renderCausalInferenceSelfTerms() {
         main.append(meta);
         const tag = document.createElement('span');
         tag.className = 'causalInferenceCandidateTag continuousLagged';
-        tag.textContent = 'Continuous';
+        tag.textContent = 'Self';
         row.append(checkbox, main, tag);
         container.append(row);
     });
@@ -5362,10 +5358,6 @@ $('#causalInferenceDegreeMode').addEventListener('change', () => {
     $('#causalInferenceDegreeValueField').hidden = $('#causalInferenceDegreeMode').value === 'linear';
 });
 
-$('#causalInferenceContinuousTime').addEventListener('change', () => {
-    $('#causalInferenceContinuousTimeHint').hidden = !$('#causalInferenceContinuousTime').checked;
-});
-
 function causalInferenceDegreesFromUi() {
     const mode = $('#causalInferenceDegreeMode').value;
     if (mode === 'linear') return [1];
@@ -5381,12 +5373,11 @@ $('#runCausalInference').addEventListener('click', async () => {
     status.className = 'equationDiagnostics';
     status.textContent = 'Running inference…';
     try {
-        const continuousTime = $('#causalInferenceContinuousTime').checked;
-        const config = { candidateDegrees: causalInferenceDegreesFromUi(), continuousTime };
-        // continuousTime requires candidateLags == {1} engine-side (a predictor from 2+ CSV rows
-        // back has no single-Euler-step interpretation) -- candidateLags otherwise defaults to
-        // {1, 2, 3} engine-side, so this must be explicit or the engine rejects the request.
-        if (continuousTime) config.candidateLags = [1];
+        // No candidateLags override -- the engine's own default (and only accepted value) is
+        // {1}: every fitted coefficient becomes a continuous-time rate (rate = coefficient/Δt),
+        // and a predictor from 2+ CSV rows back has no single-Euler-step interpretation for that
+        // transform, so it was never representable as a working equation regardless.
+        const config = { candidateDegrees: causalInferenceDegreesFromUi() };
         const result = await window.engine.infer(causalInferenceState.csvContent, config);
         if (!result.available) throw new Error('The native inference engine is unavailable.');
         causalInferenceState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));

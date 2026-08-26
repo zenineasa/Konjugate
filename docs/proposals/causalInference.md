@@ -76,7 +76,39 @@ The prototype uses ridge regression with a held-out validation split — a reaso
 
 ### Continuous time — a real fork in direction
 
+See [Discrete fit vs. continuous rate](continuousTimeConversion.md) for the equations behind this section, side by side, with minimal prose.
+
 Konjugate is a continuous-time ODE/SDE simulation engine, not a fixed-timestep discrete framework. A lag-1 VAR is implicitly a discrete-time approximation; a **continuous-time** formulation (the course text calls this a continuous-time VAR / SDE) would map onto Konjugate's actual execution model more directly and would handle irregularly-sampled CSVs (a common problem the text spends real space on) without the grid-discretization workaround discrete VAR needs. The tradeoff: the course text notes current software support for continuous-time inference is weak, especially as the number of variables grows — this would be genuinely new work, not "just switch a library." Decided against for v1, below — the biggest fork in this whole document, but not the next one in line.
+
+**This is not just a theoretical tidiness concern -- it's a concrete, shipped-behavior problem.** Every Konjugate edge equation contributes to a state's *derivative*, never its next value directly ([Project schema](../projectSchema.md)). Causal inference fits a discrete rule (`target[t] = coefficient · source[t−1] + ...`) and, in [Causal inference](../causalInference.md)'s stage 2, explicitly *discards* each target's self-lag coefficient once it has served as a nuisance control term -- it never becomes part of a reported edge. The practical consequence: a model built from causal inference and then actually run forward in Konjugate has no damping/self-persistence term on any recovered node, and tends to diverge. This was hit directly while building the causal-inference blog post -- the "predicted vs. true" trajectory comparison there could not use a real forward simulation for exactly this reason, and had to fall back to evaluating each recovered equation statically instead.
+
+**A fix was prototyped** (standalone, JS, no engine changes) to check whether it's viable before considering it for real: fit the discrete relationship as today (but keep the self-lag coefficient instead of discarding it, giving a full discrete transition matrix `Φ`), then recover the continuous-time rate matrix via the standard matrix-exponential/logarithm correspondence for linear systems (`Φ = exp(AΔt)`, so `A = log(Φ)/Δt`) -- a well-established technique in systems identification and econometrics, not something invented for this.
+
+Result: **it works, and works dramatically, for non-oscillatory relationships.** On a 2-node synthetic system with known continuous-time ground truth (one damped root, one node coupled to it, no oscillation), forward-simulating the recovered continuous model landed within the system's own natural noise range (final-state error 0.34) after 200 time units, while forward-simulating today's shipped approach (self-lag discarded, discrete coefficient misapplied directly as a derivative) diverged to a final-state error of 32 -- two orders of magnitude off, with one node frozen at its initial value forever (its only true dynamic was the discarded self-lag term) and the other growing unboundedly.
+
+**It does not work safely for oscillatory relationships, and the failure mode is dangerous.** Tested against a damped-harmonic-oscillator ground truth (complex eigenvalues -- the standard model for anything with inertia: mechanical vibration, an LC circuit, any system with momentum) at several sampling rates relative to the true oscillation period:
+
+| Samples per true oscillation cycle | Recovery error (Frobenius norm) |
+| ---: | ---: |
+| 12.7 | 0.016 (excellent) |
+| 4.2 | 0.012 (excellent) |
+| 1.8 | 2.635 (unrecognizable) |
+| 1.1 | 1.513 (unrecognizable) |
+
+The transition happens exactly where Nyquist sampling theory predicts it (2 samples per cycle is the theoretical minimum to avoid aliasing), and it is a cliff, not a gradual degradation. Below that threshold, the recovered matrix isn't merely noisy -- it's a plausible-looking but *entirely different, wrong* continuous system, indistinguishable from a correct result without already knowing the answer. This is a real identifiability limit of the data, not an implementation bug: a system oscillating at frequency `ω`, sampled too slowly, is genuinely observationally indistinguishable from one oscillating at `ω` plus a multiple of the sampling rate. A user has no way to know in advance whether their CSV's sampling rate is fast enough relative to their system's fastest oscillatory mode -- discovering that is exactly what they're using this feature for in the first place -- and oscillatory/vibrational dynamics are common in the physical systems Konjugate targets, not a rare edge case.
+
+**One candidate detection method was tried and found unreliable, not just "not yet built."** A standard signal-processing diagnostic: fit the continuous `A` at the CSV's actual row rate, fit it again on a deliberately coarser sub-sample (every other row), and compare -- a genuinely well-identified (non-aliased) fit should be roughly consistent between the two, since a coarser rate is more likely to lock onto a *different* aliased branch if aliasing is occurring at all. Tested across four random seeds at each of the same sampling regimes:
+
+| Regime | True recovery error | Full-vs-half-rate consistency |
+| --- | ---: | ---: |
+| Well-sampled | 0.02–0.05 (safe) | 0–1% |
+| Moderate | 0.01–0.03 (safe) | 9–17% |
+| Poor (just past Nyquist) | ~2.6 (badly wrong) | **109–110%** -- reliably flags danger |
+| Very poor (well past Nyquist) | ~1.5 (badly wrong) | **12–15%** -- looks as safe as the moderate case |
+
+The check works cleanly right at the Nyquist boundary, consistent across every seed tested. It fails, just as consistently, for severe under-sampling -- the consistency score there is indistinguishable from a genuinely safe fit's, giving false confidence at exactly the point where the recovered system is most wrong. A threshold rule built on this specific diagnostic would catch one real failure mode and completely miss a worse one, which is arguably more dangerous than having no check at all.
+
+**Not implemented, and not a simple follow-on from here.** Shipping the matrix-log approach safely would need, at minimum, one of: a genuinely reliable way to detect likely under-sampling from the data alone (the one candidate tried above only partially works, per the table), an explicit restriction to non-oscillatory relationships with detection of (rather than silent wrong answers for) the oscillatory case, or accepting the risk with clear documentation. There's also real engineering scope beyond the math: the self-lag coefficient becoming a kept, reported quantity rather than a discarded nuisance term is a change to what stage 2 fits, the natural formulation is a joint multivariate system matrix rather than today's per-target independent regressions, and a production matrix logarithm needs to be numerically robust (naive eigendecomposition broke on both near-repeated real eigenvalues and required care for complex ones during prototyping; Eigen's unsupported `MatrixFunctions` module is a plausible foundation, not yet evaluated). Left as a documented direction, same status as before this investigation -- now with concrete evidence for what a real attempt would need to solve, rather than an open question.
 
 ### Data hygiene, directly relevant to arbitrary user CSVs
 

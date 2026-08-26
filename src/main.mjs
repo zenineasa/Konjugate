@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
@@ -28,7 +28,7 @@ import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
-import { auxiliaryWindowPresentation } from './windowLifecycle.mjs';
+import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, packageKey, uninstallPackage } from './packageArchive.mjs';
@@ -270,9 +270,7 @@ async function openGuideWindow(projectWindow, payload) {
     const state = projectWindowState.get(projectWindow);
     if (!state.exampleGuideWindow || state.exampleGuideWindow.isDestroyed()) {
         const createdWindow = new BrowserWindow({
-            width: 720,
-            height: 760,
-            ...state.exampleGuideBounds,
+            ...auxiliaryWindowBounds(projectWindow, 720, 760, state.exampleGuideBounds, screen),
             ...auxiliaryWindowPresentation(projectWindow),
             minWidth: 480,
             minHeight: 420,
@@ -335,9 +333,7 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
     state.providerEditorOwner = ownerWebContents;
     if (!state.providerEditorWindow || state.providerEditorWindow.isDestroyed()) {
         const createdWindow = new BrowserWindow({
-            width: 820,
-            height: 640,
-            ...state.providerEditorBounds,
+            ...auxiliaryWindowBounds(projectWindow, 820, 640, state.providerEditorBounds, screen),
             ...auxiliaryWindowPresentation(projectWindow),
             minWidth: 480,
             minHeight: 360,
@@ -574,8 +570,7 @@ async function openResultsVisualizer(projectWindow, { addonDirectory, manifest }
         return;
     }
     const createdWindow = new BrowserWindow({
-        width: 1080,
-        height: 720,
+        ...auxiliaryWindowBounds(projectWindow, 1080, 720, null, screen),
         minWidth: 720,
         minHeight: 480,
         ...auxiliaryWindowPresentation(projectWindow),

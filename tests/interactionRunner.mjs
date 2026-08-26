@@ -164,6 +164,70 @@ async function retryGesture(window, perform, checkExpression, times = 5, settleM
     return false;
 }
 
+// Deterministic pseudo-random generator (mulberry32), used instead of a smooth formula like a
+// sinusoid: a smooth curve is strongly autocorrelated with itself, which the engine-side unit
+// tests (engine/tests/causalInferenceTests.cpp) found leaks information across lags in exactly
+// the way real noise must not, producing a spurious reverse edge. Shared across every
+// causal-inference test below (was duplicated three times before the continuous-time test needed
+// buildThermalSystemCsv too).
+function mulberry32(seed) {
+    return function () {
+        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+function gaussianFrom(random) {
+    const u1 = Math.max(random(), 1e-9);
+    const u2 = random();
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+// An 8-node electronics-enclosure thermal/vibration system: 3 independent AR(1) roots
+// (ambientTemperature, motorLoad, solarIrradiance), 5 downstream nodes, 12 true lagged edges (one
+// quadratic: componentTemperature -> thermalStress). See the "recovers most of a realistic 8-node,
+// 12-edge system" test below for the full history of why this system exists and what it validates.
+function buildThermalSystemCsv(rowCount = 3000) {
+    const random = mulberry32(8080);
+    const amb = new Array(rowCount), motor = new Array(rowCount), solar = new Array(rowCount);
+    amb[0] = 0.2; motor[0] = 0.1; solar[0] = 0.15;
+    for (let t = 1; t < rowCount; t += 1) {
+        amb[t] = 0.5 * amb[t - 1] + 0.3 * gaussianFrom(random);
+        motor[t] = 0.5 * motor[t - 1] + 0.3 * gaussianFrom(random);
+        solar[t] = 0.5 * solar[t - 1] + 0.3 * gaussianFrom(random);
+    }
+    const enc = new Array(rowCount), vib = new Array(rowCount);
+    for (let t = 0; t < rowCount; t += 1) {
+        const pAmb = t > 0 ? amb[t - 1] : amb[0], pMotor = t > 0 ? motor[t - 1] : motor[0], pSolar = t > 0 ? solar[t - 1] : solar[0];
+        enc[t] = 2.0 * pAmb + 1.5 * pSolar + 0.05 * gaussianFrom(random);
+        vib[t] = 3.0 * pMotor + 0.4 * gaussianFrom(random);
+    }
+    const comp = new Array(rowCount);
+    for (let t = 0; t < rowCount; t += 1) {
+        const pEnc = t > 0 ? enc[t - 1] : enc[0], pMotor = t > 0 ? motor[t - 1] : motor[0], pAmb = t > 0 ? amb[t - 1] : amb[0];
+        comp[t] = 2.5 * pEnc + 1.0 * pMotor + 1.0 * pAmb + 0.05 * gaussianFrom(random);
+    }
+    const stress = new Array(rowCount);
+    for (let t = 0; t < rowCount; t += 1) {
+        const pComp = t > 0 ? comp[t - 1] : comp[0], pAmb = t > 0 ? amb[t - 1] : amb[0];
+        stress[t] = 3.5 * pComp + 0.8 * pComp * pComp + 2.0 * pAmb + 0.05 * gaussianFrom(random);
+    }
+    const fatigue = new Array(rowCount);
+    for (let t = 0; t < rowCount; t += 1) {
+        const pStress = t > 0 ? stress[t - 1] : stress[0], pVib = t > 0 ? vib[t - 1] : vib[0];
+        const pComp = t > 0 ? comp[t - 1] : comp[0], pMotor = t > 0 ? motor[t - 1] : motor[0];
+        fatigue[t] = 1.5 * pStress + 1.2 * pVib + 1.0 * pComp + 0.8 * pMotor + 0.6 * gaussianFrom(random);
+    }
+    const columnNames = ['ambientTemperature', 'motorLoad', 'solarIrradiance', 'enclosureTemperature',
+        'vibrationAmplitude', 'componentTemperature', 'thermalStress', 'fatigueAccumulation'];
+    const lines = [['time', ...columnNames].join(',')];
+    for (let t = 0; t < rowCount; t += 1) {
+        lines.push([t, amb[t], motor[t], solar[t], enc[t], vib[t], comp[t], stress[t], fatigue[t]].join(','));
+    }
+    return `${lines.join('\n')}\n`;
+}
+
 export async function runInteractionTests(window) {
     let passed = 0;
     const run = async (name, task) => {
@@ -2575,23 +2639,6 @@ export async function runInteractionTests(window) {
     });
 
     await run('causal inference proposes a lagged edge and materializes it as one undoable step', async () => {
-        // Deterministic pseudo-random generator (mulberry32), used instead of a smooth formula
-        // like a sinusoid: a smooth curve is strongly autocorrelated with itself, which the
-        // engine-side unit tests (engine/tests/causalInferenceTests.cpp) found leaks information
-        // across lags in exactly the way real noise must not, producing a spurious reverse edge.
-        function mulberry32(seed) {
-            return function () {
-                seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-            };
-        }
-        function gaussianFrom(random) {
-            const u1 = Math.max(random(), 1e-9);
-            const u2 = random();
-            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-        }
         // columnA follows a genuine AR(1) process, and columnB[t] = 3*columnA[t-1] + noise, with
         // columnA independent of columnB -- the same one-directional generative shape validated
         // in engine/tests/causalInferenceTests.cpp's inferGraphFindsAOneDirectionalLaggedEdge.
@@ -2694,19 +2741,6 @@ export async function runInteractionTests(window) {
         // makeQuadraticPairSeries. That C++ test found 300 rows necessary for a robust fit at
         // this construction (fewer let a spurious reverse edge slip through finite-sample
         // overfitting on the richer degree-2 feature set); this test uses the same row count.
-        function mulberry32(seed) {
-            return function () {
-                seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-            };
-        }
-        function gaussianFrom(random) {
-            const u1 = Math.max(random(), 1e-9);
-            const u2 = random();
-            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-        }
         function buildQuadraticPairCsv(rowCount = 300) {
             const random = mulberry32(5005);
             const p = [0.2];
@@ -2809,58 +2843,6 @@ export async function runInteractionTests(window) {
         // fatigueAccumulation) -- ridge consistently attributes the shared effect to the mediator,
         // at any sample size. 10 of the 12 true edges are recovered; this test asserts exactly
         // those 10, plus that no *other* spurious candidate reaches a high (>= 0.5) score.
-        function mulberry32(seed) {
-            return function () {
-                seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-            };
-        }
-        function gaussianFrom(random) {
-            const u1 = Math.max(random(), 1e-9);
-            const u2 = random();
-            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-        }
-        function buildThermalSystemCsv(rowCount = 3000) {
-            const random = mulberry32(8080);
-            const amb = new Array(rowCount), motor = new Array(rowCount), solar = new Array(rowCount);
-            amb[0] = 0.2; motor[0] = 0.1; solar[0] = 0.15;
-            for (let t = 1; t < rowCount; t += 1) {
-                amb[t] = 0.5 * amb[t - 1] + 0.3 * gaussianFrom(random);
-                motor[t] = 0.5 * motor[t - 1] + 0.3 * gaussianFrom(random);
-                solar[t] = 0.5 * solar[t - 1] + 0.3 * gaussianFrom(random);
-            }
-            const enc = new Array(rowCount), vib = new Array(rowCount);
-            for (let t = 0; t < rowCount; t += 1) {
-                const pAmb = t > 0 ? amb[t - 1] : amb[0], pMotor = t > 0 ? motor[t - 1] : motor[0], pSolar = t > 0 ? solar[t - 1] : solar[0];
-                enc[t] = 2.0 * pAmb + 1.5 * pSolar + 0.05 * gaussianFrom(random);
-                vib[t] = 3.0 * pMotor + 0.4 * gaussianFrom(random);
-            }
-            const comp = new Array(rowCount);
-            for (let t = 0; t < rowCount; t += 1) {
-                const pEnc = t > 0 ? enc[t - 1] : enc[0], pMotor = t > 0 ? motor[t - 1] : motor[0], pAmb = t > 0 ? amb[t - 1] : amb[0];
-                comp[t] = 2.5 * pEnc + 1.0 * pMotor + 1.0 * pAmb + 0.05 * gaussianFrom(random);
-            }
-            const stress = new Array(rowCount);
-            for (let t = 0; t < rowCount; t += 1) {
-                const pComp = t > 0 ? comp[t - 1] : comp[0], pAmb = t > 0 ? amb[t - 1] : amb[0];
-                stress[t] = 3.5 * pComp + 0.8 * pComp * pComp + 2.0 * pAmb + 0.05 * gaussianFrom(random);
-            }
-            const fatigue = new Array(rowCount);
-            for (let t = 0; t < rowCount; t += 1) {
-                const pStress = t > 0 ? stress[t - 1] : stress[0], pVib = t > 0 ? vib[t - 1] : vib[0];
-                const pComp = t > 0 ? comp[t - 1] : comp[0], pMotor = t > 0 ? motor[t - 1] : motor[0];
-                fatigue[t] = 1.5 * pStress + 1.2 * pVib + 1.0 * pComp + 0.8 * pMotor + 0.6 * gaussianFrom(random);
-            }
-            const columnNames = ['ambientTemperature', 'motorLoad', 'solarIrradiance', 'enclosureTemperature',
-                'vibrationAmplitude', 'componentTemperature', 'thermalStress', 'fatigueAccumulation'];
-            const lines = [['time', ...columnNames].join(',')];
-            for (let t = 0; t < rowCount; t += 1) {
-                lines.push([t, amb[t], motor[t], solar[t], enc[t], vib[t], comp[t], stress[t], fatigue[t]].join(','));
-            }
-            return `${lines.join('\n')}\n`;
-        }
         // [source, target, degree, trueCoefficient] terms for exactly the 10 unique edges this
         // construction recovers (11 entries: componentTemperature -> thermalStress carries both a
         // degree-1 and a degree-2 term on the same edge) -- see the comment above for the 2
@@ -2940,6 +2922,116 @@ export async function runInteractionTests(window) {
             'Undo should remove all 8 created nodes.');
         assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore,
             'Undo should remove all created edges.');
+    });
+
+    await run('causal inference in continuous-time mode fits self terms and continuous-rate edges', async () => {
+        // Same 8-node system and same true discrete coefficients as the test above -- this
+        // system's own CSV time column is 0,1,2,...,rowCount-1, so timeStep == 1 and the
+        // exact-Euler-match transform (rate = coefficient/timeStep for a cross term, rate =
+        // (coefficient - 1)/timeStep for a self-lag) leaves every cross-term coefficient
+        // numerically unchanged -- a convenient, free extra check that the transform is being
+        // applied at all (a bug that silently skipped it would still pass the "close to
+        // trueCoefficient" checks below, since 1/1 == coefficient either way, so provenance and
+        // the self-terms are the checks that actually distinguish this from the discrete mode).
+        const expectedEdges = [
+            ['ambientTemperature', 'enclosureTemperature', 1, 2.0],
+            ['solarIrradiance', 'enclosureTemperature', 1, 1.5],
+            ['motorLoad', 'vibrationAmplitude', 1, 3.0],
+            ['ambientTemperature', 'componentTemperature', 1, 1.0],
+            ['motorLoad', 'componentTemperature', 1, 1.0],
+            ['enclosureTemperature', 'componentTemperature', 1, 2.5],
+            ['componentTemperature', 'thermalStress', 1, 3.5],
+            ['componentTemperature', 'thermalStress', 2, 0.8],
+            ['vibrationAmplitude', 'fatigueAccumulation', 1, 1.2],
+            ['componentTemperature', 'fatigueAccumulation', 1, 1.0],
+            ['thermalStress', 'fatigueAccumulation', 1, 1.5]
+        ];
+
+        await evaluate(window, `document.querySelector('#causalInferenceButton').click()`);
+        await waitFor(window, `!document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not open.');
+        await evaluate(window, `window.__debugCausalInference.loadCsv(${JSON.stringify(buildThermalSystemCsv())})`);
+        await waitFor(window, `!document.querySelector('#causalInferenceMappingSection').hidden`, 'The column mapping section did not appear.');
+
+        await evaluate(window, `(() => {
+            const select = document.querySelector('#causalInferenceDegreeMode');
+            select.value = 'auto';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#causalInferenceDegreeValue').value = '2';
+            document.querySelector('#causalInferenceContinuousTime').click();
+        })()`);
+        assert.equal(await isRenderedVisible(window, '#causalInferenceContinuousTimeHint'), true,
+            'Checking the continuous-time box should reveal its calibration hint.');
+        await evaluate(window, `document.querySelector('#runCausalInference').click()`);
+        await waitFor(window, `!document.querySelector('#causalInferenceCandidatesSection').hidden`, 'The candidate list did not appear.', 20000);
+
+        const candidates = await evaluate(window, `window.__debugCausalInference.candidates()`);
+        for (const candidate of candidates) {
+            assert.notEqual(candidate.provenance, 'lagged',
+                `A lagged candidate should be tagged continuousLagged in this mode, never the discrete "lagged" tag `
+                + `(${candidate.sourceColumn} -> ${candidate.targetColumn} was tagged ${candidate.provenance}).`);
+        }
+        for (const [source, target, degree, trueCoefficient] of expectedEdges) {
+            const candidate = candidates.find((c) => c.sourceColumn === source && c.targetColumn === target);
+            assert.ok(candidate, `Expected a ${source} -> ${target} candidate.`);
+            const term = candidate.terms.find((t) => t.degree === degree);
+            assert.ok(term, `Expected a degree-${degree} term on ${source} -> ${target}, got: ${JSON.stringify(candidate.terms)}`);
+            const relativeError = Math.abs((term.coefficient - trueCoefficient) / trueCoefficient);
+            assert.ok(relativeError < 0.25,
+                `${source} -> ${target} degree ${degree}: expected a continuous rate close to ${trueCoefficient} (timeStep == 1), `
+                + `got ${term.coefficient} (${(relativeError * 100).toFixed(1)}% off).`);
+        }
+
+        // Every target that produced an accepted lagged candidate must also have a self-term --
+        // the engine pushes both from behind the same per-target fit gate (see
+        // causalInference.cpp's continuousTime block), so this holds regardless of which
+        // individual sources later clear the per-source coefficientThreshold.
+        const selfTerms = await evaluate(window, `window.__debugCausalInference.selfTerms()`);
+        const laggedTargets = new Set(candidates.filter((c) => c.provenance === 'continuousLagged').map((c) => c.targetColumn));
+        const selfTermTargets = new Set(selfTerms.map((t) => t.targetColumn));
+        for (const target of laggedTargets) {
+            assert.ok(selfTermTargets.has(target), `Expected a self-term for ${target}, which has an accepted continuous-time edge.`);
+        }
+        for (const term of selfTerms) {
+            assert.ok(Number.isFinite(term.rate), `Self-term rate for ${term.targetColumn} should be a finite number, got ${term.rate}.`);
+        }
+
+        const expectedPairs = new Set(expectedEdges.map(([s, t]) => `${s}->${t}`));
+        const otherCandidates = candidates.filter((c) => !expectedPairs.has(`${c.sourceColumn}->${c.targetColumn}`));
+        for (const candidate of otherCandidates) {
+            await evaluate(window, `(() => {
+                const row = [...document.querySelectorAll('#causalInferenceCandidateRows .causalInferenceCandidateRow')]
+                    .find((r) => r.querySelector('.causalInferenceCandidateMain').textContent.includes(${JSON.stringify(`${candidate.sourceColumn} → ${candidate.targetColumn}`)}));
+                row.querySelector('input[type="checkbox"]').click();
+            })()`);
+        }
+
+        const nodesBefore = await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`);
+        const consoleMessages = await captureConsoleMessages(window, async () => {
+            await evaluate(window, `document.querySelector('#commitCausalInference').click()`);
+            await waitFor(window, `document.querySelector('#causalInference').classList.contains('hidden')`, 'The causal inference card did not close after commit.', 15000);
+        });
+        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore + 8,
+            'Committing should have created one new node per CSV column (8), same as the discrete-mode test.');
+
+        // Candidates have no dedicated node/edge-style count to check self-terms landed correctly
+        // against (a source term is local to a node, not a separate relationship on the canvas) --
+        // read the committed document directly. Every self-term target should have exactly one
+        // sourceTerm whose expression references that node's own state symbol (not a
+        // source/target-prefixed edge symbol).
+        const committedDocument = await evaluate(window, `window.__debugCausalInference.document()`);
+        for (const target of laggedTargets) {
+            const node = committedDocument.nodes.find((candidateNode) => candidateNode.name === target);
+            assert.ok(node, `Expected a committed node named ${target}.`);
+            assert.equal(node.sourceTerms.length, 1, `Expected exactly one source term on ${target}, got ${node.sourceTerms.length}.`);
+            const symbol = node.states[0].symbol;
+            assert.ok(node.sourceTerms[0].expression.includes(symbol),
+                `${target}'s source term should reference its own state symbol "${symbol}", got: ${node.sourceTerms[0].expression}`);
+        }
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[0].textContent.match(/\\d+/)[0])`), nodesBefore,
+            'Undo should remove all 8 created nodes, and with them every source term that lived on them.');
     });
 
     console.log(`Interaction tests passed: ${passed}`);

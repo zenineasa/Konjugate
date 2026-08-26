@@ -5014,10 +5014,14 @@ function resetCausalInference() {
     $('#causalInferenceDegreeMode').value = 'linear';
     $('#causalInferenceDegreeValueField').hidden = true;
     $('#causalInferenceDegreeValue').value = '3';
+    $('#causalInferenceContinuousTime').checked = false;
+    $('#causalInferenceContinuousTimeHint').hidden = true;
     $('#runCausalInference').hidden = true;
     $('#runCausalInference').disabled = true;
     $('#causalInferenceCandidatesSection').hidden = true;
     $('#causalInferenceCandidateRows').replaceChildren();
+    $('#causalInferenceSelfTermSection').hidden = true;
+    $('#causalInferenceSelfTermRows').replaceChildren();
     $('#commitCausalInference').hidden = true;
     $('#commitCausalInference').disabled = true;
 }
@@ -5062,6 +5066,15 @@ function renderCausalInferenceMapping() {
     });
 }
 
+// Nothing is accepted unless at least one candidate edge OR self term is checked -- either
+// render function can leave the other's items unaffected, so this always looks at both rather
+// than each function only reasoning about its own list.
+function updateCommitCausalInferenceEnabled() {
+    const hasAcceptedCandidate = causalInferenceState.candidates.some((item) => item.accepted);
+    const hasAcceptedSelfTerm = (causalInferenceState.selfTerms ?? []).some((item) => item.accepted);
+    $('#commitCausalInference').disabled = !hasAcceptedCandidate && !hasAcceptedSelfTerm;
+}
+
 function renderCausalInferenceCandidates() {
     const container = $('#causalInferenceCandidateRows');
     container.replaceChildren();
@@ -5070,7 +5083,7 @@ function renderCausalInferenceCandidates() {
         empty.className = 'builderHint';
         empty.textContent = 'No candidate relationships were found.';
         container.append(empty);
-        $('#commitCausalInference').disabled = true;
+        updateCommitCausalInferenceEnabled();
         return;
     }
     causalInferenceState.candidates.forEach((candidate, index) => {
@@ -5081,24 +5094,57 @@ function renderCausalInferenceCandidates() {
         checkbox.checked = candidate.accepted;
         checkbox.addEventListener('change', () => {
             causalInferenceState.candidates[index].accepted = checkbox.checked;
-            $('#commitCausalInference').disabled = !causalInferenceState.candidates.some((item) => item.accepted);
+            updateCommitCausalInferenceEnabled();
         });
         const main = document.createElement('span');
         main.className = 'causalInferenceCandidateMain';
         main.textContent = `${candidate.sourceColumn} → ${candidate.targetColumn}`;
         const meta = document.createElement('span');
         meta.className = 'causalInferenceCandidateMeta';
-        meta.textContent = candidate.provenance === 'lagged'
-            ? `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`
-            : `score ${candidate.score.toFixed(2)}`;
+        meta.textContent = candidate.provenance === 'correlationOnly'
+            ? `score ${candidate.score.toFixed(2)}`
+            : `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`;
         main.append(meta);
         const tag = document.createElement('span');
         tag.className = `causalInferenceCandidateTag ${candidate.provenance}`;
-        tag.textContent = candidate.provenance === 'lagged' ? 'Lagged' : 'Correlation-only';
+        tag.textContent = candidate.provenance === 'lagged' ? 'Lagged'
+            : candidate.provenance === 'continuousLagged' ? 'Continuous'
+            : 'Correlation-only';
         row.append(checkbox, main, tag);
         container.append(row);
     });
-    $('#commitCausalInference').disabled = !causalInferenceState.candidates.some((item) => item.accepted);
+    updateCommitCausalInferenceEnabled();
+}
+
+function renderCausalInferenceSelfTerms() {
+    const container = $('#causalInferenceSelfTermRows');
+    container.replaceChildren();
+    const selfTerms = causalInferenceState.selfTerms ?? [];
+    $('#causalInferenceSelfTermSection').hidden = selfTerms.length === 0;
+    selfTerms.forEach((term, index) => {
+        const row = document.createElement('label');
+        row.className = 'causalInferenceCandidateRow';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = term.accepted;
+        checkbox.addEventListener('change', () => {
+            causalInferenceState.selfTerms[index].accepted = checkbox.checked;
+            updateCommitCausalInferenceEnabled();
+        });
+        const main = document.createElement('span');
+        main.className = 'causalInferenceCandidateMain';
+        main.textContent = `${term.targetColumn} (self)`;
+        const meta = document.createElement('span');
+        meta.className = 'causalInferenceCandidateMeta';
+        meta.textContent = `rate ${formatFittedNumber(term.rate)}`;
+        main.append(meta);
+        const tag = document.createElement('span');
+        tag.className = 'causalInferenceCandidateTag continuousLagged';
+        tag.textContent = 'Continuous';
+        row.append(checkbox, main, tag);
+        container.append(row);
+    });
+    updateCommitCausalInferenceEnabled();
 }
 
 function upperFirst(text) {
@@ -5138,10 +5184,24 @@ function latexForFittedEdge(candidate, sourceStateSymbol) {
     return `${termsLatex} ${interceptTerm}`;
 }
 
+// A self-term's rate applies to the node's own state directly -- an addSourceTerm's bindings
+// expose every one of that node's states by its raw symbol (unlike an edge's source/target-
+// prefixed synthesized symbols), and there's no intercept (see SelfTerm's doc comment in
+// causalInference.hpp for why: extending self-terms with their own intercept share would mean
+// propagating or fixing a pre-existing gap in how the discrete path already splits intercepts,
+// out of scope here). Still needs the same \mathrm{} wrapping latexForFittedEdge uses -- a bare
+// multi-letter LaTeX token like "componentTemperature" parses as implicit multiplication of
+// single-letter variables (c*o*m*p*o*n*e*n*t...) unless wrapped, regardless of whether the symbol
+// happens to be single- or multi-letter.
+function latexForSelfTerm(selfTerm, targetStateSymbol) {
+    return signedTermLatex(selfTerm.rate, `\\mathrm{${targetStateSymbol}}`).replace(/^\+ /, '');
+}
+
 async function commitCausalInference() {
     if (!causalInferenceState?.candidates || activeResult) return;
     const acceptedCandidates = causalInferenceState.candidates.filter((candidate) => candidate.accepted);
-    if (!acceptedCandidates.length) return;
+    const acceptedSelfTerms = (causalInferenceState.selfTerms ?? []).filter((term) => term.accepted);
+    if (!acceptedCandidates.length && !acceptedSelfTerms.length) return;
     const status = $('#causalInferenceStatus');
 
     // New nodes land on a circle -- every edge between two imported nodes is then a chord inside
@@ -5198,6 +5258,14 @@ async function commitCausalInference() {
         operations.push({
             kind: 'setEdgeEquation', edgeRef, outputStateRef: target.stateRef ?? target.stateId,
             latex: latexForFittedEdge(candidate, source.symbol)
+        });
+    });
+    acceptedSelfTerms.forEach((term, index) => {
+        const target = resolvedColumns.get(term.targetColumn);
+        operations.push({
+            kind: 'addSourceTerm', ref: `causalInferenceSelfTerm${index}`,
+            nodeRef: target.nodeRef ?? target.nodeId, outputStateRef: target.stateRef ?? target.stateId,
+            latex: latexForSelfTerm(term, target.symbol)
         });
     });
 
@@ -5281,11 +5349,21 @@ window.__debugCausalInference = {
     // 60+ prior tests can leave a relationship's projected midpoint raycasting to the wrong
     // object. Exposing the raw candidate data lets a test verify a fitted term (e.g. a degree >=
     // 2 one) reached the UI without depending on canvas hit-testing at all.
-    candidates: () => structuredClone(causalInferenceState?.candidates ?? null)
+    candidates: () => structuredClone(causalInferenceState?.candidates ?? null),
+    selfTerms: () => structuredClone(causalInferenceState?.selfTerms ?? null),
+    // Committed source terms have no node/edge-style count in .modelStatus to assert against, and
+    // (like candidates() above) reading them back via a node's own editor is fragile this deep
+    // into the interaction suite -- the serialized document is the only reliable place to check
+    // one actually landed.
+    document: () => serializeProjectDocument()
 };
 
 $('#causalInferenceDegreeMode').addEventListener('change', () => {
     $('#causalInferenceDegreeValueField').hidden = $('#causalInferenceDegreeMode').value === 'linear';
+});
+
+$('#causalInferenceContinuousTime').addEventListener('change', () => {
+    $('#causalInferenceContinuousTimeHint').hidden = !$('#causalInferenceContinuousTime').checked;
 });
 
 function causalInferenceDegreesFromUi() {
@@ -5303,15 +5381,24 @@ $('#runCausalInference').addEventListener('click', async () => {
     status.className = 'equationDiagnostics';
     status.textContent = 'Running inference…';
     try {
-        const config = { candidateDegrees: causalInferenceDegreesFromUi() };
+        const continuousTime = $('#causalInferenceContinuousTime').checked;
+        const config = { candidateDegrees: causalInferenceDegreesFromUi(), continuousTime };
+        // continuousTime requires candidateLags == {1} engine-side (a predictor from 2+ CSV rows
+        // back has no single-Euler-step interpretation) -- candidateLags otherwise defaults to
+        // {1, 2, 3} engine-side, so this must be explicit or the engine rejects the request.
+        if (continuousTime) config.candidateLags = [1];
         const result = await window.engine.infer(causalInferenceState.csvContent, config);
         if (!result.available) throw new Error('The native inference engine is unavailable.');
         causalInferenceState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));
+        causalInferenceState.selfTerms = (result.report.selfTerms ?? []).map((term) => ({ ...term, accepted: true }));
+        const selfTermCount = causalInferenceState.selfTerms.length;
         status.className = 'equationDiagnostics valid';
-        status.textContent = `Found ${causalInferenceState.candidates.length} candidate relationship${causalInferenceState.candidates.length === 1 ? '' : 's'}.`;
+        status.textContent = `Found ${causalInferenceState.candidates.length} candidate relationship${causalInferenceState.candidates.length === 1 ? '' : 's'}`
+            + (selfTermCount ? ` and ${selfTermCount} self term${selfTermCount === 1 ? '' : 's'}.` : '.');
         $('#causalInferenceCandidatesSection').hidden = false;
         $('#commitCausalInference').hidden = false;
         renderCausalInferenceCandidates();
+        renderCausalInferenceSelfTerms();
     } catch (error) {
         status.className = 'equationDiagnostics';
         status.textContent = error.message;

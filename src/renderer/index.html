@@ -652,11 +652,21 @@
                     <option value="auto">Let the tool decide, up to degree…</option>
                 </select></label>
                 <label class="editorField" id="causalInferenceDegreeValueField" hidden><span>Degree</span><input id="causalInferenceDegreeValue" type="number" min="2" max="6" value="3"></label>
+                <label class="editorField checkboxField">
+                    <input id="causalInferenceContinuousTime" type="checkbox">
+                    <span>Fit for continuous-time simulation (experimental)</span>
+                </label>
+                <p class="builderHint" id="causalInferenceContinuousTimeHint" hidden>Equations are calibrated to this CSV's own sampling interval. Results may drift if the project's own time step is set much finer than that.</p>
             </section>
             <section id="causalInferenceCandidatesSection" hidden>
                 <h3>Candidate relationships</h3>
                 <p class="builderHint">One row per proposed directed edge. <strong>Lagged</strong> means the source's past value predicts the target; <strong>correlation-only</strong> means the two are related but no clear direction was found.</p>
                 <div id="causalInferenceCandidateRows"></div>
+                <div id="causalInferenceSelfTermSection" hidden>
+                    <h3>Self terms</h3>
+                    <p class="builderHint">Each target's own recovered persistence/decay rate, applied to the node's own state rather than as a relationship between two nodes.</p>
+                    <div id="causalInferenceSelfTermRows"></div>
+                </div>
             </section>
             <footer>
                 <button id="cancelCausalInference" type="button">Cancel</button>

@@ -52,6 +52,12 @@ void writeInferenceReport(const std::filesystem::path& path, const InferenceResu
         json << "],\"intercept\":" << edge.intercept << ",\"score\":" << edge.score
              << ",\"provenance\":\"" << escape(edge.provenance) << "\"}";
     }
+    json << "],\"selfTerms\":[";
+    for (std::size_t index = 0; index < result.selfTerms.size(); ++index) {
+        if (index) json << ',';
+        const auto& term = result.selfTerms[index];
+        json << "{\"targetColumn\":\"" << escape(term.targetColumn) << "\",\"rate\":" << term.rate << "}";
+    }
     json << "]}";
     atomicWrite(path, json.str());
 }

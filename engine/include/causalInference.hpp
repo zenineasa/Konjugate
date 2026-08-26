@@ -14,6 +14,7 @@ namespace konjugate {
 struct InferenceSeries {
     std::vector<std::string> columnNames;
     std::vector<std::vector<double>> rows; // rows[t][column], rows.size() == T, each row.size() == columnNames.size()
+    double timeStep = 1.0; // the (validated, regular) spacing of the time column, populated by parseInferenceCsv()
 };
 
 struct InferenceConfig {
@@ -32,6 +33,17 @@ struct InferenceConfig {
     // for lag/penalty rather than adding a second selection mechanism. See
     // docs/proposals/causalInference.md's "Planned next" section.
     std::vector<int> candidateDegrees = {1};
+
+    // When true, every fitted coefficient (and each target's own self-lag, otherwise discarded)
+    // is transformed into a continuous-time rate via rate = coefficient/timeStep (rate =
+    // (coefficient-1)/timeStep for a self-lag) -- the exact solution to "what rate makes one
+    // Euler step at the CSV's own sampling interval reproduce this fitted discrete transition",
+    // so the resulting equations are unit-compatible with Konjugate's dx/dt edges instead of
+    // being a raw discrete-step multiplier. See docs/proposals/continuousTimeConversion.md.
+    // Requires candidateLags == {1} (inferGraph() throws otherwise) -- a predictor from 2+ CSV
+    // rows back has no single-Euler-step interpretation. No restriction on candidateDegrees: the
+    // transform is exact for any polynomial degree.
+    bool continuousTime = false;
 };
 
 // One polynomial term of a fitted relationship: coefficient * sourceColumn^degree, in the
@@ -49,18 +61,31 @@ struct InferredEdge {
     std::vector<PolynomialTerm> terms; // always non-empty; see PolynomialTerm
     double intercept = 0.0;     // in the original units of the target column
     double score = 0.0;         // held-out variance-explained, roughly (-inf, 1]; higher is better
-    std::string provenance;     // "lagged" | "correlationOnly"
+    std::string provenance;     // "lagged" | "correlationOnly" | "continuousLagged"
+};
+
+// A target's own diagonal (self-lag) rate, continuous-time mode only -- source == target, so this
+// cannot be an InferredEdge (Konjugate's schema forbids self-loop edges; see docs/projectSchema.md's
+// sourceTerms, which is the mechanism used instead). No intercept: a target whose sources are all
+// rejected already loses its intercept in today's edge-only path (split only across accepted
+// edges) -- extending self-terms with their own share would mean propagating or fixing that
+// pre-existing gap, out of scope here. Known v1 limitation.
+struct SelfTerm {
+    std::string targetColumn;
+    double rate = 0.0; // per unit time, original units
 };
 
 struct InferenceResult {
     std::vector<InferredEdge> edges;
+    std::vector<SelfTerm> selfTerms; // only populated when config.continuousTime == true
 };
 
 // Parses CSV text whose first column is a numeric, strictly increasing, evenly spaced time
-// column and whose remaining columns are the numeric variable series. Throws std::runtime_error
-// with a specific, user-facing message on a ragged row, a non-numeric cell, a non-increasing or
-// unevenly spaced time column, or a constant (zero-variance) variable column -- v1 requires
-// complete, regularly sampled input and rejects otherwise rather than imputing or resampling.
+// column and whose remaining columns are the numeric variable series. The validated spacing is
+// kept as InferenceSeries::timeStep. Throws std::runtime_error with a specific, user-facing
+// message on a ragged row, a non-numeric cell, a non-increasing or unevenly spaced time column,
+// or a constant (zero-variance) variable column -- v1 requires complete, regularly sampled input
+// and rejects otherwise rather than imputing or resampling.
 InferenceSeries parseInferenceCsv(const std::string& csvContent);
 
 // A standardized (zero-mean / unit-variance per column) copy of a series' variable columns,
@@ -102,6 +127,11 @@ double heldOutScore(const RidgeFit& fit, const Eigen::MatrixXd& xValidation, con
 // provenance == "correlationOnly" rather than "lagged", so the two cases stay visibly distinct
 // downstream. Throws std::runtime_error if there are not enough observations relative to the
 // number of variables for the correlation matrix to be invertible.
+//
+// If config.continuousTime is set, every lagged coefficient (and each target's own kept
+// self-lag) is additionally transformed into a continuous-time rate -- see
+// InferenceConfig::continuousTime and docs/proposals/continuousTimeConversion.md. Throws
+// std::runtime_error if continuousTime is set with candidateLags other than exactly {1}.
 InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig& config);
 
 }

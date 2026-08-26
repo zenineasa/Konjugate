@@ -38,6 +38,11 @@ std::filesystem::path optionPath(int argc, char** argv, const std::string& optio
     return {};
 }
 
+bool hasFlag(int argc, char** argv, const std::string& option) {
+    for (int index = 3; index < argc; ++index) if (std::string(argv[index]) == option) return true;
+    return false;
+}
+
 bool hasKjtExtension(const std::filesystem::path& path) {
     auto extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char character) {
@@ -84,6 +89,7 @@ konjugate::InferenceConfig inferenceConfigFromArgs(int argc, char** argv) {
     if (!ridgePenalties.empty()) config.ridgePenalties = parseDoubleList(ridgePenalties);
     const auto degrees = optionPath(argc, argv, "--degrees").string();
     if (!degrees.empty()) config.candidateDegrees = parseIntList(degrees);
+    config.continuousTime = hasFlag(argc, argv, "--continuous-time");
     return config;
 }
 }
@@ -129,7 +135,7 @@ int main(int argc, char** argv) {
     }
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
-                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]\n";
+                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3] [--continuous-time]\n";
         std::_Exit(64);
     }
     const std::string command = argv[1];

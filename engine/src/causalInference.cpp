@@ -81,6 +81,7 @@ InferenceSeries parseInferenceCsv(const std::string& csvContent) {
     // "Decided for v1").
     const double step = time[1] - time[0];
     if (!(step > kEpsilon)) throw std::runtime_error("The time column must be strictly increasing.");
+    series.timeStep = step;
     for (std::size_t index = 1; index < time.size(); ++index) {
         const double delta = time[index] - time[index - 1];
         if (delta <= 0) throw std::runtime_error("The time column must be strictly increasing.");
@@ -198,6 +199,12 @@ double adjustedHeldOutScore(double rawScore, std::size_t validationRows, std::si
 InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig& config) {
     if (config.skeletonMethod != "partialCorrelation") {
         throw std::runtime_error("Unsupported skeleton method \"" + config.skeletonMethod + "\".");
+    }
+    if (config.continuousTime && (config.candidateLags.size() != 1 || config.candidateLags[0] != 1)) {
+        // A predictor from 2+ CSV rows back has no single-Euler-step interpretation without a
+        // delay buffer (out of scope) -- reject rather than silently clamp, so a caller bug (e.g.
+        // the UI forgetting to force this) can't masquerade as a plausible result.
+        throw std::runtime_error("continuousTime requires candidateLags == {1}.");
     }
     const StandardizedSeries standardized = standardizeSeries(series);
     const Eigen::MatrixXd partial = computePartialCorrelation(standardized.values);
@@ -375,6 +382,18 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
             static_cast<Eigen::Index>(sources.size() * static_cast<std::size_t>(bestDegree)));
         jointInterceptOriginal -= selfLagCoefficient * muTarget;
 
+        // Continuous-time mode: rather than discard this control term, keep it -- rate =
+        // (coefficient - 1)/timeStep is the exact solution to "what rate makes one Euler step at
+        // this CSV's own sampling interval reproduce a discrete self-transition of
+        // selfLagCoefficient" (x + rate*x*dt == coefficient*x). No de-standardization needed: a
+        // column regressed on its own lagged value has sigmaTarget/sigmaSource == 1, so the
+        // standardized coefficient already is the original-units one. Emitted as a SelfTerm, not
+        // an InferredEdge -- see SelfTerm's doc comment for why (source == target isn't a valid
+        // edge in Konjugate's schema).
+        if (config.continuousTime) {
+            result.selfTerms.push_back({series.columnNames[target], (selfLagCoefficient - 1.0) / series.timeStep});
+        }
+
         for (std::size_t column = 0; column < sources.size(); ++column) {
             const std::size_t source = sources[column];
             const double sigmaSource = standardized.stddev(static_cast<Eigen::Index>(source));
@@ -402,14 +421,28 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
             if (std::sqrt(aggregateSquared) < config.coefficientThreshold) continue;
             laggedSurvived[target][source] = true;
 
+            // Continuous-time mode: rate = coefficient/timeStep for every term and the intercept
+            // -- the exact solution to "what rate makes one Euler step at this CSV's own sampling
+            // interval reproduce this fitted discrete contribution" (x + rate*x*dt == coefficient*x
+            // for a linear term; the same reasoning applies per polynomial degree and to the
+            // constant intercept term, none of which have an "unchanged" baseline to subtract, so
+            // unlike the self-lag transform above there is no "- 1"). Applies uniformly across
+            // every fitted degree -- unlike a matrix-logarithm-based conversion (rejected; see
+            // docs/proposals/continuousTimeConversion.md), this transform has no linear-only
+            // restriction.
+            if (config.continuousTime) {
+                for (auto& term : terms) term.coefficient /= series.timeStep;
+            }
+
             InferredEdge edge;
             edge.sourceColumn = series.columnNames[source];
             edge.targetColumn = series.columnNames[target];
             edge.lag = bestLag;
             edge.terms = std::move(terms);
             edge.intercept = jointInterceptOriginal / static_cast<double>(sources.size());
+            if (config.continuousTime) edge.intercept /= series.timeStep;
             edge.score = bestRawScore;
-            edge.provenance = "lagged";
+            edge.provenance = config.continuousTime ? "continuousLagged" : "lagged";
             result.edges.push_back(std::move(edge));
         }
     }

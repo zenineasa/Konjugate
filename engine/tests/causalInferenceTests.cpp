@@ -25,6 +25,13 @@ const konjugate::InferredEdge* findEdge(const konjugate::InferenceResult& result
     return nullptr;
 }
 
+const konjugate::SelfTerm* findSelfTerm(const konjugate::InferenceResult& result, const std::string& targetColumn) {
+    for (const auto& term : result.selfTerms) {
+        if (term.targetColumn == targetColumn) return &term;
+    }
+    return nullptr;
+}
+
 // The degree-1 (linear) term's coefficient, or 0 if the edge has none -- every test in this file
 // that predates the polynomial extension only ever produced a single linear term, so this is a
 // drop-in stand-in for the old InferredEdge::coefficient scalar field.
@@ -136,6 +143,25 @@ konjugate::InferenceSeries makeMutualPairSeries(std::size_t rowCount) {
     return series;
 }
 
+// b has a genuinely nonzero self-lag (unlike makeLaggedPairSeries's b, whose true self-lag is
+// exactly 0) so the continuous-time self-term transform has a real, known-nonzero value to
+// recover: selfLagCoefficient ~= 0.4 -> selfRate = (0.4 - 1)/timeStep, crossCoefficient ~= 2.0 ->
+// crossRate = 2.0/timeStep.
+konjugate::InferenceSeries makeContinuousTimeSeries(std::size_t rowCount) {
+    std::mt19937 generator(7007);
+    konjugate::InferenceSeries series;
+    series.columnNames = {"source", "target"};
+    std::vector<double> source(rowCount), target(rowCount);
+    source[0] = 0.2;
+    target[0] = 0.1;
+    for (std::size_t t = 1; t < rowCount; ++t) source[t] = 0.5 * source[t - 1] + noiseSample(generator, 0.3);
+    for (std::size_t t = 1; t < rowCount; ++t) {
+        target[t] = 0.4 * target[t - 1] + 2.0 * source[t - 1] + noiseSample(generator, 0.05);
+    }
+    for (std::size_t t = 0; t < rowCount; ++t) series.rows.push_back({source[t], target[t]});
+    return series;
+}
+
 void parseInferenceCsvParsesHeaderAndRows() {
     const std::string csv = "time,a,b\n0,1,10\n1,2,20\n2,3,30\n3,4,40\n4,5,50\n"
         "5,6,60\n6,7,70\n7,8,80\n8,9,90\n9,10,100\n";
@@ -145,6 +171,12 @@ void parseInferenceCsvParsesHeaderAndRows() {
     require(series.rows.size() == 10, "Expected ten data rows.");
     require(approxEqual(series.rows[0][0], 1.0) && approxEqual(series.rows[0][1], 10.0), "First row values did not parse correctly.");
     require(approxEqual(series.rows[9][0], 10.0) && approxEqual(series.rows[9][1], 100.0), "Last row values did not parse correctly.");
+}
+
+void parseInferenceCsvCapturesTimeStep() {
+    const std::string csv = "time,a\n0,1\n2.5,2\n5,3\n7.5,4\n10,5\n12.5,6\n15,7\n17.5,8\n20,9\n22.5,10\n";
+    const auto series = konjugate::parseInferenceCsv(csv);
+    require(approxEqual(series.timeStep, 2.5), "The parsed time step should match the CSV's own regular spacing.");
 }
 
 void parseInferenceCsvRejectsRaggedRow() {
@@ -351,11 +383,79 @@ void inferGraphWithDefaultConfigStaysLinearOnly() {
     }
 }
 
+void inferGraphRejectsContinuousTimeWithMultipleLags() {
+    const auto series = makeContinuousTimeSeries(300);
+    konjugate::InferenceConfig config;
+    config.continuousTime = true; // candidateLags left at its default {1, 2, 3}
+    bool threw = false;
+    try {
+        konjugate::inferGraph(series, config);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    require(threw, "continuousTime with candidateLags other than exactly {1} should be rejected, not silently clamped.");
+}
+
+void inferGraphContinuousTimeTransformsCoefficientsAndSelfLagExactly() {
+    // True discrete relationship: target[t] = 0.4*target[t-1] + 2.0*source[t-1] + noise, timeStep
+    // == 1.0 (a hand-built series, not parsed from CSV). The exact-Euler-match transform predicts
+    // crossRate == crossCoefficient/timeStep ~= 2.0, and selfRate == (selfLagCoefficient -
+    // 1.0)/timeStep ~= (0.4 - 1.0)/1.0 == -0.6.
+    const auto series = makeContinuousTimeSeries(300);
+    konjugate::InferenceConfig config;
+    config.continuousTime = true;
+    config.candidateLags = {1};
+    const auto result = konjugate::inferGraph(series, config);
+
+    const auto* sourceToTarget = findEdge(result, "source", "target");
+    require(sourceToTarget != nullptr, "Expected a source -> target edge.");
+    require(sourceToTarget->provenance == "continuousLagged",
+        "A continuous-time edge should be tagged continuousLagged, not lagged, so it can never be confused with a "
+        "discrete-coefficient edge in the same terms[].coefficient field.");
+    require(approxEqual(linearCoefficient(*sourceToTarget), 2.0, 0.2),
+        "The continuous-time cross rate should be close to the true value of 2.0 (coefficient/timeStep with timeStep == 1).");
+
+    require(findEdge(result, "target", "source") == nullptr,
+        "The self-lag rate must not be emitted as a target -> target (or any) edge -- self-loop edges are not valid "
+        "in Konjugate's schema.");
+    const auto* targetSelf = findSelfTerm(result, "target");
+    require(targetSelf != nullptr, "Expected a self-term for target.");
+    require(approxEqual(targetSelf->rate, -0.6, 0.2),
+        "The continuous-time self rate should be close to (0.4 - 1)/1 == -0.6.");
+}
+
+void inferGraphContinuousTimeAppliesToPolynomialDegrees() {
+    // Unlike a matrix-logarithm-based conversion (rejected -- see
+    // docs/proposals/continuousTimeConversion.md), the exact-Euler-match transform is exact for
+    // any polynomial degree: rate = coefficient/timeStep applies per term. continuousTime imposes
+    // no restriction on candidateDegrees.
+    const auto series = makeQuadraticPairSeries(300);
+    konjugate::InferenceConfig config;
+    config.continuousTime = true;
+    config.candidateLags = {1};
+    config.candidateDegrees = {1, 2};
+    const auto result = konjugate::inferGraph(series, config);
+
+    const auto* aToB = findEdge(result, "a", "b");
+    require(aToB != nullptr, "Expected an edge from a to b.");
+    require(aToB->provenance == "continuousLagged", "The a-to-b edge should be tagged continuousLagged.");
+
+    double linear = 0.0;
+    double quadratic = 0.0;
+    for (const auto& term : aToB->terms) {
+        if (term.degree == 1) linear = term.coefficient;
+        else if (term.degree == 2) quadratic = term.coefficient;
+    }
+    require(approxEqual(linear, 2.0, 0.2), "The continuous-time linear rate should be close to the true value of 2.0.");
+    require(approxEqual(quadratic, 0.5, 0.1), "The continuous-time quadratic rate should be close to the true value of 0.5.");
+}
+
 }
 
 int main() {
     try {
         parseInferenceCsvParsesHeaderAndRows();
+        parseInferenceCsvCapturesTimeStep();
         parseInferenceCsvRejectsRaggedRow();
         parseInferenceCsvRejectsNonNumericCell();
         parseInferenceCsvRejectsUnevenSpacing();
@@ -370,6 +470,9 @@ int main() {
         inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold();
         inferGraphRecoversAnExactQuadraticRelationship();
         inferGraphWithDefaultConfigStaysLinearOnly();
+        inferGraphRejectsContinuousTimeWithMultipleLags();
+        inferGraphContinuousTimeTransformsCoefficientsAndSelfLagExactly();
+        inferGraphContinuousTimeAppliesToPolynomialDegrees();
         std::cout << "Graph inference tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

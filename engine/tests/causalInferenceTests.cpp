@@ -346,6 +346,31 @@ void inferGraphFallsBackToCorrelationOnlyEdgesWhenNoDirectionClearsTheThreshold(
         "Neither fallback coefficient should be degenerately zero.");
 }
 
+void inferGraphScalesCorrelationOnlyCoefficientsByTimeStep() {
+    // Every other existing test builds its InferenceSeries directly (not via parseInferenceCsv),
+    // so timeStep defaults to 1.0 and a missing timeStep scaling would be numerically invisible.
+    // Fit the same series at two different timeSteps and confirm the coefficient scales exactly
+    // as 1/timeStep -- this is the one thing that distinguishes "scaled" from "not scaled" here.
+    auto series = makeLaggedPairSeries(60);
+    konjugate::InferenceConfig config;
+    config.coefficientThreshold = 5.0; // same as above -- forces the correlationOnly fallback
+
+    series.timeStep = 1.0;
+    const auto atOne = konjugate::inferGraph(series, config);
+    const auto* aToBAtOne = findEdge(atOne, "a", "b");
+    require(aToBAtOne != nullptr, "Expected a correlationOnly a -> b edge at timeStep 1.");
+
+    series.timeStep = 2.0;
+    const auto atTwo = konjugate::inferGraph(series, config);
+    const auto* aToBAtTwo = findEdge(atTwo, "a", "b");
+    require(aToBAtTwo != nullptr, "Expected a correlationOnly a -> b edge at timeStep 2.");
+
+    require(approxEqual(linearCoefficient(*aToBAtTwo), linearCoefficient(*aToBAtOne) / 2.0, 1e-9),
+        "Doubling timeStep should exactly halve the correlationOnly coefficient (rate = coefficient/timeStep).");
+    require(approxEqual(aToBAtTwo->intercept, aToBAtOne->intercept / 2.0, 1e-9),
+        "Doubling timeStep should exactly halve the correlationOnly intercept too.");
+}
+
 void inferGraphRecoversAnExactQuadraticRelationship() {
     const auto series = makeQuadraticPairSeries(300);
     konjugate::InferenceConfig config;
@@ -470,6 +495,7 @@ int main() {
         inferGraphRejectsCandidateLagsOtherThanOne();
         inferGraphTransformsCoefficientsAndSelfLagIntoContinuousRatesExactly();
         inferGraphAppliesTheRateTransformToPolynomialDegrees();
+        inferGraphScalesCorrelationOnlyCoefficientsByTimeStep();
         std::cout << "Graph inference tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

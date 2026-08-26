@@ -57,13 +57,15 @@ struct InferredEdge {
     std::vector<PolynomialTerm> terms; // always non-empty; see PolynomialTerm
     double intercept = 0.0;     // in the original units of the target column
     double score = 0.0;         // held-out variance-explained, roughly (-inf, 1]; higher is better
-    // "continuousLagged" | "correlationOnly". Every accepted lagged coefficient (any polynomial
-    // degree) is a continuous-time rate, not a raw discrete-step multiplier: rate =
-    // coefficient/timeStep, the exact solution to "what rate makes one Euler step at the CSV's
-    // own sampling interval reproduce this fitted discrete transition" -- see
-    // docs/proposals/continuousTimeConversion.md. "correlationOnly" is untransformed: it's built
-    // from contemporaneous (same-timestep) partial correlation, which has no lagged-transition
-    // structure for the transform to apply to.
+    // "continuousLagged" | "correlationOnly". Both are rate/timeStep-scaled, in the same sense
+    // that a coefficient placed into Konjugate's dx/dt needs a time dimension -- but only
+    // "continuousLagged" is the *exact* solution to "what rate makes one Euler step at the CSV's
+    // own sampling interval reproduce this fitted discrete transition" (see
+    // docs/proposals/continuousTimeConversion.md). "correlationOnly" is contemporaneous (same-
+    // timestep, lag 0), so there's no discrete transition for that derivation to apply to;
+    // dividing by timeStep there is an explicit modeling choice (treat the association as a
+    // coupling that resolves within one timeStep), not a derived exact result -- see its own
+    // comment in causalInference.cpp.
     std::string provenance;
 };
 

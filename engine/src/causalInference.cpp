@@ -446,6 +446,17 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
     // rather than a lagged one, tagged provenance == "correlationOnly" so they never read as an
     // ordinary lagged/dynamical edge downstream. Always linear (degree 1) -- partial correlation
     // is an inherently linear measure, so there is no natural nonlinear counterpart to it here.
+    //
+    // This coefficient is contemporaneous (lag 0), not a discrete transition -- there's no
+    // "before" and "after" state for the lagged tier's Euler-step-reproduction derivation to
+    // apply to, so dividing by timeStep here is not that same exact derivation. It's a distinct,
+    // explicit modeling choice instead: treat a same-timestep association as a coupling that
+    // resolves within one timeStep, so rate = coefficient/timeStep at least has the right units
+    // and the right order of magnitude for Konjugate's dx/dt. The alternative -- leaving an
+    // arbitrary-magnitude correlation-derived coefficient unscaled -- has exactly the same
+    // unbounded-divergence risk under Euler integration that motivated transforming every other
+    // tier; an approximate but dimensionally sound rate is a real improvement over a coefficient
+    // with no time dimension in it at all.
     for (std::size_t i = 0; i < variableCount; ++i) {
         for (std::size_t j = i + 1; j < variableCount; ++j) {
             if (!survivedSkeleton[i][j] || laggedSurvived[i][j] || laggedSurvived[j][i]) continue;
@@ -462,8 +473,8 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
                 edge.sourceColumn = series.columnNames[source];
                 edge.targetColumn = series.columnNames[target];
                 edge.lag = 0;
-                edge.terms = {{1, coefficientOriginal}};
-                edge.intercept = muTarget - coefficientOriginal * muSource;
+                edge.terms = {{1, coefficientOriginal / series.timeStep}};
+                edge.intercept = (muTarget - coefficientOriginal * muSource) / series.timeStep;
                 edge.score = std::abs(coefficientValue);
                 edge.provenance = "correlationOnly";
                 result.edges.push_back(std::move(edge));

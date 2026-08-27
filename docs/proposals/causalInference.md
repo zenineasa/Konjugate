@@ -141,9 +141,9 @@ This also matches an existing precedent: the planned digital-twin calibration wo
 3. **Require complete, regularly-sampled input; reject with a clear message otherwise.** Imputation and grid-discretization are real techniques the course text covers well, but they're additional engine surface for a problem no real user CSV has demonstrated yet. Validate on import and fail loudly rather than silently interpolating.
 4. **Review-before-commit UX: a candidate list, one row per proposed directed edge, with its score and its provenance** (lagged-directional vs. correlation-only), individually checked in or out before materializing — not an all-or-nothing accept. Consistent with the product strategy's own decision filter ("makes a modeling or numerical assumption more visible"), and the provenance tag is exactly where a user tells apart "confident, causal" edges from "these move together, direction unclear" edges before either lands in their model.
 
-## Planned next: additive-polynomial nonlinear extension
+## Additive-polynomial nonlinear extension
 
-**Shipped as v2.** Kept below in its original planning phrasing, since the design it argues for is what was actually built; see [Causal inference](../causalInference.md)'s "Additive polynomial terms (v2)" section for the shipped mathematics, including the destandardization approach (scale-only normalization for degree ≥ 2, worked out during implementation since this document didn't need to solve it) and the degrees-of-freedom-adjusted acceptance score (found necessary during testing, not anticipated here).
+**Status: shipped as v2.** Kept below in its original planning phrasing, since the design it argues for is what was actually built; see [Causal inference](../causalInference.md)'s "Additive polynomial terms (v2)" section for the shipped mathematics, including the destandardization approach (scale-only normalization for degree ≥ 2, worked out during implementation since this document didn't need to solve it) and the degrees-of-freedom-adjusted acceptance score (found necessary during testing, not anticipated here).
 
 Not a someday-maybe — this is the committed v2, to be implemented right after v1 lands, so it's worth designing now while the reasoning is fresh rather than rediscovering it later.
 

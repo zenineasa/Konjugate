@@ -80,10 +80,15 @@ removes the temporary directory and does not leave a partially installed
 version. Existing versions are not replaced unless an explicit update path
 requests overwrite behavior.
 
-Package installation does not execute package code. Add-ons run later in their
-existing sandboxed visualizer window. Plugins are not executed by the current
-package installer; a future plugin runtime must add explicit trust, artifact,
-platform and project-reference checks.
+Package installation itself does not execute package code — that stays true.
+Add-ons run later in their existing sandboxed visualizer window. Plugins are
+not executed by the installer either, but a plugin runtime now exists and does
+execute plugin code afterward, when a project actually references an installed
+plugin (`src/pluginResolver.mjs`, wired into `resolveInstalledPlugins` in
+`src/engineAdapter.mjs`) — it already checks project-reference pinning
+(`pluginId`/`pluginVersion`) and manifest-identity/API-version compatibility,
+and rejects a disabled plugin. What it does not yet add is artifact-hash
+verification or platform-specific package selection.
 
 ## Signing direction
 

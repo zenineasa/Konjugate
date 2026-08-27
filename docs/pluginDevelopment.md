@@ -129,7 +129,7 @@ The planned capability levels are:
 | Capability | What it adds | Execution status |
 | --- | --- | --- |
 | Relationship provider | Stateless behavior on an edge or source term | Implemented |
-| Component provider | A reusable node/edge vocabulary with declared ports and defaults | Planned |
+| Component provider | A reusable node/edge vocabulary with declared ports and defaults | Implemented |
 | Computational-node provider | A stateful component with lifecycle and checkpoint support | Implemented (Python, inline source only) |
 | Connector | Timestamped data from an approved device or external service | Planned |
 | Domain validator | Additional diagnostics that supplement native validation | Planned |

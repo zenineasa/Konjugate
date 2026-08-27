@@ -2,7 +2,7 @@
 
 # Component library: reusable node and edge templates
 
-**Status: proposal, not yet implemented.** This document records a design brainstormed in conversation, for review before implementation begins. Unlike the rest of `docs/`, it does not describe shipped behavior.
+**Status: shipped.** Kept below in its original planning phrasing, since the design it argues for is what was actually built — templates on disk at `assets/componentLibrary/*.json`, discovery and merging of bundled + user-installed templates in `src/main.mjs`, the sidebar UI (`#componentLibraryPanel`) and application logic in `src/renderer/index.html`/`renderer.mjs`, and interaction-test coverage in `tests/interactionRunner.mjs` ("component library places node templates and connects them with an auto-bound edge template"). One deviation from this document as originally written: node-template placement shipped as **click-to-place** (the same fixed-position/cascading-offset default "Add node" uses), not drag-and-drop from the sidebar as "Applying a node template" below describes — see that section's own note.
 
 ## Problem
 
@@ -20,6 +20,8 @@ Both are governed by the same `implementation`/`expressionModel` JSON shape alre
 ## Applying a node template
 
 Drag from the library sidebar, drop at a canvas position — the same shape of interaction as today's node placement, just pre-filled instead of starting from the "Add node" dialog's blank defaults.
+
+**As shipped, this is click-to-place instead**: clicking a node template places it at a fixed position with the same cascading offset "Add node" already uses for its own blank-default placement, rather than drag-and-drop. See `applyNodeTemplate`'s own comment in `src/renderer/renderer.mjs` for why drag-to-position was left for later rather than built here.
 
 ## Applying an edge template
 

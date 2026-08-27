@@ -59,7 +59,7 @@ A new user should be able to build a meaningful model without authoring every co
 
 The component library should provide reusable node and relationship templates for common thermal, electrical, mechanical and fluid primitives. Templates should use the existing model creation, binding, validation and undo mechanisms so a component created from the library behaves exactly like one created manually.
 
-The existing proposal is the starting point: [Component library](proposals/componentLibrary.md).
+**Shipped.** [Component library](proposals/componentLibrary.md) — the sidebar, templates (thermal mass, conduction, resistor, voltage source, battery, motor and others), symbol-based auto-binding for edge templates, and bundled-plus-user-installed/plugin-contributed discovery are all implemented and test-covered.
 
 The first library should favor a small, coherent vocabulary over a large catalog. Example primitives include thermal mass, thermal conductor, resistor, capacitor, voltage source, spring, damper, mass, pump, tank and controller. Each should have clear units, sensible defaults, a useful visual representation and a short explanation of its assumptions.
 
@@ -141,7 +141,7 @@ The same model should be easy to validate in CI, run headlessly for parameter sw
 
 ### Foundation phase
 
-- Implement the first small component library.
+- Implement the first small component library. **Shipped.**
 - Improve validation messages and entity highlighting.
 - Make one flagship example a guided workflow.
 - Add first-run diagnostics for engine and provider prerequisites.
@@ -233,6 +233,8 @@ than a public marketplace:
 - keep project references explicit and versioned;
 - make failures visible without corrupting the host application or model.
 
+**Shipped.** `src/packageArchive.mjs` (install/enable/disable/uninstall), `src/pluginResolver.mjs` (version-pinned resolution, incompatibility errors), and `src/extensionStateStore.mjs` implement this local-installation workflow; the component library's discovery already merges bundled and plugin-contributed entries. Deeper trust (publisher signatures, artifact hashes) remains future work — see [Plugin development](pluginDevelopment.md).
+
 ### Hello World contribution set
 
 The repository should ship three intentionally small contribution examples:
@@ -267,13 +269,13 @@ through synchronized analysis, not simply provide a larger chart menu.
 An initial release could provide:
 
 - 2D point, line and trajectory layers;
-- 3D points and paths for spatial or geographic data;
-- Plotly-backed time-series, scatter and distribution charts;
-- signal-to-color, signal-to-size and signal-to-label mappings;
-- a shared time cursor with the simulation result player;
-- selection synchronization between a plotted entity and its graph node;
-- legends that include signal, unit, branch and timestamp;
-- export of the current view and selected data.
+- 3D points and paths for spatial or geographic data; **shipped** — `addons/poseVisualizer`, a full Three.js scene for bodies/links.
+- Plotly-backed time-series, scatter and distribution charts; **time-series shipped** — `addons/resultPlotViewer`; scatter/distribution still open.
+- signal-to-color, signal-to-size and signal-to-label mappings; still open.
+- a shared time cursor with the simulation result player; **shipped**.
+- selection synchronization between a plotted entity and its graph node; **shipped**.
+- legends that include signal, unit, branch and timestamp; **partially shipped** (signal legends exist; unit/branch/timestamp not confirmed as part of them).
+- export of the current view and selected data; still open.
 
 The add-on should consume a stable, read-only visualization context. It should
 not reach into private result storage or duplicate simulation playback logic.

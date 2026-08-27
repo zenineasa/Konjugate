@@ -77,6 +77,6 @@ add-on easier to review and safer to install.
 The next ecosystem examples should build on this one without expanding its
 authority:
 
-- a visualization add-on that synchronizes a selected signal with a chart;
-- a component-library entry that inserts a reusable model template;
-- a numerical provider example using the documented C++ or Python provider SDK.
+- a visualization add-on that synchronizes a selected signal with a chart — **shipped**: `addons/resultPlotViewer` ("Results Analysis"), Plotly time-series with signal search, legend, and timeline sync;
+- a component-library entry that inserts a reusable model template — **shipped**: `examples/providers/helloComponent.json`, documented in [Plugin development](pluginDevelopment.md);
+- a numerical provider example using the documented C++ or Python provider SDK — **partially shipped**: `examples/providers/helloWorld.py` exists; no standalone C++ provider example exists yet.

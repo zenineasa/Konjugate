@@ -221,15 +221,16 @@ Implemented engine pacing modes are:
 - **Real time:** target one simulation second per wall-clock second.
 - **Limited ratio:** run at no more than `n` simulation seconds per wall-clock second.
 
-Manual stepping and pausing remain future extensions.
+Manual stepping remains a future extension. Pausing is already implemented (see below).
 
 A pacing cap is a maximum, not a guarantee; expensive models may advance more
 slowly. Pausing occurs at a safe synchronization boundary. Pacing belongs in the
 C++ runner so Electron and command-line execution share the same semantics.
 
 During a paced run, confirmed samples stream to the UI, the transport cursor
-advances, and node labels update at output intervals. Cancellation, pausing, and
-interventions use the file-based job protocol rather than renderer delays.
+advances, and node labels update at output intervals. Cancellation and pausing
+are sent as live protobuf control-stream commands rather than renderer delays or
+a file-based mechanism — see [Engine job protocol](jobProtocol.md).
 
 The implemented execution lifecycle is `running ↔ paused`, followed by either
 `completed` or `stopped`. Stop captures the current synchronization boundary and

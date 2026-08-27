@@ -2079,6 +2079,27 @@ function normalizedParameterControl(parameter) {
     };
 }
 
+// Digital-twin fitting bounds -- orthogonal to `control` (a "live" slider's runtime UI range):
+// a parameter can be a fitting target independent of whether it's also live-adjustable during a
+// run. Reuses the same "value ± its own magnitude" default heuristic as liveParameterRange()
+// when no bounds have been set yet, for the same reason -- a plausible starting range beats an
+// arbitrary fixed one.
+function normalizedParameterTuning(parameter) {
+    const value = Number(parameter.value) || 0;
+    const magnitude = Math.max(Math.abs(value), 1);
+    return {
+        minimum: Number.isFinite(Number(parameter.tuning?.minimum)) ? Number(parameter.tuning.minimum) : Math.min(0, value - magnitude),
+        maximum: Number.isFinite(Number(parameter.tuning?.maximum)) ? Number(parameter.tuning.maximum) : Math.max(0, value + magnitude)
+    };
+}
+
+function parameterTuningError(value, tuning) {
+    if (![value, tuning.minimum, tuning.maximum].every(Number.isFinite)) return 'Value and fitting bounds must be finite numbers.';
+    if (!(tuning.minimum < tuning.maximum)) return 'Minimum must be less than maximum.';
+    if (value < tuning.minimum || value > tuning.maximum) return 'The initial value must be within the fitting bounds.';
+    return '';
+}
+
 function parameterControlError(value, control) {
     if (![value, control.minimum, control.maximum, control.step].every(Number.isFinite)) return 'Value and slider settings must be finite numbers.';
     if (!(control.minimum < control.maximum)) return 'Minimum must be less than maximum.';
@@ -2105,6 +2126,7 @@ function renderEdgeEditor(definition) {
     if (!definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
     definition.parameters.forEach((parameter) => {
         const control = normalizedParameterControl(parameter);
+        const tuning = normalizedParameterTuning(parameter);
         const row = document.createElement('div');
         row.className = 'editorParameterRow';
         row.innerHTML = `
@@ -2113,6 +2135,7 @@ function renderEdgeEditor(definition) {
             <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value)}"></label>
             <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
             <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
+            <label class="parameterTuningToggle"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''}> Tunable (fitting target)</label>
             <button type="button" title="Remove parameter">×</button>
             <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
                 <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
@@ -2120,22 +2143,42 @@ function renderEdgeEditor(definition) {
                 <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
                 <span class="parameterControlError" role="status"></span>
             </div>
+            <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
+                <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}"></label>
+                <label class="parameterField"><span>Fitting maximum</span><input data-tuning-field="maximum" type="number" value="${tuning.maximum}"></label>
+                <span class="parameterTuningError" role="status"></span>
+            </div>
         `;
         $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
         const readControl = () => Object.fromEntries($$('[data-control-field]', row)
             .map((input) => [input.dataset.controlField, Number(input.value)]));
+        const readTuning = () => Object.fromEntries($$('[data-tuning-field]', row)
+            .map((input) => [input.dataset.tuningField, Number(input.value)]));
         const showControlError = () => {
             const error = $('[data-field="mode"]', row).value === 'live'
                 ? parameterControlError(Number($('[data-field="value"]', row).value), readControl()) : '';
             $('.parameterControlError', row).textContent = error;
             return error;
         };
+        const showTuningError = () => {
+            const error = $('[data-field="tunable"]', row).checked
+                ? parameterTuningError(Number($('[data-field="value"]', row).value), readTuning()) : '';
+            $('.parameterTuningError', row).textContent = error;
+            return error;
+        };
         $$('[data-control-field], [data-field="value"]', row).forEach((input) => input.addEventListener('input', showControlError));
+        $$('[data-tuning-field], [data-field="value"]', row).forEach((input) => input.addEventListener('input', showTuningError));
         $$('[data-field]', row).forEach((input) => input.addEventListener('change', () => {
             if (input.dataset.field === 'mode') $('.parameterControlFields', row).hidden = input.value !== 'live';
-            if (showControlError()) return;
+            if (input.dataset.field === 'tunable') $('.parameterTuningFields', row).hidden = !input.checked;
+            if (showControlError() || showTuningError()) return;
             changeEdgeModel(definition, (snapshot) => {
                 const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
+                if (input.dataset.field === 'tunable') {
+                    if (input.checked) targetParameter.tuning = readTuning();
+                    else delete targetParameter.tuning;
+                    return;
+                }
                 targetParameter[input.dataset.field] = input.dataset.field === 'value'
                     ? Number(input.value) || 0
                     : input.value.trim();
@@ -2149,6 +2192,14 @@ function renderEdgeEditor(definition) {
                 const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
                 targetParameter.value = Number($('[data-field="value"]', row).value) || 0;
                 targetParameter.control = readControl();
+            });
+        }));
+        $$('[data-tuning-field]', row).forEach((input) => input.addEventListener('change', () => {
+            if (showTuningError()) return;
+            changeEdgeModel(definition, (snapshot) => {
+                const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
+                targetParameter.value = Number($('[data-field="value"]', row).value) || 0;
+                targetParameter.tuning = readTuning();
             });
         }));
         $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
@@ -5560,6 +5611,245 @@ $('#cancelCausalInference').addEventListener('click', () => {
 });
 
 $('#commitCausalInference').addEventListener('click', () => { commitCausalInference(); });
+
+// Digital-twin parameter tuning: fit a model's own tunable parameters (marked "Tunable" in the
+// relationship editor, see normalizedParameterTuning/parameterTuningError above) against measured
+// CSV data through the real simulator -- see engine/src/parameterFitting.cpp. Distinct from
+// causal inference in one structural way: mapping here is existing-states-only (no "create new
+// node" option), since fitting requires a model that already exists.
+let parameterTuningState = null;
+
+const PARAMETER_TUNING_BACKENDS = [
+    { id: 'nlopt-bobyqa', label: 'BOBYQA (derivative-free)' },
+    { id: 'nlopt-cobyla', label: 'COBYLA (derivative-free)' },
+    { id: 'nlopt-neldermead', label: 'Nelder-Mead (derivative-free)' },
+    { id: 'nlopt-slsqp', label: 'SLSQP (gradient-based)' }
+];
+
+function findTunableParametersInModel() {
+    const document = serializeProjectDocument();
+    const found = [];
+    for (const edge of document.edges) {
+        for (const parameter of edge.parameters ?? []) {
+            if (parameter.tuning) {
+                found.push({
+                    edgeId: edge.id, edgeName: edge.name, parameterId: parameter.id,
+                    name: parameter.name, symbol: parameter.symbol, value: parameter.value, tuning: parameter.tuning
+                });
+            }
+        }
+    }
+    return found;
+}
+
+function resetParameterTuning() {
+    parameterTuningState = null;
+    $('#parameterTuningFile').value = '';
+    $('#parameterTuningStatus').className = 'equationDiagnostics';
+    $('#parameterTuningStatus').textContent = '';
+    $('#parameterTuningMappingSection').hidden = true;
+    $('#parameterTuningMappingRows').replaceChildren();
+    $('#parameterTuningParametersSection').hidden = true;
+    $('#parameterTuningParameterRows').replaceChildren();
+    if (!$('#parameterTuningBackend').options.length) {
+        PARAMETER_TUNING_BACKENDS.forEach((backend) => $('#parameterTuningBackend').append(new Option(backend.label, backend.id)));
+    }
+    $('#parameterTuningProgressSection').hidden = true;
+    $('#parameterTuningProgress').textContent = '';
+    $('#parameterTuningReviewSection').hidden = true;
+    $('#parameterTuningReviewRows').replaceChildren();
+    $('#parameterTuningReviewStatus').textContent = '';
+    $('#runParameterTuning').hidden = true;
+    $('#runParameterTuning').disabled = true;
+    $('#commitParameterTuning').hidden = true;
+    $('#commitParameterTuning').disabled = true;
+}
+
+function openParameterTuning() {
+    if (activeResult) return;
+    hideCards($('#parameterTuning'));
+    resetParameterTuning();
+    $('#parameterTuning').classList.remove('hidden');
+}
+
+$('#parameterTuningButton').addEventListener('click', openParameterTuning);
+
+function renderParameterTuningMapping() {
+    const container = $('#parameterTuningMappingRows');
+    container.replaceChildren();
+    parameterTuningState.mapping.forEach((entry) => {
+        const modelNode = model.nodes.find((node) => node.id === entry.nodeId);
+        const state = modelNode?.states.find((candidate) => candidate.id === entry.stateId);
+        const row = document.createElement('div');
+        row.className = 'causalInferenceMappingRow';
+        const label = document.createElement('span');
+        label.textContent = entry.columnName;
+        const target = document.createElement('span');
+        target.textContent = `→ ${modelNode?.title ?? '?'} · ${state?.label ?? '?'}`;
+        row.append(label, target);
+        container.append(row);
+    });
+}
+
+function renderParameterTuningParameters() {
+    const container = $('#parameterTuningParameterRows');
+    container.replaceChildren();
+    parameterTuningState.tunableParameters.forEach((parameter) => {
+        const row = document.createElement('div');
+        row.className = 'causalInferenceMappingRow';
+        const label = document.createElement('span');
+        label.textContent = `${parameter.edgeName} · ${parameter.symbol}`;
+        const range = document.createElement('span');
+        range.textContent = `current ${parameter.value}, bounds [${parameter.tuning.minimum}, ${parameter.tuning.maximum}]`;
+        row.append(label, range);
+        container.append(row);
+    });
+}
+
+async function loadParameterTuningCsv(content) {
+    const status = $('#parameterTuningStatus');
+    try {
+        const parsed = parseCsv(content);
+        const tunableParameters = findTunableParametersInModel();
+        if (!tunableParameters.length) {
+            status.className = 'equationDiagnostics';
+            status.textContent = 'No parameters are marked "Tunable" yet -- mark at least one in a relationship editor first.';
+            return;
+        }
+        // Existing-states-only: unlike causal inference, tuning never creates a node -- it fits a
+        // model that already exists, so an unmatched CSV column is simply not usable here.
+        const mapping = mapColumnsToNodes(parsed.columnNames, existingNodesForMapping()).filter((entry) => !entry.createNew);
+        if (!mapping.length) {
+            status.className = 'equationDiagnostics';
+            status.textContent = 'None of the CSV columns matched an existing state by name.';
+            return;
+        }
+        parameterTuningState = { csvContent: content, mapping, tunableParameters, report: null };
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `Parsed ${parsed.columnNames.length} column${parsed.columnNames.length === 1 ? '' : 's'}, ${parsed.rows.length} rows. `
+            + `Matched ${mapping.length} to existing states.`;
+        renderParameterTuningMapping();
+        renderParameterTuningParameters();
+        $('#parameterTuningMappingSection').hidden = false;
+        $('#parameterTuningParametersSection').hidden = false;
+        $('#parameterTuningProgressSection').hidden = true;
+        $('#parameterTuningReviewSection').hidden = true;
+        $('#commitParameterTuning').hidden = true;
+        $('#commitParameterTuning').disabled = true;
+        $('#runParameterTuning').hidden = false;
+        $('#runParameterTuning').disabled = false;
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = error.message;
+    }
+}
+
+$('#parameterTuningFile').addEventListener('change', async () => {
+    const file = $('#parameterTuningFile').files[0];
+    if (!file) return;
+    await loadParameterTuningCsv(await file.text());
+});
+
+// Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
+// driven by this app's interaction-test harness.
+window.__debugParameterTuning = {
+    loadCsv: (content) => loadParameterTuningCsv(content),
+    report: () => structuredClone(parameterTuningState?.report ?? null)
+};
+
+function renderParameterTuningReview() {
+    const container = $('#parameterTuningReviewRows');
+    container.replaceChildren();
+    parameterTuningState.report.finalParameters.forEach((entry) => {
+        const parameter = parameterTuningState.tunableParameters.find((candidate) => candidate.parameterId === entry.parameterId);
+        if (!parameter) return;
+        const row = document.createElement('label');
+        row.className = 'causalInferenceCandidateRow';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.dataset.parameterId = String(entry.parameterId);
+        const main = document.createElement('span');
+        main.className = 'causalInferenceCandidateMain';
+        main.textContent = `${parameter.edgeName} · ${parameter.symbol}: ${parameter.value} → ${Number(entry.value).toPrecision(6)}`;
+        row.append(checkbox, main);
+        container.append(row);
+    });
+}
+
+$('#runParameterTuning').addEventListener('click', async () => {
+    if (!parameterTuningState || activeResult) return;
+    const button = $('#runParameterTuning');
+    const progress = $('#parameterTuningProgress');
+    button.disabled = true;
+    $('#parameterTuningProgressSection').hidden = false;
+    $('#parameterTuningReviewSection').hidden = true;
+    $('#commitParameterTuning').hidden = true;
+    $('#commitParameterTuning').disabled = true;
+    progress.textContent = 'Running…';
+    try {
+        const content = JSON.stringify(serializeProjectDocument());
+        const config = { backend: $('#parameterTuningBackend').value };
+        const result = await window.engine.fit(content, parameterTuningState.csvContent, config);
+        if (!result.available) throw new Error('The native fitting engine is unavailable.');
+        parameterTuningState.report = result.report;
+        progress.textContent = `${result.report.converged ? 'Converged' : 'Did not fully converge'} (${result.report.terminationReason}), `
+            + `final loss ${Number(result.report.finalLoss).toPrecision(4)}.`;
+        renderParameterTuningReview();
+        $('#parameterTuningReviewSection').hidden = false;
+        $('#commitParameterTuning').hidden = false;
+        $('#commitParameterTuning').disabled = false;
+    } catch (error) {
+        progress.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+});
+
+async function commitParameterTuning() {
+    if (!parameterTuningState?.report) return;
+    const status = $('#parameterTuningReviewStatus');
+    const acceptedRows = $$('#parameterTuningReviewRows input[type=checkbox]:checked');
+    if (!acceptedRows.length) {
+        status.textContent = 'Select at least one fitted value to apply.';
+        return;
+    }
+    const baseDocument = serializeProjectDocument();
+    const operations = acceptedRows.map((checkbox) => {
+        const parameterId = Number(checkbox.dataset.parameterId);
+        const fitted = parameterTuningState.report.finalParameters.find((entry) => entry.parameterId === parameterId);
+        return { kind: 'updateParameter', parameterRef: parameterId, value: fitted.value };
+    });
+    let prepared;
+    try {
+        prepared = buildAssistantProposal(baseDocument, { proposalVersion: 1, operations });
+    } catch (error) {
+        status.textContent = error.message;
+        return;
+    }
+    const validation = await window.engine.validate(JSON.stringify(prepared.document));
+    if (!validation.available || !validation.report.valid) {
+        status.textContent = validation.available
+            ? (validation.report.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.message).join(' ')
+                || 'The native validator rejected these fitted values.')
+            : 'The native validation engine is unavailable.';
+        return;
+    }
+    const before = baseDocument;
+    const after = prepared.document;
+    replaceModelContents(after);
+    recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
+    resetParameterTuning();
+    $('#parameterTuning').classList.add('hidden');
+    $('#statusText').textContent = 'Fitted parameters applied. Use Save As to keep this as a new project -- the original is untouched until you do.';
+}
+
+$('#cancelParameterTuning').addEventListener('click', () => {
+    resetParameterTuning();
+    $('#parameterTuning').classList.add('hidden');
+});
+
+$('#commitParameterTuning').addEventListener('click', () => { commitParameterTuning(); });
 
 function assistantModelSummary() {
     const document = serializeProjectDocument();

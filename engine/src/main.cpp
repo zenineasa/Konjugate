@@ -3,6 +3,8 @@
 #include "causalInference.hpp"
 #include "causalInferenceReport.hpp"
 #include "modelValidator.hpp"
+#include "parameterFitting.hpp"
+#include "parameterFittingReport.hpp"
 #include "partitionPlan.hpp"
 #include "projectContainer.hpp"
 #include "simulationRunner.hpp"
@@ -131,21 +133,24 @@ int main(int argc, char** argv) {
     }
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
-                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]\n";
+                      "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]\n"
+                      "       konjugateEngine fit <project.kjt> <measured.csv> --report report.json [--backend nlopt-bobyqa] [--max-iterations 200]\n";
         std::_Exit(64);
     }
     const std::string command = argv[1];
     const auto report = optionPath(argc, argv, "--report");
     const auto configurationPath = optionPath(argc, argv, "--configuration");
     const auto outputPath = optionPath(argc, argv, "--output");
-    if ((command != "inspect" && command != "validate" && command != "run" && command != "infer") ||
-        ((command == "inspect" || command == "validate" || command == "infer") && report.empty()) ||
-        (command == "run" && (configurationPath.empty() || outputPath.empty()))) {
+    if ((command != "inspect" && command != "validate" && command != "run" && command != "infer" && command != "fit") ||
+        ((command == "inspect" || command == "validate" || command == "infer" || command == "fit") && report.empty()) ||
+        (command == "run" && (configurationPath.empty() || outputPath.empty())) ||
+        (command == "fit" && argc < 4)) {
         std::cerr << "The selected command requires its report, configuration, and output paths.\n";
         std::_Exit(64);
     }
     // infer takes a CSV, not a .kjt project -- every other command still requires the container
-    // extension check below.
+    // extension check below. fit takes both a .kjt project (argv[2]) and a measured CSV
+    // (argv[3]) -- only the project half needs the extension check.
     if (command != "infer" && !hasKjtExtension(argv[2])) {
         std::cerr << "UNSUPPORTED_FILE_FORMAT: Only .kjt project files are supported.\n";
         std::_Exit(3);
@@ -176,6 +181,26 @@ int main(int argc, char** argv) {
         if (!result.valid) {
             std::cerr << "MODEL_INVALID: The model must pass validation before it can run.\n";
             std::_Exit(2);
+        }
+        if (command == "fit") {
+            konjugate::FittingProblem problem;
+            problem.baseDocument = document;
+            problem.measured = konjugate::parseInferenceCsv(readTextFile(argv[3]));
+            problem.mapping = konjugate::autoMapColumnsToStates(problem.measured.columnNames, document);
+            problem.tunableParameters = konjugate::findTunableParameters(document);
+            if (problem.tunableParameters.empty()) {
+                throw std::runtime_error("The model has no parameters marked tunable (parameters[].tuning).");
+            }
+            if (problem.mapping.empty()) {
+                throw std::runtime_error("None of the measured CSV's columns matched a state in the model.");
+            }
+            const auto backendOption = optionPath(argc, argv, "--backend").string();
+            if (!backendOption.empty()) problem.optimizerBackendId = backendOption;
+            const auto maxIterationsOption = optionPath(argc, argv, "--max-iterations").string();
+            if (!maxIterationsOption.empty()) problem.options.maxIterations = static_cast<std::size_t>(std::stoul(maxIterationsOption));
+            const auto fittingReport = konjugate::runParameterFit(problem);
+            konjugate::writeFittingReport(report, fittingReport);
+            std::_Exit(fittingReport.converged ? 0 : 1);
         }
         boost::property_tree::ptree configuration;
         boost::property_tree::read_json(configurationPath.string(), configuration);

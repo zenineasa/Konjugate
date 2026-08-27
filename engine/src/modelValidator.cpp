@@ -413,6 +413,18 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             else if (!parameters.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Parameter symbol \"" + symbol + "\" is duplicated.", "edge", id, "parameters");
             const auto mode = value(parameter, "mode");
             if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "edge", id, "parameters");
+            // Orthogonal to mode -- a parameter can be marked as a digital-twin fitting target
+            // (its value is a candidate the optimizer varies) independent of whether it's also a
+            // live-adjustable slider during a run. Presence of "tuning" is what marks it tunable.
+            if (parameter.get_child_optional("tuning")) {
+                const auto tuningMinimum = parameter.get_optional<double>("tuning.minimum");
+                const auto tuningMaximum = parameter.get_optional<double>("tuning.maximum");
+                const auto tuningInitialValue = parameter.get_optional<double>("value");
+                if (!tuningMinimum || !tuningMaximum || !tuningInitialValue || !std::isfinite(*tuningMinimum) || !std::isfinite(*tuningMaximum) ||
+                    !(*tuningMinimum < *tuningMaximum) || *tuningInitialValue < *tuningMinimum || *tuningInitialValue > *tuningMaximum) {
+                    add(result, "parameterTuningInvalid", "error", "Tunable parameter fitting bounds require minimum < maximum and an initial value within the bounds.", "edge", id, "parameters");
+                }
+            }
             if (mode == "live" && parameter.get_child_optional("control")) {
                 const auto minimum = parameter.get_optional<double>("control.minimum");
                 const auto maximum = parameter.get_optional<double>("control.maximum");

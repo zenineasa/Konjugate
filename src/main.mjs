@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { cppProviderSdkPath, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { cppProviderSdkPath, fitWithEngine, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
@@ -131,6 +131,7 @@ const activeAIRequests = new Map();
 const activeAIOperations = new Set();
 const activeValidationOperations = new Set();
 const activeInferenceOperations = new Set();
+const activeFittingOperations = new Set();
 let aiProviderRegistry = null;
 let aiConfigurationStore = null;
 let providerToolchainStore = null;
@@ -212,6 +213,7 @@ function createProjectWindow(pendingFileOpen) {
         abortAIOperations(owner);
         shutdownValidationOperations(owner);
         shutdownInferenceOperations(owner);
+        shutdownFittingOperations(owner);
         shutdownEngineJobs(owner);
     };
     owner.once('destroyed', ownerUnavailable);
@@ -431,6 +433,12 @@ async function shutdownInferenceOperations(owner = null) {
     await Promise.allSettled(operations.map((active) => active.completion));
 }
 
+async function shutdownFittingOperations(owner = null) {
+    const operations = [...activeFittingOperations].filter((active) => !owner || active.owner === owner);
+    for (const active of operations) active.controller.abort();
+    await Promise.allSettled(operations.map((active) => active.completion));
+}
+
 async function shutdownEngineJobs(owner = null) {
     const jobs = [...activeEngineJobs.values()].filter((job) => !owner || job.owner === owner);
     await Promise.allSettled(jobs.map((job) => job.shutdown()));
@@ -513,7 +521,7 @@ function beginApplicationShutdown() {
     if (applicationShutdownPromise) return applicationShutdownPromise;
     abortAIOperations();
     applicationShutdownPromise = (async () => {
-        await Promise.all([shutdownEngineJobs(), shutdownValidationOperations(), shutdownInferenceOperations()]);
+        await Promise.all([shutdownEngineJobs(), shutdownValidationOperations(), shutdownInferenceOperations(), shutdownFittingOperations()]);
         await closeCompletedEngineResults();
     })();
     return applicationShutdownPromise;
@@ -1803,6 +1811,17 @@ ipcMain.handle('engineInfer', async (event, csvContent, config) => {
         return await active.completion;
     } finally {
         activeInferenceOperations.delete(active);
+    }
+});
+
+ipcMain.handle('engineFit', async (event, content, csvContent, config) => {
+    const active = { owner: event.sender, controller: new AbortController(), completion: null };
+    activeFittingOperations.add(active);
+    try {
+        active.completion = fitWithEngine(content, csvContent, config, { ...await engineOptions(), signal: active.controller.signal });
+        return await active.completion;
+    } finally {
+        activeFittingOperations.delete(active);
     }
 });
 

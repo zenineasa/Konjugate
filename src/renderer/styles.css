@@ -515,12 +515,13 @@ input, select, textarea { user-select: text; }
 .diagnosticsEntry-error .diagnosticsEntryMessage { color: #e0929a; }
 .diagnosticsEntry-warning .diagnosticsEntryMessage { color: #d9b06b; }
 .editorCard { width: 390px; }
-.edgeEditor, .edgeGroupEditor, .causalInference { width: 440px; }
+.edgeEditor, .edgeGroupEditor, .causalInference, .parameterTuning { width: 440px; }
 .contextCard.nodeEditor,
 .contextCard.edgeEditor,
 .contextCard.edgeBuilder,
 .contextCard.edgeGroupEditor,
-.contextCard.causalInference {
+.contextCard.causalInference,
+.contextCard.parameterTuning {
     position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); right: 10px;
     bottom: calc(var(--math-keyboard-inset) + 10px); left: auto; max-height: none; overflow: auto;
     overscroll-behavior: contain; transition: bottom .2s ease, opacity .14s ease, transform .14s ease;
@@ -529,12 +530,14 @@ input, select, textarea { user-select: text; }
 .contextCard.edgeEditor > header,
 .contextCard.edgeBuilder > header,
 .contextCard.edgeGroupEditor > header,
-.contextCard.causalInference > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
+.contextCard.causalInference > header,
+.contextCard.parameterTuning > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
 .contextCard.nodeEditor > footer,
 .contextCard.edgeEditor > footer,
 .contextCard.edgeBuilder > footer,
 .contextCard.edgeGroupEditor > footer,
-.contextCard.causalInference > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
+.contextCard.causalInference > footer,
+.contextCard.parameterTuning > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
 .contextCard.nodeEditor > footer[hidden] { display: none; }
 .editorCard > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; }
 .editorCard > header strong, .contextKicker { display: block; }
@@ -612,6 +615,11 @@ input, select, textarea { user-select: text; }
 .parameterControlFields { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 7px; background: rgb(66 201 188 / 4%); border: 1px solid #263d45; border-radius: 5px; }
 .parameterControlFields[hidden] { display: none; }
 .parameterControlError { grid-column: 1 / -1; min-height: 8px; color: #d2767f; font-size: 6px; }
+.parameterTuningToggle { display: flex; grid-column: 1 / -1; align-items: center; gap: 5px; color: #8fa3ac; font-size: 6px; cursor: pointer; }
+.parameterTuningToggle input { width: 10px; height: 10px; accent-color: #42c9bc; }
+.parameterTuningFields { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); gap: 5px; padding: 7px; background: rgb(217 139 84 / 5%); border: 1px solid #453626; border-radius: 5px; }
+.parameterTuningFields[hidden] { display: none; }
+.parameterTuningError { grid-column: 1 / -1; min-height: 8px; color: #d2767f; font-size: 6px; }
 .editorCard footer { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 10px 12px; }
 .editorCard footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 8px; }
 .editorCard footer button:first-child { margin-right: auto; color: #bc6c73; }

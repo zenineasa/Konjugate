@@ -2996,6 +2996,80 @@ export async function runInteractionTests(window) {
             'Undo should remove all created edges.');
     });
 
+    await run('digital-twin tuning marks a parameter tunable, fits it against measured data through the real engine, and applies the result', async () => {
+        // Reuses the same edge the "live parameters" test above already opens -- Thermal
+        // Management's Battery module -> Enclosed air relationship, whose one parameter is
+        // "heatTransferCoefficient".
+        await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')))`,
+            'The "Battery module" label did not settle back into the DOM after the previous test\'s undo.');
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        await waitFor(window, `Boolean([...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')))`,
+            'The "Battery module" relationship bundle label did not appear.');
+        await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Edge editor did not open.');
+        await waitFor(window, `document.querySelector('.editorParameterRow') !== null`, 'No parameter row rendered for this edge.');
+
+        const beforeValue = await evaluate(window, `Number(document.querySelector('.editorParameterRow:first-child [data-field="value"]').value)`);
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child .parameterTuningFields').hidden`), true);
+
+        await evaluate(window, `(() => {
+            const row = document.querySelector('.editorParameterRow:first-child');
+            const checkbox = row.querySelector('[data-field="tunable"]');
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child .parameterTuningFields').hidden`), false,
+            'Checking "Tunable" should reveal the fitting-bounds fields.');
+        await evaluate(window, `(() => {
+            const row = document.querySelector('.editorParameterRow:first-child');
+            row.querySelector('[data-tuning-field="minimum"]').value = '0';
+            row.querySelector('[data-tuning-field="maximum"]').value = '50';
+            row.querySelector('[data-tuning-field="minimum"]').dispatchEvent(new Event('change', { bubbles: true }));
+            row.querySelector('[data-tuning-field="maximum"]').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+
+        const document_ = await evaluate(window, `window.__debugCausalInference.document()`);
+        const tunableEdge = document_.edges.find((edge) => (edge.parameters ?? []).some((parameter) => parameter.tuning));
+        assert.ok(tunableEdge, 'Expected an edge with a tunable parameter in the committed document.');
+        const tunableParameter = tunableEdge.parameters.find((parameter) => parameter.tuning);
+        assert.deepEqual(tunableParameter.tuning, { minimum: 0, maximum: 50 });
+        const targetStateId = tunableEdge.equationModel?.output?.stateId ?? tunableEdge.target.stateId;
+        const targetNode = document_.nodes.find((node) => (node.states ?? []).some((state) => state.id === targetStateId));
+        const targetState = targetNode.states.find((state) => state.id === targetStateId);
+
+        // A small, arbitrary measured series -- numerical recovery against real physics is
+        // already proven at the C++ level (engine/tests/parameterFittingTests.cpp); this exercises
+        // the UI's full mapping/run/review/apply path against the real engine end to end.
+        const csvLines = [`time,${targetState.symbol}`];
+        for (let row = 0; row < 10; row += 1) csvLines.push(`${row},${(targetState.initialValue ?? 290) + row}`);
+
+        await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not open.');
+        await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(csvLines.join('\n'))})`);
+        await waitFor(window, `!document.querySelector('#parameterTuningParametersSection').hidden`, 'Tunable parameters section did not appear.', 5000);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows > div').length`), 1);
+
+        await evaluate(window, `document.querySelector('#runParameterTuning').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'Review section did not appear after running the fit.', 60000);
+        const report = await evaluate(window, `window.__debugParameterTuning.report()`);
+        assert.equal(report.finalParameters.length, 1);
+        assert.equal(report.finalParameters[0].parameterId, tunableParameter.id);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningReviewRows label').length`), 1);
+
+        await evaluate(window, `document.querySelector('#commitParameterTuning').click()`);
+        await waitFor(window, `document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not close after apply.', 5000);
+        const after = await evaluate(window, `window.__debugCausalInference.document()`);
+        const appliedParameter = after.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === tunableParameter.id);
+        assert.equal(appliedParameter.value, report.finalParameters[0].value,
+            'The committed document should carry the fitted value once applied.');
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        const afterUndo = await evaluate(window, `window.__debugCausalInference.document()`);
+        const undoneParameter = afterUndo.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === tunableParameter.id);
+        assert.equal(undoneParameter.value, beforeValue, 'Undo should restore the pre-fit parameter value in one step.');
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+    });
+
     await run('Results Analysis timeline seek only redraws the scatter trail once the run is completed, not while running or paused', async () => {
         const before = BrowserWindow.getAllWindows();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);

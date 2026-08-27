@@ -96,6 +96,39 @@ export async function inferWithEngine(csvContent, config, options) {
     }
 }
 
+// Digital-twin parameter fitting -- deliberately a one-shot process spawn like inferWithEngine()
+// above, not a long-lived streamed one like startEngineRun() below: the whole optimization loop
+// runs in-process inside the engine binary itself (see engine/src/parameterFitting.cpp), so there
+// is no per-trial IPC to relay, only a final JSON report to read back. Live progress streaming
+// (a FittingProgress protobuf event, analogous to run's sample stream) is a real gap for a
+// long-running fit with no feedback until it finishes -- left for a follow-up once this base path
+// is proven, same as engine-side IPOPT support.
+export async function fitWithEngine(content, csvContent, config, options) {
+    const executable = await resolveEnginePath(options);
+    if (!executable) return { available: false };
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateFitting-'));
+    const inputPath = join(directory, 'input.kjt');
+    const csvPath = join(directory, 'measured.csv');
+    const reportPath = join(directory, 'fitting.json');
+    try {
+        const resolvedContent = await resolveInstalledPlugins(content, options);
+        await writeFile(inputPath, await encodeProjectFile(resolvedContent));
+        await writeFile(csvPath, csvContent, 'utf8');
+        const args = ['fit', inputPath, csvPath, '--report', reportPath];
+        if (config?.backend !== undefined) args.push('--backend', config.backend);
+        if (config?.maxIterations !== undefined) args.push('--max-iterations', String(config.maxIterations));
+        const execution = await runEngine(executable, args, {}, options.signal);
+        if (execution.code !== 0 && execution.code !== 1) {
+            // Exit code 1 is a completed-but-not-converged fit (see main.cpp's fit branch) --
+            // still a real report worth reading back, unlike every other nonzero code here.
+            throw new Error(execution.diagnostics || `The fitting engine exited with code ${execution.code}.`);
+        }
+        return { available: true, report: JSON.parse(await readFile(reportPath, 'utf8')) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}
+
 export async function runWithEngine(content, configuration, options) {
     const execution = await startEngineRun(content, configuration, options);
     if (!execution.available) return execution;

@@ -21,6 +21,7 @@ find_package(OpenSSL REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
+find_package(NLopt CONFIG REQUIRED)
 find_path(BOOST_INCLUDE_DIR boost/property_tree/json_parser.hpp REQUIRED)
 
 protobuf_generate_cpp(PROTOCOL_SOURCES PROTOCOL_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/engineProtocol.proto")
@@ -123,8 +124,12 @@ add_executable(konjugateEngine
     src/executionPlan.cpp
     src/causalInference.cpp
     src/causalInferenceReport.cpp
+    src/finiteDifferenceGradient.cpp
     src/main.cpp
     src/modelValidator.cpp
+    src/nloptBackend.cpp
+    src/parameterFitting.cpp
+    src/parameterFittingReport.cpp
     src/partitionPlan.cpp
     src/partitionRuntime.cpp
     src/projectContainer.cpp
@@ -141,7 +146,7 @@ set_target_properties(konjugateEngine PROPERTIES
     INSTALL_RPATH "$<IF:$<PLATFORM_ID:Darwin>,@loader_path,$ORIGIN>"
 )
 target_include_directories(konjugateEngine PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads Eigen3::Eigen ${CMAKE_DL_LIBS})
+target_link_libraries(konjugateEngine PRIVATE ZLIB::ZLIB OpenSSL::Crypto protobuf::libprotobuf Threads::Threads Eigen3::Eigen NLopt::nlopt ${CMAKE_DL_LIBS})
 target_compile_definitions(konjugateEngine PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
 if(KONJUGATE_HAS_METIS)
     target_include_directories(konjugateEngine PRIVATE ${METIS_INCLUDE_DIR})
@@ -287,6 +292,44 @@ if(BUILD_TESTING)
     target_link_libraries(causalInferenceTests PRIVATE Eigen3::Eigen)
     add_test(NAME causalInferenceTests COMMAND causalInferenceTests)
 
+    # Needs the full simulation stack (runSimulation() and everything it depends on), not just
+    # parameterFitting.cpp itself -- the recovery tests below drive real simulations end to end.
+    add_executable(parameterFittingTests
+        tests/parameterFittingTests.cpp
+        src/causalInference.cpp
+        src/dependencyGraph.cpp
+        src/executionBackend.cpp
+        src/executionPlan.cpp
+        src/finiteDifferenceGradient.cpp
+        src/modelValidator.cpp
+        src/nloptBackend.cpp
+        src/parameterFitting.cpp
+        src/partitionPlan.cpp
+        src/partitionRuntime.cpp
+        src/providerRuntime.cpp
+        src/simulationRunner.cpp
+        src/taskExecutor.cpp
+        ${PROTOCOL_SOURCES}
+        ${PROTOCOL_HEADERS}
+        ${PROVIDER_PROTOCOL_SOURCES}
+        ${PROVIDER_PROTOCOL_HEADERS}
+    )
+    set_target_properties(parameterFittingTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(parameterFittingTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(parameterFittingTests PRIVATE
+        Eigen3::Eigen NLopt::nlopt protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_definitions(parameterFittingTests PRIVATE KONJUGATE_HAS_METIS=${KONJUGATE_HAS_METIS})
+    if(KONJUGATE_HAS_METIS)
+        target_include_directories(parameterFittingTests PRIVATE ${METIS_INCLUDE_DIR})
+        target_link_libraries(parameterFittingTests PRIVATE ${KONJUGATE_METIS_LINK_LIBRARY})
+    endif()
+    add_test(NAME parameterFittingTests COMMAND parameterFittingTests)
+
     # A manual perf tool, not a pass/fail test: intentionally left out of add_test/ctest.
     add_executable(providerBatchingBenchmark
         tests/providerBatchingBenchmark.cpp
@@ -306,6 +349,7 @@ if(MSVC)
         target_compile_options(relationshipProviderTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(nodeProviderRuntimeTests PRIVATE /W4 /permissive- /MP)
         target_compile_options(causalInferenceTests PRIVATE /W4 /permissive- /MP)
+        target_compile_options(parameterFittingTests PRIVATE /W4 /permissive- /MP)
     endif()
 else()
     target_compile_options(konjugateEngine PRIVATE -Wall -Wextra -Wpedantic)
@@ -314,6 +358,7 @@ else()
         target_compile_options(relationshipProviderTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(nodeProviderRuntimeTests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(causalInferenceTests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(parameterFittingTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
@@ -325,5 +370,6 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(relationshipProviderTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(nodeProviderRuntimeTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(causalInferenceTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
+        target_compile_options(parameterFittingTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
     endif()
 endif()

@@ -347,6 +347,7 @@
             <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
             <button id="componentLibraryButton" class="toolButton" type="button" aria-expanded="false" aria-controls="componentLibraryPanel"><span>▤</span> Library</button>
             <button id="causalInferenceButton" class="toolButton" type="button" aria-controls="causalInference"><span>⇩</span> Causal inference</button>
+            <button id="parameterTuningButton" class="toolButton" type="button" aria-controls="parameterTuning"><span>⇧</span> Tuning</button>
         </div>
         <div class="toolGroup" role="group" aria-label="History">
             <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
@@ -677,6 +678,45 @@
                 <button id="cancelCausalInference" type="button">Cancel</button>
                 <button id="runCausalInference" type="button" disabled hidden>Run inference</button>
                 <button id="commitCausalInference" class="doneButton" type="button" disabled hidden>Import selected</button>
+            </footer>
+        </div>
+
+        <div id="parameterTuning" class="contextCard editorCard parameterTuning hidden">
+            <header><div><span class="contextKicker">Analysis</span><strong>Digital twin tuning</strong></div><button data-close-card type="button">×</button></header>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <section>
+                <p class="builderHint">Fit this model's tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship's editor first, then import a CSV of measured signals here.</p>
+                <label class="geometrySourceButton">
+                    <input id="parameterTuningFile" type="file" accept=".csv">
+                    <span>↥ Choose CSV file</span>
+                </label>
+                <div id="parameterTuningStatus" class="equationDiagnostics" role="status"></div>
+            </section>
+            <section id="parameterTuningMappingSection" hidden>
+                <h3>Column mapping</h3>
+                <p class="builderHint">Each column is matched to an existing state by exact name -- read-only for now; rename a CSV column or a state's symbol/name to change a match.</p>
+                <div id="parameterTuningMappingRows"></div>
+            </section>
+            <section id="parameterTuningParametersSection" hidden>
+                <h3>Tunable parameters</h3>
+                <p class="builderHint">Found on the model's relationships. Their current value is the optimizer's starting point.</p>
+                <div id="parameterTuningParameterRows"></div>
+                <label class="editorField"><span>Optimizer</span><select id="parameterTuningBackend"></select></label>
+            </section>
+            <section id="parameterTuningProgressSection" hidden>
+                <h3>Fitting…</h3>
+                <p class="builderHint">Running the optimizer through the real simulator. This can take a while depending on how many tunable parameters there are and how long one simulation takes -- there's no progress detail yet, just a final result.</p>
+                <div id="parameterTuningProgress" class="equationDiagnostics" role="status"></div>
+            </section>
+            <section id="parameterTuningReviewSection" hidden>
+                <h3>Review fitted values</h3>
+                <div id="parameterTuningReviewStatus" class="equationDiagnostics" role="status"></div>
+                <div id="parameterTuningReviewRows"></div>
+            </section>
+            <footer>
+                <button id="cancelParameterTuning" type="button">Cancel</button>
+                <button id="runParameterTuning" type="button" disabled hidden>Run fit</button>
+                <button id="commitParameterTuning" class="doneButton" type="button" disabled hidden>Apply fitted values</button>
             </footer>
         </div>
 

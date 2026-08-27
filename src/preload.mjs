@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('projectFiles', {
     listExamples: () => ipcRenderer.invoke('projectListExamples'),
     loadExample: (id) => ipcRenderer.invoke('projectLoadExample', id),
     openExampleGuide: (id) => ipcRenderer.invoke('projectOpenExampleGuide', id),
+    openCausalInferenceInteractionHelp: () => ipcRenderer.invoke('projectOpenCausalInferenceInteractionHelp'),
     open: () => ipcRenderer.invoke('projectOpen'),
     pendingOpen: () => ipcRenderer.invoke('projectPendingOpen'),
     pathChanged: (path) => ipcRenderer.send('projectPathChanged', path),

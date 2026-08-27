@@ -44,7 +44,7 @@ document.querySelector('#maximize').addEventListener('click', () => window.windo
 document.querySelector('#close').addEventListener('click', () => window.windowControls.close());
 window.windowControls.onMaximizedChange((expanded) => { document.querySelector('#maximize').textContent = expanded ? '❐' : '□'; });
 window.exampleGuide.onContent(({ title, markdown, kind = 'example' }) => {
-    const suffix = kind === 'about' ? 'About' : 'Example Guide';
+    const suffix = kind === 'about' ? 'About' : kind === 'help' ? 'Help' : 'Example Guide';
     document.title = `${title} · ${suffix}`;
     document.querySelector('#guideTitle').textContent = `${title} · ${suffix}`;
     document.querySelector('#content').innerHTML = renderMarkdown(markdown);

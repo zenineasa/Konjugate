@@ -32,8 +32,8 @@ input, select { user-select: text; }
     align-items: center; justify-content: space-between; color: #eff8fa; background: #070d13;
     border-bottom: 1px solid #15212a; -webkit-app-region: drag;
 }
-:is(#titleBar, .toolstrip, .viewCube) [data-tooltip] { position: relative; -webkit-app-region: no-drag; }
-:is(#titleBar, .toolstrip, .viewCube) [data-tooltip]::after {
+:is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip] { position: relative; -webkit-app-region: no-drag; }
+:is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip]::after {
     position: absolute; z-index: 100; top: calc(100% + 7px); left: 50%; padding: 5px 7px;
     color: #d8e5ea; background: #15232c; border: 1px solid #354954; border-radius: 4px;
     box-shadow: 0 7px 18px rgb(0 0 0 / 38%); content: attr(data-tooltip); font-size: 8px;
@@ -41,16 +41,16 @@ input, select { user-select: text; }
     transform: translate(-50%, -2px); transition: opacity .12s .35s, transform .12s .35s;
     visibility: hidden; white-space: nowrap;
 }
-:is(#titleBar, .toolstrip, .viewCube) [data-tooltip]:hover::after,
-:is(#titleBar, .toolstrip, .viewCube) [data-tooltip]:focus-visible::after,
-:is(#titleBar, .toolstrip, .viewCube) [data-tooltip]:focus-within::after {
+:is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip]:hover::after,
+:is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip]:focus-visible::after,
+:is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip]:focus-within::after {
     opacity: 1; transform: translate(-50%, 0); visibility: visible;
 }
 #titleBar .windowControls button:last-child::after { right: 5px; left: auto; transform: translateY(-2px); }
 #titleBar .windowControls button:last-child:hover::after,
 #titleBar .windowControls button:last-child:focus-visible::after { transform: translateY(0); }
 @media (prefers-reduced-motion: reduce) {
-    :is(#titleBar, .toolstrip, .viewCube) [data-tooltip]::after { transition: none; }
+    :is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip]::after { transition: none; }
 }
 .windowTitle { display: flex; align-items: center; gap: 8px; padding-left: 13px; font-size: 11px; }
 .windowTitle img { width: 18px; height: 18px; }
@@ -82,6 +82,12 @@ input, select { user-select: text; }
 .exampleButton i { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); }
 .documentActions .exampleGuideButton { width: 25px; height: 25px; padding: 0; color: #78aaa7; background: rgb(66 201 188 / 6%); border: 1px solid #2d484c; border-radius: 50%; font-size: 9px; }
 .documentActions .exampleGuideButton[hidden] { display: none; }
+/* Same round "?" affordance as .exampleGuideButton above, under a name that doesn't tie it to
+   example guides specifically -- reusable anywhere a control needs an inline help window. */
+.helpButton { width: 25px; height: 25px; padding: 0; color: #78aaa7; background: rgb(66 201 188 / 6%); border: 1px solid #2d484c; border-radius: 50%; font-size: 9px; flex-shrink: 0; }
+.helpButton:hover { color: #a4e8e2; border-color: #477574; }
+.checkboxFieldRow { display: flex; align-items: center; gap: 8px; }
+.checkboxFieldRow .checkboxField { flex: 1; }
 .encryptionMenu { width: 245px; padding: 6px; }
 .encryptionMenu button { display: block; width: 100%; padding: 8px 9px; color: #91a3ac; background: transparent; border: 0; border-radius: 4px; text-align: left; }
 .encryptionMenu button:hover { background: #1a2933; }
@@ -833,7 +839,7 @@ input, select { user-select: text; }
 .viewNavActions .cubeFit { font-size: 7px; }
 .viewNavActions button:hover { color: #8adfd8; border-color: #477574; }
 /* #viewCube #lock2DButton (not just #lock2DButton): the shared tooltip rule above,
-   :is(#titleBar, .toolstrip, .viewCube) [data-tooltip], carries #titleBar's id specificity
+   :is(#titleBar, .toolstrip, .viewCube, .causalInference) [data-tooltip], carries #titleBar's id specificity
    even though .viewCube is what actually matches here (:is() specificity is its highest-
    specificity argument, not the one that matched) -- a bare id selector alone still loses to it. */
 #viewCube #lock2DButton { position: absolute; z-index: 4; top: 8px; right: 8px; display: grid; width: 22px; height: 22px; place-items: center; padding: 0; background: #11212a; border: 1px solid #2d4651; border-radius: 50%; }

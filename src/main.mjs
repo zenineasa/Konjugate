@@ -266,6 +266,16 @@ async function checkForUpdates(window) {
     if (response === 0) shell.openExternal(update.url);
 }
 
+// Kept as one small mapping shared by both title-setting call sites in openGuideWindow below
+// (initial creation and reuse-existing-window), rather than inlining the ternary twice, since a
+// third guide kind was added after the original about/example-only version -- easy to miss
+// keeping two inline ternaries in sync when a fourth one shows up later.
+function guideKindSuffix(kind) {
+    if (kind === 'about') return 'About';
+    if (kind === 'help') return 'Help';
+    return 'Example Guide';
+}
+
 async function openGuideWindow(projectWindow, payload) {
     const state = projectWindowState.get(projectWindow);
     if (!state.exampleGuideWindow || state.exampleGuideWindow.isDestroyed()) {
@@ -276,7 +286,7 @@ async function openGuideWindow(projectWindow, payload) {
             minHeight: 420,
             frame: false,
             backgroundColor: '#09131b',
-            title: `${payload.title} · ${payload.kind === 'about' ? 'About' : 'Example Guide'}`,
+            title: `${payload.title} · ${guideKindSuffix(payload.kind)}`,
             webPreferences: {
                 preload: join(currentDir, 'exampleGuide', 'preload.cjs'),
                 contextIsolation: true,
@@ -291,7 +301,7 @@ async function openGuideWindow(projectWindow, payload) {
         createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('exampleGuideContent', payload); });
         await createdWindow.loadFile(join(currentDir, 'exampleGuide', 'index.html'));
     } else {
-        state.exampleGuideWindow.setTitle(`${payload.title} · ${payload.kind === 'about' ? 'About' : 'Example Guide'}`);
+        state.exampleGuideWindow.setTitle(`${payload.title} · ${guideKindSuffix(payload.kind)}`);
         state.exampleGuideWindow.webContents.send('exampleGuideContent', payload);
         state.exampleGuideWindow.show();
         state.exampleGuideWindow.focus();
@@ -325,6 +335,23 @@ async function openAboutWindow(projectWindow) {
         title: 'Konjugate',
         markdown,
         kind: 'about'
+    });
+}
+
+// Same docs/-exclusion-from-packaging reasoning as aboutMarkdownPath() above -- this doc needs
+// its own extraResource entry in packageElectron.mjs for the same reason About.md has one.
+function causalInferenceInteractionHelpMarkdownPath() {
+    return app.isPackaged
+        ? join(process.resourcesPath, 'causalInferenceInteractionHelp.md')
+        : join(currentDir, '..', 'docs', 'causalInferenceInteractionHelp.md');
+}
+
+async function openCausalInferenceInteractionHelp(projectWindow) {
+    const markdown = await readFile(causalInferenceInteractionHelpMarkdownPath(), 'utf8');
+    return openGuideWindow(projectWindow, {
+        title: 'Causal inference',
+        markdown,
+        kind: 'help'
     });
 }
 
@@ -819,6 +846,11 @@ ipcMain.handle('projectLoadExample', async (_event, id) => {
 ipcMain.handle('projectOpenExampleGuide', async (event, id) => {
     requireProjectWindow(event, 'Only a project window can open example guides.');
     return openExampleGuide(getWindowFromEvent(event), id);
+});
+
+ipcMain.handle('projectOpenCausalInferenceInteractionHelp', (event) => {
+    requireProjectWindow(event, 'Only a project window can open this help window.');
+    return openCausalInferenceInteractionHelp(getWindowFromEvent(event));
 });
 
 const shapesDir = join(currentDir, '..', 'assets', 'shapes');

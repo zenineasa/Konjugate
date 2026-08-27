@@ -5505,6 +5505,8 @@ $('#causalInferenceDegreeMode').addEventListener('change', () => {
     $('#causalInferenceDegreeValueField').hidden = $('#causalInferenceDegreeMode').value === 'linear';
 });
 
+$('#causalInferenceInteractionHelpButton').addEventListener('click', () => window.projectFiles.openCausalInferenceInteractionHelp());
+
 function causalInferenceDegreesFromUi() {
     const mode = $('#causalInferenceDegreeMode').value;
     if (mode === 'linear') return [1];

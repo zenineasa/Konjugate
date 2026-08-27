@@ -16,7 +16,11 @@ body {
     display: grid;
     place-items: center;
     background: radial-gradient(circle at 20% 10%, #234850 0, transparent 42%), #101b21;
+    user-select: none;
 }
+
+/* Sample data values stay selectable -- the one thing here a user would plausibly copy. */
+dd { user-select: text; }
 
 main {
     width: min(460px, calc(100vw - 48px));

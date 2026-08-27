@@ -986,6 +986,24 @@ export async function runInteractionTests(window) {
         await waitFor(editorWindow, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the provider editor window.');
         assert.equal(await evaluate(editorWindow, `document.querySelector('#editorKindLabel').textContent`), 'C++');
 
+        // body { user-select: none } now covers this window's chrome (see styles.css) -- confirm
+        // that didn't drag CodeMirror's own editable content down with it. A real double-click
+        // (word selection), not a scripted Selection API call, since user-select specifically
+        // governs drag/click-driven selection, not programmatic Range/Selection calls.
+        const codeWordPoint = await evaluate(editorWindow, `(() => {
+            const line = document.querySelector('.cm-line');
+            const r = line.getBoundingClientRect();
+            return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
+        })()`);
+        editorWindow.webContents.sendInputEvent({ type: 'mouseMove', ...codeWordPoint });
+        editorWindow.webContents.sendInputEvent({ type: 'mouseDown', ...codeWordPoint, button: 'left', clickCount: 1 });
+        editorWindow.webContents.sendInputEvent({ type: 'mouseUp', ...codeWordPoint, button: 'left', clickCount: 1 });
+        editorWindow.webContents.sendInputEvent({ type: 'mouseDown', ...codeWordPoint, button: 'left', clickCount: 2 });
+        editorWindow.webContents.sendInputEvent({ type: 'mouseUp', ...codeWordPoint, button: 'left', clickCount: 2 });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.ok(await evaluate(editorWindow, `window.getSelection().toString().length`) > 0,
+            'Double-clicking CodeMirror content did not select a word -- user-select: none on the window body may have leaked into the editor.');
+
         // These checks wait on a real clang invocation (plus the linter's own debounce),
         // which is far more variable than a DOM/JS operation, so give it real headroom
         // rather than the default timeout tuned for in-process checks.

@@ -3,7 +3,7 @@
 :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #09131b; }
 * { box-sizing: border-box; }
 body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; margin: 0; color: #9eb0b9; background: radial-gradient(circle at 20% 0, rgb(34 84 88 / 15%), transparent 35%), #09131b; }
-.titleBar { flex: 0 0 auto; display: flex; height: 38px; align-items: center; justify-content: space-between; background: #081119; border-bottom: 1px solid #253944; -webkit-app-region: drag; }
+.titleBar { flex: 0 0 auto; display: flex; height: 38px; align-items: center; justify-content: space-between; background: #081119; border-bottom: 1px solid #253944; -webkit-app-region: drag; user-select: none; }
 .title { display: flex; align-items: center; gap: 8px; padding-left: 12px; }
 .title img { width: 18px; height: 18px; }
 .title strong { color: #edf5f6; font-size: 11px; }

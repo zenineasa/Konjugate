@@ -25,7 +25,7 @@ html, body { width: 100%; height: 100%; margin: 0; }
 body { overflow: hidden; user-select: none; }
 button, input, select { font: inherit; }
 button { color: inherit; cursor: pointer; }
-input, select { user-select: text; }
+input, select, textarea { user-select: text; }
 
 #titleBar {
     position: fixed; z-index: 50; top: 0; display: flex; width: 100%; height: var(--title-height);
@@ -369,7 +369,7 @@ input, select { user-select: text; }
 .assistantTranscript[hidden] { display: none; }
 .assistantTranscriptTurn { display: grid; gap: 3px; padding-bottom: 8px; border-bottom: 1px solid #1a2830; font-size: 8px; line-height: 1.5; }
 .assistantTranscriptTurn:last-child { padding-bottom: 0; border-bottom: 0; }
-.assistantTranscriptYou, .assistantTranscriptOutcome { margin: 0; overflow-wrap: anywhere; }
+.assistantTranscriptYou, .assistantTranscriptOutcome { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .assistantTranscriptYou { color: #b8c7ce; }
 .assistantTranscriptYou::before { margin-right: 4px; color: #4c8e8a; font-weight: 650; content: 'You:'; }
 .assistantTranscriptOutcome { color: #8ea1aa; }
@@ -398,7 +398,7 @@ input, select { user-select: text; }
 .assistantChange.remove b { color: #d68a91; background: rgb(185 75 85 / 10%); }
 .assistantChange.add b { color: #83bfe0; background: rgb(83 164 205 / 10%); }
 .assistantChange strong { color: #aebfc7; font-size: 8px; font-weight: 600; }
-.assistantChange dl { display: grid; gap: 3px; margin: 0; padding-top: 5px; border-top: 1px solid #22343e; }
+.assistantChange dl { display: grid; gap: 3px; margin: 0; padding-top: 5px; border-top: 1px solid #22343e; user-select: text; }
 .assistantChange dl div { display: grid; grid-template-columns: 72px 1fr; gap: 6px; }
 .assistantChange dt { overflow: hidden; color: #617681; text-overflow: ellipsis; white-space: nowrap; }
 .assistantChange dd { overflow-wrap: anywhere; margin: 0; color: #899da6; }
@@ -586,8 +586,8 @@ input, select { user-select: text; }
 .causalInferenceCandidateRow:first-of-type { border-radius: 4px 4px 0 0; }
 .causalInferenceCandidateRow:last-of-type { border: 0; border-radius: 0 0 4px 4px; }
 .causalInferenceCandidateRow input[type="checkbox"] { flex-shrink: 0; width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
-.causalInferenceCandidateMain { display: block; flex: 1; color: #d5e1e6; }
-.causalInferenceCandidateMeta { display: block; margin-top: 2px; color: #6e828e; font-size: 7px; }
+.causalInferenceCandidateMain { display: block; flex: 1; color: #d5e1e6; user-select: text; }
+.causalInferenceCandidateMeta { display: block; margin-top: 2px; color: #6e828e; font-size: 7px; user-select: text; }
 .causalInferenceCandidateTag { flex-shrink: 0; padding: 2px 6px; border-radius: 9px; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
 .causalInferenceCandidateTag.correlationOnly { color: #d9b06b; background: rgb(217 176 107 / 12%); }
 .causalInferenceCandidateTag.continuousLagged { color: #78c9c2; background: rgb(66 201 188 / 12%); }
@@ -693,7 +693,7 @@ input, select { user-select: text; }
 .validationIssue:hover { background: #182832; }
 .validationIssue i { width: 7px; height: 7px; margin-top: 2px; background: var(--orange); border-radius: 50%; }
 .validationIssue.error i { background: #d96f78; }
-.validationIssue strong, .validationIssue small { display: block; }
+.validationIssue strong, .validationIssue small { display: block; user-select: text; }
 .validationIssue strong { color: #becdd3; font-size: 8px; line-height: 1.4; }
 .validationIssue small { margin-top: 3px; color: #5f747f; font-size: 7px; text-transform: capitalize; }
 .validationEmpty { margin: 0; padding: 16px 13px; color: #648079; font-size: 8px; }
@@ -791,7 +791,7 @@ input, select { user-select: text; }
 .executionSummaryCard header strong { margin-top: 3px; color: #d0dfe3; font-size: 10px; }
 .executionSummaryCard header button { width: 22px; height: 22px; padding: 0; color: #70858f; background: transparent; border: 0; font-size: 13px; }
 .executionSummaryCard > p { margin: 0; padding: 9px 12px; color: #77909a; background: rgb(66 201 188 / 5%); border-bottom: 1px solid #263b45; font-size: 7px; line-height: 1.45; }
-.executionSummaryCard dl { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; padding: 11px 12px 12px; font-size: 7px; }
+.executionSummaryCard dl { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; padding: 11px 12px 12px; font-size: 7px; user-select: text; }
 .executionSummaryCard dt { color: #718791; }
 .executionSummaryCard dd { margin: 0; color: #b9cbd0; text-align: right; }
 .viewCube { position: absolute; z-index: 9; bottom: 18px; left: 18px; width: 176px; height: 180px; background: rgb(9 18 25 / 75%); border: 1px solid #293f4a; border-radius: 16px; box-shadow: 0 10px 28px rgb(0 0 0 / 28%); backdrop-filter: blur(10px); }

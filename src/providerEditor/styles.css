@@ -2,7 +2,8 @@
 
 :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #09131b; }
 * { box-sizing: border-box; }
-body { display: flex; flex-direction: column; height: 100vh; margin: 0; color: #9eb0b9; background: #09131b; }
+body { display: flex; flex-direction: column; height: 100vh; margin: 0; color: #9eb0b9; background: #09131b; user-select: none; }
+input, select, #editorStatus, #editorHost, #editorHost * { user-select: text; }
 .titleBar { position: sticky; z-index: 2; top: 0; display: flex; flex: none; height: 38px; align-items: center; justify-content: space-between; background: #081119; border-bottom: 1px solid #253944; -webkit-app-region: drag; }
 .title { display: flex; align-items: center; gap: 8px; padding-left: 12px; }
 .title img { width: 18px; height: 18px; }

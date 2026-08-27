@@ -128,6 +128,7 @@ Permissions are declared explicitly. Unknown permissions cause the manifest to b
 | `simulation.status.read` | Receive live run lifecycle and progress metadata. |
 | `simulation.pacing.read` | Receive the active simulation pacing mode and ratio. |
 | `simulation.pacing.control` | Request a pacing change for the active engine job. |
+| `results.export` | Save signal samples to a CSV file the user chooses. |
 
 Only request capabilities the visualizer uses. The bundled preload may expose a method whose corresponding permission was not granted, but the host will not provide the protected data or event.
 
@@ -305,6 +306,16 @@ await window.konjugateVisualizer.requestPacing({
 ```
 
 `realTime` always means one simulation second per wall second. `fastest` removes the wall-clock limit. A limited ratio is a cap, not a guarantee: computationally expensive models may advance more slowly. Simulation pacing controls engine execution; it is separate from the completed-result playback rate and must not be presented as playback speed.
+
+### `exportCsv(suggestedFilename, csv)`
+
+Requires `results.export`. Opens a native save dialog pre-filled with `suggestedFilename`, then writes the given CSV text to the path the user chooses:
+
+```js
+await window.konjugateVisualizer.exportCsv('trajectory.csv', csv);
+```
+
+Returns a promise for `{ path, fileName }`, or `null` if the user cancels the dialog. The add-on builds the CSV text itself, client-side, from data already returned by `readSeries`; the host only handles the file-system write.
 
 ## Minimal visualizer
 

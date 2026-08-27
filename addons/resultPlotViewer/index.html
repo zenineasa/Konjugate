@@ -5,7 +5,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    <!-- style-src needs 'unsafe-inline': Plotly injects its own base stylesheet (position:absolute
+         on each SVG layer, among other rules) into <head> at runtime -- without it, that stylesheet
+         is silently blocked, and its layered SVGs fall back to normal document flow instead of
+         overlaying, visibly displacing content like the legend. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
     <title>Results Analysis</title>
     <link rel="stylesheet" href="styles.css">
     <script src="../../node_modules/plotly.js-dist-min/plotly.min.js"></script>
@@ -19,8 +23,21 @@
     <main>
         <aside class="signalBrowser">
             <header><div><span>Signals</span><strong>Compare results</strong></div><button id="clearSignals" type="button">Clear</button></header>
+            <label class="chartModeField"><span>Chart</span><select id="chartMode" aria-label="Chart type">
+                <option value="timeSeries" selected>Time series</option>
+                <option value="scatter">Scatter</option>
+                <option value="distribution">Distribution</option>
+            </select></label>
+            <button id="resetTrail" type="button" hidden>Reset trail</button>
+            <div id="scatterPickers" class="scatterPickers" hidden>
+                <label><span>X axis</span><select id="scatterX" aria-label="Scatter X axis signal"></select></label>
+                <label><span>Y axis</span><select id="scatterY" aria-label="Scatter Y axis signal"></select></label>
+                <label><span>Color by</span><select id="scatterColor" aria-label="Scatter color-by signal"><option value="">None</option></select></label>
+                <label><span>Size by</span><select id="scatterSize" aria-label="Scatter size-by signal"><option value="">None</option></select></label>
+            </div>
             <input id="signalSearch" type="search" placeholder="Search nodes or signals" aria-label="Search signals">
             <div id="signalGroups"></div>
+            <button id="exportCsv" type="button" disabled>Export data (CSV)</button>
         </aside>
         <section class="plotWorkspace">
             <div id="analysisPlot" role="img" aria-label="Selected simulation signals"></div>

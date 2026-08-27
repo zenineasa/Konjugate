@@ -22,8 +22,18 @@ main { display: grid; min-height: 0; grid-template-columns: 250px minmax(0, 1fr)
 .signalBrowser > header span { color: #627985; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
 .signalBrowser > header strong { color: #c3d1d7; font-size: 11px; }
 .signalBrowser button { color: #73bdb7; background: transparent; border: 0; font-size: 9px; }
+.chartModeField, .scatterPickers label { display: grid; gap: 3px; margin-bottom: 10px; }
+.chartModeField span, .scatterPickers span { color: #627985; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
+.chartModeField select, .scatterPickers select { height: 29px; padding: 0 8px; color: #b7c6cd; background: #08131a; border: 1px solid #2b404a; border-radius: 5px; outline: 0; font-size: 9px; }
+.chartModeField select:focus, .scatterPickers select:focus { border-color: #47746f; }
+.scatterPickers { margin-bottom: 13px; }
+#resetTrail { width: 100%; height: 27px; margin-bottom: 13px; color: #73bdb7; background: transparent; border: 1px solid #2b404a; border-radius: 5px; font-size: 9px; cursor: pointer; }
+#resetTrail:hover { background: #11222c; }
 #signalSearch { width: 100%; height: 31px; margin-bottom: 13px; padding: 0 9px; color: #b7c6cd; background: #08131a; border: 1px solid #2b404a; border-radius: 5px; outline: 0; font-size: 9px; }
 #signalSearch:focus { border-color: #47746f; }
+#exportCsv { width: 100%; height: 31px; margin-top: 13px; color: #73bdb7; background: transparent; border: 1px solid #2b404a; border-radius: 5px; font-size: 9px; cursor: pointer; }
+#exportCsv:hover:not(:disabled) { background: #11222c; }
+#exportCsv:disabled { color: #4a5c64; cursor: not-allowed; }
 .signalGroup { margin-bottom: 14px; }
 .signalGroup > strong { display: block; margin-bottom: 6px; color: #718791; font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
 .signalGroup.selectedEntity > strong { color: #80d7cf; }

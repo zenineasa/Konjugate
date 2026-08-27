@@ -753,6 +753,24 @@ ipcMain.handle('visualizerRequestPacing', async (event, pacing) => {
     return job.setPacing(pacing);
 });
 
+ipcMain.handle('visualizerExportCsv', async (event, { suggestedFilename, csv }) => {
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.export')) {
+        throw new Error('The visualizer does not have permission to export results.');
+    }
+    const result = await dialog.showSaveDialog(state.analysisWindow, {
+        title: 'Export data as CSV',
+        defaultPath: suggestedFilename || 'results.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }]
+    });
+    if (result.canceled) return null;
+    let path = result.filePath;
+    if (!path.toLowerCase().endsWith('.csv')) path += '.csv';
+    await writeFile(path, csv, 'utf8');
+    return { path, fileName: basename(path) };
+});
+
 ipcMain.on('windowMaximizeToggle', (event) => {
     const targetWindow = getWindowFromEvent(event);
     if (!targetWindow) return;

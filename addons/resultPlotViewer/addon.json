@@ -14,7 +14,8 @@
         "selection.read",
         "simulation.status.read",
         "simulation.pacing.read",
-        "simulation.pacing.control"
+        "simulation.pacing.control",
+        "results.export"
     ],
     "contributes": {
         "toolstrip": [{

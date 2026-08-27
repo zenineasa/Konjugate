@@ -1,7 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import assert from 'node:assert/strict';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
+import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
 
@@ -637,6 +639,81 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(analysisWindow, `document.querySelector('.readOnlyBadge').textContent`), 'Completed');
         assert.equal(await evaluate(analysisWindow, `typeof require === 'undefined'`), true);
         assert.ok(await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data.length`) > 0);
+
+        await evaluate(analysisWindow, `(() => {
+            const options = (id) => [...document.querySelector(id).options].map((option) => option.value);
+            const xOptions = options('#scatterX');
+            const yOptions = options('#scatterY').filter((value) => value !== xOptions[0]);
+            document.querySelector('#scatterX').value = xOptions[0];
+            document.querySelector('#scatterY').value = yOptions[0] ?? xOptions[0];
+            document.querySelector('#scatterColor').value = options('#scatterColor').filter(Boolean)[0] ?? '';
+            document.querySelector('#chartMode').value = 'scatter';
+            document.querySelector('#chartMode').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data[0]?.type === 'scatter' && document.querySelector('#analysisPlot').data[0]?.mode === 'markers'`, 'Scatter mode did not render a markers trace.', 3000);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#scatterPickers').hidden`), false);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#signalGroups').hidden`), true);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#resetTrail').hidden`), false);
+        assert.equal(await evaluate(analysisWindow, `Array.isArray(document.querySelector('#analysisPlot').data[0].marker.color)`), true);
+
+        // Scatter/distribution reveal samples progressively up to the timeline's current position
+        // (a phase-space trail) -- seeking to 0 should empty it, seeking forward should refill it,
+        // and axis ranges (fixed from the full run) should stay put across that Plotly.restyle-only
+        // update rather than being reasserted from whatever's currently revealed.
+        const rangeBeforeTrailScrub = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').layout.xaxis.range`);
+        await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length <= 1`, 'Scatter trail did not empty when seeking to time 0.', 3000);
+        assert.deepEqual(await evaluate(analysisWindow, `document.querySelector('#analysisPlot').layout.xaxis.range`), rangeBeforeTrailScrub);
+        await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = timeline.max; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length > 1`, 'Scatter trail did not refill when seeking forward.', 3000);
+        await evaluate(analysisWindow, `document.querySelector('#resetTrail').click()`);
+        await waitFor(analysisWindow, `document.querySelector('#timeline').value === '0' && document.querySelector('#analysisPlot').data[0].x.length <= 1`, 'Reset trail button did not empty the trail.', 3000);
+        await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = timeline.max; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length > 1`, 'Scatter trail did not refill after reset.', 3000);
+
+        await evaluate(analysisWindow, `(() => {
+            document.querySelector('#chartMode').value = 'distribution';
+            document.querySelector('#chartMode').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data.length > 0 && document.querySelector('#analysisPlot').data.every((trace) => trace.type === 'histogram')`, 'Distribution mode did not render histogram traces.', 3000);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#scatterPickers').hidden`), true);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#signalGroups').hidden`), false);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#resetTrail').hidden`), false);
+        const distributionRangeBeforeScrub = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').layout.yaxis.range`);
+        await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length <= 1`, 'Distribution trail did not empty when seeking to time 0.', 3000);
+        assert.deepEqual(await evaluate(analysisWindow, `document.querySelector('#analysisPlot').layout.yaxis.range`), distributionRangeBeforeScrub);
+
+        await evaluate(analysisWindow, `(() => {
+            document.querySelector('#chartMode').value = 'timeSeries';
+            document.querySelector('#chartMode').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data.every((trace) => trace.type === 'scatter' && trace.mode === 'lines')`, 'Time series mode did not restore line traces after switching chart types.', 3000);
+        assert.ok(await evaluate(analysisWindow, `document.querySelector('#analysisPlot').layout.shapes.length`) > 0);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#resetTrail').hidden`), true);
+
+        // The cursor line itself, not just its presence -- seeking must actually move it.
+        const cursorXBefore = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').layout.shapes[0].x0`);
+        await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = String(Number(timeline.max) / 2); timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').layout.shapes[0].x0 !== ${JSON.stringify(cursorXBefore)}`,
+            'Time series cursor line did not move when seeking on a completed run.', 3000);
+
+        const exportPath = join(tmpdir(), `konjugate-interaction-export-${Date.now()}.csv`);
+        const originalShowSaveDialog = dialog.showSaveDialog;
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
+        let exportedCsv = null;
+        try {
+            assert.equal(await evaluate(analysisWindow, `document.querySelector('#exportCsv').disabled`), false);
+            await evaluate(analysisWindow, `document.querySelector('#exportCsv').click()`);
+            for (let attempt = 0; attempt < 100 && exportedCsv === null; attempt += 1) {
+                try { exportedCsv = await readFile(exportPath, 'utf8'); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
+            }
+        } finally {
+            dialog.showSaveDialog = originalShowSaveDialog;
+        }
+        assert.ok(exportedCsv, 'Export data (CSV) did not write a file.');
+        assert.match(exportedCsv, /^time \(s\)/);
+
         await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         await waitFor(window, `document.querySelector('#resultCurrentTime').value === '0 s'`, 'Visualizer seek did not synchronize to the project window.');
         await evaluate(window, `document.querySelector('[data-node-tab="model"]').click()`);
@@ -2899,6 +2976,116 @@ export async function runInteractionTests(window) {
             'Undo should remove all 8 created nodes, and with them every source term that lived on them.');
         assert.equal(await evaluate(window, `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`), edgesBefore,
             'Undo should remove all created edges.');
+    });
+
+    await run('Results Analysis timeline seek only redraws the scatter trail once the run is completed, not while running or paused', async () => {
+        const before = BrowserWindow.getAllWindows();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        let diagnosticWindow = null;
+        const openStartedAt = Date.now();
+        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
+            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
+            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(diagnosticWindow, 'A new project window did not open for the timeline-drag diagnostic.');
+        await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#exampleButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#examplesExplorerDialog').open`, 'Examples explorer did not open in the diagnostic window.');
+        await waitFor(diagnosticWindow, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management'))`, 'Examples explorer did not populate in the diagnostic window.');
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#examplesExplorerLoad').click()`);
+        await waitFor(diagnosticWindow, `document.querySelectorAll('.node-label-container').length === 3`, 'Thermal example did not load in the diagnostic window.');
+
+        // #runButton stays disabled until the C++ engine's async post-load model validation
+        // finishes (renderValidationPending/-Status in renderer.mjs) -- clicking a disabled
+        // button never dispatches 'click' at all, so a run started before this settles is a
+        // silent no-op, not a visible failure.
+        await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
+
+        // A real ~10 wall-clock-second run under realTime pacing, matching the reported repro
+        // exactly, rather than the near-instantaneous runs the rest of this suite uses.
+        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await evaluate(diagnosticWindow, `(() => { document.querySelector('#runTargetTime').value = '10'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(diagnosticWindow, `document.querySelector('.resultMode small').textContent === 'Running · model locked'`, 'C++ simulation did not enter its running state in the diagnostic window.', 10000);
+
+        // Pause rather than staying live: while running, the Analysis window's own timeline
+        // value keeps auto-advancing on its own (a separate visualizerHostTimelineChange
+        // broadcast tracking the live playhead, src/main.mjs), which would make a seek attempt's
+        // effect indistinguishable from just the natural clock ticking during this test's own
+        // waits. Paused, the timeline is static, so any redraw can only be the seek itself.
+        await evaluate(diagnosticWindow, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('.resultMode small').textContent === 'Paused · model locked'`, 'Simulation did not pause.', 5000);
+
+        await waitFor(diagnosticWindow, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]:not([hidden])'))`, 'Analysis toolstrip command did not appear during a live run.');
+        await evaluate(diagnosticWindow, `document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]').click()`);
+        const analysisWindow = await (async () => {
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 5000) {
+                const candidate = BrowserWindow.getAllWindows().find((item) => item !== diagnosticWindow && !before.includes(item) && !item.isDestroyed());
+                if (candidate) return candidate;
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            throw new Error('Results Analysis add-on window did not open during a live run.');
+        })();
+        await waitFor(analysisWindow, `document.querySelectorAll('.signalOption').length > 0`, 'Results Analysis did not load signals during a live run.', 5000);
+        await evaluate(analysisWindow, `(() => {
+            const options = (id) => [...document.querySelector(id).options].map((option) => option.value);
+            const xOptions = options('#scatterX');
+            const yOptions = options('#scatterY').filter((value) => value !== xOptions[0]);
+            document.querySelector('#scatterX').value = xOptions[0];
+            document.querySelector('#scatterY').value = yOptions[0] ?? xOptions[0];
+            document.querySelector('#chartMode').value = 'scatter';
+            document.querySelector('#chartMode').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await waitFor(analysisWindow, `document.querySelector('#analysisPlot').data[0]?.type === 'scatter'`, 'Scatter mode did not render during a live run.', 3000);
+
+        // A genuine mouse drag on the native range input, not a scripted .value= + dispatchEvent
+        // -- Chromium moves a native <input type=range>'s own displayed value on a real click
+        // regardless of any JS listener's outcome, so this is the one gesture that can actually
+        // distinguish "the seek request was accepted" from "the slider just looks like it moved."
+        const dragTimeline = async (fraction) => {
+            const rect = await evaluate(analysisWindow, `(() => { const r = document.querySelector('#timeline').getBoundingClientRect(); return { left: r.left, top: r.top + r.height / 2, width: r.width }; })()`);
+            const start = { x: Math.round(rect.left + 4), y: Math.round(rect.top) };
+            const end = { x: Math.round(rect.left + rect.width * fraction), y: Math.round(rect.top) };
+            analysisWindow.webContents.sendInputEvent({ type: 'mouseMove', ...start });
+            analysisWindow.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'left', clickCount: 1 });
+            analysisWindow.webContents.sendInputEvent({ type: 'mouseMove', ...end });
+            analysisWindow.webContents.sendInputEvent({ type: 'mouseUp', ...end, button: 'left', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+        };
+
+        // While paused, src/main.mjs's visualizerSeek handler silently no-ops
+        // (['running','paused'].includes(lifecycle)) -- the native input still visibly jumps to
+        // the dragged position, but the chart must NOT redraw, since the session's real time
+        // never moved. This is the reported bug's actual mechanism: the slider looks connected:
+        // dragging it, the chart doesn't change.
+        const pausedTraceLengthBefore = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length`);
+        await dragTimeline(0.5);
+        const pausedTraceLengthAfter = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length`);
+        assert.equal(pausedTraceLengthAfter, pausedTraceLengthBefore,
+            'Expected the scatter trail to stay unchanged while paused/running, since src/main.mjs visualizerSeek blocks seeking then -- if this now redraws, the seek gate has changed and this assertion needs updating.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete in the diagnostic window.', 15000);
+        await waitFor(analysisWindow, `document.querySelector('.readOnlyBadge').textContent === 'Completed'`, 'Analysis window did not observe run completion.', 5000);
+
+        // Compare two deliberately-targeted positions rather than "before vs. after one drag":
+        // where context.time happens to sit right as the run completes is itself a race (the
+        // Analysis window's own catch-up broadcast vs. the main window's completion badge), so
+        // an assertion anchored to an unknown starting point would be flaky. Two known targets
+        // isn't.
+        await dragTimeline(0.02);
+        const earlyTraceLength = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length`);
+        await dragTimeline(0.95);
+        const lateTraceLength = await evaluate(analysisWindow, `document.querySelector('#analysisPlot').data[0].x.length`);
+        assert.ok(lateTraceLength > earlyTraceLength,
+            `Expected the revealed scatter trail to grow as the Analysis timeline is dragged forward once the run has completed (near t=0: ${earlyTraceLength} points, near the end: ${lateTraceLength} points).`);
+
+        diagnosticWindow.close();
+        for (let attempt = 0; attempt < 100 && !diagnosticWindow.isDestroyed(); attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
     });
 
     console.log(`Interaction tests passed: ${passed}`);

@@ -14,7 +14,8 @@ const allowedPermissions = new Set([
     'results.live.read',
     'simulation.status.read',
     'simulation.pacing.read',
-    'simulation.pacing.control'
+    'simulation.pacing.control',
+    'results.export'
 ]);
 
 export function validateAddonManifest(manifest) {

@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('konjugateVisualizer', Object.freeze({
     readSeries: (signalIds, options) => ipcRenderer.invoke('visualizerReadSeries', { signalIds, options }),
     seek: (time) => ipcRenderer.send('visualizerSeek', Number(time)),
     requestPacing: (pacing) => ipcRenderer.invoke('visualizerRequestPacing', pacing),
+    exportCsv: (suggestedFilename, csv) => ipcRenderer.invoke('visualizerExportCsv', { suggestedFilename, csv }),
     onTimelineChange: (callback) => ipcRenderer.on('visualizerTimelineChange', (_event, time) => callback(time)),
     onSelectionChange: (callback) => ipcRenderer.on('visualizerSelectionChange', (_event, nodeId) => callback(nodeId)),
     onSamplesAvailable: (callback) => ipcRenderer.on('visualizerSamplesAvailable', (_event, update) => callback(update)),

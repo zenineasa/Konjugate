@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultProviderSource } from '../src/providerTemplate.mjs';
+import { defaultProviderSource, replayProviderSource } from '../src/providerTemplate.mjs';
 
 const bindings = [{ key: 'sourceTemperature' }, { key: 'conductance' }];
 
@@ -65,4 +65,50 @@ test('produces syntactically balanced braces for both languages regardless of bi
             assert.equal(opens, closes, `${kind} template with ${testBindings.length} bindings is unbalanced.`);
         }
     }
+});
+
+// See docs/proposals/causalInferenceInputReplay.md: the mathematical/numerical correctness of
+// the generated evaluate() body (exact reproduction under Euler integration at any substep
+// count, including the floating-point boundary-drift fix) was verified by compiling this
+// function's actual output against the real SDK header and running it through a standalone Euler
+// harness -- not reproduced as a JS-side unit test here, since that would mean re-implementing a
+// C++ compiler's semantics in JS. These tests cover what a JS unit test can meaningfully check:
+// structural shape and embedded-data correctness.
+test('replayProviderSource embeds no bindings and declares a bare output port', () => {
+    const source = replayProviderSource('ambientTemperature', [{ time: 0, value: 1 }, { time: 1, value: 2 }], 'Ambient Temperature');
+    assert.match(source, /#include <konjugate\/relationshipProvider\.hpp>/);
+    assert.match(source, /class AmbientTemperature final : public konjugate::sdk::v1::RelationshipProvider/);
+    assert.match(source, /"ambientTemperature"/);
+    assert.match(source, /\{\}[\s,]*konjugate::sdk::v1::ScalarPort\{"output", "output", ""\}/s);
+    assert.match(source, /std::make_unique<AmbientTemperature>/);
+});
+
+test('replayProviderSource embeds every recorded sample as a C++ double literal, in order', () => {
+    const pairs = [{ time: 0, value: 1.5 }, { time: 1, value: -2.25 }, { time: 2, value: 0 }];
+    const source = replayProviderSource('x', pairs, 'x');
+    assert.match(source, /constexpr double kTimes\[\] = \{ 0, 1, 2 \};/);
+    assert.match(source, /constexpr double kValues\[\] = \{ 1\.5, -2\.25, 0 \};/);
+});
+
+test('replayProviderSource holds past the recorded range rather than extrapolating', () => {
+    const source = replayProviderSource('x', [{ time: 0, value: 1 }, { time: 1, value: 2 }], 'x');
+    assert.match(source, /position < 0 \|\| position >= kSampleCount - 1/);
+    assert.match(source, /output\.addGradient\(0\);/);
+});
+
+test('produces syntactically balanced braces at 2 samples and above', () => {
+    for (const pairs of [
+        [{ time: 0, value: 1 }, { time: 1, value: 2 }],
+        [{ time: 0, value: 1 }, { time: 1, value: 2 }, { time: 2, value: 3 }]
+    ]) {
+        const source = replayProviderSource('x', pairs, 'x');
+        const opens = (source.match(/[{[]/g) ?? []).length;
+        const closes = (source.match(/[}\]]/g) ?? []).length;
+        assert.equal(opens, closes, `${pairs.length}-sample template is unbalanced.`);
+    }
+});
+
+test('replayProviderSource rejects fewer than 2 samples rather than emitting a zero-length array', () => {
+    assert.throws(() => replayProviderSource('x', [], 'x'), /at least 2 recorded samples/);
+    assert.throws(() => replayProviderSource('x', [{ time: 0, value: 1 }], 'x'), /at least 2 recorded samples/);
 });

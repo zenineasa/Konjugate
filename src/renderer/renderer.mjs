@@ -14,7 +14,7 @@ import {
     validateEquationLatex
 } from '../equationModel.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
-import { defaultProviderSource } from '../providerTemplate.mjs';
+import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
@@ -5021,6 +5021,8 @@ function resetCausalInference() {
     $('#causalInferenceCandidateRows').replaceChildren();
     $('#causalInferenceSelfTermSection').hidden = true;
     $('#causalInferenceSelfTermRows').replaceChildren();
+    $('#causalInferenceInputSection').hidden = true;
+    $('#causalInferenceInputRows').replaceChildren();
     $('#commitCausalInference').hidden = true;
     $('#commitCausalInference').disabled = true;
 }
@@ -5071,7 +5073,83 @@ function renderCausalInferenceMapping() {
 function updateCommitCausalInferenceEnabled() {
     const hasAcceptedCandidate = causalInferenceState.candidates.some((item) => item.accepted);
     const hasAcceptedSelfTerm = (causalInferenceState.selfTerms ?? []).some((item) => item.accepted);
-    $('#commitCausalInference').disabled = !hasAcceptedCandidate && !hasAcceptedSelfTerm;
+    const hasAcceptedInput = (causalInferenceState.inputs ?? []).some((item) => item.accepted);
+    $('#commitCausalInference').disabled = !hasAcceptedCandidate && !hasAcceptedSelfTerm && !hasAcceptedInput;
+}
+
+// Every mapped column can be replayed instead of modeled -- not just ones causal inference found
+// no predictors for. Deliberately not filtered to "root" columns only: a user may want to hold
+// *any* column to its exact recorded trajectory regardless of what was fitted for it (isolating
+// one part of the system, distrusting a particular fit, or a genuine root the tool didn't manage
+// to leave fully unexplained -- see below). See docs/proposals/causalInferenceInputReplay.md.
+//
+// The 8-node validation system is why this isn't restricted to structurally rootless columns:
+// all 3 genuinely independent root columns still get a self term (an accurately recovered AR(1)
+// decay rate) even though nothing predicts them, because self-persistence is a real, separately
+// fittable property -- and a deterministic self-decay term only ever settles toward equilibrium,
+// never reproducing the noise-driven fluctuation the real column actually has. Restricting
+// eligibility to "no self term either" would have missed exactly the columns this feature exists
+// for; not filtering at all is simpler and correct for every case, not just that one.
+
+// True once a column has an accepted input: committing both an input and a self term/edge for
+// the same column would double-count, since Konjugate sums every source term/edge targeting the
+// same state additively. Checking "input" for a column is meant to *replace* whatever else was
+// targeting it, not add to it -- drives the two-way UI mutual exclusion in
+// renderCausalInferenceInputs/renderCausalInferenceCandidates/renderCausalInferenceSelfTerms
+// below, and commitCausalInference() also excludes any edge/self term whose column has an
+// accepted input as a defensive second check independent of UI state.
+function causalInferenceInputAcceptedFor(columnName) {
+    return (causalInferenceState.inputs ?? []).some((entry) => entry.columnName === columnName && entry.accepted);
+}
+
+function renderCausalInferenceInputs() {
+    const container = $('#causalInferenceInputRows');
+    container.replaceChildren();
+    const inputs = causalInferenceState.inputs ?? [];
+    $('#causalInferenceInputSection').hidden = inputs.length === 0;
+    inputs.forEach((entry, index) => {
+        const row = document.createElement('label');
+        row.className = 'causalInferenceCandidateRow';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = entry.accepted;
+        checkbox.addEventListener('change', () => {
+            causalInferenceState.inputs[index].accepted = checkbox.checked;
+            // Mutual exclusion: accepting a replay for this column supersedes whatever else
+            // targets it -- uncheck its self term and every accepted incoming edge rather than
+            // leave them alongside it (see causalInferenceInputAcceptedFor's comment for why
+            // that would double-count).
+            if (checkbox.checked) {
+                const selfTerm = (causalInferenceState.selfTerms ?? []).find((term) => term.targetColumn === entry.columnName);
+                if (selfTerm) selfTerm.accepted = false;
+                for (const candidate of causalInferenceState.candidates ?? []) {
+                    if (candidate.targetColumn === entry.columnName) candidate.accepted = false;
+                }
+            }
+            updateCommitCausalInferenceEnabled();
+            renderCausalInferenceSelfTerms();
+            renderCausalInferenceCandidates();
+        });
+        const main = document.createElement('span');
+        main.className = 'causalInferenceCandidateMain';
+        main.textContent = entry.columnName;
+        const supersededEdgeCount = (causalInferenceState.candidates ?? [])
+            .filter((candidate) => candidate.targetColumn === entry.columnName && candidate.accepted).length;
+        const supersedesSelfTerm = (causalInferenceState.selfTerms ?? []).some((term) => term.targetColumn === entry.columnName);
+        const supersedes = [
+            supersededEdgeCount ? `${supersededEdgeCount} edge${supersededEdgeCount === 1 ? '' : 's'}` : null,
+            supersedesSelfTerm ? 'its self term' : null
+        ].filter(Boolean).join(' and ');
+        if (supersedes) {
+            const meta = document.createElement('span');
+            meta.className = 'causalInferenceCandidateMeta';
+            meta.textContent = `replaces ${supersedes}`;
+            main.append(meta);
+        }
+        row.append(checkbox, main);
+        container.append(row);
+    });
+    updateCommitCausalInferenceEnabled();
 }
 
 function renderCausalInferenceCandidates() {
@@ -5090,20 +5168,29 @@ function renderCausalInferenceCandidates() {
         row.className = 'causalInferenceCandidateRow';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = candidate.accepted;
+        // Mutual exclusion with an accepted input for the same target column -- see
+        // causalInferenceInputAcceptedFor's comment.
+        const supersededByInput = causalInferenceInputAcceptedFor(candidate.targetColumn);
+        checkbox.checked = candidate.accepted && !supersededByInput;
+        checkbox.disabled = supersededByInput;
         checkbox.addEventListener('change', () => {
             causalInferenceState.candidates[index].accepted = checkbox.checked;
+            if (checkbox.checked) {
+                const input = (causalInferenceState.inputs ?? []).find((entry) => entry.columnName === candidate.targetColumn);
+                if (input) input.accepted = false;
+            }
             updateCommitCausalInferenceEnabled();
+            renderCausalInferenceInputs();
         });
         const main = document.createElement('span');
         main.className = 'causalInferenceCandidateMain';
         main.textContent = `${candidate.sourceColumn} → ${candidate.targetColumn}`;
         const meta = document.createElement('span');
         meta.className = 'causalInferenceCandidateMeta';
-        meta.textContent = (candidate.provenance === 'correlationOnly'
+        meta.textContent = supersededByInput ? 'replaced by input replay' : ((candidate.provenance === 'correlationOnly'
             ? `score ${candidate.score.toFixed(2)}`
             : `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`)
-            + (candidate.interaction ? ' · includes interaction term' : '');
+            + (candidate.interaction ? ' · includes interaction term' : ''));
         main.append(meta);
         const tag = document.createElement('span');
         tag.className = `causalInferenceCandidateTag ${candidate.provenance}`;
@@ -5124,17 +5211,27 @@ function renderCausalInferenceSelfTerms() {
         row.className = 'causalInferenceCandidateRow';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = term.accepted;
+        // Mutual exclusion with an accepted input for the same column -- see
+        // causalInferenceInputAcceptedFor's comment. Disabled (not just unchecked) so it's
+        // visually clear this isn't independently choosable while the input replay is active.
+        const supersededByInput = causalInferenceInputAcceptedFor(term.targetColumn);
+        checkbox.checked = term.accepted && !supersededByInput;
+        checkbox.disabled = supersededByInput;
         checkbox.addEventListener('change', () => {
             causalInferenceState.selfTerms[index].accepted = checkbox.checked;
+            if (checkbox.checked) {
+                const input = (causalInferenceState.inputs ?? []).find((entry) => entry.columnName === term.targetColumn);
+                if (input) input.accepted = false;
+            }
             updateCommitCausalInferenceEnabled();
+            renderCausalInferenceInputs();
         });
         const main = document.createElement('span');
         main.className = 'causalInferenceCandidateMain';
         main.textContent = `${term.targetColumn} (self)`;
         const meta = document.createElement('span');
         meta.className = 'causalInferenceCandidateMeta';
-        meta.textContent = `rate ${formatFittedNumber(term.rate)}`;
+        meta.textContent = supersededByInput ? 'replaced by input replay' : `rate ${formatFittedNumber(term.rate)}`;
         main.append(meta);
         const tag = document.createElement('span');
         tag.className = 'causalInferenceCandidateTag continuousLagged';
@@ -5210,10 +5307,28 @@ function latexForSelfTerm(selfTerm, targetStateSymbol) {
 
 async function commitCausalInference() {
     if (!causalInferenceState?.candidates || activeResult) return;
-    const acceptedCandidates = causalInferenceState.candidates.filter((candidate) => candidate.accepted);
-    const acceptedSelfTerms = (causalInferenceState.selfTerms ?? []).filter((term) => term.accepted);
-    if (!acceptedCandidates.length && !acceptedSelfTerms.length) return;
+    const acceptedInputs = (causalInferenceState.inputs ?? []).filter((entry) => entry.accepted);
+    const acceptedInputColumns = new Set(acceptedInputs.map((entry) => entry.columnName));
+    // Defensive second check, independent of the UI's own mutual exclusion above: never commit an
+    // edge or a self term alongside an input-replay provider for the same target column -- see
+    // causalInferenceInputAcceptedFor's comment for why that would double-count.
+    const acceptedCandidates = causalInferenceState.candidates
+        .filter((candidate) => candidate.accepted && !acceptedInputColumns.has(candidate.targetColumn));
+    const acceptedSelfTerms = (causalInferenceState.selfTerms ?? [])
+        .filter((term) => term.accepted && !acceptedInputColumns.has(term.targetColumn));
+    if (!acceptedCandidates.length && !acceptedSelfTerms.length && !acceptedInputs.length) return;
     const status = $('#causalInferenceStatus');
+
+    // Parsed once up front: every newly created state's initialValue is seeded from this column's
+    // own first recorded row (see docs/proposals/causalInferenceInputReplay.md's bug writeup --
+    // hardcoding 0 here regardless of the CSV meant a committed, freshly-created node never
+    // actually started where its own data said it should), and an accepted input's replay
+    // provider embeds this same column's full recorded series below.
+    const parsedCsv = parseCsv(causalInferenceState.csvContent);
+    const columnSeries = (columnName) => {
+        const columnIndex = parsedCsv.columnNames.indexOf(columnName);
+        return parsedCsv.rows.map((row) => ({ time: row.time, value: row.values[columnIndex] }));
+    };
 
     // New nodes land on a circle -- every edge between two imported nodes is then a chord inside
     // it, so nothing crosses through the middle of an unrelated node the way the generic 4-column
@@ -5249,7 +5364,10 @@ async function commitCausalInference() {
             const nodeRef = `causalInferenceNode${mappingIndex}`;
             const stateRef = `${nodeRef}State`;
             operations.push({ kind: 'addNode', ref: nodeRef, name: entry.columnName, position: nextCirclePosition(), shape: 'sphere' });
-            operations.push({ kind: 'addState', nodeRef, ref: stateRef, name: symbol, symbol, initialValue: 0, unit: '' });
+            operations.push({
+                kind: 'addState', nodeRef, ref: stateRef, name: symbol, symbol,
+                initialValue: columnSeries(entry.columnName)[0].value, unit: ''
+            });
             resolvedColumns.set(entry.columnName, { nodeRef, stateRef, symbol });
         } else {
             const node = model.nodes.find((candidate) => candidate.id === entry.nodeId);
@@ -5277,6 +5395,19 @@ async function commitCausalInference() {
             kind: 'addSourceTerm', ref: `causalInferenceSelfTerm${index}`,
             nodeRef: target.nodeRef ?? target.nodeId, outputStateRef: target.stateRef ?? target.stateId,
             latex: latexForSelfTerm(term, target.symbol)
+        });
+    });
+    // No bindings needed -- the generated provider only reads context.simulationTime, the same
+    // no-bindings, time-driven pattern already used for a hand-authored kinematic driver source
+    // term. See docs/proposals/causalInferenceInputReplay.md for why this is exact (not
+    // approximate) at any substep count, and why a gradient-based provider rather than a new
+    // direct-value-set SDK primitive is the right mechanism.
+    acceptedInputs.forEach((input, index) => {
+        const target = resolvedColumns.get(input.columnName);
+        operations.push({
+            kind: 'addSourceTerm', ref: `causalInferenceInput${index}`,
+            nodeRef: target.nodeRef ?? target.nodeId, outputStateRef: target.stateRef ?? target.stateId,
+            implementation: { kind: 'cpp', source: replayProviderSource(input.columnName, columnSeries(input.columnName), input.columnName) }
         });
     });
 
@@ -5362,6 +5493,7 @@ window.__debugCausalInference = {
     // 2 one) reached the UI without depending on canvas hit-testing at all.
     candidates: () => structuredClone(causalInferenceState?.candidates ?? null),
     selfTerms: () => structuredClone(causalInferenceState?.selfTerms ?? null),
+    inputs: () => structuredClone(causalInferenceState?.inputs ?? null),
     // Committed source terms have no node/edge-style count in .modelStatus to assert against, and
     // (like candidates() above) reading them back via a node's own editor is fragile this deep
     // into the interaction suite -- the serialized document is the only reliable place to check
@@ -5400,6 +5532,9 @@ $('#runCausalInference').addEventListener('click', async () => {
         if (!result.available) throw new Error('The native inference engine is unavailable.');
         causalInferenceState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));
         causalInferenceState.selfTerms = (result.report.selfTerms ?? []).map((term) => ({ ...term, accepted: true }));
+        // One entry per mapped column, every column eligible -- see the comment above
+        // causalInferenceInputAcceptedFor for why this isn't filtered to "root" columns only.
+        causalInferenceState.inputs = causalInferenceState.mapping.map((entry) => ({ columnName: entry.columnName, accepted: false }));
         const selfTermCount = causalInferenceState.selfTerms.length;
         status.className = 'equationDiagnostics valid';
         status.textContent = `Found ${causalInferenceState.candidates.length} candidate relationship${causalInferenceState.candidates.length === 1 ? '' : 's'}`
@@ -5408,6 +5543,7 @@ $('#runCausalInference').addEventListener('click', async () => {
         $('#commitCausalInference').hidden = false;
         renderCausalInferenceCandidates();
         renderCausalInferenceSelfTerms();
+        renderCausalInferenceInputs();
     } catch (error) {
         status.className = 'equationDiagnostics';
         status.textContent = error.message;

@@ -200,22 +200,47 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
             const node = resolve(operation.nodeRef, 'node', operationIndex).value;
             const output = resolve(operation.outputStateRef, 'state', operationIndex);
             if (output.parent !== node) throw new AssistantProposalError('The output state does not belong to the source-term node.', operationIndex);
-            const latex = requireText(operation.latex, 'latex', operationIndex);
-            const bindings = node.states.map((state) => ({
-                kind: 'state', nodeId: node.id, stateId: state.id, symbol: state.symbol, label: state.symbol
-            }));
-            const validation = validateEquationLatex(latex, bindings);
-            if (!validation.valid) throw new AssistantProposalError(validation.errors.join(' '), operationIndex);
-            const term = {
-                state: output.value.symbol,
-                expression: latex,
-                expressionModel: {
-                    latex,
-                    bindings,
-                    output: { stateId: output.value.id },
-                    mathJson: validation.mathJson
+            let term;
+            if (operation.implementation) {
+                // A programmable source term (in place of an equation) -- see docs/projectSchema.md:
+                // "it carries an implementation object (in place of equationModel/expressionModel)
+                // and its own top-level expression/equation field is left empty." Used today by the
+                // causal-inference input-replay feature (docs/proposals/causalInferenceInputReplay.md),
+                // which needs no bound state -- only context.simulationTime -- so bindings stays [].
+                const kind = operation.implementation.kind;
+                if (kind !== 'cpp' && kind !== 'python') {
+                    throw new AssistantProposalError('implementation.kind must be cpp or python.', operationIndex);
                 }
-            };
+                const source = requireText(operation.implementation.source, 'implementation.source', operationIndex);
+                term = {
+                    state: output.value.symbol,
+                    expression: '',
+                    implementation: {
+                        kind,
+                        providerApiVersion: 1,
+                        source,
+                        bindings: [],
+                        output: { key: 'output', stateId: output.value.id }
+                    }
+                };
+            } else {
+                const latex = requireText(operation.latex, 'latex', operationIndex);
+                const bindings = node.states.map((state) => ({
+                    kind: 'state', nodeId: node.id, stateId: state.id, symbol: state.symbol, label: state.symbol
+                }));
+                const validation = validateEquationLatex(latex, bindings);
+                if (!validation.valid) throw new AssistantProposalError(validation.errors.join(' '), operationIndex);
+                term = {
+                    state: output.value.symbol,
+                    expression: latex,
+                    expressionModel: {
+                        latex,
+                        bindings,
+                        output: { stateId: output.value.id },
+                        mathJson: validation.mathJson
+                    }
+                };
+            }
             allocate(operation, 'sourceTerm', term, node, operationIndex);
             node.sourceTerms.push(term);
             changes.push({ kind: operation.kind, action: 'add', entityId: term.id, focusEntityId: node.id, label: `Add local term for ${output.value.symbol}` });

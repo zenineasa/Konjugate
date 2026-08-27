@@ -88,6 +88,41 @@ test('creates a validated node-local source term', () => {
     assert.equal(document.nodes[0].sourceTerms[0].expressionModel.mathJson, 'heatRate');
 });
 
+test('creates a programmable (cpp) source term in place of an equation', () => {
+    const proposal = {
+        proposalVersion: 1,
+        operations: [
+            { kind: 'addNode', ref: 'input', name: 'Ambient temperature' },
+            { kind: 'addState', ref: 'inputState', nodeRef: 'input', name: 'Temperature', symbol: 'temperature', initialValue: 293.15, unit: 'K' },
+            {
+                kind: 'addSourceTerm', ref: 'replay', nodeRef: 'input', outputStateRef: 'inputState',
+                implementation: { kind: 'cpp', source: '// replay provider source' }
+            }
+        ]
+    };
+    const { document } = applyAssistantProposal(emptyProject(), proposal, { idFactory: idFactory() });
+    const term = document.nodes[0].sourceTerms[0];
+    assert.equal(term.expression, '');
+    assert.equal(term.expressionModel, undefined);
+    assert.equal(term.implementation.kind, 'cpp');
+    assert.equal(term.implementation.providerApiVersion, 1);
+    assert.equal(term.implementation.source, '// replay provider source');
+    assert.deepEqual(term.implementation.bindings, []);
+    assert.equal(term.implementation.output.stateId, document.nodes[0].states[0].id);
+});
+
+test('rejects a source-term implementation kind other than cpp or python', () => {
+    const proposal = {
+        proposalVersion: 1,
+        operations: [
+            { kind: 'addNode', ref: 'input', name: 'Ambient temperature' },
+            { kind: 'addState', ref: 'inputState', nodeRef: 'input', name: 'Temperature', symbol: 'temperature', initialValue: 0, unit: '' },
+            { kind: 'addSourceTerm', ref: 'replay', nodeRef: 'input', outputStateRef: 'inputState', implementation: { kind: 'rust', source: 'fn evaluate() {}' } }
+        ]
+    };
+    assert.throws(() => applyAssistantProposal(emptyProject(), proposal, { idFactory: idFactory() }), AssistantProposalError);
+});
+
 test('allocates after run-configuration IDs that share the project namespace', () => {
     const source = emptyProject();
     source.runConfigurations = [{ id: 10, name: 'Default' }];

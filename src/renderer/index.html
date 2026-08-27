@@ -664,6 +664,11 @@
                     <p class="builderHint">Each target's own recovered persistence/decay rate, applied to the node's own state rather than as a relationship between two nodes.</p>
                     <div id="causalInferenceSelfTermRows"></div>
                 </div>
+                <div id="causalInferenceInputSection" hidden>
+                    <h3>Inputs</h3>
+                    <p class="builderHint">Check any column that should replay its own recorded values exactly instead of being explained by a fitted equation -- driven by a generated C++ provider, exact at any simulation step size. This replaces whatever candidate edges or self term would otherwise target that column. Most useful for a column nothing else predicts (its only alternative is a self term that settles toward equilibrium rather than reproducing the real fluctuation, or -- if not even that -- staying frozen at its initial value for the entire run), but any column can be replayed this way, for instance to hold it to ground truth while the rest of the model runs on the fitted equations.</p>
+                    <div id="causalInferenceInputRows"></div>
+                </div>
             </section>
             <footer>
                 <button id="cancelCausalInference" type="button">Cancel</button>

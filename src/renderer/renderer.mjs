@@ -5014,6 +5014,7 @@ function resetCausalInference() {
     $('#causalInferenceDegreeMode').value = 'linear';
     $('#causalInferenceDegreeValueField').hidden = true;
     $('#causalInferenceDegreeValue').value = '3';
+    $('#causalInferenceIncludeInteractionTerms').checked = false;
     $('#runCausalInference').hidden = true;
     $('#runCausalInference').disabled = true;
     $('#causalInferenceCandidatesSection').hidden = true;
@@ -5099,9 +5100,10 @@ function renderCausalInferenceCandidates() {
         main.textContent = `${candidate.sourceColumn} → ${candidate.targetColumn}`;
         const meta = document.createElement('span');
         meta.className = 'causalInferenceCandidateMeta';
-        meta.textContent = candidate.provenance === 'correlationOnly'
+        meta.textContent = (candidate.provenance === 'correlationOnly'
             ? `score ${candidate.score.toFixed(2)}`
-            : `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`;
+            : `lag ${candidate.lag} · score ${candidate.score.toFixed(2)}`)
+            + (candidate.interaction ? ' · includes interaction term' : '');
         main.append(meta);
         const tag = document.createElement('span');
         tag.className = `causalInferenceCandidateTag ${candidate.provenance}`;
@@ -5168,16 +5170,29 @@ function signedTermLatex(value, symbolLatex) {
 // entry per fitted polynomial degree (always at least a degree-1 entry); degree 1 renders as the
 // bare source symbol, degree >= 2 as the symbol raised to that power -- Power is already a
 // supported mathJson primitive, so no equation-engine changes are needed for this.
-function latexForFittedEdge(candidate, sourceStateSymbol) {
+//
+// candidate.interaction (present only when the engine's includeInteractionTerms recovered a
+// genuinely non-separable coupling -- see docs/proposals/causalInferenceInteractionTerms.md) adds
+// one further term referencing *both* endpoints' own symbols, the same pattern the shipped
+// rodX/rodY/rodZ component-library templates already use for a hand-authored relative term
+// (e.g. "targetX - sourceX"). reconcileEquationBindings() already auto-binds every one of the
+// target node's own states under a "target"-prefixed symbol for every edge, whether or not the
+// hand-authored LaTeX happens to reference one -- so targetStateSymbol needs no new binding work,
+// only a caller that knows to pass it in.
+function latexForFittedEdge(candidate, sourceStateSymbol, targetStateSymbol) {
     const sourceSymbol = `\\mathrm{source${upperFirst(sourceStateSymbol)}}`;
     const termsLatex = candidate.terms
         .slice()
         .sort((a, b) => a.degree - b.degree)
         .map((term) => signedTermLatex(term.coefficient, term.degree === 1 ? sourceSymbol : `${sourceSymbol}^{${term.degree}}`))
-        .join(' ')
-        .replace(/^\+ /, '');
+        .join(' ');
     const interceptTerm = signedTermLatex(candidate.intercept, null);
-    return `${termsLatex} ${interceptTerm}`;
+    let combined = `${termsLatex} ${interceptTerm}`;
+    if (candidate.interaction) {
+        const targetSymbol = `\\mathrm{target${upperFirst(targetStateSymbol)}}`;
+        combined += ` ${signedTermLatex(candidate.interaction.coefficient, `${sourceSymbol} \\cdot ${targetSymbol}`)}`;
+    }
+    return combined.replace(/^\s*\+ /, '');
 }
 
 // A self-term's rate applies to the node's own state directly -- an addSourceTerm's bindings
@@ -5253,7 +5268,7 @@ async function commitCausalInference() {
         });
         operations.push({
             kind: 'setEdgeEquation', edgeRef, outputStateRef: target.stateRef ?? target.stateId,
-            latex: latexForFittedEdge(candidate, source.symbol)
+            latex: latexForFittedEdge(candidate, source.symbol, target.symbol)
         });
     });
     acceptedSelfTerms.forEach((term, index) => {
@@ -5377,7 +5392,10 @@ $('#runCausalInference').addEventListener('click', async () => {
         // {1}: every fitted coefficient becomes a continuous-time rate (rate = coefficient/Δt),
         // and a predictor from 2+ CSV rows back has no single-Euler-step interpretation for that
         // transform, so it was never representable as a working equation regardless.
-        const config = { candidateDegrees: causalInferenceDegreesFromUi() };
+        const config = {
+            candidateDegrees: causalInferenceDegreesFromUi(),
+            includeInteractionTerms: $('#causalInferenceIncludeInteractionTerms').checked
+        };
         const result = await window.engine.infer(causalInferenceState.csvContent, config);
         if (!result.available) throw new Error('The native inference engine is unavailable.');
         causalInferenceState.candidates = result.report.edges.map((edge) => ({ ...edge, accepted: true }));

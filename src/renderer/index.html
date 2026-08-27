@@ -652,6 +652,7 @@
                     <option value="auto">Let the tool decide, up to degree…</option>
                 </select></label>
                 <label class="editorField" id="causalInferenceDegreeValueField" hidden><span>Degree</span><input id="causalInferenceDegreeValue" type="number" min="2" max="6" value="3"></label>
+                <label class="editorField checkboxField"><input id="causalInferenceIncludeInteractionTerms" type="checkbox"><span>Also test for interaction effects between related variables</span></label>
                 <p class="builderHint">Fitted equations are calibrated to this CSV's own sampling interval. Results may drift if the project's own time step is set much finer than that.</p>
             </section>
             <section id="causalInferenceCandidatesSection" hidden>

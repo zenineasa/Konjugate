@@ -49,7 +49,15 @@ void writeInferenceReport(const std::filesystem::path& path, const InferenceResu
             const auto& term = edge.terms[termIndex];
             json << "{\"degree\":" << term.degree << ",\"coefficient\":" << term.coefficient << "}";
         }
-        json << "],\"intercept\":" << edge.intercept << ",\"score\":" << edge.score
+        json << "]";
+        // Additive field, omitted for an edge with no interaction term -- an older reader that
+        // doesn't know about it can safely ignore it (docs/projectSchema.md's additive-field
+        // rule), and a present-but-absent field is exactly what an optional<InteractionTerm>
+        // means here.
+        if (edge.interaction.has_value()) {
+            json << ",\"interaction\":{\"coefficient\":" << edge.interaction->coefficient << "}";
+        }
+        json << ",\"intercept\":" << edge.intercept << ",\"score\":" << edge.score
              << ",\"provenance\":\"" << escape(edge.provenance) << "\"}";
     }
     json << "],\"selfTerms\":[";

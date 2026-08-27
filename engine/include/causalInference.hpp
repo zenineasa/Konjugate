@@ -3,6 +3,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,17 @@ struct InferenceConfig {
     // for lag/penalty rather than adding a second selection mechanism. See
     // docs/proposals/causalInference.md's "Planned next" section.
     std::vector<int> candidateDegrees = {1};
+    // Off by default -- adds one extra ridge feature (targetColumn(t-1) * sourceColumn(t-1),
+    // scale-only normalized) per surviving source, letting stage 2 recover a genuinely
+    // non-separable coupling term (mass-action/bilinear-style, e.g. a predator-prey
+    // dx/dt = a*x - b*x*y) that no combination of an edge (a function of the source alone) and
+    // the shared self-lag term can reconstruct -- unlike a purely additive relationship
+    // (rate*source - rate*target), which the existing joint edge+self-lag fit already recovers
+    // exactly with no need for this. When true, it becomes one more axis in the existing
+    // (lag, degree, penalty) grid search, selected per target by the same adjusted held-out
+    // score used for everything else -- never forced on unconditionally. See
+    // docs/proposals/causalInferenceInteractionTerms.md.
+    bool includeInteractionTerms = false;
 };
 
 // One polynomial term of a fitted relationship: coefficient * sourceColumn^degree, in the
@@ -50,11 +62,24 @@ struct PolynomialTerm {
     double coefficient = 0.0;
 };
 
+// A non-separable joint term -- coefficient * targetColumn * sourceColumn -- that cannot be
+// represented as a PolynomialTerm (a function of the source alone) or folded into a SelfTerm (a
+// function of the target alone), because it genuinely depends on both. Renders as an ordinary
+// edge equation referencing both endpoints' own states, the same pattern the shipped
+// rodX/rodY/rodZ component-library templates already use for a hand-authored relative term (e.g.
+// "targetX - sourceX"). Only ever set when InferenceConfig::includeInteractionTerms was enabled
+// and the target's fit selected it via held-out score; see
+// docs/proposals/causalInferenceInteractionTerms.md for the destandardization derivation.
+struct InteractionTerm {
+    double coefficient = 0.0; // original units, already rate/timeStep-scaled like PolynomialTerm
+};
+
 struct InferredEdge {
     std::string sourceColumn;
     std::string targetColumn;
     int lag = 0;                // 0 for a correlationOnly edge, which has no lag concept
     std::vector<PolynomialTerm> terms; // always non-empty; see PolynomialTerm
+    std::optional<InteractionTerm> interaction; // see InteractionTerm; unset unless fit and accepted
     double intercept = 0.0;     // in the original units of the target column
     double score = 0.0;         // held-out variance-explained, roughly (-inf, 1]; higher is better
     // "continuousLagged" | "correlationOnly". Both are rate/timeStep-scaled, in the same sense

@@ -260,9 +260,18 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
     for (Eigen::Index source = 0; source < columnCount; ++source) {
         expandedFeatures.col(source * maxDegree) = standardized.values.col(source);
     }
-    if (maxDegree >= 2) {
-        const Eigen::MatrixXd scaleOnly = (standardized.values.array().rowwise()
+    // scaleOnly (v = x/sigma, no mean subtraction) is also what the interaction feature below is
+    // built from, for the same reason degree >= 2 needs it: a mean-centered product spreads into
+    // lower-order cross terms under expansion (binomial expansion), a scale-only one doesn't --
+    // see docs/proposals/causalInferenceInteractionTerms.md's destandardization derivation. Built
+    // whenever either consumer needs it; the degree >= 2 loop below is a no-op when maxDegree < 2
+    // regardless.
+    Eigen::MatrixXd scaleOnly;
+    if (maxDegree >= 2 || config.includeInteractionTerms) {
+        scaleOnly = (standardized.values.array().rowwise()
             + (standardized.mean.array() / standardized.stddev.array())).matrix();
+    }
+    if (maxDegree >= 2) {
         for (Eigen::Index source = 0; source < columnCount; ++source) {
             for (int power = 2; power <= maxDegree; ++power) {
                 const Eigen::VectorXd raised = scaleOnly.col(source).array().pow(static_cast<double>(power)).matrix();
@@ -274,6 +283,13 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
             }
         }
     }
+
+    // Whether a target's fit tries interaction features at all is its own axis in the (lag,
+    // degree, penalty) grid search below, not a per-source decision -- see InferenceConfig::
+    // includeInteractionTerms's doc comment and the proposal doc's "Decided: a global per-target
+    // toggle" section for why a per-source combinatorial search isn't built instead.
+    const std::vector<bool> interactionOptions =
+        config.includeInteractionTerms ? std::vector<bool>{false, true} : std::vector<bool>{false};
 
     InferenceResult result;
     std::vector<std::vector<bool>> laggedSurvived(variableCount, std::vector<bool>(variableCount, false));
@@ -289,10 +305,32 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
         }
         if (sources.empty()) continue;
 
+        // Interaction feature per surviving source: targetColumn(t-1) * sourceColumn(t-1), built
+        // from scale-only (not mean-centered) columns so the product stays a single clean term --
+        // see docs/proposals/causalInferenceInteractionTerms.md. Depends on `target`, so unlike
+        // expandedFeatures this can't be precomputed once for the whole series; computed here,
+        // once per target, reused across every (lag, degree, penalty) combination below.
+        Eigen::MatrixXd interactionFeatures;
+        std::vector<double> interactionScale;
+        if (config.includeInteractionTerms) {
+            interactionFeatures.resize(static_cast<Eigen::Index>(rowCount), static_cast<Eigen::Index>(sources.size()));
+            interactionScale.assign(sources.size(), 1.0);
+            for (std::size_t column = 0; column < sources.size(); ++column) {
+                const auto sourceIndex = static_cast<Eigen::Index>(sources[column]);
+                const Eigen::VectorXd raw =
+                    (scaleOnly.col(static_cast<Eigen::Index>(target)).array() * scaleOnly.col(sourceIndex).array()).matrix();
+                const double scale = std::sqrt(raw.array().square().mean());
+                const double safeScale = scale > kEpsilon ? scale : 1.0;
+                interactionFeatures.col(static_cast<Eigen::Index>(column)) = raw / safeScale;
+                interactionScale[column] = safeScale;
+            }
+        }
+
         double bestScore = -std::numeric_limits<double>::infinity();
         double bestRawScore = -std::numeric_limits<double>::infinity();
         int bestLag = 0;
         int bestDegree = 1;
+        bool bestUseInteraction = false;
         RidgeFit bestFit;
         bool found = false;
 
@@ -306,43 +344,54 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
 
             for (const int degree : config.candidateDegrees) {
                 const int clampedDegree = std::max(1, degree);
-                const std::size_t featureCount = sources.size() * static_cast<std::size_t>(clampedDegree) + 1;
-                if (trainRows <= featureCount + 1 || validationRows < 1) continue;
+                for (const bool useInteraction : interactionOptions) {
+                    const std::size_t interactionColumnCount = useInteraction ? sources.size() : 0;
+                    const std::size_t featureCount =
+                        sources.size() * static_cast<std::size_t>(clampedDegree) + interactionColumnCount + 1;
+                    if (trainRows <= featureCount + 1 || validationRows < 1) continue;
 
-                Eigen::MatrixXd x(static_cast<Eigen::Index>(usableRows), static_cast<Eigen::Index>(featureCount));
-                Eigen::VectorXd y(static_cast<Eigen::Index>(usableRows));
-                for (std::size_t row = 0; row < usableRows; ++row) {
-                    const auto eigenRow = static_cast<Eigen::Index>(row);
-                    const auto t = static_cast<Eigen::Index>(row + static_cast<std::size_t>(lag));
-                    for (std::size_t column = 0; column < sources.size(); ++column) {
-                        const auto sourceIndex = static_cast<Eigen::Index>(sources[column]);
-                        for (int power = 1; power <= clampedDegree; ++power) {
-                            const auto featureColumn = static_cast<Eigen::Index>(
-                                column * static_cast<std::size_t>(clampedDegree) + static_cast<std::size_t>(power - 1));
-                            x(eigenRow, featureColumn) = expandedFeatures(eigenRow, sourceIndex * maxDegree + (power - 1));
+                    Eigen::MatrixXd x(static_cast<Eigen::Index>(usableRows), static_cast<Eigen::Index>(featureCount));
+                    Eigen::VectorXd y(static_cast<Eigen::Index>(usableRows));
+                    const auto selfLagColumn = static_cast<Eigen::Index>(
+                        sources.size() * static_cast<std::size_t>(clampedDegree) + interactionColumnCount);
+                    for (std::size_t row = 0; row < usableRows; ++row) {
+                        const auto eigenRow = static_cast<Eigen::Index>(row);
+                        const auto t = static_cast<Eigen::Index>(row + static_cast<std::size_t>(lag));
+                        for (std::size_t column = 0; column < sources.size(); ++column) {
+                            const auto sourceIndex = static_cast<Eigen::Index>(sources[column]);
+                            for (int power = 1; power <= clampedDegree; ++power) {
+                                const auto featureColumn = static_cast<Eigen::Index>(
+                                    column * static_cast<std::size_t>(clampedDegree) + static_cast<std::size_t>(power - 1));
+                                x(eigenRow, featureColumn) = expandedFeatures(eigenRow, sourceIndex * maxDegree + (power - 1));
+                            }
+                            if (useInteraction) {
+                                const auto interactionColumn = static_cast<Eigen::Index>(
+                                    sources.size() * static_cast<std::size_t>(clampedDegree) + column);
+                                x(eigenRow, interactionColumn) = interactionFeatures(eigenRow, static_cast<Eigen::Index>(column));
+                            }
                         }
+                        x(eigenRow, selfLagColumn) = standardized.values(eigenRow, static_cast<Eigen::Index>(target));
+                        y(eigenRow) = standardized.values(t, static_cast<Eigen::Index>(target));
                     }
-                    x(eigenRow, static_cast<Eigen::Index>(sources.size() * static_cast<std::size_t>(clampedDegree))) =
-                        standardized.values(eigenRow, static_cast<Eigen::Index>(target));
-                    y(eigenRow) = standardized.values(t, static_cast<Eigen::Index>(target));
-                }
 
-                const Eigen::MatrixXd xTrain = x.topRows(static_cast<Eigen::Index>(trainRows));
-                const Eigen::VectorXd yTrain = y.topRows(static_cast<Eigen::Index>(trainRows));
-                const Eigen::MatrixXd xValidation = x.bottomRows(static_cast<Eigen::Index>(validationRows));
-                const Eigen::VectorXd yValidation = y.bottomRows(static_cast<Eigen::Index>(validationRows));
+                    const Eigen::MatrixXd xTrain = x.topRows(static_cast<Eigen::Index>(trainRows));
+                    const Eigen::VectorXd yTrain = y.topRows(static_cast<Eigen::Index>(trainRows));
+                    const Eigen::MatrixXd xValidation = x.bottomRows(static_cast<Eigen::Index>(validationRows));
+                    const Eigen::VectorXd yValidation = y.bottomRows(static_cast<Eigen::Index>(validationRows));
 
-                for (const double penalty : config.ridgePenalties) {
-                    const RidgeFit fit = fitRidgeRegression(xTrain, yTrain, penalty);
-                    const double rawScore = heldOutScore(fit, xValidation, yValidation);
-                    const double score = adjustedHeldOutScore(rawScore, validationRows, featureCount);
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestRawScore = rawScore;
-                        bestLag = lag;
-                        bestDegree = clampedDegree;
-                        bestFit = fit;
-                        found = true;
+                    for (const double penalty : config.ridgePenalties) {
+                        const RidgeFit fit = fitRidgeRegression(xTrain, yTrain, penalty);
+                        const double rawScore = heldOutScore(fit, xValidation, yValidation);
+                        const double score = adjustedHeldOutScore(rawScore, validationRows, featureCount);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestRawScore = rawScore;
+                            bestLag = lag;
+                            bestDegree = clampedDegree;
+                            bestUseInteraction = useInteraction;
+                            bestFit = fit;
+                            found = true;
+                        }
                     }
                 }
             }
@@ -378,8 +427,9 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
             const double sourceMu = standardized.mean(static_cast<Eigen::Index>(sources[column]));
             jointInterceptOriginal -= (linearCoefficient * sigmaTarget / sourceSigma) * sourceMu;
         }
-        const double selfLagCoefficient = bestFit.coefficients(
-            static_cast<Eigen::Index>(sources.size() * static_cast<std::size_t>(bestDegree)));
+        const std::size_t bestInteractionColumnCount = bestUseInteraction ? sources.size() : 0;
+        const double selfLagCoefficient = bestFit.coefficients(static_cast<Eigen::Index>(
+            sources.size() * static_cast<std::size_t>(bestDegree) + bestInteractionColumnCount));
         jointInterceptOriginal -= selfLagCoefficient * muTarget;
 
         // Rather than discard this control term, keep it -- rate = (coefficient - 1)/timeStep is
@@ -415,6 +465,23 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
                 }
                 terms.push_back({power, coefficientOriginal});
             }
+
+            // The interaction coefficient folds into the same aggregate-magnitude sum-of-squares
+            // as the polynomial terms above -- one source is judged, and accepted or rejected, as
+            // a whole by any of its fitted terms together (linear, polynomial, or interaction),
+            // not by separate per-term gates. See docs/proposals/causalInferenceInteractionTerms.md's
+            // "Decided" section.
+            double interactionCoefficientOriginal = 0.0;
+            if (bestUseInteraction) {
+                const double gamma = bestFit.coefficients(static_cast<Eigen::Index>(
+                    sources.size() * static_cast<std::size_t>(bestDegree) + column));
+                aggregateSquared += gamma * gamma;
+                // coefficient_ij = gamma / (sigmaSource * interactionScale) -- sigmaTarget cancels
+                // exactly, since it enters once dividing (inside the scale-only target feature)
+                // and once multiplying (destandardizing the target's own response). See the
+                // proposal doc's derivation.
+                interactionCoefficientOriginal = gamma / (sigmaSource * interactionScale[column]);
+            }
             if (std::sqrt(aggregateSquared) < config.coefficientThreshold) continue;
             laggedSurvived[target][source] = true;
 
@@ -426,7 +493,8 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
             // the self-lag transform above there is no "- 1"). Applies uniformly across every
             // fitted degree -- unlike a matrix-logarithm-based conversion (tried and rejected;
             // see docs/proposals/continuousTimeConversion.md), this transform has no linear-only
-            // restriction.
+            // restriction. The interaction term is a cross-term exactly like any polynomial term
+            // in this respect (no "-1"), so it takes the same transform.
             for (auto& term : terms) term.coefficient /= series.timeStep;
 
             InferredEdge edge;
@@ -434,6 +502,9 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
             edge.targetColumn = series.columnNames[target];
             edge.lag = bestLag;
             edge.terms = std::move(terms);
+            if (bestUseInteraction) {
+                edge.interaction = InteractionTerm{interactionCoefficientOriginal / series.timeStep};
+            }
             edge.intercept = (jointInterceptOriginal / static_cast<double>(sources.size())) / series.timeStep;
             edge.score = bestRawScore;
             edge.provenance = "continuousLagged";

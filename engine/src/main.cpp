@@ -84,6 +84,8 @@ konjugate::InferenceConfig inferenceConfigFromArgs(int argc, char** argv) {
     if (!ridgePenalties.empty()) config.ridgePenalties = parseDoubleList(ridgePenalties);
     const auto degrees = optionPath(argc, argv, "--degrees").string();
     if (!degrees.empty()) config.candidateDegrees = parseIntList(degrees);
+    const auto includeInteractionTerms = optionPath(argc, argv, "--include-interaction-terms").string();
+    if (!includeInteractionTerms.empty()) config.includeInteractionTerms = includeInteractionTerms == "true" || includeInteractionTerms == "1";
     return config;
 }
 }

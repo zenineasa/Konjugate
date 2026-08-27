@@ -162,6 +162,32 @@ konjugate::InferenceSeries makeContinuousTimeSeries(std::size_t rowCount) {
     return series;
 }
 
+// Same AR(1)-driven "source" as makeContinuousTimeSeries, but target now also has a genuine
+// bilinear (non-separable) term: target[t] = 0.4*target[t-1] + 2.0*source[t-1] +
+// 0.8*source[t-1]*target[t-1] + noise. The 0.8 coefficient cannot be represented as
+// g(source) + h(target) -- no combination of an edge (source-only) and the self-lag term
+// (target-only) can reconstruct it -- so recovering it is exactly what
+// InferenceConfig::includeInteractionTerms exists to test. The 2.0 linear term stays large
+// enough that stage 1's linear-correlation skeleton still admits the pair regardless of the
+// interaction term (a separate, known limitation -- see
+// docs/proposals/causalInferenceInteractionTerms.md's "Stage-1 skeleton blind spot" -- not what
+// this test is checking).
+konjugate::InferenceSeries makeInteractionPairSeries(std::size_t rowCount) {
+    std::mt19937 generator(9009);
+    konjugate::InferenceSeries series;
+    series.columnNames = {"source", "target"};
+    std::vector<double> source(rowCount), target(rowCount);
+    source[0] = 0.2;
+    target[0] = 0.1;
+    for (std::size_t t = 1; t < rowCount; ++t) source[t] = 0.5 * source[t - 1] + noiseSample(generator, 0.3);
+    for (std::size_t t = 1; t < rowCount; ++t) {
+        target[t] = 0.4 * target[t - 1] + 2.0 * source[t - 1] + 0.8 * source[t - 1] * target[t - 1]
+            + noiseSample(generator, 0.05);
+    }
+    for (std::size_t t = 0; t < rowCount; ++t) series.rows.push_back({source[t], target[t]});
+    return series;
+}
+
 void parseInferenceCsvParsesHeaderAndRows() {
     const std::string csv = "time,a,b\n0,1,10\n1,2,20\n2,3,30\n3,4,40\n4,5,50\n"
         "5,6,60\n6,7,70\n7,8,80\n8,9,90\n9,10,100\n";
@@ -472,6 +498,48 @@ void inferGraphAppliesTheRateTransformToPolynomialDegrees() {
     require(approxEqual(quadratic, 0.5, 0.1), "The continuous-time quadratic rate should be close to the true value of 0.5.");
 }
 
+void inferGraphOmitsInteractionTermsByDefault() {
+    // includeInteractionTerms defaults to false -- even fit against a series with a genuine
+    // bilinear term, no edge should carry one, and the fit should behave the same as if the
+    // interaction feature didn't exist at all (existing linear/self-lag recovery still works,
+    // just without the coefficient the bilinear term would otherwise explain).
+    const auto series = makeInteractionPairSeries(400);
+    konjugate::InferenceConfig config;
+    const auto result = konjugate::inferGraph(series, config);
+    const auto* sourceToTarget = findEdge(result, "source", "target");
+    require(sourceToTarget != nullptr, "Expected a source -> target edge even without interaction terms enabled.");
+    require(!sourceToTarget->interaction.has_value(),
+        "No edge should carry an interaction term when includeInteractionTerms is left at its default of false.");
+}
+
+void inferGraphRecoversANonSeparableInteractionTerm() {
+    // With includeInteractionTerms enabled, stage 2's grid search should select the
+    // interaction-on fit for this target (it genuinely explains more held-out variance) and
+    // recover a coefficient close to the true 0.8 -- something no PolynomialTerm/SelfTerm
+    // decomposition could represent, since 0.8*source*target isn't separable into g(source) +
+    // h(target). This is the primary regression test for
+    // docs/proposals/causalInferenceInteractionTerms.md.
+    const auto series = makeInteractionPairSeries(400);
+    konjugate::InferenceConfig config;
+    config.includeInteractionTerms = true;
+    const auto result = konjugate::inferGraph(series, config);
+
+    const auto* sourceToTarget = findEdge(result, "source", "target");
+    require(sourceToTarget != nullptr, "Expected a source -> target edge.");
+    require(sourceToTarget->provenance == "continuousLagged", "The edge should be backed by lagged evidence.");
+    require(sourceToTarget->interaction.has_value(),
+        "The winning fit for this target should have selected interaction terms via held-out score.");
+    require(approxEqual(sourceToTarget->interaction->coefficient, 0.8, 0.3),
+        "The recovered interaction rate should be reasonably close to the true value of 0.8.");
+    require(approxEqual(linearCoefficient(*sourceToTarget), 2.0, 0.3),
+        "The linear term should still be recovered close to its true value of 2.0 alongside the interaction term.");
+
+    const auto* targetSelf = findSelfTerm(result, "target");
+    require(targetSelf != nullptr, "Expected a self-term for target.");
+    require(approxEqual(targetSelf->rate, -0.6, 0.3),
+        "The self rate should still be close to (0.4 - 1)/1 == -0.6 with interaction terms enabled.");
+}
+
 }
 
 int main() {
@@ -496,6 +564,8 @@ int main() {
         inferGraphTransformsCoefficientsAndSelfLagIntoContinuousRatesExactly();
         inferGraphAppliesTheRateTransformToPolynomialDegrees();
         inferGraphScalesCorrelationOnlyCoefficientsByTimeStep();
+        inferGraphOmitsInteractionTermsByDefault();
+        inferGraphRecoversANonSeparableInteractionTerm();
         std::cout << "Graph inference tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

@@ -8,7 +8,7 @@ The installed command will be `konjugate`; the development binary is `konjugateE
 konjugate inspect model.kjt --report report.json
 konjugate validate model.kjt --report validation.json
 konjugate run model.kjt --configuration runConfiguration.json --output simulationResult.bin
-konjugate infer series.csv --report inference.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]
+konjugate infer series.csv --report inference.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3] [--include-interaction-terms true]
 ```
 
 Reports are written atomically. Machine consumers should always provide `--report`; concise human output may be added later.

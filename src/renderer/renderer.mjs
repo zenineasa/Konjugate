@@ -5619,11 +5619,18 @@ $('#commitCausalInference').addEventListener('click', () => { commitCausalInfere
 // node" option), since fitting requires a model that already exists.
 let parameterTuningState = null;
 
+// Static for now -- ideally populated from the engine binary's own `capabilities` report
+// (engine/src/main.cpp reports optimizerBackendIds there).
 const PARAMETER_TUNING_BACKENDS = [
     { id: 'nlopt-bobyqa', label: 'BOBYQA (derivative-free)' },
     { id: 'nlopt-cobyla', label: 'COBYLA (derivative-free)' },
     { id: 'nlopt-neldermead', label: 'Nelder-Mead (derivative-free)' },
-    { id: 'nlopt-slsqp', label: 'SLSQP (gradient-based)' }
+    { id: 'nlopt-praxis', label: 'PRAXIS (derivative-free)' },
+    { id: 'nlopt-sbplx', label: 'Subplex (derivative-free)' },
+    { id: 'nlopt-isres', label: 'ISRES (derivative-free, global)' },
+    { id: 'nlopt-slsqp', label: 'SLSQP (gradient-based)' },
+    { id: 'nlopt-mma', label: 'MMA (gradient-based)' },
+    { id: 'nlopt-ccsaq', label: 'CCSAQ (gradient-based)' }
 ];
 
 function findTunableParametersInModel() {

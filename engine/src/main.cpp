@@ -3,6 +3,7 @@
 #include "causalInference.hpp"
 #include "causalInferenceReport.hpp"
 #include "modelValidator.hpp"
+#include "nloptBackend.hpp"
 #include "parameterFitting.hpp"
 #include "parameterFittingReport.hpp"
 #include "partitionPlan.hpp"
@@ -109,12 +110,16 @@ int main(int argc, char** argv) {
     // program relies on exit-time flushing for correctness -- every real write already flushes or
     // closes explicitly (atomicWrite()'s std::ofstream::close(), writeFramedMessage()'s explicit
     // flush()).
+    // Every optimizer backend runParameterFit() will accept in this build.
+    const auto optimizerBackendIds = konjugate::nloptAlgorithmIds();
+
     if (argc == 3 && std::string(argv[1]) == "capabilities" && std::string(argv[2]) == "--protobuf") {
         konjugate::protocol::EngineEvent event;
         event.set_protocol_version(1);
         auto* capabilities = event.mutable_capabilities();
         capabilities->set_metis_available(konjugate::metisPartitionerAvailable());
         capabilities->set_metis_version(konjugate::metisPartitionerVersion());
+        for (const auto& id : optimizerBackendIds) capabilities->add_optimizer_backend_ids(id);
         writeFramedMessage(std::cout, event);
         std::_Exit(0);
     }
@@ -125,9 +130,15 @@ int main(int argc, char** argv) {
         // skips the atexit flush that would otherwise cover this, so it must be explicit here
         // (writeFramedMessage()/writeFramedEvent() already flush themselves; this was the one
         // remaining stdout write in this file that didn't).
+        std::ostringstream backendIdsJson;
+        for (std::size_t index = 0; index < optimizerBackendIds.size(); ++index) {
+            if (index > 0) backendIdsJson << ",";
+            backendIdsJson << "\"" << optimizerBackendIds[index] << "\"";
+        }
         std::cout << "{\"metis\":{\"available\":"
                   << (konjugate::metisPartitionerAvailable() ? "true" : "false")
-                  << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}}\n";
+                  << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}"
+                  << ",\"optimizerBackendIds\":[" << backendIdsJson.str() << "]}\n";
         std::cout.flush();
         std::_Exit(0);
     }

@@ -102,7 +102,7 @@ export async function inferWithEngine(csvContent, config, options) {
 // is no per-trial IPC to relay, only a final JSON report to read back. Live progress streaming
 // (a FittingProgress protobuf event, analogous to run's sample stream) is a real gap for a
 // long-running fit with no feedback until it finishes -- left for a follow-up once this base path
-// is proven, same as engine-side IPOPT support.
+// is proven.
 export async function fitWithEngine(content, csvContent, config, options) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };

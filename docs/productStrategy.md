@@ -172,6 +172,22 @@ automated verification.
 
 ### Digital twin tuning and data comparison
 
+**Status: the first release described below is implemented.** CSV import,
+column-to-state mapping, bounded parameter fitting (the `parameters[].tuning`
+schema field — see [Project document schema](projectSchema.md)) and a choice
+of NLopt optimizer backends (derivative-free and gradient-based) run natively
+in the engine via a `fit` CLI subcommand, driven from a "Tuning" panel in the
+authoring UI. Not yet built: measured-versus-simulated plots with residuals,
+and the source-data hash/objective/weights/engine-version provenance record
+this section calls for — the review UI shows the column mapping and the
+tunable parameters' before/after values, but not that fuller provenance set,
+and none of it is persisted into the saved result. IPOPT was
+evaluated as a second backend family and dropped: the vcpkg build available
+to this project ships with no usable linear solver (no HSL/MUMPS/PARDISO),
+so it links but cannot actually solve. The rest of this section is retained
+as the original, still-accurate design intent, including the parts (state
+estimation, validation, monitoring, live acquisition) that remain unbuilt.
+
 Digital twin work should begin with offline measured-data comparison rather
 than live acquisition. This keeps the first implementation deterministic and
 makes it useful for experiments, test benches and historical data.

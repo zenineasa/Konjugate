@@ -20,14 +20,25 @@ struct AlgorithmInfo {
 // "luksan" feature (LGPL-licensed, off by default -- see vcpkg.json's nlopt entry), and fails at
 // runtime ("attempting to use NLOPT_LD_LBFGS, but Luksan code disabled") without it. Enabling an
 // LGPL component is a licensing decision, not a build-config one -- left out here rather than
-// silently opted into. SLSQP is NLopt's own native gradient-based implementation (not
-// Luksan-derived) and covers the "gradient-based method" requirement without that tradeoff.
+// silently opted into. Every algorithm below is NLopt's own native implementation (not
+// Luksan-derived), so none of them carry that tradeoff.
+//
+// ISRES (a global, population-based evolution strategy) stands in for CMA-ES: this vcpkg build
+// of NLopt has no LN_CMAES entry in its algorithm enum at all (confirmed against the installed
+// nlopt.hpp), so it isn't a build-config choice like LBFGS above -- it simply isn't offered by
+// this library build. ISRES fills the same "global, derivative-free, good for messy/multi-modal
+// loss surfaces" role and is present in every NLopt build.
 const std::vector<std::pair<std::string, AlgorithmInfo>>& algorithmTable() {
     static const std::vector<std::pair<std::string, AlgorithmInfo>> table = {
         {"nlopt-bobyqa", {nlopt::LN_BOBYQA}},
         {"nlopt-cobyla", {nlopt::LN_COBYLA}},
         {"nlopt-neldermead", {nlopt::LN_NELDERMEAD}},
+        {"nlopt-praxis", {nlopt::LN_PRAXIS}},
+        {"nlopt-sbplx", {nlopt::LN_SBPLX}},
+        {"nlopt-isres", {nlopt::GN_ISRES}},
         {"nlopt-slsqp", {nlopt::LD_SLSQP}},
+        {"nlopt-mma", {nlopt::LD_MMA}},
+        {"nlopt-ccsaq", {nlopt::LD_CCSAQ}},
     };
     return table;
 }

@@ -43,7 +43,7 @@ struct OptimizationResult {
     std::string terminationReason;
 };
 
-// One pluggable solver. Concrete backends (NLopt algorithms, IPOPT, ...) wrap a real optimization
+// One pluggable solver. Concrete backends (NLopt algorithms, ...) wrap a real optimization
 // library behind this interface, so the fitting loop and the UI only ever depend on this, not on
 // any specific library -- see engine/src/nloptBackend.cpp for the first concrete implementation.
 class OptimizerBackend {

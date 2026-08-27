@@ -7,6 +7,10 @@ package konjugate.protocol;
 message Capabilities {
     bool metis_available = 1;
     string metis_version = 2;
+    // Every optimizer backend id runParameterFit()/createOptimizerBackend() (parameterFitting.cpp)
+    // will accept in this build -- the UI's backend picker can populate itself from this rather
+    // than hardcoding a list.
+    repeated string optimizer_backend_ids = 3;
 }
 
 message StateDescriptor {

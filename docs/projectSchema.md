@@ -21,6 +21,11 @@ A node may also carry `subsystemId`, referencing an entry in the top-level `subs
 
 An edge contains `id`, `name`, source and target node/state references, directionality, LaTeX equation, optional normalized `equationModel`, parameters, appearance, and optional `enabled`. Parameter symbols are unique lower-camel-case identifiers within their edge. Normalized equation bindings and outputs use numeric entity references.
 
+Each entry in an edge's `parameters` array contains `id`, `name`, `symbol`, `value`, optional `unit`, and `mode` (`"constant"` or `"live"`, default `"constant"`). Two further, independent fields may accompany it, orthogonal to each other and to `mode`:
+
+- `control`: `{ minimum, maximum, step }`, present only when `mode` is `"live"`. Governs the interactive slider shown during a run — `minimum < maximum`, `step > 0`, and `value` must fall within `[minimum, maximum]`.
+- `tuning`: `{ minimum, maximum }`, marking the parameter as a fitting target for the digital-twin parameter-tuning feature (see [Causal inference](causalInference.md) for the related, but distinct, structure-discovery feature). Presence of `tuning` is what makes a parameter tunable — it is unrelated to `mode`: a parameter may be tunable, live, both, or neither. `minimum < maximum` and `value` must fall within `[minimum, maximum]`; both are validated the same way `control`'s bounds are.
+
 `enabled` (boolean, default `true` when absent) marks a node or edge as disabled without removing it: unlike a UI delete, a disabled entity is written to the file and round-trips through save and load. The engine treats a disabled node or edge exactly as if it had been deleted — its states are not part of the state vector, and it contributes nothing — but its definition, bindings and equations are preserved and are not validated while disabled. An edge is inert if it is disabled itself, or if either endpoint node is disabled, even if the edge's own `enabled` is `true`; re-enabling the node alone is enough to restore that edge without needing to touch it directly.
 
 For an executable relationship, `equationModel` is required and contains:

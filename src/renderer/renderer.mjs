@@ -17,7 +17,7 @@ import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
-import { nearestSampleIndex, nodeResultSeries, ResultPlot } from './resultPlot.mjs';
+import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
@@ -5638,19 +5638,38 @@ $('#commitCausalInference').addEventListener('click', () => { commitCausalInfere
 // node" option), since fitting requires a model that already exists.
 let parameterTuningState = null;
 
-// Static for now -- ideally populated from the engine binary's own `capabilities` report
-// (engine/src/main.cpp reports optimizerBackendIds there).
-const PARAMETER_TUNING_BACKENDS = [
-    { id: 'nlopt-bobyqa', label: 'BOBYQA (derivative-free)' },
-    { id: 'nlopt-cobyla', label: 'COBYLA (derivative-free)' },
-    { id: 'nlopt-neldermead', label: 'Nelder-Mead (derivative-free)' },
-    { id: 'nlopt-praxis', label: 'PRAXIS (derivative-free)' },
-    { id: 'nlopt-sbplx', label: 'Subplex (derivative-free)' },
-    { id: 'nlopt-isres', label: 'ISRES (derivative-free, global)' },
-    { id: 'nlopt-slsqp', label: 'SLSQP (gradient-based)' },
-    { id: 'nlopt-mma', label: 'MMA (gradient-based)' },
-    { id: 'nlopt-ccsaq', label: 'CCSAQ (gradient-based)' }
-];
+// Friendly labels only -- NOT the source of truth for which backends exist. That's
+// window.engine.capabilities() (engine/src/main.cpp's "capabilities" command reports
+// optimizerBackendIds there, the actual set this compiled binary supports), read once and cached
+// below, so a build that adds or drops an algorithm doesn't silently drift out of sync with what
+// this dropdown offers. An id with no entry here just falls back to showing its raw id.
+const PARAMETER_TUNING_BACKEND_LABELS = {
+    'nlopt-bobyqa': 'BOBYQA (derivative-free)',
+    'nlopt-cobyla': 'COBYLA (derivative-free)',
+    'nlopt-neldermead': 'Nelder-Mead (derivative-free)',
+    'nlopt-praxis': 'PRAXIS (derivative-free)',
+    'nlopt-sbplx': 'Subplex (derivative-free)',
+    'nlopt-isres': 'ISRES (derivative-free, global)',
+    'nlopt-slsqp': 'SLSQP (gradient-based)',
+    'nlopt-mma': 'MMA (gradient-based)',
+    'nlopt-ccsaq': 'CCSAQ (gradient-based)'
+};
+
+// Caches the in-flight/resolved promise itself (not just its value) so concurrent calls before
+// the first capabilities() round-trip finishes all await the same request rather than each
+// spawning their own engine process.
+let parameterTuningBackendIdsPromise = null;
+function loadParameterTuningBackendIds() {
+    if (!parameterTuningBackendIdsPromise) {
+        parameterTuningBackendIdsPromise = window.engine.capabilities()
+            .then((response) => {
+                const ids = response?.available ? response.capabilities?.optimizerBackendIds : null;
+                return Array.isArray(ids) && ids.length ? ids : Object.keys(PARAMETER_TUNING_BACKEND_LABELS);
+            })
+            .catch(() => Object.keys(PARAMETER_TUNING_BACKEND_LABELS));
+    }
+    return parameterTuningBackendIdsPromise;
+}
 
 function findTunableParametersInModel() {
     const document = serializeProjectDocument();
@@ -5678,13 +5697,19 @@ function resetParameterTuning() {
     $('#parameterTuningParametersSection').hidden = true;
     $('#parameterTuningParameterRows').replaceChildren();
     if (!$('#parameterTuningBackend').options.length) {
-        PARAMETER_TUNING_BACKENDS.forEach((backend) => $('#parameterTuningBackend').append(new Option(backend.label, backend.id)));
+        loadParameterTuningBackendIds().then((ids) => {
+            if ($('#parameterTuningBackend').options.length) return; // a concurrent call already populated it
+            ids.forEach((id) => $('#parameterTuningBackend').append(new Option(PARAMETER_TUNING_BACKEND_LABELS[id] ?? id, id)));
+        });
     }
     $('#parameterTuningProgressSection').hidden = true;
     $('#parameterTuningProgress').textContent = '';
     $('#parameterTuningReviewSection').hidden = true;
     $('#parameterTuningReviewRows').replaceChildren();
     $('#parameterTuningReviewStatus').textContent = '';
+    $('#parameterTuningComparisonStatus').textContent = '';
+    if (!$('#parameterTuningComparisonPlot').hidden) globalThis.Plotly?.purge($('#parameterTuningComparisonPlot'));
+    $('#parameterTuningComparisonPlot').hidden = true;
     $('#runParameterTuning').hidden = true;
     $('#runParameterTuning').disabled = true;
     $('#commitParameterTuning').hidden = true;
@@ -5791,16 +5816,89 @@ function renderParameterTuningReview() {
         if (!parameter) return;
         const row = document.createElement('label');
         row.className = 'causalInferenceCandidateRow';
+        // entry.value is JSON `null` (not a number) when the fit diverged to a non-finite value
+        // for this specific parameter -- defaulting that row's checkbox to unchecked+disabled
+        // stops a divergent result from being applied to the model by default, rather than just
+        // fixing how it displays.
+        const isFinite_ = entry.value !== null;
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = true;
+        checkbox.checked = isFinite_;
+        checkbox.disabled = !isFinite_;
         checkbox.dataset.parameterId = String(entry.parameterId);
         const main = document.createElement('span');
         main.className = 'causalInferenceCandidateMain';
-        main.textContent = `${parameter.edgeName} · ${parameter.symbol}: ${parameter.value} → ${Number(entry.value).toPrecision(6)}`;
+        main.textContent = `${parameter.edgeName} · ${parameter.symbol}: ${parameter.value} → `
+            + (isFinite_ ? Number(entry.value).toPrecision(6) : 'not finite (fit diverged, cannot apply)');
         row.append(checkbox, main);
         container.append(row);
     });
+}
+
+// Runs one more simulation with the just-fitted parameter values applied, on the same time grid
+// as the measured CSV (matching the fitting loop's own "no interpolation, paired by row index"
+// convention -- see engine/src/parameterFitting.cpp), and plots each mapped signal's measured and
+// simulated series together with a residual sub-trace. A real extra simulation, not something
+// FittingReport already carries: the C++ side only returns the final parameter values and loss,
+// not the winning trial's full sample series.
+async function renderParameterTuningComparison() {
+    const plotElement = $('#parameterTuningComparisonPlot');
+    const status = $('#parameterTuningComparisonStatus');
+    plotElement.hidden = true;
+    status.className = 'equationDiagnostics';
+    status.textContent = '';
+    if (!parameterTuningState?.report) return;
+    try {
+        // A non-finite fitted value (JSON `null` -- see parameterFittingReport.cpp) means the fit
+        // diverged for at least one parameter; applying it and re-simulating would either poison
+        // the whole comparison run or just fail less clearly than saying so up front.
+        if (parameterTuningState.report.finalParameters.some((entry) => entry.value === null)) {
+            throw new Error('At least one fitted value did not converge to a finite number.');
+        }
+        status.textContent = 'Running the fitted model to compare against measured data…';
+        const parsed = parseCsv(parameterTuningState.csvContent);
+        if (parsed.rows.length < 2) throw new Error('Not enough measured rows to compare.');
+        const timeStep = parsed.rows[1].time - parsed.rows[0].time;
+        const targetTime = timeStep * (parsed.rows.length - 1);
+
+        // serializeProjectDocument()'s edges reference the live model's own parameter objects
+        // directly (edge.parameters ?? []) rather than cloning them, so mutating them in place
+        // here without cloning first would corrupt the in-editor model.
+        const document_ = structuredClone(serializeProjectDocument());
+        const fittedById = new Map(parameterTuningState.report.finalParameters.map((entry) => [entry.parameterId, entry.value]));
+        document_.edges.forEach((edge) => {
+            (edge.parameters ?? []).forEach((parameter) => {
+                if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
+            });
+        });
+
+        const runResult = await window.engine.run(JSON.stringify(document_), { globalTimeStep: timeStep, outputInterval: timeStep, targetTime });
+        if (!runResult.available) throw new Error('The native simulation engine is unavailable.');
+
+        const simulatedByState = resultSeriesForStateIds(runResult.result, parameterTuningState.mapping.map((entry) => entry.stateId));
+        const times = parsed.rows.map((row) => row.time);
+        const entries = parameterTuningState.mapping.map((entry) => {
+            const node = model.nodes.find((candidate) => candidate.id === entry.nodeId);
+            const state = node?.states.find((candidate) => candidate.id === entry.stateId);
+            const columnIndex = parsed.columnNames.indexOf(entry.columnName);
+            const simulatedSamples = simulatedByState.get(entry.stateId) ?? [];
+            return {
+                name: state?.label ?? entry.columnName,
+                unit: state?.unit ?? '',
+                times,
+                measured: parsed.rows.map((row) => row.values[columnIndex]),
+                simulated: times.map((_, index) => simulatedSamples[index]?.value ?? NaN)
+            };
+        }).filter((entry) => entry.simulated.every(Number.isFinite));
+
+        if (!entries.length) throw new Error('Could not align the simulated result with the measured data.');
+        await renderMeasuredVsSimulatedComparison(plotElement, entries);
+        plotElement.hidden = false;
+        status.textContent = '';
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = `Measured-vs-simulated comparison unavailable: ${error.message}`;
+    }
 }
 
 $('#runParameterTuning').addEventListener('click', async () => {
@@ -5819,12 +5917,16 @@ $('#runParameterTuning').addEventListener('click', async () => {
         const result = await window.engine.fit(content, parameterTuningState.csvContent, config);
         if (!result.available) throw new Error('The native fitting engine is unavailable.');
         parameterTuningState.report = result.report;
+        // finalLoss is JSON `null` (not a number) when the fit diverged to a non-finite value --
+        // Number(null) silently coerces to 0, which would misleadingly read as a perfect fit.
+        const finalLossText = result.report.finalLoss === null ? 'not finite' : Number(result.report.finalLoss).toPrecision(4);
         progress.textContent = `${result.report.converged ? 'Converged' : 'Did not fully converge'} (${result.report.terminationReason}), `
-            + `final loss ${Number(result.report.finalLoss).toPrecision(4)}.`;
+            + `final loss ${finalLossText}.`;
         renderParameterTuningReview();
         $('#parameterTuningReviewSection').hidden = false;
         $('#commitParameterTuning').hidden = false;
         $('#commitParameterTuning').disabled = false;
+        await renderParameterTuningComparison();
     } catch (error) {
         progress.textContent = error.message;
     } finally {

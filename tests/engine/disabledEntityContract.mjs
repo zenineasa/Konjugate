@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
+import { decodeValidationReport } from '../../src/reportProtocol.mjs';
 
 function execute(executable, args) {
     return new Promise((resolve, reject) => {
@@ -75,13 +76,13 @@ const directory = await mkdtemp(join(tmpdir(), 'konjugateDisabledEntity-'));
 try {
     const inputPath = join(directory, 'disabled.kjt');
     const configurationPath = join(directory, 'configuration.json');
-    const reportPath = join(directory, 'report.json');
+    const reportPath = join(directory, 'report.bin');
     const outputPath = join(directory, 'result.bin');
     await writeFile(inputPath, await encodeProjectFile(JSON.stringify(model())));
     await writeFile(configurationPath, JSON.stringify({ name: 'disabledEntity', targetTime: 1, globalTimeStep: 0.1, outputInterval: 1 }));
 
     const validateExitCode = await execute(executable, ['validate', inputPath, '--report', reportPath]);
-    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    const report = decodeValidationReport(await readFile(reportPath));
     assert.equal(validateExitCode, 0, 'A model with disabled entities should still validate.');
     assert.equal(report.valid, true, 'Disabled entities must not be deep-validated, even though an enabled edge references a disabled node\'s state.');
 

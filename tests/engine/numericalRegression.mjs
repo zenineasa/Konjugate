@@ -34,7 +34,7 @@ try {
         const inputPath = join(directory, `${testCase.example}.kjt`);
         const configurationPath = join(directory, `${testCase.example}Configuration.json`);
         const outputPath = join(directory, `${testCase.example}Result.bin`);
-        const validationPath = join(directory, `${testCase.example}Validation.json`);
+        const validationPath = join(directory, `${testCase.example}Validation.bin`);
         await writeFile(inputPath, content);
         await writeFile(configurationPath, JSON.stringify({ name: testCase.example, ...testCase.configuration }, null, 4));
         assert.equal(await execute(executable, ['validate', inputPath, '--report', validationPath]), 0, `${testCase.example} must validate`);

@@ -1,31 +1,16 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "causalInferenceReport.hpp"
+#include "engineProtocol.pb.h"
 #include <fstream>
-#include <sstream>
 
 namespace konjugate {
 namespace {
-std::string escape(const std::string& value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-        case '\\': output << "\\\\"; break;
-        case '"': output << "\\\""; break;
-        case '\n': output << "\\n"; break;
-        case '\r': output << "\\r"; break;
-        case '\t': output << "\\t"; break;
-        default: output << character;
-        }
-    }
-    return output.str();
-}
-
-void atomicWrite(const std::filesystem::path& path, const std::string& content) {
+void atomicWrite(const std::filesystem::path& path, const std::string& bytes) {
     const auto temporary = path.string() + ".tmp";
     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
     if (!stream) throw std::runtime_error("The report file could not be created.");
-    stream << content;
+    stream << bytes;
     stream.close();
     std::error_code error;
     std::filesystem::rename(temporary, path, error);
@@ -36,38 +21,40 @@ void atomicWrite(const std::filesystem::path& path, const std::string& content) 
 }
 }
 
+// Binary protobuf, not JSON -- see protocol/engineProtocol.proto's InferenceReport message.
+// Doubles here (coefficient, intercept, score, rate) natively represent Infinity/-Infinity/NaN,
+// unlike JSON (see the identical rationale, and the actual defect it fixed, in
+// parameterFittingReport.cpp). InferredEdgeReport.interaction is a message-typed field, which
+// protobuf already treats as inherently optional/presence-tracked -- unlike the old JSON writer,
+// no manual has_value() branch is needed to get the same "field present only when the interaction
+// term itself is present" behavior.
 void writeInferenceReport(const std::filesystem::path& path, const InferenceResult& result) {
-    std::ostringstream json;
-    json << "{\"reportVersion\":1,\"engineVersion\":\"0.2.0\",\"edges\":[";
-    for (std::size_t index = 0; index < result.edges.size(); ++index) {
-        if (index) json << ',';
-        const auto& edge = result.edges[index];
-        json << "{\"sourceColumn\":\"" << escape(edge.sourceColumn) << "\",\"targetColumn\":\"" << escape(edge.targetColumn)
-             << "\",\"lag\":" << edge.lag << ",\"terms\":[";
-        for (std::size_t termIndex = 0; termIndex < edge.terms.size(); ++termIndex) {
-            if (termIndex) json << ',';
-            const auto& term = edge.terms[termIndex];
-            json << "{\"degree\":" << term.degree << ",\"coefficient\":" << term.coefficient << "}";
+    protocol::InferenceReport message;
+    message.set_report_version(1);
+    message.set_engine_version("0.2.0");
+    for (const auto& edge : result.edges) {
+        auto* entry = message.add_edges();
+        entry->set_source_column(edge.sourceColumn);
+        entry->set_target_column(edge.targetColumn);
+        entry->set_lag(edge.lag);
+        for (const auto& term : edge.terms) {
+            auto* termEntry = entry->add_terms();
+            termEntry->set_degree(term.degree);
+            termEntry->set_coefficient(term.coefficient);
         }
-        json << "]";
-        // Additive field, omitted for an edge with no interaction term -- an older reader that
-        // doesn't know about it can safely ignore it (docs/projectSchema.md's additive-field
-        // rule), and a present-but-absent field is exactly what an optional<InteractionTerm>
-        // means here.
         if (edge.interaction.has_value()) {
-            json << ",\"interaction\":{\"coefficient\":" << edge.interaction->coefficient << "}";
+            entry->mutable_interaction()->set_coefficient(edge.interaction->coefficient);
         }
-        json << ",\"intercept\":" << edge.intercept << ",\"score\":" << edge.score
-             << ",\"provenance\":\"" << escape(edge.provenance) << "\"}";
+        entry->set_intercept(edge.intercept);
+        entry->set_score(edge.score);
+        entry->set_provenance(edge.provenance);
     }
-    json << "],\"selfTerms\":[";
-    for (std::size_t index = 0; index < result.selfTerms.size(); ++index) {
-        if (index) json << ',';
-        const auto& term = result.selfTerms[index];
-        json << "{\"targetColumn\":\"" << escape(term.targetColumn) << "\",\"rate\":" << term.rate << "}";
+    for (const auto& term : result.selfTerms) {
+        auto* entry = message.add_self_terms();
+        entry->set_target_column(term.targetColumn);
+        entry->set_rate(term.rate);
     }
-    json << "]}";
-    atomicWrite(path, json.str());
+    atomicWrite(path, message.SerializeAsString());
 }
 
 }

@@ -7,6 +7,7 @@ node_modules
 out
 assets/icons
 .tools
+src/generated
 **/*.pyc
 **/__pycache__
 build

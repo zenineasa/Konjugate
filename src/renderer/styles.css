@@ -557,6 +557,8 @@ input, select, textarea { user-select: text; }
 .editorCard [data-node-panel][hidden] { display: none; }
 .nodeResultsPanel { position: relative; min-height: 285px; padding: 8px !important; }
 .nodeResultPlot { width: 100%; height: 270px; }
+.parameterTuningComparisonPlot { width: 100%; height: 260px; margin-top: 9px; }
+.parameterTuningComparisonPlot[hidden] { display: none; }
 .nodeResultEmpty { display: grid; min-height: 260px; place-content: center; gap: 6px; color: #5f747f; text-align: center; }
 .nodeResultEmpty strong { color: #91a4ad; font-size: 10px; }
 .nodeResultEmpty span { font-size: 8px; }

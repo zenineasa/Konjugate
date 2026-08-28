@@ -1,15 +1,19 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+#include "engineProtocol.pb.h"
 #include "modelValidator.hpp"
 #include "nloptBackend.hpp"
 #include "parameterFitting.hpp"
+#include "parameterFittingReport.hpp"
 #include "simulationRunner.hpp"
 #include <algorithm>
 #include <boost/property_tree/json_parser.hpp>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
 #include <numbers>
 #include <sstream>
 #include <stdexcept>
@@ -527,12 +531,51 @@ void autoMapColumnsToStatesMatchesBySymbolCaseInsensitively() {
     require(mapping[1].csvColumnName == "targetTemperature" && mapping[1].stateId == 12, "Expected the target column mapped to state 12.");
 }
 
+// Regression test for a real bug found in manual testing: a diverging fit can produce a
+// non-finite loss (and, in principle, a non-finite parameter value). writeFittingReport() used to
+// write hand-rolled JSON via raw std::ostringstream string concatenation, and C++'s default
+// ostream formatting for a non-finite double prints the literal words "inf"/"-inf"/"nan" -- none
+// of which are valid JSON tokens, so JSON.parse() on the JS side rejected the whole report
+// outright rather than just this one field. writeFittingReport() now writes binary protobuf (see
+// protocol/engineProtocol.proto's FittingReport message) instead, whose double fields natively
+// represent Infinity/-Infinity/NaN -- this constructs a report with every kind of non-finite
+// value in it and confirms each one round-trips exactly through a real decode, not just that the
+// file parses as *something*.
+void writeFittingReportPreservesNonFiniteValues() {
+    konjugate::FittingReport report;
+    report.backend = "nlopt-isres";
+    report.converged = false;
+    report.terminationReason = "diverging";
+    report.finalLoss = std::numeric_limits<double>::infinity();
+    report.iterations = {
+        {1, std::numeric_limits<double>::quiet_NaN(), {0.5}},
+        {2, -std::numeric_limits<double>::infinity(), {1.5}}
+    };
+    report.finalParameters = {{13, std::numeric_limits<double>::infinity()}};
+
+    const auto scratchPath = std::filesystem::temp_directory_path() / "konjugateFittingReportNonFiniteTest.bin";
+    konjugate::writeFittingReport(scratchPath, report);
+    std::ifstream stream(scratchPath, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    std::error_code removeError;
+    std::filesystem::remove(scratchPath, removeError);
+
+    konjugate::protocol::FittingReport decoded;
+    require(decoded.ParseFromString(bytes), "Expected the written report to parse as a valid FittingReport protobuf message.");
+    require(std::isinf(decoded.final_loss()) && decoded.final_loss() > 0, "Expected finalLoss to round-trip as +Infinity exactly.");
+    require(std::isnan(decoded.iterations(0).loss()), "Expected the first iteration's loss to round-trip as NaN exactly.");
+    require(std::isinf(decoded.iterations(1).loss()) && decoded.iterations(1).loss() < 0, "Expected the second iteration's loss to round-trip as -Infinity exactly.");
+    require(std::isinf(decoded.final_parameters(0).value()) && decoded.final_parameters(0).value() > 0,
+        "Expected the fitted parameter's value to round-trip as +Infinity exactly.");
+}
+
 }
 
 int main() {
     try {
         findTunableParametersIgnoresParametersWithoutTuning();
         autoMapColumnsToStatesMatchesBySymbolCaseInsensitively();
+        writeFittingReportPreservesNonFiniteValues();
         runParameterFitRecoversAKnownRateViaBobyqa();
         runParameterFitRecoversAKnownRateViaGradientBasedSolver();
         everyRemainingNloptAlgorithmRecoversAKnownRate();

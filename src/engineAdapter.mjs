@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
+import { decodeFittingReport, decodeInferenceReport, decodeValidationReport } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
 
 function engineFileName() {
@@ -48,12 +49,40 @@ function runEngine(executable, args, environment = {}, signal = null) {
     });
 }
 
+// What this specific engine binary actually supports -- e.g. optimizerBackendIds, the set of
+// parameter-fitting backends this build was compiled with (see engine/src/main.cpp's
+// "capabilities" command). Deliberately not routed through runEngine(): that helper discards
+// stdout (its callers all read a --report file instead), but "capabilities" writes its one JSON
+// object straight to stdout with no report file involved.
+export async function getEngineCapabilities(options) {
+    const executable = await resolveEnginePath(options);
+    if (!executable) return { available: false };
+    return new Promise((resolve, reject) => {
+        const child = spawn(executable, ['capabilities'], { stdio: ['ignore', 'pipe', 'pipe'], ...(options.signal ? { signal: options.signal } : {}) });
+        let stdout = '';
+        let diagnostics = '';
+        let processError = null;
+        child.stdout.on('data', (chunk) => { stdout += chunk; });
+        child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+        child.once('error', (error) => { processError = error; });
+        child.once('close', (code) => {
+            if (processError) { reject(processError); return; }
+            if (code !== 0) { reject(new Error(diagnostics.trim() || `The engine exited with code ${code}.`)); return; }
+            try {
+                resolve({ available: true, capabilities: JSON.parse(stdout) });
+            } catch (error) {
+                reject(new Error(`Could not parse the engine's capabilities output: ${error.message}`));
+            }
+        });
+    });
+}
+
 export async function validateWithEngine(content, options) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };
     const directory = await mkdtemp(join(tmpdir(), 'konjugateValidation-'));
     const inputPath = join(directory, 'input.kjt');
-    const reportPath = join(directory, 'validation.json');
+    const reportPath = join(directory, 'validation.bin');
     try {
         const resolvedContent = await resolveInstalledPlugins(content, options);
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
@@ -61,7 +90,7 @@ export async function validateWithEngine(content, options) {
         if (execution.code !== 0 && execution.code !== 2) {
             throw new Error(execution.diagnostics || `The validation engine exited with code ${execution.code}.`);
         }
-        return { available: true, report: JSON.parse(await readFile(reportPath, 'utf8')) };
+        return { available: true, report: decodeValidationReport(await readFile(reportPath)) };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
@@ -72,7 +101,7 @@ export async function inferWithEngine(csvContent, config, options) {
     if (!executable) return { available: false };
     const directory = await mkdtemp(join(tmpdir(), 'konjugateInference-'));
     const inputPath = join(directory, 'series.csv');
-    const reportPath = join(directory, 'inference.json');
+    const reportPath = join(directory, 'inference.bin');
     try {
         await writeFile(inputPath, csvContent, 'utf8');
         const args = ['infer', inputPath, '--report', reportPath];
@@ -90,7 +119,7 @@ export async function inferWithEngine(csvContent, config, options) {
         if (execution.code !== 0) {
             throw new Error(execution.diagnostics || `The inference engine exited with code ${execution.code}.`);
         }
-        return { available: true, report: JSON.parse(await readFile(reportPath, 'utf8')) };
+        return { available: true, report: decodeInferenceReport(await readFile(reportPath)) };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
@@ -99,7 +128,7 @@ export async function inferWithEngine(csvContent, config, options) {
 // Digital-twin parameter fitting -- deliberately a one-shot process spawn like inferWithEngine()
 // above, not a long-lived streamed one like startEngineRun() below: the whole optimization loop
 // runs in-process inside the engine binary itself (see engine/src/parameterFitting.cpp), so there
-// is no per-trial IPC to relay, only a final JSON report to read back. Live progress streaming
+// is no per-trial IPC to relay, only a final report to read back. Live progress streaming
 // (a FittingProgress protobuf event, analogous to run's sample stream) is a real gap for a
 // long-running fit with no feedback until it finishes -- left for a follow-up once this base path
 // is proven.
@@ -109,7 +138,7 @@ export async function fitWithEngine(content, csvContent, config, options) {
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFitting-'));
     const inputPath = join(directory, 'input.kjt');
     const csvPath = join(directory, 'measured.csv');
-    const reportPath = join(directory, 'fitting.json');
+    const reportPath = join(directory, 'fitting.bin');
     try {
         const resolvedContent = await resolveInstalledPlugins(content, options);
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
@@ -123,7 +152,7 @@ export async function fitWithEngine(content, csvContent, config, options) {
             // still a real report worth reading back, unlike every other nonzero code here.
             throw new Error(execution.diagnostics || `The fitting engine exited with code ${execution.code}.`);
         }
-        return { available: true, report: JSON.parse(await readFile(reportPath, 'utf8')) };
+        return { available: true, report: decodeFittingReport(await readFile(reportPath)) };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

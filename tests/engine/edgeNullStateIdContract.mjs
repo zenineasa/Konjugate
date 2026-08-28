@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
+import { decodeValidationReport } from '../../src/reportProtocol.mjs';
 
 function execute(executable, args) {
     return new Promise((resolve, reject) => {
@@ -62,11 +63,11 @@ const directory = await mkdtemp(join(tmpdir(), 'konjugateEdgeNullStateId-'));
 
 try {
     const inputPath = join(directory, 'nullStateId.kjt');
-    const reportPath = join(directory, 'report.json');
+    const reportPath = join(directory, 'report.bin');
     await writeFile(inputPath, await encodeProjectFile(JSON.stringify(model())));
 
     const exitCode = await execute(executable, ['validate', inputPath, '--report', reportPath]);
-    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    const report = decodeValidationReport(await readFile(reportPath));
 
     assert.equal(exitCode, 0, 'A fully-configured edge with an unset source/target stateId should validate.');
     assert.equal(report.valid, true, 'The validation report should report the model as valid.');

@@ -9,6 +9,7 @@ import { decodeProjectBundle, encodeProjectFile } from '../../src/projectFile.mj
 import { normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from '../../src/engineProtocol.mjs';
 import { openIndexedResult } from '../../src/indexedResultReader.mjs';
+import { decodeValidationReport } from '../../src/reportProtocol.mjs';
 
 function run(executable, args, environment = {}) {
     return new Promise((resolve, reject) => {
@@ -71,7 +72,7 @@ assert.equal(capabilityEvents[0].capabilities.metisAvailable, expectMetis);
 if (expectMetis) assert.match(capabilityEvents[0].capabilities.metisVersion, /^\d+\.\d+\.\d+$/);
 const directory = await mkdtemp(join(tmpdir(), 'konjugateEngineTest-'));
 const input = join(directory, 'model.kjt');
-const report = join(directory, 'validation.json');
+const report = join(directory, 'validation.bin');
 const project = JSON.stringify({
     format: 'konjugate', version: 1, nodes: [{
         id: 1, name: 'Node', states: [{
@@ -81,7 +82,7 @@ const project = JSON.stringify({
 });
 await writeFile(input, await encodeProjectFile(project));
 assert.equal(await run(executable, ['validate', input, '--report', report]), 0);
-const validation = JSON.parse(await readFile(report, 'utf8'));
+const validation = decodeValidationReport(await readFile(report));
 assert.equal(validation.valid, true);
 assert.deepEqual(validation.summary, { nodes: 1, edges: 0 });
 
@@ -115,12 +116,12 @@ assert.ok(sourceResult.checkpoints.every((checkpoint) => /^[0-9a-f]{8}-[0-9a-f]{
 assert.ok(sourceResult.checkpoints.every((checkpoint) => checkpoint.solver.kind === 'explicitEuler' && checkpoint.states.length === 1));
 
 const exampleInput = join(directory, 'thermalManagement.kjt');
-const exampleReport = join(directory, 'thermalValidation.json');
+const exampleReport = join(directory, 'thermalValidation.bin');
 const exampleBytes = await readFile(new URL('../../examples/thermalManagement.kjt', import.meta.url));
 const example = (await decodeProjectBundle(exampleBytes)).content;
 await writeFile(exampleInput, exampleBytes);
 assert.equal(await run(executable, ['validate', exampleInput, '--report', exampleReport]), 0);
-assert.equal(JSON.parse(await readFile(exampleReport, 'utf8')).valid, true);
+assert.equal(decodeValidationReport(await readFile(exampleReport)).valid, true);
 const invalidControlConfiguration = join(directory, 'invalidControlConfiguration.json');
 await writeFile(invalidControlConfiguration, JSON.stringify({
     name: 'Invalid command ordering', targetTime: 10, globalTimeStep: 0.01, outputInterval: 1,
@@ -266,7 +267,7 @@ const damaged = JSON.parse(project);
 damaged.nodes[0].states[0].symbol = 'Not camel case';
 await writeFile(input, await encodeProjectFile(JSON.stringify(damaged)));
 assert.equal(await run(executable, ['validate', input, '--report', report]), 2);
-const invalid = JSON.parse(await readFile(report, 'utf8'));
+const invalid = decodeValidationReport(await readFile(report));
 assert.equal(invalid.valid, false);
 assert.ok(invalid.issues.some((issue) => issue.code === 'stateSymbolInvalid'));
 
@@ -278,7 +279,7 @@ invalidEquation.edges[0].equationModel = {
 };
 await writeFile(input, await encodeProjectFile(JSON.stringify(invalidEquation)));
 assert.equal(await run(executable, ['validate', input, '--report', report]), 2);
-const invalidEquationReport = JSON.parse(await readFile(report, 'utf8'));
+const invalidEquationReport = decodeValidationReport(await readFile(report));
 assert.ok(invalidEquationReport.issues.some((issue) => (
     issue.code === 'edgeEquationInvalid' && issue.message.includes('randomCharacters')
 )));
@@ -422,7 +423,7 @@ const nodeProviderProject = JSON.parse(await readFile(
 const nodeProviderInput = join(directory, 'nodeProvider.kjt');
 await writeFile(nodeProviderInput, await encodeProjectFile(JSON.stringify(nodeProviderProject)));
 assert.equal(await run(executable, ['validate', nodeProviderInput, '--report', report]), 0);
-assert.equal(JSON.parse(await readFile(report, 'utf8')).valid, true);
+assert.equal(decodeValidationReport(await readFile(report)).valid, true);
 
 const nodeProviderRunConfiguration = (overrides) => JSON.stringify({
     name: 'PI controller', globalTimeStep: 0.1, outputInterval: 0.5,

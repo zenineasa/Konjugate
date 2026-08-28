@@ -54,7 +54,8 @@
     },
     "devDependencies": {
         "@electron/packager": "^20.0.4",
-        "electron": "^43.2.0"
+        "electron": "^43.2.0",
+        "protobufjs-cli": "^2.7.0"
     },
     "engines": {
         "node": ">=22.12.0"
@@ -69,6 +70,7 @@
         "mathlive": "^0.110.0",
         "occt-import-js": "^0.0.23",
         "plotly.js-dist-min": "^3.7.0",
+        "protobufjs": "^8.8.0",
         "three": "^0.185.1"
     }
 }

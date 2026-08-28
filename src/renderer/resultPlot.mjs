@@ -19,6 +19,21 @@ export function nodeResultSeries(result, node) {
     })).filter((series) => series.samples.length);
 }
 
+// Same field-reading convention as nodeResultSeries() above, but keyed directly by an explicit
+// list of state ids rather than one node's states -- useful when the states of interest span
+// multiple nodes, as a digital-twin tuning CSV's mapped columns generally do.
+export function resultSeriesForStateIds(result, stateIds) {
+    const samplesByState = new Map(stateIds.map((id) => [id, []]));
+    if (!result?.samples?.length) return samplesByState;
+    result.samples.forEach((sample) => {
+        sample.states.forEach((state) => samplesByState.get(state.stateId)?.push({
+            time: Number(sample.time),
+            value: Number(state.value)
+        }));
+    });
+    return samplesByState;
+}
+
 export function nearestSampleIndex(samples, time) {
     if (!samples.length) return -1;
     let low = 0;
@@ -125,4 +140,63 @@ export class ResultPlot {
         if (this.rendered) globalThis.Plotly?.purge(this.element);
         this.rendered = false;
     }
+}
+
+// A one-shot, static comparison for the digital-twin tuning review step: measured versus
+// simulated (with the just-fitted parameter values applied) for each mapped signal, plus a
+// residual (simulated - measured) sub-trace on its own subplot underneath. Deliberately a plain
+// function rather than a ResultPlot method -- ResultPlot's seek/cursor interaction and its
+// unit-grouped secondary-axis stacking exist for the main live-run view, neither of which this
+// static, review-only comparison needs; every mapped signal shares one axis per subplot here
+// instead, which keeps this simple for the common case of a handful of mapped signals rather than
+// risking an under-tested multi-axis layout for a first version.
+// entries: [{ name, unit, times: number[], measured: number[], simulated: number[] }] -- times,
+// measured and simulated must already be the same length and index-paired per entry.
+export async function renderMeasuredVsSimulatedComparison(element, entries) {
+    if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
+    const traces = entries.flatMap((entry) => {
+        const unitSuffix = entry.unit ? ` ${entry.unit}` : '';
+        return [
+            {
+                type: 'scatter', mode: 'lines', name: `${entry.name} (measured)`,
+                x: entry.times, y: entry.measured,
+                line: { width: 2, dash: 'dot' },
+                hovertemplate: `${entry.name} measured<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
+            },
+            {
+                type: 'scatter', mode: 'lines', name: `${entry.name} (simulated)`,
+                x: entry.times, y: entry.simulated,
+                line: { width: 2 },
+                hovertemplate: `${entry.name} simulated<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
+            },
+            {
+                type: 'scatter', mode: 'lines', name: `${entry.name} (residual)`,
+                x: entry.times, y: entry.times.map((_, index) => entry.simulated[index] - entry.measured[index]),
+                xaxis: 'x2', yaxis: 'y2',
+                line: { width: 1.5 },
+                hovertemplate: `${entry.name} residual<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
+            }
+        ];
+    });
+    const allTimes = entries.flatMap((entry) => entry.times);
+    const layout = {
+        autosize: true,
+        margin: { l: 48, r: 18, t: 26, b: 34 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(7,15,21,.52)',
+        font: { color: '#8297a1', family: 'system-ui, sans-serif', size: 9 },
+        hovermode: 'x unified',
+        showlegend: true,
+        legend: { orientation: 'h', x: 0, y: 1.16, yanchor: 'bottom', tracegroupgap: 8 },
+        xaxis: { range: paddedRange(allTimes, 0.04), gridcolor: '#1d303a', zerolinecolor: '#2b414c', anchor: 'y' },
+        xaxis2: { matches: 'x', gridcolor: '#1d303a', zerolinecolor: '#2b414c', anchor: 'y2' },
+        yaxis: { domain: [0.34, 1], gridcolor: '#1d303a', zerolinecolor: '#2b414c' },
+        yaxis2: { domain: [0, 0.22], title: 'Residual', gridcolor: '#1d303a', zerolinecolor: '#2b414c' }
+    };
+    await globalThis.Plotly.newPlot(element, traces, layout, {
+        responsive: true,
+        displaylogo: false,
+        scrollZoom: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d']
+    });
 }

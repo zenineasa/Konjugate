@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { cppProviderSdkPath, fitWithEngine, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
@@ -1791,6 +1791,8 @@ async function runCliMode() {
     await execution.cleanup();
     app.exit(0);
 }
+
+ipcMain.handle('engineCapabilities', async () => getEngineCapabilities(await engineOptions()));
 
 ipcMain.handle('engineValidate', async (event, content) => {
     const active = { owner: event.sender, controller: new AbortController(), completion: null };

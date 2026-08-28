@@ -109,3 +109,98 @@ message EngineEvent {
         SampleBatch sample_batch = 4;
     }
 }
+
+// One-shot report messages, written once by a CLI subcommand (validate/infer/fit/inspect) and
+// read back once on the JS side -- see engine/src/*Report.cpp and src/reportProtocol.mjs. Unlike
+// the streaming messages above, these were previously hand-written JSON via raw std::ostringstream
+// string concatenation, which is how a diverging fit's non-finite loss (double values C++'s
+// default ostream formatting prints as the literal words "inf"/"nan", neither a valid JSON token)
+// ended up producing a report JSON.parse() rejected outright. protobuf's double fields natively
+// represent Infinity/-Infinity/NaN, so that failure mode doesn't exist here.
+
+message IssueLocationReport {
+    string kind = 1;
+    string entity_id = 2;
+    string field = 3;
+}
+
+message ValidationIssueReport {
+    string code = 1;
+    string severity = 2;
+    string message = 3;
+    IssueLocationReport location = 4;
+}
+
+message ValidationSummary {
+    uint64 nodes = 1;
+    uint64 edges = 2;
+}
+
+message ValidationReport {
+    uint32 report_version = 1;
+    string engine_version = 2;
+    bool valid = 3;
+    ValidationSummary summary = 4;
+    repeated ValidationIssueReport issues = 5;
+}
+
+message InspectionReport {
+    uint32 report_version = 1;
+    string format = 2;
+    uint32 container_version = 3;
+    bool encrypted = 4;
+}
+
+message PolynomialTermReport {
+    int32 degree = 1;
+    double coefficient = 2;
+}
+
+message InteractionTermReport {
+    double coefficient = 1;
+}
+
+message InferredEdgeReport {
+    string source_column = 1;
+    string target_column = 2;
+    int32 lag = 3;
+    repeated PolynomialTermReport terms = 4;
+    InteractionTermReport interaction = 5; // absent unless fit and accepted -- message fields are inherently presence-tracked
+    double intercept = 6;
+    double score = 7;
+    string provenance = 8;
+}
+
+message SelfTermReport {
+    string target_column = 1;
+    double rate = 2;
+}
+
+message InferenceReport {
+    uint32 report_version = 1;
+    string engine_version = 2;
+    repeated InferredEdgeReport edges = 3;
+    repeated SelfTermReport self_terms = 4;
+}
+
+message FittingProgressUpdateReport {
+    uint64 iteration = 1;
+    double loss = 2;
+    repeated double parameter_values = 3;
+}
+
+message FittedParameterReport {
+    uint64 parameter_id = 1;
+    double value = 2;
+}
+
+message FittingReport {
+    uint32 report_version = 1;
+    string engine_version = 2;
+    string backend = 3;
+    bool converged = 4;
+    string termination_reason = 5;
+    double final_loss = 6;
+    repeated FittingProgressUpdateReport iterations = 7;
+    repeated FittedParameterReport final_parameters = 8;
+}

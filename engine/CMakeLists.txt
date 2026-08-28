@@ -292,6 +292,29 @@ if(BUILD_TESTING)
     target_link_libraries(causalInferenceTests PRIVATE Eigen3::Eigen)
     add_test(NAME causalInferenceTests COMMAND causalInferenceTests)
 
+    # Round-trips writeInferenceReport()/writeValidationReport()/writeInspectionReport() through
+    # real protobuf encode+decode -- these had no coverage of their own report-writing logic
+    # before this target existed (writeFittingReport()'s equivalent lives in
+    # parameterFittingTests.cpp instead). Only needs the report structs' header definitions, not
+    # inferGraph()/validateModel()'s own implementations (causalInference.cpp/modelValidator.cpp),
+    # since what's under test is serialization of a given struct, not how that struct gets built.
+    add_executable(reportProtocolTests
+        tests/reportProtocolTests.cpp
+        src/causalInferenceReport.cpp
+        src/validationReport.cpp
+        ${PROTOCOL_SOURCES}
+        ${PROTOCOL_HEADERS}
+    )
+    set_target_properties(reportProtocolTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(reportProtocolTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(reportProtocolTests PRIVATE Eigen3::Eigen protobuf::libprotobuf)
+    add_test(NAME reportProtocolTests COMMAND reportProtocolTests)
+
     # Needs the full simulation stack (runSimulation() and everything it depends on), not just
     # parameterFitting.cpp itself -- the recovery tests below drive real simulations end to end.
     add_executable(parameterFittingTests
@@ -304,6 +327,7 @@ if(BUILD_TESTING)
         src/modelValidator.cpp
         src/nloptBackend.cpp
         src/parameterFitting.cpp
+        src/parameterFittingReport.cpp
         src/partitionPlan.cpp
         src/partitionRuntime.cpp
         src/providerRuntime.cpp

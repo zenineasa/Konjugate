@@ -24,6 +24,7 @@ import { applyAssistantProposal } from '../../src/assistantOperations.mjs';
 import { replayProviderSource } from '../../src/providerTemplate.mjs';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
+import { decodeInferenceReport, decodeValidationReport } from '../../src/reportProtocol.mjs';
 
 // The engine SDK root a C++ provider is compiled against -- engineAdapter.mjs's own
 // cppProviderSdkPath() resolves this as "<applicationPath>/engine" in a dev build; this test
@@ -148,10 +149,10 @@ async function commitAndRun(label, mapping, report, parsedCsv, columnSeries, rep
     const inputPath = join(directory, `${label}.kjt`);
     await writeFile(inputPath, await encodeProjectFile(JSON.stringify(document)));
 
-    const validateReportPath = join(directory, `${label}.validate.json`);
+    const validateReportPath = join(directory, `${label}.validate.bin`);
     assert.equal(await execute(executable, ['validate', inputPath, '--report', validateReportPath]),
         0, `${label}: validate must succeed.`);
-    const validation = JSON.parse(await readFile(validateReportPath, 'utf8'));
+    const validation = decodeValidationReport(await readFile(validateReportPath));
     assert.equal(validation.valid, true, `${label}: the committed model must be valid (${JSON.stringify(validation.issues)}).`);
 
     const configPath = join(directory, `${label}.config.json`);
@@ -175,11 +176,11 @@ const directory = await mkdtemp(join(tmpdir(), 'konjugateCausalInferenceCommitAn
 try {
     const csvContent = buildThermalSystemCsv();
     const inputCsvPath = join(directory, 'thermalSystem.csv');
-    const reportPath = join(directory, 'inference.json');
+    const reportPath = join(directory, 'inference.bin');
     await writeFile(inputCsvPath, csvContent);
     assert.equal(await execute(executable, ['infer', inputCsvPath, '--report', reportPath, '--degrees', '1,2']),
         0, 'infer must succeed on the 8-node thermal system.');
-    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    const report = decodeInferenceReport(await readFile(reportPath));
 
     const parsedCsv = parseCsv(csvContent);
     const mapping = mapColumnsToNodes(parsedCsv.columnNames, []);

@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildThermalSystemCsv } from '../fixtures/thermalSystemCsv.mjs';
+import { decodeInferenceReport } from '../../src/reportProtocol.mjs';
 
 function execute(executable, args) {
     return new Promise((resolve, reject) => {
@@ -94,11 +95,11 @@ const directory = await mkdtemp(join(tmpdir(), 'konjugateContinuousTimeDrift-'))
 try {
     const csvContent = buildThermalSystemCsv();
     const inputPath = join(directory, 'thermalSystem.csv');
-    const reportPath = join(directory, 'report.json');
+    const reportPath = join(directory, 'report.bin');
     await writeFile(inputPath, csvContent, 'utf8');
     assert.equal(await execute(executable, ['infer', inputPath, '--report', reportPath, '--degrees', '1,2']),
         0, 'infer must succeed on the 8-node thermal system.');
-    const report = JSON.parse(await readFile(reportPath, 'utf8'));
+    const report = decodeInferenceReport(await readFile(reportPath));
 
     const columnNames = ['ambientTemperature', 'motorLoad', 'solarIrradiance', 'enclosureTemperature',
         'vibrationAmplitude', 'componentTemperature', 'thermalStress', 'fatigueAccumulation'];

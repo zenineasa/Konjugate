@@ -67,4 +67,5 @@ if (!await pathExists(executablePath('vcpkg'))) {
 }
 
 await run('cmake', ['--preset', 'development'], { cwd: join(rootDirectory, 'engine') });
+await run(process.execPath, [join(rootDirectory, 'scripts', 'generateReportProtocol.mjs')]);
 console.log('Development dependencies are configured. Run npm run dev to build and start Konjugate.');

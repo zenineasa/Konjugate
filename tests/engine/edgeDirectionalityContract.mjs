@@ -80,7 +80,7 @@ try {
     const inputPath = join(directory, 'bidirectionalEdge.kjt');
     const configurationPath = join(directory, 'configuration.json');
     const outputPath = join(directory, 'result.bin');
-    const validationPath = join(directory, 'validation.json');
+    const validationPath = join(directory, 'validation.bin');
     await writeFile(inputPath, await encodeProjectFile(JSON.stringify(model())));
     await writeFile(configurationPath, JSON.stringify({ name: 'edgeDirectionalityContract', targetTime: 5, globalTimeStep: 0.01, outputInterval: 5 }, null, 4));
 

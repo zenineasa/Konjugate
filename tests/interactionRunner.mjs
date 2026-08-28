@@ -3086,6 +3086,15 @@ export async function runInteractionTests(window) {
 
         await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
         await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not open.');
+        // The backend dropdown is populated from the real engine binary's own `capabilities`
+        // report (window.engine.capabilities()), not a hardcoded list -- assert it actually
+        // matches what that binary reports, not just that something got populated.
+        await waitFor(window, `document.querySelector('#parameterTuningBackend').options.length > 0`,
+            'The optimizer backend dropdown was not populated from the engine\'s capabilities report.');
+        const reportedBackendIds = (await evaluate(window, `window.engine.capabilities()`)).capabilities.optimizerBackendIds;
+        const renderedBackendIds = await evaluate(window, `[...document.querySelectorAll('#parameterTuningBackend option')].map((option) => option.value)`);
+        assert.deepEqual(renderedBackendIds, reportedBackendIds,
+            'The backend dropdown should list exactly the ids the engine binary itself reports supporting.');
         await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(csvLines.join('\n'))})`);
         await waitFor(window, `!document.querySelector('#parameterTuningParametersSection').hidden`, 'Tunable parameters section did not appear.', 5000);
         assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows > div').length`), 1);
@@ -3096,6 +3105,19 @@ export async function runInteractionTests(window) {
         assert.equal(report.finalParameters.length, 1);
         assert.equal(report.finalParameters[0].parameterId, tunableParameter.id);
         assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningReviewRows label').length`), 1);
+
+        // renderParameterTuningComparison() runs one more simulation with the fitted values
+        // applied and plots it against the measured CSV; it catches its own errors into a status
+        // message rather than throwing, so this checks the plot actually rendered rather than
+        // just that nothing threw.
+        await waitFor(window,
+            `!document.querySelector('#parameterTuningComparisonStatus').textContent.includes('Running the fitted model')`,
+            'The measured-vs-simulated comparison never finished.', 30000);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), '',
+            'Expected the measured-vs-simulated comparison to succeed with no error status.');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningComparisonPlot').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningComparisonPlot').data?.length`), 3,
+            'Expected one measured, one simulated and one residual trace for the single mapped signal.');
 
         await evaluate(window, `document.querySelector('#commitParameterTuning').click()`);
         await waitFor(window, `document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not close after apply.', 5000);

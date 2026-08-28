@@ -1,31 +1,16 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "validationReport.hpp"
+#include "engineProtocol.pb.h"
 #include <fstream>
-#include <sstream>
 
 namespace konjugate {
 namespace {
-std::string escape(const std::string& value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-        case '\\': output << "\\\\"; break;
-        case '"': output << "\\\""; break;
-        case '\n': output << "\\n"; break;
-        case '\r': output << "\\r"; break;
-        case '\t': output << "\\t"; break;
-        default: output << character;
-        }
-    }
-    return output.str();
-}
-
-void atomicWrite(const std::filesystem::path& path, const std::string& content) {
+void atomicWrite(const std::filesystem::path& path, const std::string& bytes) {
     const auto temporary = path.string() + ".tmp";
     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
     if (!stream) throw std::runtime_error("The report file could not be created.");
-    stream << content;
+    stream << bytes;
     stream.close();
     std::error_code error;
     std::filesystem::rename(temporary, path, error);
@@ -36,26 +21,33 @@ void atomicWrite(const std::filesystem::path& path, const std::string& content) 
 }
 }
 
+// Binary protobuf, not JSON -- see protocol/engineProtocol.proto's ValidationReport message.
 void writeValidationReport(const std::filesystem::path& path, const ValidationResult& result) {
-    std::ostringstream json;
-    json << "{\"reportVersion\":1,\"engineVersion\":\"0.2.0\",\"valid\":" << (result.valid ? "true" : "false")
-         << ",\"summary\":{\"nodes\":" << result.nodeCount << ",\"edges\":" << result.edgeCount << "},\"issues\":[";
-    for (std::size_t index = 0; index < result.issues.size(); ++index) {
-        if (index) json << ',';
-        const auto& item = result.issues[index];
-        json << "{\"code\":\"" << escape(item.code) << "\",\"severity\":\"" << escape(item.severity)
-             << "\",\"message\":\"" << escape(item.message) << "\",\"location\":{\"kind\":\"" << escape(item.location.kind)
-             << "\",\"entityId\":\"" << escape(item.location.entityId) << "\",\"field\":\"" << escape(item.location.field) << "\"}}";
+    protocol::ValidationReport message;
+    message.set_report_version(1);
+    message.set_engine_version("0.2.0");
+    message.set_valid(result.valid);
+    message.mutable_summary()->set_nodes(result.nodeCount);
+    message.mutable_summary()->set_edges(result.edgeCount);
+    for (const auto& item : result.issues) {
+        auto* entry = message.add_issues();
+        entry->set_code(item.code);
+        entry->set_severity(item.severity);
+        entry->set_message(item.message);
+        entry->mutable_location()->set_kind(item.location.kind);
+        entry->mutable_location()->set_entity_id(item.location.entityId);
+        entry->mutable_location()->set_field(item.location.field);
     }
-    json << "]}";
-    atomicWrite(path, json.str());
+    atomicWrite(path, message.SerializeAsString());
 }
 
 void writeInspectionReport(const std::filesystem::path& path, const std::string& format, unsigned version, bool encrypted) {
-    std::ostringstream json;
-    json << "{\"reportVersion\":1,\"format\":\"" << escape(format) << "\",\"containerVersion\":" << version
-         << ",\"encrypted\":" << (encrypted ? "true" : "false") << '}';
-    atomicWrite(path, json.str());
+    protocol::InspectionReport message;
+    message.set_report_version(1);
+    message.set_format(format);
+    message.set_container_version(version);
+    message.set_encrypted(encrypted);
+    atomicWrite(path, message.SerializeAsString());
 }
 
 }

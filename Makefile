@@ -1,6 +1,8 @@
 # Copyright © 2026 Zenin Easa Panthakkalakath
 
 svgIcon := assets/icon.svg
+dmgBackgroundSvg := assets/dmgBackground.svg
+dmgBackgroundPng := assets/dmgBackground.png
 iconDir := assets/icons
 pngDir := $(iconDir)/png
 pngSizes := 16 24 32 48 64 128 256 512 1024
@@ -138,6 +140,17 @@ $(iconDir)/app.png: $(pngDir)/512.png
 	@$(MKDIR) $(iconDir)
 	$(CP) $< $@
 
+
+# Rendered at 1400x900 px (2x of the 700x450-pt DMG window --window-size below) and then tagged
+# 144 DPI so Finder's DMG background renderer treats it as a retina asset scaled to fit that
+# window, rather than displaying it at its full pixel size and cropping it -- rsvg-convert itself
+# has no option to embed DPI metadata (verified: its -d/-p flags only affect internal SVG-unit
+# conversion, not the output PNG's stored resolution), so sips sets it as a separate step.
+$(dmgBackgroundPng): $(dmgBackgroundSvg)
+	@command -v rsvg-convert >/dev/null 2>&1 || { echo "rsvg-convert is required (install librsvg)."; exit 1; }
+	rsvg-convert --width 1400 --height 900 $< --output $@
+	sips --setProperty dpiWidth 144 --setProperty dpiHeight 144 $@ --out $@ >/dev/null
+
 iconsWindows: $(iconDir)/app.ico
 
 $(iconDir)/app.ico: $(pngIcons) scripts/pngToIco.py
@@ -236,8 +249,8 @@ else
 	@exit 1
 endif
 
-distributableMacos: packageMacos
-	@command -v hdiutil >/dev/null 2>&1 || { echo "hdiutil is required to create a DMG."; exit 1; }
+distributableMacos: packageMacos $(iconDir)/app.icns $(dmgBackgroundPng)
+	@command -v create-dmg >/dev/null 2>&1 || { echo "create-dmg is required to create a DMG (brew install create-dmg)."; exit 1; }
 	@mkdir -p $(releaseDir)/dmg
 	rm -rf $(releaseDir)/dmg/$(appName).app $(releaseDir)/dmg/Applications
 	cp -R $(packageDir)/$(appName)-darwin-$(hostArch)/$(appName).app $(releaseDir)/dmg/
@@ -270,14 +283,20 @@ endif
 		codesign -dv $(releaseDir)/dmg/$(appName).app/Contents/Resources/engine/libmetis.dylib 2>&1 | grep -q "^Signature=" \
 			|| { echo "libmetis.dylib is not signed inside the packaged app."; exit 1; }; \
 	fi
-	ln -s /Applications $(releaseDir)/dmg/Applications
 	rm -f $(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg
-	hdiutil create \
-		-volname "$(appName)" \
-		-srcfolder $(releaseDir)/dmg \
-		-ov \
-		-format UDZO \
-		$(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg
+	create-dmg \
+		--volname "$(appName)" \
+		--volicon $(iconDir)/app.icns \
+		--background $(dmgBackgroundPng) \
+		--window-size 700 450 \
+		--icon-size 128 \
+		--icon "$(appName).app" 190 240 \
+		--hide-extension "$(appName).app" \
+		--app-drop-link 510 240 \
+		--no-internet-enable \
+		--format UDZO \
+		$(releaseDir)/$(appName)-$(appVersion)-macos-$(hostArch).dmg \
+		$(releaseDir)/dmg
 ifneq ($(strip $(appleNotaryProfile)),)
 	@test -n "$(macSignIdentity)" || { echo "macSignIdentity is required when notarizing."; exit 1; }
 	xcrun notarytool submit \

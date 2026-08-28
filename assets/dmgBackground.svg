@@ -1,0 +1,41 @@
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+<!-- DMG installer background, authored at 2x for retina (logical window: 700x450). Light
+     throughout: Finder always renders icon-label text in a fixed dark color that can't be
+     restyled, so rather than patch light backing cards behind just the icons, the whole
+     background is light: simpler, and every label position stays legible without needing to
+     predict exactly where Finder will draw it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1400" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f7f9fa"/>
+      <stop offset="1" stop-color="#e7edf0"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="380" y1="0" x2="1020" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1fa393"/>
+      <stop offset="1" stop-color="#2f6fed"/>
+    </linearGradient>
+    <linearGradient id="dropWord" x1="0" y1="0" x2="220" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1fa393"/>
+      <stop offset="1" stop-color="#2f6fed"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1400" height="900" fill="url(#bg)"/>
+
+  <!-- title bar, matching the app's own convention -->
+  <line x1="0" y1="76" x2="1400" y2="76" stroke="#d3dce1" stroke-width="1.5"/>
+  <text x="60" y="50" font-family="-apple-system, 'Helvetica Neue', sans-serif" font-size="30" font-weight="600" fill="#16283f">Konjugate</text>
+
+  <!-- Instruction text, split two-tone like the app's own accent convention -->
+  <text x="700" y="320" font-family="-apple-system, 'Helvetica Neue', sans-serif" font-size="58" font-weight="600" text-anchor="middle" xml:space="preserve"><tspan fill="#26374a">drag and </tspan><tspan fill="url(#dropWord)">drop</tspan></text>
+
+  <!-- Curved arrow, dipping below the icon row to connect the app icon to the Applications shortcut -->
+  <path d="M 385 565 C 480 660, 920 660, 1015 570"
+        fill="none" stroke="url(#arrow)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 966 538 L 1020 568 L 984 616" fill="none" stroke="url(#arrow)" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="700" y="800" font-family="-apple-system, 'Helvetica Neue', sans-serif" font-size="22" fill="#6b7785" text-anchor="middle">
+    Move Konjugate into Applications to install it
+  </text>
+</svg>

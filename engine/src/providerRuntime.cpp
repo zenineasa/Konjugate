@@ -104,10 +104,11 @@ std::string sha256Hex(const std::string& data) {
     if (!ok) throw std::runtime_error("Failed to hash a C++ relationship provider's inline source.");
 
     static const char hex[] = "0123456789abcdef";
-    std::string result(digestLength * 2, '0');
+    std::string result(static_cast<std::size_t>(digestLength) * 2, '0');
     for (unsigned int index = 0; index < digestLength; ++index) {
-        result[2 * index] = hex[(digest[index] >> 4) & 0xf];
-        result[2 * index + 1] = hex[digest[index] & 0xf];
+        const auto position = static_cast<std::size_t>(index) * 2;
+        result[position] = hex[(digest[index] >> 4) & 0xf];
+        result[position + 1] = hex[digest[index] & 0xf];
     }
     return result;
 }
@@ -120,7 +121,8 @@ std::string resolveCppCompiler(const ProviderConfiguration& config) {
     if (!config.cppCompiler.empty()) return config.cppCompiler;
 #ifdef __APPLE__
     std::string discovered;
-    if (FILE* pipe = ::popen("xcrun -find clang++ 2>/dev/null", "r")) {
+    // Fixed, hardcoded command string; no user-controlled input reaches the shell here.
+    if (FILE* pipe = ::popen("xcrun -find clang++ 2>/dev/null", "r")) { // NOLINT(bugprone-command-processor)
         std::array<char, 4096> buffer{};
         while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe)) discovered += buffer.data();
         ::pclose(pipe);
@@ -136,7 +138,8 @@ std::string resolveCppCompiler(const ProviderConfiguration& config) {
 // locate the platform SDK on its own and needs an explicit sysroot to find <cstddef> etc.
 std::string resolveAppleSdkSysroot() {
     std::string sdkPath;
-    if (FILE* pipe = ::popen("xcrun --show-sdk-path 2>/dev/null", "r")) {
+    // Fixed, hardcoded command string; no user-controlled input reaches the shell here.
+    if (FILE* pipe = ::popen("xcrun --show-sdk-path 2>/dev/null", "r")) { // NOLINT(bugprone-command-processor)
         std::array<char, 4096> buffer{};
         while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe)) sdkPath += buffer.data();
         ::pclose(pipe);
@@ -705,13 +708,15 @@ public:
 #else
         if (pid_ <= 0) return;
 #endif
+        // Best-effort: this whole function is noexcept, and the fds get closed unconditionally
+        // right below regardless of whether the provider ever answers the shutdown handshake.
         try {
             EngineToProvider msg;
             msg.mutable_shutdown();
             writeFramed(stdinFd_, msg);
             ProviderToEngine resp;
             readFramed(stdoutFd_, resp);
-        } catch (...) {}
+        } catch (...) {} // NOLINT(bugprone-empty-catch)
 
         if (stdinFd_ != -1) { ::close(stdinFd_); stdinFd_ = -1; }
         if (stdoutFd_ != -1) { ::close(stdoutFd_); stdoutFd_ = -1; }
@@ -1370,6 +1375,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
         }
 
         if (node.nodeProvider) {
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- guarded by the if() directly above.
             const auto& task = *node.nodeProvider;
             const auto& key = task.providerProcessKeyCache;
             auto& proc = processes_[key];

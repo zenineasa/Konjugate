@@ -65,7 +65,10 @@ void* create() {
     }
 }
 
-void destroy(void* self) { delete static_cast<ShimState*>(self); }
+// The paired create()/destroy() above/here is the one legitimate raw new/delete in this codebase:
+// create() releases a std::make_unique across a C-ABI plugin boundary (an opaque void* handle,
+// since the caller may be a different compiler), and this is its sole, contained counterpart.
+void destroy(void* self) { delete static_cast<ShimState*>(self); } // NOLINT(cppcoreguidelines-owning-memory)
 
 std::uint32_t inputCount(void* self) {
     return static_cast<std::uint32_t>(state(self).description.inputs.size());
@@ -144,7 +147,7 @@ void shutdownProvider(void* self) {
     // must not prevent unloading the library.
     try {
         state(self).provider->shutdown();
-    } catch (...) {}
+    } catch (...) {} // NOLINT(bugprone-empty-catch)
 }
 
 constexpr KonjugateInProcessProviderV1 kVtable{

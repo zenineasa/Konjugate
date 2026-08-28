@@ -7,16 +7,24 @@
 # config yet -- see docs on this repo's memory-safety pass for why: a first run needs triaging
 # before more check families are worth turning on, and a huge default check set would mostly
 # flag pre-existing, already-reviewed style choices rather than real defects.
+#
+# First full triage (43 findings) is done: 2 were real bugs (fixed -- both main()s now wrap their
+# whole body in a try/catch, not just the dispatch logic), a handful of small numeric-cast issues
+# were fixed directly, and a handful of genuinely rare cases got a targeted NOLINT with a reason
+# (see providerInProcessShim.cpp, providerRuntime.cpp, modelValidator.cpp). The three casting
+# checks below are disabled category-wide rather than suppressed line-by-line: every one of their
+# 25 combined hits was a legitimate, structurally necessary use (binary-protocol byte headers,
+# OpenSSL/zlib C-API const-correctness gaps, POSIX exec/shm/sem calls, dlopen) -- this engine's
+# nature as a binary-protocol/C-ABI-provider layer makes them pervasive and expected here, not
+# incidental, so the check doesn't earn its keep in this codebase the way it would in
+# higher-level C++ that shouldn't need raw casts or varargs at all.
 Checks: >
   -*,
   bugprone-*,
   cppcoreguidelines-owning-memory,
-  cppcoreguidelines-pro-type-const-cast,
   cppcoreguidelines-pro-type-cstyle-cast,
-  cppcoreguidelines-pro-type-reinterpret-cast,
   cppcoreguidelines-pro-type-static-cast-downcast,
   cppcoreguidelines-pro-type-union-access,
-  cppcoreguidelines-pro-type-vararg,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions
 WarningsAsErrors: ''

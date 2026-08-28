@@ -449,16 +449,23 @@ void stopSharedMemoryEvalThread(std::thread& evalThread, std::atomic<bool>& stop
 
 } // anonymous namespace
 
-int main() {
+// The only code before the try/catch below is the Windows _setmode() calls, a non-throwing CRT
+// function (returns int, no exception path); every other statement in this function is already
+// covered by a try/catch (see below).
+int main() { // NOLINT(bugprone-exception-escape)
 #if defined(_WIN32) || defined(_MSC_VER)
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
-    std::cin.exceptions(std::ios::badbit);
-    std::cout.exceptions(std::ios::badbit | std::ios::failbit);
-
     std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> provider;
     try {
+        // basic_ios::exceptions() can itself throw if the stream is already in one of the
+        // newly-enabled exception states, so it shares this try/catch rather than running
+        // unprotected before it -- narrow in practice, but the point of this worker's own
+        // uniform failure path (encodeProviderFailure() over the framed protocol, not a bare
+        // crash) is exactly to cover cases like this.
+        std::cin.exceptions(std::ios::badbit);
+        std::cout.exceptions(std::ios::badbit | std::ios::failbit);
         provider = createRelationshipProvider();
     } catch (const std::exception& error) {
         writeFramed(encodeProviderFailure(0, "factoryFailed", error.what(), true));
@@ -575,7 +582,7 @@ int main() {
 #ifndef _WIN32
         stopSharedMemoryEvalThread(evalThread, stopRequested, sharedMemory ? sharedMemory->requestSemaphore : nullptr);
 #endif
-        try { provider->shutdown(); } catch (...) {}
+        try { provider->shutdown(); } catch (...) {} // NOLINT(bugprone-empty-catch)
         return 1;
     }
 }

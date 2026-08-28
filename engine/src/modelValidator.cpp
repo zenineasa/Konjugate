@@ -13,9 +13,12 @@
 
 namespace konjugate {
 namespace {
+// NOLINTBEGIN(bugprone-throwing-static-initialization) -- fixed, hand-written regex literals,
+// verified valid; std::regex's constructor cannot actually throw for these at runtime.
 const std::regex entityIdPattern("^[1-9][0-9]{0,15}$");
 const std::regex symbolPattern("^[a-z][A-Za-z0-9]*$");
 const std::regex providerKeyPattern("^[a-z][A-Za-z0-9]*$");
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 void add(ValidationResult& result, std::string code, std::string severity, std::string message,
          std::string kind = "model", std::string entityId = {}, std::string field = {}) {

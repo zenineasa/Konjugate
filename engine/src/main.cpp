@@ -94,6 +94,12 @@ konjugate::InferenceConfig inferenceConfigFromArgs(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+    // Wraps the entire body (not just the run/validate/infer/fit dispatch below) so an exception
+    // from the capabilities/usage/argument-parsing paths above it -- all of which allocate
+    // (std::string, std::vector, std::ostringstream) and could in principle throw std::bad_alloc
+    // -- still produces this CLI's own clean "ENGINE_FAILURE: ..." message and exit code instead
+    // of an uncaught-exception crash.
+    try {
 #if defined(_WIN32) || defined(_MSC_VER)
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
@@ -166,7 +172,6 @@ int main(int argc, char** argv) {
         std::cerr << "UNSUPPORTED_FILE_FORMAT: Only .kjt project files are supported.\n";
         std::_Exit(3);
     }
-    try {
         if (command == "infer") {
             const auto series = konjugate::parseInferenceCsv(readTextFile(argv[2]));
             const auto config = inferenceConfigFromArgs(argc, argv);

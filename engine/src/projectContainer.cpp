@@ -15,12 +15,15 @@
 namespace konjugate {
 namespace {
 constexpr std::size_t fixedHeaderLength = 10;
-constexpr std::size_t maximumHeaderLength = 64 * 1024;
+constexpr std::size_t maximumHeaderLength = 64ULL * 1024;
 constexpr std::size_t maximumOutputLength = 1024ULL * 1024ULL * 1024ULL;
 constexpr unsigned char gzipFlag = 1;
 constexpr unsigned char encryptedFlag = 2;
 
-struct ParsedContainer {
+// The implicit constructor's members (vector, string, ptree) can only throw std::bad_alloc, an
+// allocation-failure case no constructor here could meaningfully recover from either; not worth
+// marking noexcept (which would instead call std::terminate on that same failure).
+struct ParsedContainer { // NOLINT(bugprone-exception-escape)
     std::vector<unsigned char> bytes;
     std::size_t payloadStart = 0;
     unsigned char flags = 0;
@@ -107,7 +110,7 @@ std::vector<unsigned char> decrypt(const ParsedContainer& parsed, const std::str
     EVP_CIPHER_CTX_free(context);
     std::fill(key.begin(), key.end(), 0);
     if (!success) throw ContainerError("DECRYPTION_FAILED", "The password is incorrect or the project has been modified.");
-    plaintext.resize(static_cast<std::size_t>(written + finalWritten));
+    plaintext.resize(static_cast<std::size_t>(written) + static_cast<std::size_t>(finalWritten));
     return plaintext;
 }
 
@@ -117,7 +120,7 @@ std::string inflateGzip(const unsigned char* data, std::size_t size) {
     stream.avail_in = static_cast<uInt>(size);
     if (inflateInit2(&stream, 16 + MAX_WBITS) != Z_OK) throw ContainerError("CORRUPT_PAYLOAD", "The gzip decoder could not be initialized.");
     std::string output;
-    std::array<char, 64 * 1024> buffer{};
+    std::array<char, 64ULL * 1024> buffer{};
     int status = Z_OK;
     while (status == Z_OK) {
         stream.next_out = reinterpret_cast<Bytef*>(buffer.data());

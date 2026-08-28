@@ -13,9 +13,14 @@ import { rootDirectory, run } from './developmentEnvironment.mjs';
 
 const generatedDirectory = join(rootDirectory, 'src', 'generated');
 await mkdir(generatedDirectory, { recursive: true });
-// npm's local .bin wrapper: a plain (extension-less) shim on macOS/Linux, a .cmd shim on Windows.
-const pbjsPath = join(rootDirectory, 'node_modules', '.bin', process.platform === 'win32' ? 'pbjs.cmd' : 'pbjs');
-await run(pbjsPath, [
+// Invoked as a plain Node script via process.execPath, not through npm's node_modules/.bin shim:
+// that shim is a .cmd file on Windows, and node's spawn() cannot execute a .cmd directly without
+// shell: true (verified against a real Windows CI failure -- spawn EINVAL). pbjs's actual
+// entrypoint is itself just a Node script (bin/pbjs, `#!/usr/bin/env node`), so running it
+// through process.execPath sidesteps the .cmd/shell question entirely, on every platform.
+const pbjsPath = join(rootDirectory, 'node_modules', 'protobufjs-cli', 'bin', 'pbjs');
+await run(process.execPath, [
+    pbjsPath,
     '-t', 'static-module',
     '-w', 'esm',
     '-o', join(generatedDirectory, 'reportMessages.mjs'),

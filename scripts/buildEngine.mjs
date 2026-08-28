@@ -4,7 +4,12 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathExists, rootDirectory, run, vcpkgDirectory } from './developmentEnvironment.mjs';
 
-const preset = process.argv.includes('--no-metis') ? 'development-no-metis' : 'development';
+// --sanitize builds engine-sanitize/ with ASan+UBSan (Linux only -- see engine/CMakePresets.json)
+// for local reproduction of what the sanitize CI job runs; it is never combined with --install
+// since a sanitizer-instrumented binary is a diagnostic build, not something to package.
+const preset = process.argv.includes('--sanitize') ? 'sanitize' :
+    process.argv.includes('--no-metis') ? 'development-no-metis' : 'development';
+const presetBinaryDirName = { development: 'engine', 'development-no-metis': 'engine-no-metis', sanitize: 'engine-sanitize' }[preset];
 if (!await pathExists(join(vcpkgDirectory, 'scripts', 'buildsystems', 'vcpkg.cmake'))) {
     throw new Error('The development dependencies are not configured. Run npm run setup first.');
 }
@@ -12,7 +17,7 @@ await run('cmake', ['--preset', preset], { cwd: join(rootDirectory, 'engine') })
 await run('cmake', ['--build', '--preset', preset], { cwd: join(rootDirectory, 'engine') });
 
 if (process.argv.includes('--install')) {
-    const engineBuildDir = join(rootDirectory, 'out', preset === 'development-no-metis' ? 'engine-no-metis' : 'engine');
+    const engineBuildDir = join(rootDirectory, 'out', presetBinaryDirName);
     const enginePackageDir = join(rootDirectory, 'out', 'packageResources', 'engine');
     await rm(enginePackageDir, { recursive: true, force: true });
     await run('cmake', ['--install', engineBuildDir, '--config', 'RelWithDebInfo', '--prefix', enginePackageDir]);

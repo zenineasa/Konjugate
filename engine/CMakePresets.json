@@ -15,7 +15,8 @@
                 "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/../.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
                 "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
                 "VCPKG_MANIFEST_DIR": "${sourceDir}/..",
-                "KONJUGATE_REQUIRE_METIS": "ON"
+                "KONJUGATE_REQUIRE_METIS": "ON",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         },
         {
@@ -26,6 +27,23 @@
             "cacheVariables": {
                 "KONJUGATE_ENABLE_METIS": "OFF",
                 "KONJUGATE_REQUIRE_METIS": "OFF"
+            }
+        },
+        {
+            "name": "sanitize",
+            "displayName": "Konjugate with ASan+UBSan (Clang/GCC only -- CI runs it on Linux)",
+            "inherits": "development-no-metis",
+            "binaryDir": "${sourceDir}/../out/engine-sanitize",
+            "condition": {
+                "type": "notEquals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer",
+                "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
             }
         }
     ],
@@ -39,6 +57,11 @@
             "name": "development-no-metis",
             "configurePreset": "development-no-metis",
             "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize",
+            "configuration": "Debug"
         }
     ],
     "testPresets": [
@@ -54,6 +77,14 @@
             "name": "development-no-metis",
             "configurePreset": "development-no-metis",
             "configuration": "RelWithDebInfo",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize",
+            "configuration": "Debug",
             "output": {
                 "outputOnFailure": true
             }

@@ -173,6 +173,13 @@ Pacing pacingFromTree(const boost::property_tree::ptree& tree, const Pacing& fal
     return pacing;
 }
 
+// stream must outlive the whole process -- see runSimulation()'s doc comment in
+// simulationRunner.hpp. The thread below is deliberately detached rather than joined: joining it
+// would mean blocking runSimulation()'s return on stream->read() reaching EOF or an error, which
+// for the real caller (stdin, piped from a parent process) may never happen on a clean, one-shot
+// successful run if the parent never closes its write end -- exactly the deadlock main.cpp's own
+// std::_Exit() comment works around on the shutdown side. Detaching is the reason stream's
+// lifetime requirement is "the whole process" rather than "until runSimulation() returns".
 std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
     auto inbox = std::make_shared<ControlInbox>();
     if (!stream) return inbox;

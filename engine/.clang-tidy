@@ -1,0 +1,24 @@
+---
+# Copyright © 2026 Zenin Easa Panthakkalakath
+#
+# Scoped to the checks most relevant to a memory-safety pass: use-after-free/dangling-pointer
+# patterns (bugprone-*), raw-owning-pointer misuse (cppcoreguidelines-owning-memory), and unsafe
+# type-punning/casts (cppcoreguidelines-pro-type-*). Deliberately not a broader "everything"
+# config yet -- see docs on this repo's memory-safety pass for why: a first run needs triaging
+# before more check families are worth turning on, and a huge default check set would mostly
+# flag pre-existing, already-reviewed style choices rather than real defects.
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-pro-type-union-access,
+  cppcoreguidelines-pro-type-vararg,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions
+WarningsAsErrors: ''
+HeaderFilterRegex: '^.*/engine/(include|src)/.*'
+FormatStyle: none

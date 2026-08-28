@@ -49,6 +49,12 @@ function doubleBits(value) {
 
 const executable = process.argv[2];
 if (!executable) throw new Error('Pass the konjugateEngine executable path.');
+// A third 'no-metis' argument relaxes the METIS-availability assertion below -- used by
+// testEngineSanitized.mjs, which deliberately builds against the METIS-free
+// development-no-metis preset (see engine/CMakePresets.json's "sanitize" preset) rather than
+// mixing an uninstrumented vcpkg METIS binary into an ASan/UBSan build. Every other caller
+// (testEngine.mjs, testPackagedEngine.mjs) omits it and keeps requiring METIS, unchanged.
+const expectMetis = process.argv[3] !== 'no-metis';
 // Mirrors resolveEnginePath() in src/engineAdapter.mjs in reverse: reconstructs whichever layout
 // `executable` actually sits in (dev build under out/engine/, or packaged build under
 // resources/engine/) instead of assuming dev -- this file is run against both, via
@@ -61,8 +67,8 @@ const engineOptions = basename(engineParentDirectory) === 'out'
     : { applicationPath: '', resourcesPath: engineParentDirectory, packaged: true };
 const capabilityEvents = await readProtocolEvents(executable, ['capabilities', '--protobuf']);
 assert.equal(capabilityEvents.length, 1);
-assert.equal(capabilityEvents[0].capabilities.metisAvailable, true);
-assert.match(capabilityEvents[0].capabilities.metisVersion, /^\d+\.\d+\.\d+$/);
+assert.equal(capabilityEvents[0].capabilities.metisAvailable, expectMetis);
+if (expectMetis) assert.match(capabilityEvents[0].capabilities.metisVersion, /^\d+\.\d+\.\d+$/);
 const directory = await mkdtemp(join(tmpdir(), 'konjugateEngineTest-'));
 const input = join(directory, 'model.kjt');
 const report = join(directory, 'validation.json');

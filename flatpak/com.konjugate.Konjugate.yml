@@ -1,0 +1,105 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+#
+# Flathub manifest -- FIRST DRAFT, NOT YET BUILD-TESTED. No Linux machine was available while
+# drafting this, so nothing here has run through `flatpak-builder`. Treat every `sha256` below
+# marked TODO as exactly that: this manifest will not build until each is filled in by actually
+# downloading the source and computing its real hash, and the `konjugate` module below (which
+# needs the engine's CMake build to resolve its dependencies against these modules' /app prefix
+# instead of triggering vcpkg) needs real engine/CMakeLists.txt changes that don't exist yet. See
+# docs/packageManagerDistribution.md for the full picture and what's still missing.
+#
+# Strategy, and why: Flathub's build sandbox has no network access, so every build-time source
+# must be pinned here. boost-property-tree and eigen3 are header-only in this engine (no compiled
+# library -- confirmed against engine/CMakeLists.txt, which only does find_path/uses Eigen3::Eigen
+# as an INTERFACE target), so both skip vcpkg's own port machinery entirely: a single upstream
+# release tarball per library, header-copied into the prefix, no bootstrap/build step. The
+# remaining four (zlib, openssl, abseil+protobuf, nlopt) are genuinely compiled and get real
+# flatpak-builder modules under flatpak/modules -- check https://github.com/flathub/shared-modules
+# for existing definitions of these before hand-writing more than necessary, and check whether
+# org.freedesktop.Sdk already ships zlib/openssl dev headers before assuming they need bundling at
+# all.
+
+app-id: com.konjugate.Konjugate
+runtime: org.freedesktop.Platform
+runtime-version: '24.08' # TODO verify current recommended runtime version at submission time
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.node22 # matches package.json's engines.node >=22.12.0
+command: konjugate
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  # Konjugate's file dialogs (src/main.mjs, dialog.showOpenDialog/showSaveDialog) currently open
+  # and save wherever the user navigates to, not a portal-mediated picker -- --filesystem=home is
+  # the accurate grant for that today. Routing file access through xdg-desktop-portal instead
+  # (which Electron supports) would allow tightening this later; that's a real follow-up, not done
+  # here.
+  - --filesystem=home
+
+modules:
+  - name: boost-headers
+    buildsystem: simple
+    build-commands:
+      - cp -r boost /app/include/boost
+    sources:
+      - type: archive
+        url: https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.gz
+        sha256: TODO # compute after downloading -- boost-property-tree is header-only, so only
+                      # the headers are needed, not a full b2/bootstrap build
+
+  - name: eigen-headers
+    buildsystem: simple
+    build-commands:
+      - cp -r Eigen /app/include/Eigen
+      - cp -r unsupported /app/include/unsupported
+    sources:
+      - type: archive
+        # Eigen tags GitLab releases without a "v" prefix; verify this exact tag exists for 5.0.1
+        # before relying on it (only Eigen/Dense, i.e. the MPL2 core, is actually used here).
+        url: https://gitlab.com/libeigen/eigen/-/archive/5.0.1/eigen-5.0.1.tar.gz
+        sha256: TODO
+
+  - flatpak/modules/zlib.json # TODO -- check flathub/shared-modules for an existing definition
+                               # first; org.freedesktop.Sdk may already provide this
+  - flatpak/modules/openssl.json # TODO -- same as zlib
+  - flatpak/modules/abseil.json # TODO -- protobuf's undeclared transitive dependency (see
+                                 # thirdPartyNotices.md's "Abseil" section)
+  - flatpak/modules/protobuf.json # TODO
+  - flatpak/modules/nlopt.json # TODO -- upstream tag confirmed as v2.11.0 by reading
+                                # .tools/vcpkg/ports/nlopt/portfile.cmake directly; build WITHOUT
+                                # the luksan feature to stay MIT-licensed, matching vcpkg.json's
+                                # plain `nlopt` (no `luksan` feature) -- see thirdPartyNotices.md
+
+  - name: konjugate
+    # TODO -- this is the genuinely unsolved piece. engine/CMakeLists.txt currently always loads
+    # .tools/vcpkg/scripts/buildsystems/vcpkg.cmake as CMAKE_TOOLCHAIN_FILE (set in
+    # engine/CMakePresets.json), which would try to fetch/build every dependency over the network
+    # again inside this sandbox. This module needs either a new CMake preset that omits the vcpkg
+    # toolchain file and resolves find_package(...) calls against this manifest's own module
+    # prefix (CMAKE_PREFIX_PATH=/app), or an equivalent KONJUGATE_SKIP_VCPKG-style option added to
+    # engine/CMakeLists.txt. Neither exists yet -- this is real, additive engine-build-system work,
+    # scoped as its own sub-task, not attempted here.
+    buildsystem: cmake-ninja
+    source-dir: engine
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    sources:
+      - type: dir
+        path: ..
+
+  - name: konjugate-electron
+    # TODO -- npm install --offline using flatpak/generatedSources.json (produced by
+    # scripts/generateFlatpakNodeSources.mjs), then package the Electron app and stage the
+    # `konjugate` module's built engine binary alongside it, matching the layout
+    # out/packageResources/engine already produces for the other packaging paths.
+    buildsystem: simple
+    build-commands:
+      - echo "TODO: npm ci --offline, then package Electron and install into /app"
+    sources:
+      - type: dir
+        path: ..
+      - generatedSources.json # produced by `npm run flatpak:generate-sources`, gitignored

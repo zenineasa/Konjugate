@@ -12,7 +12,13 @@ if (!resourcesDirectory) {
 const expectedFiles = [
     'thirdPartyNotices.md',
     join('thirdPartyLicenses', 'apache2.txt'),
-    join('thirdPartyLicenses', 'metis.txt')
+    join('thirdPartyLicenses', 'metis.txt'),
+    join('thirdPartyLicenses', 'gklib.txt'),
+    join('thirdPartyLicenses', 'boostSoftwareLicense1.0.txt'),
+    join('thirdPartyLicenses', 'nlopt.txt'),
+    join('thirdPartyLicenses', 'protobuf.txt'),
+    join('thirdPartyLicenses', 'utf8Range.txt'),
+    join('thirdPartyLicenses', 'zlib.txt')
 ];
 
 for (const relativePath of expectedFiles) {
@@ -39,6 +45,21 @@ const metisLicense = await readFile(
 if (!metisLicense.includes('Regents of the University of Minnesota') ||
     !metisLicense.includes('Apache License, Version 2.0')) {
     throw new Error('The packaged METIS notice is incomplete.');
+}
+
+const expectedLicenseContent = {
+    'gklib.txt': 'Regents of the University of Minnesota',
+    'boostSoftwareLicense1.0.txt': 'Boost Software License',
+    'nlopt.txt': 'Massachusetts Institute of Technology',
+    'protobuf.txt': 'Copyright 2008 Google Inc',
+    'utf8Range.txt': 'Copyright (c) 2019 Yibo Cai',
+    'zlib.txt': 'Jean-loup Gailly and Mark Adler'
+};
+for (const [fileName, expectedSubstring] of Object.entries(expectedLicenseContent)) {
+    const content = await readFile(join(resolve(resourcesDirectory), 'thirdPartyLicenses', fileName), 'utf8');
+    if (!content.includes(expectedSubstring)) {
+        throw new Error(`The packaged ${fileName} is incomplete (expected to contain "${expectedSubstring}").`);
+    }
 }
 
 const engineName = process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine';

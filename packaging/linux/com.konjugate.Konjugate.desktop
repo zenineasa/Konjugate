@@ -3,7 +3,7 @@
 Name=Konjugate
 Comment=Graph-native engineering simulation
 Exec=Konjugate %f
-Icon=konjugate
+Icon=com.konjugate.Konjugate
 Type=Application
 Categories=Science;Engineering;
 Terminal=false

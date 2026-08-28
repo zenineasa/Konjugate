@@ -9,6 +9,9 @@ pngSizes := 16 24 32 48 64 128 256 512 1024
 pngIcons := $(addprefix $(pngDir)/,$(addsuffix .png,$(pngSizes)))
 appName := Konjugate
 appId := com.konjugate
+# Reverse-DNS desktop-file/AppStream id -- Flatpak and AppStream both require the .desktop file's
+# basename (and, conventionally, its Icon= value) to equal this exactly.
+desktopId := com.konjugate.Konjugate
 appVersion := $(shell node -p "require('./package.json').version")
 packageDir := out/package
 releaseDir := out/release
@@ -224,16 +227,19 @@ verifyPackage: verifyPackagedEngine verifyPackagedInteraction
 
 packageMacos: checkPackaging iconsMacos engine
 	node scripts/packageElectron.mjs darwin $(hostArch) $(appVersion) $(iconDir)/app.icns $(appName) $(appId)
+	node scripts/checkThirdPartyNoticeCoverage.mjs
 	node scripts/verifyPackagingNotices.mjs \
 		$(packageDir)/$(appName)-darwin-$(hostArch)/$(appName).app/Contents/Resources
 
 packageWindows: checkPackaging iconsWindows engine
 	node scripts/packageElectron.mjs win32 $(hostArch) $(appVersion) $(iconDir)/app.ico $(appName)
+	node scripts/checkThirdPartyNoticeCoverage.mjs
 	node scripts/verifyPackagingNotices.mjs \
 		$(packageDir)/$(appName)-win32-$(hostArch)/resources
 
 packageLinux: checkPackaging iconsPng engine
 	node scripts/packageElectron.mjs linux $(hostArch) $(appVersion) $(iconDir)/app.png $(appName)
+	node scripts/checkThirdPartyNoticeCoverage.mjs
 	node scripts/verifyPackagingNotices.mjs \
 		$(packageDir)/$(appName)-linux-$(hostArch)/resources
 
@@ -335,9 +341,11 @@ distributableLinux: packageLinux
 	@mkdir -p $(releaseDir)/$(appName).AppDir/usr/lib/konjugate
 	cp -R $(packageDir)/$(appName)-linux-$(hostArch)/. $(releaseDir)/$(appName).AppDir/usr/lib/konjugate/
 	cp packaging/linux/AppRun $(releaseDir)/$(appName).AppDir/AppRun
-	cp packaging/linux/konjugate.desktop $(releaseDir)/$(appName).AppDir/konjugate.desktop
-	cp $(iconDir)/app.png $(releaseDir)/$(appName).AppDir/konjugate.png
+	cp packaging/linux/$(desktopId).desktop $(releaseDir)/$(appName).AppDir/$(desktopId).desktop
+	cp $(iconDir)/app.png $(releaseDir)/$(appName).AppDir/$(desktopId).png
 	cp $(iconDir)/app.png $(releaseDir)/$(appName).AppDir/.DirIcon
+	@$(MKDIR) $(releaseDir)/$(appName).AppDir/usr/share/metainfo
+	cp packaging/linux/$(desktopId).metainfo.xml $(releaseDir)/$(appName).AppDir/usr/share/metainfo/$(desktopId).metainfo.xml
 	chmod +x $(releaseDir)/$(appName).AppDir/AppRun
 	ARCH=$(appImageArch) appimagetool \
 		$(releaseDir)/$(appName).AppDir \

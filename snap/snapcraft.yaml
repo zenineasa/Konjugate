@@ -1,0 +1,69 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+#
+# Snap package for Konjugate. Consumes the already-built `out/package/Konjugate-linux-<arch>`
+# directory (the same output the AppImage build in Makefile's distributableLinux target already
+# consumes) via a `dump` part, rather than rebuilding Electron packaging inside Snapcraft's own
+# environment -- the repo uses neither electron-builder nor electron-installer-snap, so there's no
+# existing Snapcraft-native packaging path to hook into.
+#
+# CI (release.yml's snapRelease job) copies whichever single `Konjugate-linux-<arch>` directory
+# `make packageLinux` produced on that runner to the fixed `out/package/konjugateLinux` path this
+# part's `source:` expects, so this manifest stays arch-agnostic rather than hard-coding a suffix.
+#
+# NOT YET VERIFIED against a real `snapcraft pack` run -- no Linux machine was available while
+# drafting this. Treat it as a first draft; see docs/packageManagerDistribution.md.
+
+name: konjugate
+title: Konjugate
+summary: Graph-native simulation engine for engineering and digital twins
+description: |
+  Konjugate is an open-source graph-native simulation engine for building composable engineering
+  simulations and digital twins. Rather than requiring users to manually assemble large
+  system-level formulations, Konjugate represents systems as graphs of interconnected components:
+  components define their states and properties, while relationships define the equations
+  governing how quantities are transported and transformed between them.
+website: https://github.com/zenineasa/Konjugate
+contact: https://github.com/zenineasa/Konjugate/issues
+issues: https://github.com/zenineasa/Konjugate/issues
+source-code: https://github.com/zenineasa/Konjugate
+license: MPL-2.0
+
+version: '0.7.3'
+grade: stable
+base: core24
+
+# `strict` confinement's plug model has no clean way to grant "spawn an arbitrary host compiler" --
+# Konjugate's inline C++/Python provider feature spawns whichever of clang++/g++/c++/cl.exe and
+# python3/python it finds on the host (src/main.mjs), plus a user-overridable toolchain-path
+# override. `classic` matches what the app actually does today; it requires a one-time manual
+# Canonical review before stable-channel publication (free, but human-gated -- see
+# docs/packageManagerDistribution.md).
+confinement: classic
+
+apps:
+  konjugate:
+    command: usr/lib/konjugate/Konjugate
+    desktop: usr/share/applications/com.konjugate.Konjugate.desktop
+
+parts:
+  konjugate:
+    plugin: dump
+    source: out/package/konjugateLinux
+    organize:
+      '*': usr/lib/konjugate/
+  desktop-integration:
+    plugin: dump
+    source: packaging/linux
+    organize:
+      com.konjugate.Konjugate.desktop: usr/share/applications/com.konjugate.Konjugate.desktop
+      com.konjugate.Konjugate.metainfo.xml: usr/share/metainfo/com.konjugate.Konjugate.metainfo.xml
+    stage:
+      - usr/share/applications/com.konjugate.Konjugate.desktop
+      - usr/share/metainfo/com.konjugate.Konjugate.metainfo.xml
+  icon:
+    plugin: dump
+    source: assets/icons/png
+    organize:
+      512.png: usr/share/icons/hicolor/512x512/apps/com.konjugate.Konjugate.png
+    stage:
+      - usr/share/icons/hicolor/512x512/apps/com.konjugate.Konjugate.png

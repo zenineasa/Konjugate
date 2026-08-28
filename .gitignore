@@ -8,6 +8,7 @@ out
 assets/icons
 .tools
 src/generated
+flatpak/generatedSources.json
 **/*.pyc
 **/__pycache__
 build

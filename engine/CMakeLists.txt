@@ -95,24 +95,24 @@ if(GKLIB_LIBRARY)
     list(APPEND KONJUGATE_METIS_LINK_LIBRARY ${GKLIB_LIBRARY})
 endif()
 
-if(KONJUGATE_HAS_METIS)
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/thirdPartyLicenses")
+
+# Every dependency documented here (boost-property-tree, eigen3, nlopt, openssl, protobuf, zlib,
+# and their transitive deps) is a core, always-present dependency, not a METIS-conditional one --
+# this used to be gated behind KONJUGATE_HAS_METIS back when METIS was the only documented
+# dependency, which silently dropped thirdPartyNotices.md entirely from a --no-metis build.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/thirdPartyLicenses")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md"
+    "${CMAKE_BINARY_DIR}/thirdPartyNotices.md"
+    COPYONLY
+)
+foreach(licenseFile apache2.txt metis.txt gklib.txt boostSoftwareLicense1.0.txt nlopt.txt protobuf.txt utf8Range.txt zlib.txt)
     configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md"
-        "${CMAKE_BINARY_DIR}/thirdPartyNotices.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/${licenseFile}"
+        "${CMAKE_BINARY_DIR}/thirdPartyLicenses/${licenseFile}"
         COPYONLY
     )
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/apache2.txt"
-        "${CMAKE_BINARY_DIR}/thirdPartyLicenses/apache2.txt"
-        COPYONLY
-    )
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/metis.txt"
-        "${CMAKE_BINARY_DIR}/thirdPartyLicenses/metis.txt"
-        COPYONLY
-    )
-endif()
+endforeach()
 
 add_executable(konjugateEngine
     ${PROTOCOL_SOURCES}
@@ -190,14 +190,18 @@ endif()
 if(WIN32)
     install(DIRECTORY "${CMAKE_BINARY_DIR}/" DESTINATION . FILES_MATCHING PATTERN "*.dll")
 endif()
-if(KONJUGATE_HAS_METIS)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md" DESTINATION .)
-    install(FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/apache2.txt"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/metis.txt"
-        DESTINATION thirdPartyLicenses
-    )
-endif()
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md" DESTINATION .)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/apache2.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/metis.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/gklib.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/boostSoftwareLicense1.0.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/nlopt.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/protobuf.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/utf8Range.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/zlib.txt"
+    DESTINATION thirdPartyLicenses
+)
 
 include(CTest)
 if(BUILD_TESTING)

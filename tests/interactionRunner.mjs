@@ -901,6 +901,47 @@ export async function runInteractionTests(window) {
         assert.match(await evaluate(window, `document.querySelector('.editorParameterRow:first-child .parameterControlError').textContent`), /Minimum must be less than maximum/);
     });
 
+    await run('a live-mode parameter cannot also be marked tunable, and switching to live clears any existing tuning bounds', async () => {
+        // Continues from the previous test, which already left this row's Mode at "live" --
+        // fitting a parameter against measured data (Tuning) and interactively adjusting it
+        // during a run (Live) are different phases of use, but a value that's live-adjustable at
+        // run time has no fixed "fitted" baseline worth calibrating beforehand, so the two are
+        // mutually exclusive here.
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child [data-field="mode"]').value`), 'live');
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child [data-field="tunable"]').disabled`), true);
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child [data-field="tunable"]').checked`), false);
+
+        // Switch back to constant: the checkbox re-enables, and checking it commits tuning bounds.
+        await evaluate(window, `(() => {
+            const mode = document.querySelector('.editorParameterRow:first-child [data-field="mode"]');
+            mode.value = 'constant';
+            mode.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child [data-field="tunable"]').disabled`), false);
+        await evaluate(window, `(() => {
+            const checkbox = document.querySelector('.editorParameterRow:first-child [data-field="tunable"]');
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await waitFor(window, `!document.querySelector('.editorParameterRow:first-child .parameterTuningFields').hidden`,
+            'Checking Tunable in constant mode did not reveal the fitting-bounds fields.');
+        const editedEdgeName = await evaluate(window, `document.querySelector('#editEdgeName').value`);
+        const firstParameterOf = (document_) => document_.edges.find((edge) => edge.name === editedEdgeName).parameters[0];
+        let document_ = await evaluate(window, `window.__debugCausalInference.document()`);
+        assert.ok(firstParameterOf(document_).tuning, 'Expected the committed document to carry tuning bounds after checking Tunable.');
+
+        // Switching back to live must clear that tuning data, not just hide it behind a disabled checkbox.
+        await evaluate(window, `(() => {
+            const mode = document.querySelector('.editorParameterRow:first-child [data-field="mode"]');
+            mode.value = 'live';
+            mode.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child [data-field="tunable"]').checked`), false);
+        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child [data-field="tunable"]').disabled`), true);
+        document_ = await evaluate(window, `window.__debugCausalInference.document()`);
+        assert.equal(firstParameterOf(document_).tuning, undefined, 'Switching Mode to Live should clear any existing tuning bounds, not just hide them.');
+    });
+
     await run('equation editor switches between visual and LaTeX modes', async () => {
         await evaluate(window, `document.querySelector('[data-equation-mode="latex"]').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#editEdgeMathField').hidden && document.querySelector('#editEdgeEquation').hidden`), false);

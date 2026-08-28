@@ -2135,7 +2135,6 @@ function renderEdgeEditor(definition) {
             <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value)}"></label>
             <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
             <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
-            <label class="parameterTuningToggle"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''}> Tunable (fitting target)</label>
             <button type="button" title="Remove parameter">×</button>
             <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
                 <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
@@ -2143,9 +2142,12 @@ function renderEdgeEditor(definition) {
                 <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
                 <span class="parameterControlError" role="status"></span>
             </div>
+            <label class="parameterTuningToggle" title="${parameter.mode === 'live' ? 'A live parameter is adjusted interactively during a run; fitting it against measured data doesn’t apply while Mode is Live.' : ''}">
+                <input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' ? 'disabled' : ''}> Tunable (fitting target)
+            </label>
             <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
-                <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}"></label>
-                <label class="parameterField"><span>Fitting maximum</span><input data-tuning-field="maximum" type="number" value="${tuning.maximum}"></label>
+                <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
+                <label class="parameterField"><span>Fitting maximum</span><input data-tuning-field="maximum" type="number" value="${tuning.maximum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
                 <span class="parameterTuningError" role="status"></span>
             </div>
         `;
@@ -2169,7 +2171,22 @@ function renderEdgeEditor(definition) {
         $$('[data-control-field], [data-field="value"]', row).forEach((input) => input.addEventListener('input', showControlError));
         $$('[data-tuning-field], [data-field="value"]', row).forEach((input) => input.addEventListener('input', showTuningError));
         $$('[data-field]', row).forEach((input) => input.addEventListener('change', () => {
-            if (input.dataset.field === 'mode') $('.parameterControlFields', row).hidden = input.value !== 'live';
+            if (input.dataset.field === 'mode') {
+                $('.parameterControlFields', row).hidden = input.value !== 'live';
+                // A live parameter is adjusted interactively during a run, so fitting it against
+                // measured data beforehand doesn't apply -- switching to Live clears any tuning
+                // bounds the same way an explicit uncheck would, rather than leaving stale,
+                // uneditable data behind a disabled checkbox.
+                const tunableCheckbox = $('[data-field="tunable"]', row);
+                tunableCheckbox.disabled = input.value === 'live';
+                tunableCheckbox.title = input.value === 'live'
+                    ? 'A live parameter is adjusted interactively during a run; fitting it against measured data doesn’t apply while Mode is Live.' : '';
+                if (input.value === 'live' && tunableCheckbox.checked) {
+                    tunableCheckbox.checked = false;
+                    $('.parameterTuningFields', row).hidden = true;
+                }
+                $$('[data-tuning-field]', row).forEach((tuningInput) => { tuningInput.disabled = input.value === 'live'; });
+            }
             if (input.dataset.field === 'tunable') $('.parameterTuningFields', row).hidden = !input.checked;
             if (showControlError() || showTuningError()) return;
             changeEdgeModel(definition, (snapshot) => {
@@ -2182,8 +2199,10 @@ function renderEdgeEditor(definition) {
                 targetParameter[input.dataset.field] = input.dataset.field === 'value'
                     ? Number(input.value) || 0
                     : input.value.trim();
-                if (targetParameter.mode === 'live') targetParameter.control = readControl();
-                else delete targetParameter.control;
+                if (targetParameter.mode === 'live') {
+                    targetParameter.control = readControl();
+                    delete targetParameter.tuning;
+                } else delete targetParameter.control;
             });
         }));
         $$('[data-control-field]', row).forEach((input) => input.addEventListener('change', () => {

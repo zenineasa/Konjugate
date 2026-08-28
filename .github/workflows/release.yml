@@ -66,7 +66,7 @@ jobs:
               # to vcpkg's static build on macOS (a combination that previously corrupted the
               # live simulation event stream at runtime instead of failing at build time) -- it
               # must come from Homebrew, found via its own explicit /opt/homebrew|/usr/local search.
-              run: brew install librsvg metis
+              run: brew install librsvg metis create-dmg
             - name: Install Windows packaging prerequisites
               if: runner.os == 'Windows'
               # rsvg-convert is the least-certain package name here -- if this step fails on

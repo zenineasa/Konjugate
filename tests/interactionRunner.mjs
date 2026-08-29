@@ -1546,6 +1546,29 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#undoButton').click()`);
     });
 
+    await run('an invalid state symbol shows a visible error instead of silently failing to create the node', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#newNodeName').value = 'Interaction temperature node';
+            const values = { name: 'Temperature', symbol: 'T', value: '263', unit: 'K' };
+            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+            document.querySelector('#createNode').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeBuilder').classList.contains('hidden')`), false);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
+        assert.match(await evaluate(window, `document.querySelector('#addNodeError').textContent`), /lowercase/);
+        await evaluate(window, `(() => {
+            const input = document.querySelector('.stateVariableRow [data-field="symbol"]');
+            input.value = 'temperature';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#createNode').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
+        assert.equal(await evaluate(window, `document.querySelector('#addNodeError').textContent`), '');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+    });
+
     await run('node builder creates a node with an inline Python source term', async () => {
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
         await evaluate(window, `(() => {
@@ -1593,6 +1616,37 @@ export async function runInteractionTests(window) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
         assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    });
+
+    await run('an invalid edge parameter symbol shows a visible error instead of silently failing to create the edge', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        await evaluate(window, `(() => {
+            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
+            choose('#edgeSource', 'Electrical losses');
+            choose('#edgeTarget', 'Enclosed air');
+            document.querySelector('#newEdgeName').value = 'Interaction invalid symbol relationship';
+            const field = document.querySelector('#edgeMathField');
+            field.setValue('\\\\mathrm{sourceQDot}');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            const symbolInput = document.querySelector('.parameterRow [data-field="symbol"]');
+            symbolInput.value = 'K';
+            symbolInput.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#createEdge').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), false);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+        assert.match(await evaluate(window, `document.querySelector('#addEdgeError').textContent`), /lowercase/);
+        await evaluate(window, `(() => {
+            const symbolInput = document.querySelector('.parameterRow [data-field="symbol"]');
+            symbolInput.value = 'k';
+            symbolInput.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#createEdge').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
+        assert.equal(await evaluate(window, `document.querySelector('#addEdgeError').textContent`), '');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });

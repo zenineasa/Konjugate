@@ -1641,7 +1641,11 @@ function changeNodeModel(node, mutate) {
     mutate(after);
     const symbols = after.states.map((state) => state.symbol);
     if (symbols.some((symbol) => !modelSymbolPattern.test(symbol)) || new Set(symbols).size !== symbols.length) {
+        const invalidSymbol = after.states.find((state) => !modelSymbolPattern.test(state.symbol));
         renderNodeEditorModel(node);
+        $('#editNodeError').textContent = invalidSymbol
+            ? `"${invalidSymbol.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`
+            : 'Each state needs its own unique symbol.';
         return;
     }
     const validStateIds = new Set(after.states.map((state) => state.id));
@@ -1659,6 +1663,7 @@ function changeNodeModel(node, mutate) {
 
 function renderNodeEditorModel(node) {
     const definition = node.userData.definition;
+    $('#editNodeError').textContent = '';
     $('#nodeEditorTitle').textContent = definition.title;
     $('#editNodeName').value = definition.title;
     $('#editNodeType').value = definition.type;
@@ -2060,7 +2065,11 @@ function changeEdgeModel(definition, mutate) {
     }
     const parameterSymbols = after.parameters.map((parameter) => parameter.symbol);
     if (parameterSymbols.some((symbol) => !modelSymbolPattern.test(symbol)) || new Set(parameterSymbols).size !== parameterSymbols.length) {
+        const invalidSymbol = after.parameters.find((parameter) => !modelSymbolPattern.test(parameter.symbol));
         renderEdgeEditor(definition);
+        $('#editEdgeError').textContent = invalidSymbol
+            ? `"${invalidSymbol.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`
+            : 'Each parameter needs its own unique symbol.';
         return;
     }
     applyEdgeModel(definition, after);
@@ -2109,6 +2118,7 @@ function parameterControlError(value, control) {
 }
 
 function renderEdgeEditor(definition) {
+    $('#editEdgeError').textContent = '';
     $('.edgeEditor > header strong').textContent = definition.title;
     $('#editEdgeName').value = definition.title;
     $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
@@ -6398,6 +6408,7 @@ function openNodeBuilder(clientX, clientY) {
     $('#stateVariableRows').replaceChildren();
     $('#sourceTermRows').replaceChildren();
     addStateVariableRow();
+    $('#addNodeError').textContent = '';
     positionCard(builder, clientX, clientY);
     $('#newNodeName').select();
 }
@@ -6430,6 +6441,7 @@ function openEdgeBuilder(clientX, clientY) {
     $('#edgeTarget').replaceChildren();
     refreshEndpointOptions();
     addEdgeParameterRow({ name: 'Coefficient', symbol: 'k', value: '1' });
+    $('#addEdgeError').textContent = '';
     builder.style.removeProperty('left');
     builder.style.removeProperty('top');
     builder.classList.remove('hidden');
@@ -7850,13 +7862,22 @@ function sharedVisibleNodeAxisValue(axisIndex) {
 
 $('#createNode').addEventListener('click', () => {
     if (activeResult) return;
+    $('#addNodeError').textContent = '';
     const states = stateVariablesFromBuilder();
     if (!states.length) {
-        $('#stateVariableRows input').focus();
+        $('#addNodeError').textContent = 'Add at least one state variable before creating the node.';
+        $('#stateVariableRows input')?.focus();
         return;
     }
-    if (states.some((state) => !modelSymbolPattern.test(state.symbol)) ||
-        new Set(states.map((state) => state.symbol)).size !== states.length) {
+    const invalidSymbol = states.find((state) => !modelSymbolPattern.test(state.symbol));
+    if (invalidSymbol) {
+        $('#addNodeError').textContent =
+            `"${invalidSymbol.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`;
+        $('.stateVariableRow [data-field="symbol"]')?.focus();
+        return;
+    }
+    if (new Set(states.map((state) => state.symbol)).size !== states.length) {
+        $('#addNodeError').textContent = 'Each state variable needs its own unique symbol.';
         $('.stateVariableRow [data-field="symbol"]')?.focus();
         return;
     }
@@ -7937,6 +7958,7 @@ $('#createNode').addEventListener('click', () => {
 
 $('#createEdge').addEventListener('click', () => {
     if (activeResult) return;
+    $('#addEdgeError').textContent = '';
     const source = Number($('#edgeSource').value);
     const target = Number($('#edgeTarget').value);
     if (!source || !target || source === target) {
@@ -7956,8 +7978,11 @@ $('#createEdge').addEventListener('click', () => {
                 .map((input) => [input.dataset.controlField, Number(input.value)]))
         } : {})
     })).filter((parameter) => parameter.name && parameter.symbol);
-    if (parameters.some((parameter) => !modelSymbolPattern.test(parameter.symbol)) ||
-        new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
+    const invalidParameter = parameters.find((parameter) => !modelSymbolPattern.test(parameter.symbol));
+    if (invalidParameter || new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
+        $('#addEdgeError').textContent = invalidParameter
+            ? `"${invalidParameter.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`
+            : 'Each parameter needs its own unique symbol.';
         $('.parameterRow [data-field="symbol"]')?.focus();
         return;
     }
@@ -8572,6 +8597,7 @@ function renderGroupEquationDiagnostics(group) {
 }
 
 function renderEdgeGroupEditor(group) {
+    $('#editGroupError').textContent = '';
     $('#editGroupHeading').textContent = group.name;
     $('#groupName').value = group.name;
     $('#groupColor').value = `#${group.color.toString(16).padStart(6, '0')}`;
@@ -8694,7 +8720,11 @@ function changeEdgeGroupModel(group, mutate) {
     const parameterSymbols = after.definition.parameters.map((parameter) => parameter.symbol);
     if (parameterSymbols.some((symbol) => !modelSymbolPattern.test(symbol)) ||
         new Set(parameterSymbols).size !== parameterSymbols.length) {
+        const invalidSymbol = after.definition.parameters.find((parameter) => !modelSymbolPattern.test(parameter.symbol));
         renderEdgeGroupEditor(group);
+        $('#editGroupError').textContent = invalidSymbol
+            ? `"${invalidSymbol.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`
+            : 'Each parameter needs its own unique symbol.';
         return false;
     }
     applyEdgeGroupModel(group, after);

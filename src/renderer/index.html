@@ -463,6 +463,7 @@
                 <h3>Source terms <button id="editAddSourceTerm" type="button">＋</button></h3>
                 <div id="nodeEditorSourceTerms"></div>
             </section>
+            <div class="passwordError" id="editNodeError" role="alert"></div>
             </div>
             <div data-node-panel="results" hidden>
                 <section class="nodeResultsPanel">
@@ -556,6 +557,7 @@
                 <h3>Parameters <button id="editAddEdgeParameter" type="button">＋</button></h3>
                 <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
                 <div id="edgeEditorParameters"></div>
+                <div class="passwordError" id="editEdgeError" role="alert"></div>
             </section>
             <section>
                 <label class="editorField"><span>Implementation</span><select id="editEdgeImplementationKind">
@@ -626,6 +628,7 @@
                 <p class="builderHint">Applied identically to every edge in the mesh -- a member can't override a parameter without detaching.</p>
                 <div id="groupParameterRows" class="builderRows"></div>
             </section>
+            <div class="passwordError" id="editGroupError" role="alert"></div>
             <footer>
                 <button data-delete-edge-group type="button">Delete group</button>
                 <button id="toggleEdgeGroupEnabled" type="button">Disable all</button>
@@ -782,6 +785,7 @@
                 <p class="builderHint">Contributions are summed into a selected state's time derivative.</p>
                 <div id="sourceTermRows" class="builderRows"></div>
             </section>
+            <div class="passwordError" id="addNodeError" role="alert"></div>
             <footer><button data-close-card type="button">Cancel</button><button id="createNode" class="doneButton" type="button">Create node</button></footer>
         </div>
 
@@ -823,6 +827,7 @@
                 <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
                 <div id="edgeParameterRows" class="builderRows"></div>
             </section>
+            <div class="passwordError" id="addEdgeError" role="alert"></div>
             <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
         </div>
 

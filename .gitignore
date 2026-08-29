@@ -9,6 +9,7 @@ assets/icons
 .tools
 src/generated
 flatpak/generatedSources.json
+packaging/homebrew/konjugate.rb
 **/*.pyc
 **/__pycache__
 build

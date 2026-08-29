@@ -3,6 +3,7 @@
     "examples": [
         { "id": "singleJointActuator", "domains": ["electrical", "mechanical"] },
         { "id": "twoLinkArm", "domains": ["electrical", "mechanical"] },
+        { "id": "articulatedRoboticArm", "domains": ["robotics", "mechanical", "electrical"] },
         { "id": "wheeledRobotDrivetrain", "domains": ["electrical", "mechanical"] },
         { "id": "batteryPoweredJoint", "domains": ["electrical", "mechanical", "thermal"] },
         { "id": "positionControlledJoint", "domains": ["electrical", "mechanical"] },
@@ -15,3 +16,4 @@
         { "id": "thermalEquilibrium", "domains": ["thermal"] }
     ]
 }
+

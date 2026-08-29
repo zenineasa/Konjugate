@@ -182,13 +182,18 @@ jobs:
                       > - **macOS** — if you see "is damaged and can't be opened": move Konjugate.app to Applications, then in Terminal run `xattr -cr /Applications/Konjugate.app`. Or: System Settings → Privacy & Security → Open Anyway.
                       > - **Windows** — if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
 
-    # Both jobs below only BUMP an already-existing package/cask -- neither can create the first
-    # one. winget-releaser's own action.yml explicitly checks that the PackageIdentifier already
-    # exists in microsoft/winget-pkgs and errors out if not (confirmed by reading its source, not
-    # assumed from its docs); action-homebrew-bump-cask has the identical limitation for
-    # Homebrew/homebrew-cask. See docs/packageManagerDistribution.md for the one-time manual first
-    # submission each of these depends on, and why both jobs will simply fail (loudly, not
-    # silently) until that submission is merged upstream.
+    # winget-releaser only BUMPS an already-existing package -- it can't create the first one
+    # (its own action.yml explicitly checks that the PackageIdentifier already exists in
+    # microsoft/winget-pkgs and errors out if not, confirmed by reading its source directly). See
+    # docs/packageManagerDistribution.md for the one-time manual first submission this depends on,
+    # and why this job will simply fail (loudly, not silently) until that submission is merged.
+    #
+    # No equivalent Homebrew Cask job here: a real `brew audit --new` run surfaced two hard
+    # blockers, not just a one-time-setup gap like winget's -- Homebrew Cask requires
+    # notarized/signed macOS binaries (no xattr-workaround casks accepted) and a notability bar
+    # (roughly 75 stars or 30 forks/watchers) neither of which this project currently meets.
+    # Revisit once both are true; see docs/packageManagerDistribution.md's Homebrew section. The
+    # generator (scripts/generateHomebrewCask.mjs) and draft cask are kept, just not wired into CI.
     wingetRelease:
         needs: release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -199,17 +204,6 @@ jobs:
                   identifier: ZeninEasaPanthakkalakath.Konjugate
                   installers-regex: '-setup\.exe$'
                   token: ${{ secrets.WINGET_TOKEN }}
-
-    homebrewCaskBump:
-        needs: release
-        if: startsWith(github.ref, 'refs/tags/v')
-        runs-on: macos-latest
-        steps:
-            - uses: eugenesvk/action-homebrew-bump-cask@6b066272df85c164f0496877387ecc8d989a194f # 3.8.6
-              with:
-                  token: ${{ secrets.HOMEBREW_CASK_TOKEN }}
-                  tap: Homebrew/homebrew-cask
-                  cask: konjugate
 
     snapRelease:
         needs: release

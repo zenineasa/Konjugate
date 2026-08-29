@@ -12,32 +12,46 @@ Two decisions shape everything below, both made deliberately: Konjugate ships **
 and none of the four channels here cost anything to register on or publish through, so nothing is
 being skipped for budget reasons.
 
-Every channel below has the same shape: a CI job in `release.yml` handles ongoing updates
+Most channels below share the same shape: a CI job in `release.yml` handles ongoing updates
 automatically, but the *first* submission for each channel is a one-time step only a human with
 the right account can do. Nothing below can be done from an agent session — these need your own
-GitHub/Homebrew/Microsoft/Snapcraft/Flathub identity.
+GitHub/Homebrew/Microsoft/Snapcraft/Flathub identity. Homebrew Cask is the exception — real
+requirements (notarization, notability) block it outright for now, not just a one-time setup step;
+see its section below.
 
-## Homebrew Cask
+## Homebrew Cask — deferred, two real blockers found
 
-**Automated today:** nothing yet — `homebrewCaskBump` in `release.yml` runs on every tagged
-release, but `brew bump-cask-pr` (which it wraps) only bumps a cask that already exists in
-`Homebrew/homebrew-cask`. It will fail loudly until the first submission below is merged.
+**Status: on hold, not wired into CI.** A real `brew audit --cask --new konjugate` run (see
+below) surfaced two hard requirements this project doesn't meet yet, confirmed directly against
+Homebrew's own review tooling, not just their docs:
 
-**One-time setup, in order:**
-1. A draft cask already exists at `packaging/homebrew/konjugate.rb`, with real `sha256` values
-   computed directly against the published v0.7.3 DMG assets. Re-verify the version and both
-   hashes against the *latest* release before submitting — this draft goes stale the moment a
-   newer release ships.
-2. Fork `Homebrew/homebrew-cask`, copy that file to `Casks/k/konjugate.rb` in the fork, and open a
-   PR. Homebrew's own cask contribution docs (`docs.brew.sh/Adding-Software-to-Homebrew`) cover
-   the audit/lint steps their CI will run against it.
-3. Generate a **classic** GitHub PAT (not fine-grained) with `public_repo` scope, at
-   `github.com/settings/tokens`.
-4. Add it as this repo's `HOMEBREW_CASK_TOKEN` secret (Settings → Secrets and variables →
-   Actions).
+1. **Notarized, signed macOS binaries.** Homebrew Cask requires distributed macOS binaries to be
+   signed and notarized with an Apple Developer ID and pass Gatekeeper — the `xattr -cr` workaround
+   in the cask's own `caveats` (needed because Konjugate ships unsigned today, see
+   [releasePackaging.md](releasePackaging.md)) is exactly the kind of thing official casks aren't
+   allowed to paper over. Resolved once Konjugate has a real Apple Developer ID and notarized
+   builds — see this doc's intro note on signing.
+2. **Notability.** New casks need roughly 75 GitHub stars or 30 forks/watchers. Konjugate isn't
+   there yet.
 
-Once the first PR is merged, `homebrewCaskBump` bumps the cask automatically on every future
-release — no further manual PRs.
+Neither is a one-time setup step the way winget's/Snap's credentials are — both take real time
+(getting an Apple Developer ID and notarizing builds, growing the project's traction) rather than
+an afternoon of account setup. That's why, unlike winget and Snap,
+**there is no `homebrewCaskBump` job in `release.yml`** — a job that can only ever fail until both
+of these are true would just be permanent CI noise. Revisit this section once both are met.
+
+What's kept, ready for when that's true:
+- `scripts/generateHomebrewCask.mjs` (`npm run homebrew:generate-cask`) generates
+  `packaging/homebrew/konjugate.rb` (gitignored) from the latest published release — both macOS
+  DMGs and the Linux AppImage, via the same `on_macos`/`on_linux` + `app_image` pattern real casks
+  like `cursor.rb`/`warp.rb` use (confirmed Homebrew Cask has real Linux support, not just macOS).
+- Once notarization + notability are both true, the submission flow is: run the generator, fork
+  `Homebrew/homebrew-cask`, copy the output to `Casks/k/konjugate.rb`, and follow their real PR
+  checklist (`brew audit --cask --new`, `brew style --fix`, a real local install/uninstall cycle,
+  plus their mandatory AI-usage disclosure if a tool helped draft it — see
+  `docs.brew.sh/Responsible-AI-Usage`). Re-add a `homebrewCaskBump` job to `release.yml`
+  (mirroring `wingetRelease`'s shape, using `eugenesvk/action-homebrew-bump-cask`) once that first
+  PR is merged.
 
 ## winget
 

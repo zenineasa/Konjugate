@@ -28,7 +28,11 @@ issues: https://github.com/zenineasa/Konjugate/issues
 source-code: https://github.com/zenineasa/Konjugate
 license: MPL-2.0
 
-version: '0.7.3'
+# adopt-info (rather than a hardcoded version:) points at the `konjugate` part's own
+# override-pull below, which reads package.json's real version at build time -- confirmed via a
+# real CI run that a hardcoded version string goes stale immediately (a v0.7.4 release published
+# a snap still labeled 0.7.3, because nothing here tracked the actual release being built).
+adopt-info: konjugate
 grade: stable
 base: core24
 
@@ -51,6 +55,12 @@ parts:
     source: out/package/konjugateLinux
     organize:
       '*': usr/lib/konjugate/
+    # $CRAFT_PROJECT_DIR/package.json, not the dumped Electron output, is the source of truth for
+    # the version -- extracted with grep/sed rather than `node -e ...` since this part has no
+    # compile step and Node isn't otherwise guaranteed present in the build environment.
+    override-pull: |
+      craftctl default
+      craftctl set version="$(grep -m1 '"version"' "$CRAFT_PROJECT_DIR/package.json" | sed -E 's/.*"version": *"([^"]+)".*/\1/')"
   desktop-integration:
     plugin: dump
     source: packaging/linux

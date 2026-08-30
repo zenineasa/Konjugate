@@ -6418,6 +6418,7 @@ function openEdgeBuilder(clientX, clientY) {
     hideCards(builder);
     pendingBidirectionalTemplate = null;
     $('#newEdgeName').value = 'New relationship';
+    $('#newEdgeDirectionality').value = 'directed';
     $('#newEdgeColor').value = '#9c83c4';
     $('#edgeImplementationKind').value = 'equation';
     $('#edgeEquation').value = '';
@@ -8003,7 +8004,7 @@ $('#createEdge').addEventListener('click', () => {
         target,
         sourceStateId: sourceNode?.states[0]?.id ?? null,
         targetStateId: targetNode?.states[0]?.id ?? null,
-        directionality: 'directed',
+        directionality: $('#newEdgeDirectionality').value,
         color: Number.parseInt($('#newEdgeColor').value.replace('#', ''), 16),
         offset: 0,
         enabled: true,

@@ -1620,6 +1620,37 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });
 
+    await run('edge creation offers a directionality choice, defaulting to directed', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#newEdgeDirectionality').value`), 'directed');
+        await evaluate(window, `(() => {
+            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
+            choose('#edgeSource', 'Electrical losses');
+            choose('#edgeTarget', 'Enclosed air');
+            document.querySelector('#newEdgeName').value = 'Interaction bidirectional relationship';
+            document.querySelector('#newEdgeDirectionality').value = 'bidirectional';
+            const field = document.querySelector('#edgeMathField');
+            field.setValue('\\\\mathrm{sourceQDot}');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#createEdge').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
+
+        const point = await evaluate(window, `window.__relationshipScreenPoint('Interaction bidirectional relationship')`);
+        assert.ok(point, 'Could not locate the new relationship on screen.');
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the new relationship did not open the edge editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'bidirectional',
+            'The directionality chosen at creation time should have been saved onto the new edge.');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    });
+
     await run('an invalid edge parameter symbol shows a visible error instead of silently failing to create the edge', async () => {
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         await evaluate(window, `(() => {

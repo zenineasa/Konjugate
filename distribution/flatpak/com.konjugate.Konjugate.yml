@@ -14,7 +14,8 @@
 # as an INTERFACE target), so both skip vcpkg's own port machinery entirely: a single upstream
 # release tarball per library, header-copied into the prefix, no bootstrap/build step. The
 # remaining four (zlib, openssl, abseil+protobuf, nlopt) are genuinely compiled and get real
-# flatpak-builder modules under flatpak/modules -- check https://github.com/flathub/shared-modules
+# flatpak-builder modules under distribution/flatpak/modules -- check
+# https://github.com/flathub/shared-modules
 # for existing definitions of these before hand-writing more than necessary, and check whether
 # org.freedesktop.Sdk already ships zlib/openssl dev headers before assuming they need bundling at
 # all.
@@ -63,13 +64,13 @@ modules:
         url: https://gitlab.com/libeigen/eigen/-/archive/5.0.1/eigen-5.0.1.tar.gz
         sha256: TODO
 
-  - flatpak/modules/zlib.json # TODO -- check flathub/shared-modules for an existing definition
+  - distribution/flatpak/modules/zlib.json # TODO -- check flathub/shared-modules for an existing definition
                                # first; org.freedesktop.Sdk may already provide this
-  - flatpak/modules/openssl.json # TODO -- same as zlib
-  - flatpak/modules/abseil.json # TODO -- protobuf's undeclared transitive dependency (see
+  - distribution/flatpak/modules/openssl.json # TODO -- same as zlib
+  - distribution/flatpak/modules/abseil.json # TODO -- protobuf's undeclared transitive dependency (see
                                  # thirdPartyNotices.md's "Abseil" section)
-  - flatpak/modules/protobuf.json # TODO
-  - flatpak/modules/nlopt.json # TODO -- upstream tag confirmed as v2.11.0 by reading
+  - distribution/flatpak/modules/protobuf.json # TODO
+  - distribution/flatpak/modules/nlopt.json # TODO -- upstream tag confirmed as v2.11.0 by reading
                                 # .tools/vcpkg/ports/nlopt/portfile.cmake directly; build WITHOUT
                                 # the luksan feature to stay MIT-licensed, matching vcpkg.json's
                                 # plain `nlopt` (no `luksan` feature) -- see thirdPartyNotices.md
@@ -92,7 +93,7 @@ modules:
         path: ..
 
   - name: konjugate-electron
-    # TODO -- npm install --offline using flatpak/generatedSources.json (produced by
+    # TODO -- npm install --offline using distribution/flatpak/generatedSources.json (produced by
     # scripts/generateFlatpakNodeSources.mjs), then package the Electron app and stage the
     # `konjugate` module's built engine binary alongside it, matching the layout
     # out/packageResources/engine already produces for the other packaging paths.

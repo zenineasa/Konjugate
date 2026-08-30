@@ -8,8 +8,8 @@ out
 assets/icons
 .tools
 src/generated
-flatpak/generatedSources.json
-packaging/homebrew/konjugate.rb
+distribution/flatpak/generatedSources.json
+distribution/homebrew/konjugate.rb
 **/*.pyc
 **/__pycache__
 build

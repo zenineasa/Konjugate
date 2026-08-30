@@ -1,6 +1,6 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
-// Regenerates packaging/homebrew/konjugate.rb from a real published GitHub release, computing
+// Regenerates distribution/homebrew/konjugate.rb from a real published GitHub release, computing
 // actual sha256 hashes against the real DMG assets instead of hand-maintaining values in git that
 // go stale the moment the next release ships -- confirmed the hard way: the first hand-written
 // draft was already wrong (still labeled v0.7.3) by the time v0.7.4 shipped.
@@ -106,7 +106,8 @@ cask "konjugate" do
 end
 `;
 
-const outputPath = join(rootDirectory, 'packaging', 'homebrew', 'konjugate.rb');
-await mkdir(join(rootDirectory, 'packaging', 'homebrew'), { recursive: true });
+const outputDirectory = join(rootDirectory, 'distribution', 'homebrew');
+const outputPath = join(outputDirectory, 'konjugate.rb');
+await mkdir(outputDirectory, { recursive: true });
 await writeFile(outputPath, cask);
 console.log(`Generated ${outputPath} for ${release.tag_name} (arm64 sha256 ${armSha256}, x64 sha256 ${intelSha256}, linux x64 sha256 ${linuxSha256}).`);

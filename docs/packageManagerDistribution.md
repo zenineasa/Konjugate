@@ -42,7 +42,7 @@ of these are true would just be permanent CI noise. Revisit this section once bo
 
 What's kept, ready for when that's true:
 - `scripts/generateHomebrewCask.mjs` (`npm run homebrew:generate-cask`) generates
-  `packaging/homebrew/konjugate.rb` (gitignored) from the latest published release — both macOS
+  `distribution/homebrew/konjugate.rb` (gitignored) from the latest published release — both macOS
   DMGs and the Linux AppImage, via the same `on_macos`/`on_linux` + `app_image` pattern real casks
   like `cursor.rb`/`warp.rb` use (confirmed Homebrew Cask has real Linux support, not just macOS).
 - Once notarization + notability are both true, the submission flow is: run the generator, fork
@@ -84,7 +84,8 @@ rather than left permanently failing on a missing credential). It would rebuild 
 from source (there's no raw `out/package/Konjugate-linux-<arch>` tree published as an artifact,
 only the compressed AppImage) and publish via `canonical/action-build` + `canonical/action-publish`.
 
-`snap/snapcraft.yaml` uses `confinement: classic`, not `strict`, deliberately: Konjugate's inline
+`distribution/snap/snapcraft.yaml` uses `confinement: classic`, not `strict`, deliberately:
+Konjugate's inline
 C++/Python provider feature spawns whichever host compiler/interpreter it finds
 (`src/main.mjs` — `clang++`/`cl.exe`/`g++`/`c++`, `python3`/`python`), which strict confinement's
 plug model has no clean way to grant. Classic confinement requires a one-time manual Canonical
@@ -97,7 +98,8 @@ below.
 2. `snapcraft export-login --snaps=konjugate --acls package_access,package_push,package_update,package_release exported.txt`
    run locally.
 3. Paste the contents of `exported.txt` into this repo's `SNAPCRAFT_STORE_CREDENTIALS` secret.
-4. `snap/snapcraft.yaml` has not been run through a real `snapcraft pack` yet (no Linux machine was
+4. `distribution/snap/snapcraft.yaml` has not been run through a real `snapcraft pack` yet (no
+   Linux machine was
    available while drafting it) — verify it builds locally before relying on CI to publish it.
 5. Re-add a `snapRelease` job to `release.yml` (see this file's git history for the exact
    configuration that was removed) — `needs: release`, tag-gated, rebuilding the Linux package via
@@ -114,13 +116,15 @@ vcpkg C++ dependency except METIS is statically linked (confirmed against a real
 `vcpkg_installed/*/lib/*.a`), the *runtime* needs none of them — this is purely a build-sandbox
 problem.
 
-`flatpak/com.konjugate.Konjugate.yml` is a first-draft manifest, explicitly marked as not yet
+`distribution/flatpak/com.konjugate.Konjugate.yml` is a first-draft manifest, explicitly marked
+as not yet
 build-tested. What it captures: `boost-property-tree` and `eigen3` are header-only in this engine
 (no compiled library — `engine/CMakeLists.txt` only does `find_path`/uses `Eigen3::Eigen` as an
 INTERFACE target), so both use a single upstream tarball each, header-copied into the prefix,
 skipping vcpkg's own ~65-tarball transitive Boost port graph entirely. The remaining four
 (`zlib`, `openssl`, `abseil`, `protobuf`, `nlopt`) are genuinely compiled and need real
-`flatpak-builder` modules under `flatpak/modules/` — none of those files exist yet. Before
+`flatpak-builder` modules under `distribution/flatpak/modules/` — none of those files exist yet.
+Before
 hand-writing them: check `https://github.com/flathub/shared-modules` for existing definitions to
 reuse, and check whether `org.freedesktop.Sdk` already ships `zlib`/`openssl` dev headers (it's an
 unusually comprehensive base SDK — they may not need bundling at all).
@@ -134,7 +138,8 @@ Neither exists yet — it's real engine-build-system work, scoped as its own tas
 
 The npm/Electron half is more standard: `npm run flatpak:generate-sources`
 (`scripts/generateFlatpakNodeSources.mjs`) runs `flatpak-node-generator` against
-`package-lock.json` to produce an offline-installable `flatpak/generatedSources.json` (gitignored,
+`package-lock.json` to produce an offline-installable `distribution/flatpak/generatedSources.json`
+(gitignored,
 regenerated on demand — mirrors `scripts/generateReportProtocol.mjs`'s codegen convention).
 `flatpak-node-generator` is a Python tool, installed via
 `pipx install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=node`, not an

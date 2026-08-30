@@ -1,11 +1,13 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
-// Generates flatpak/generatedSources.json from package-lock.json via flatpak-node-generator
+// Generates distribution/flatpak/generatedSources.json from package-lock.json via
+// flatpak-node-generator
 // (https://github.com/flatpak/flatpak-builder-tools/tree/master/node), so the Flathub build --
 // which runs with no network access -- can `npm install --offline` inside its sandbox. This is
 // the Node/npm half of the Flathub work only; the vcpkg-fetched C++ side (boost-property-tree,
 // eigen3, nlopt, openssl, protobuf, zlib) has no equivalent generator and is handled by hand-
-// written flatpak-builder modules under flatpak/modules -- see docs/packageManagerDistribution.md.
+// written flatpak-builder modules under distribution/flatpak/modules -- see
+// docs/packageManagerDistribution.md.
 //
 // flatpak-node-generator is a Python tool, not an npm package, so it isn't a devDependency here.
 // It's expected on PATH, installed via:
@@ -25,7 +27,7 @@ if (!(await commandExists('flatpak-node-generator'))) {
 }
 
 const lockfilePath = join(rootDirectory, 'package-lock.json');
-const outputPath = join(rootDirectory, 'flatpak', 'generatedSources.json');
+const outputPath = join(rootDirectory, 'distribution', 'flatpak', 'generatedSources.json');
 
 await run('flatpak-node-generator', ['npm', lockfilePath, '-o', outputPath]);
 console.log(`Generated ${outputPath} from package-lock.json.`);

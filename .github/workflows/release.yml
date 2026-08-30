@@ -190,9 +190,11 @@ jobs:
     #   - winget: winget-releaser can only bump an already-existing package, not create the first
     #     one, and that first manifest hasn't been submitted to microsoft/winget-pkgs yet.
     #   - Snap: needs a one-time Snapcraft Store credential (SNAPCRAFT_STORE_CREDENTIALS) that
-    #     doesn't exist yet, and snap/snapcraft.yaml itself has never been run through a real
+    #     doesn't exist yet, and distribution/snap/snapcraft.yaml itself has never been run through
+    #     a real
     #     `snapcraft pack`.
-    # The tooling for each (generator scripts, snap/snapcraft.yaml, draft casks) is kept as-is,
+    # The tooling for each (generator scripts, distribution/snap/snapcraft.yaml, draft casks) is
+    # kept as-is,
     # just not wired into this workflow -- re-add a job here (winget-releaser and
     # canonical/action-build + canonical/action-publish are still the right actions, see this
     # file's git history for the exact configuration) once a given channel's blocker is cleared.

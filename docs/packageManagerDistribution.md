@@ -12,12 +12,12 @@ Two decisions shape everything below, both made deliberately: Konjugate ships **
 and none of the four channels here cost anything to register on or publish through, so nothing is
 being skipped for budget reasons.
 
-Most channels below share the same shape: a CI job in `release.yml` handles ongoing updates
-automatically, but the *first* submission for each channel is a one-time step only a human with
-the right account can do. Nothing below can be done from an agent session — these need your own
-GitHub/Homebrew/Microsoft/Snapcraft/Flathub identity. Homebrew Cask is the exception — real
-requirements (notarization, notability) block it outright for now, not just a one-time setup step;
-see its section below.
+**Current status: all four channels are deferred.** None has a CI job in `release.yml` right now
+— see each section below for why. Homebrew Cask is blocked by real requirements (notarization,
+notability), not just a setup gap. winget and Snap are genuinely just a one-time human setup step
+away (see their sections), but that setup hasn't happened yet, so their jobs were removed rather
+than left in the workflow permanently failing. Flathub is blocked by its own project-maturity and
+AI-content policies (see its section) — revisit once those no longer apply.
 
 ## Homebrew Cask — deferred, two real blockers found
 
@@ -55,29 +55,34 @@ What's kept, ready for when that's true:
 
 ## winget
 
-**Automated today:** nothing yet, for the same reason as Homebrew — `wingetRelease` uses
-`vedantmgoyal9/winget-releaser`, and its own first build step explicitly checks that the
-`identifier` already exists in `microsoft/winget-pkgs` and errors out if not (confirmed by reading
-its source directly, not assumed from its docs). It calls `komac update`, never `komac new`.
+**Automated today:** nothing — no `wingetRelease` job exists in `release.yml` right now (removed
+rather than left permanently failing). It would use `vedantmgoyal9/winget-releaser`, but that
+action's own first build step explicitly checks that the `identifier` already exists in
+`microsoft/winget-pkgs` and errors out if not (confirmed by reading its source directly, not
+assumed from its docs) — it calls `komac update`, never `komac new`, so it can't create the first
+listing.
 
 **One-time setup, in order:**
-1. Decide the winget `PackageIdentifier` (winget's `Publisher.Package` convention). The CI job
-   currently defaults to `ZeninEasaPanthakkalakath.Konjugate` — change it in `release.yml`'s
-   `wingetRelease` job if you want something else, and use the same value in step 2.
+1. Decide the winget `PackageIdentifier` (winget's `Publisher.Package` convention) — the job used
+   `ZeninEasaPanthakkalakath.Konjugate` before it was removed; reuse that value or pick another,
+   just use the same one in step 2 and in the re-added job (see below).
 2. Fork `microsoft/winget-pkgs` under your own GitHub account.
 3. Submit the first manifest by hand — either `wingetcreate new` or `komac submit`, pointed at a
    published `-setup.exe` release asset — as a PR to `microsoft/winget-pkgs`.
-4. Generate a second **classic** PAT with `public_repo` scope, stored as this repo's
-   `WINGET_TOKEN` secret.
+4. Generate a **classic** PAT with `public_repo` scope, stored as this repo's `WINGET_TOKEN`
+   secret.
+5. Re-add a `wingetRelease` job to `release.yml` (see this file's git history for the exact
+   configuration that was removed) — `needs: release`, tag-gated, using `winget-releaser` with the
+   `identifier`/`installers-regex`/`token` inputs.
 
-Once merged, `wingetRelease` bumps the manifest automatically on every future release.
+Once merged and the job is back, it bumps the manifest automatically on every future release.
 
 ## Snap
 
-**Automated today:** nothing yet — `snapRelease` in `release.yml` rebuilds the Linux package from
-source (there's no raw `out/package/Konjugate-linux-<arch>` tree published as an artifact, only
-the compressed AppImage) and publishes via `canonical/action-build` + `canonical/action-publish`,
-but it needs a Snap Store login credential that only you can generate.
+**Automated today:** nothing — no `snapRelease` job exists in `release.yml` right now (removed
+rather than left permanently failing on a missing credential). It would rebuild the Linux package
+from source (there's no raw `out/package/Konjugate-linux-<arch>` tree published as an artifact,
+only the compressed AppImage) and publish via `canonical/action-build` + `canonical/action-publish`.
 
 `snap/snapcraft.yaml` uses `confinement: classic`, not `strict`, deliberately: Konjugate's inline
 C++/Python provider feature spawns whichever host compiler/interpreter it finds
@@ -94,7 +99,10 @@ below.
 3. Paste the contents of `exported.txt` into this repo's `SNAPCRAFT_STORE_CREDENTIALS` secret.
 4. `snap/snapcraft.yaml` has not been run through a real `snapcraft pack` yet (no Linux machine was
    available while drafting it) — verify it builds locally before relying on CI to publish it.
-5. Once ready to leave the `edge` channel (which `snapRelease` publishes to by default), request
+5. Re-add a `snapRelease` job to `release.yml` (see this file's git history for the exact
+   configuration that was removed) — `needs: release`, tag-gated, rebuilding the Linux package via
+   `make packageLinux` then publishing via `canonical/action-build` + `canonical/action-publish`.
+6. Once ready to leave the `edge` channel (which that job published to by default), request
    classic-confinement review via the Snap Store dashboard.
 
 ## Flathub

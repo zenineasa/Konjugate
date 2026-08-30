@@ -47,9 +47,7 @@ During source development, placing the directory under the repository's `addons/
 
 The repository includes a minimal working example in [Hello World add-on](helloWorldAddon.md). Start there before building a larger visualizer or dashboard.
 
-For end users, package the add-on as a `.kja` file and use the application's
-installer. See [Konjugate packages](packageDevelopment.md) for the portable
-package layout and safety checks.
+For end users, package the add-on as a `.kja` file and use the application's installer. See [Konjugate packages](packageDevelopment.md) for the portable package layout and safety checks.
 
 Invalid manifests are skipped. A diagnostic is written to the main-process console. Add-on IDs must be globally unique across bundled and user-installed add-ons; a duplicate is skipped.
 

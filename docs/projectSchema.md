@@ -47,13 +47,7 @@ An edge or source term may be programmable instead of an equation: it carries an
 - `bindings`: an array naming the provider's own port keys. A state binding is `{ key, kind: "state", nodeId, stateId }`; an edge may also bind `{ key, kind: "parameter", parameterId }`. No `role` is needed on a binding (unlike `equationModel`/`expressionModel` bindings) — it just names which state or parameter feeds that port key, for either a source term's one local side or either of an edge's two endpoints.
 - `output`: `{ key, stateId }` for a source term, or `{ key, role, stateId }` for an edge — the port key the provider's `addGradient()` call fills, mapped to the state receiving the contribution (`role` disambiguates a bidirectional edge's two endpoints, exactly as it does for `equationModel`'s output).
 
-An installed provider may be referenced without embedding its source by using
-`kind: "plugin"`, `pluginId`, `pluginVersion` and `providerId` instead of
-`source`. Before validation and execution, the host resolves that reference to
-the installed plugin's declared `cpp` or `python` provider artifact. The
-version is required so numerical behavior is not silently changed by an
-upgrade. Plugin packages and their installation rules are documented in
-[Plugin development](pluginDevelopment.md).
+An installed provider may be referenced without embedding its source by using `kind: "plugin"`, `pluginId`, `pluginVersion` and `providerId` instead of `source`. Before validation and execution, the host resolves that reference to the installed plugin's declared `cpp` or `python` provider artifact. The version is required so numerical behavior is not silently changed by an upgrade. Plugin packages and their installation rules are documented in [Plugin development](pluginDevelopment.md).
 
 At run time, the engine compiles `source` (for `cpp`) into a native provider artifact and evaluates it out-of-process or in-process depending on the configured transport; see [Provider execution transports](providerExecution.md). The C++ authoring API lives in `engine/include/konjugate/relationshipProvider.hpp`.
 

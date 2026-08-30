@@ -165,32 +165,13 @@ The same model should be easy to validate in CI, run headlessly for parameter sw
 
 ## Detailed opportunity tracks
 
-The following tracks expand the strategy into concrete product directions. Each
-track starts with a narrow, useful vertical slice. Broader integrations should
-follow only after the first slice has a stable data model, clear ownership and
-automated verification.
+The following tracks expand the strategy into concrete product directions. Each track starts with a narrow, useful vertical slice. Broader integrations should follow only after the first slice has a stable data model, clear ownership and automated verification.
 
 ### Digital twin tuning and data comparison
 
-**Status: the first release described below is implemented.** CSV import,
-column-to-state mapping, bounded parameter fitting (the `parameters[].tuning`
-schema field — see [Project document schema](projectSchema.md)) and a choice
-of NLopt optimizer backends (derivative-free and gradient-based) run natively
-in the engine via a `fit` CLI subcommand, driven from a "Tuning" panel in the
-authoring UI. Not yet built: measured-versus-simulated plots with residuals,
-and the source-data hash/objective/weights/engine-version provenance record
-this section calls for — the review UI shows the column mapping and the
-tunable parameters' before/after values, but not that fuller provenance set,
-and none of it is persisted into the saved result. IPOPT was
-evaluated as a second backend family and dropped: the vcpkg build available
-to this project ships with no usable linear solver (no HSL/MUMPS/PARDISO),
-so it links but cannot actually solve. The rest of this section is retained
-as the original, still-accurate design intent, including the parts (state
-estimation, validation, monitoring, live acquisition) that remain unbuilt.
+**Status: the first release described below is implemented.** CSV import, column-to-state mapping, bounded parameter fitting (the `parameters[].tuning` schema field — see [Project document schema](projectSchema.md)) and a choice of NLopt optimizer backends (derivative-free and gradient-based) run natively in the engine via a `fit` CLI subcommand, driven from a "Tuning" panel in the authoring UI. Not yet built: measured-versus-simulated plots with residuals, and the source-data hash/objective/weights/engine-version provenance record this section calls for — the review UI shows the column mapping and the tunable parameters' before/after values, but not that fuller provenance set, and none of it is persisted into the saved result. IPOPT was evaluated as a second backend family and dropped: the vcpkg build available to this project ships with no usable linear solver (no HSL/MUMPS/PARDISO), so it links but cannot actually solve. The rest of this section is retained as the original, still-accurate design intent, including the parts (state estimation, validation, monitoring, live acquisition) that remain unbuilt.
 
-Digital twin work should begin with offline measured-data comparison rather
-than live acquisition. This keeps the first implementation deterministic and
-makes it useful for experiments, test benches and historical data.
+Digital twin work should begin with offline measured-data comparison rather than live acquisition. This keeps the first implementation deterministic and makes it useful for experiments, test benches and historical data.
 
 The initial workflow should be:
 
@@ -198,8 +179,7 @@ The initial workflow should be:
 2. Map columns to model states or derived signals.
 3. Select tunable parameters and define bounds or fixed values.
 4. Choose an objective function, such as weighted least-squares error.
-5. Run the fitting process through the same engine and CLI contract as normal
-	 simulation.
+5. Run the fitting process through the same engine and CLI contract as normal simulation.
 6. Review measured and simulated signals together, including residuals.
 7. Save the fitted parameter set as a new model or result branch.
 
@@ -211,23 +191,13 @@ The data model should distinguish:
 - **monitoring:** comparing an active system against a model over time;
 - **prediction:** running future scenarios from an accepted state estimate.
 
-The first release should support CSV import, explicit signal mapping, bounded
-parameter fitting and measured-versus-simulated plots. It should record the
-source data hash, mapping, objective function, weights, parameter bounds,
-engine version and fitting configuration. A fitted result must never silently
-overwrite the original model.
+The first release should support CSV import, explicit signal mapping, bounded parameter fitting and measured-versus-simulated plots. It should record the source data hash, mapping, objective function, weights, parameter bounds, engine version and fitting configuration. A fitted result must never silently overwrite the original model.
 
-Live acquisition can follow through a connector boundary. Candidate sources
-include MQTT, WebSocket, serial and organization-specific adapters, but these
-should remain outside the numerical engine. The engine should consume timestamped
-and validated observations through a narrow interface rather than knowing about
-transport protocols.
+Live acquisition can follow through a connector boundary. Candidate sources include MQTT, WebSocket, serial and organization-specific adapters, but these should remain outside the numerical engine. The engine should consume timestamped and validated observations through a narrow interface rather than knowing about transport protocols.
 
 ### Add-ons, plugins and components
 
-Konjugate should make extension development approachable while preserving the
-trust boundaries already described in the architecture documentation. These
-terms should remain separate:
+Konjugate should make extension development approachable while preserving the trust boundaries already described in the architecture documentation. These terms should remain separate:
 
 | Extension kind | Primary purpose | Typical authority |
 | --- | --- | --- |
@@ -235,12 +205,9 @@ terms should remain separate:
 | Provider/plugin | Numerical behavior or external-system integration | Engine execution APIs and explicit project references |
 | Component library entry | Reusable model construction | Declarative node and relationship templates |
 
-Installing one kind must not implicitly grant the authority of another. Each
-kind needs its own manifest, API version, compatibility declaration, permission
-model, installation location and failure behavior.
+Installing one kind must not implicitly grant the authority of another. Each kind needs its own manifest, API version, compatibility declaration, permission model, installation location and failure behavior.
 
-The first ecosystem milestone should be a local installation workflow rather
-than a public marketplace:
+The first ecosystem milestone should be a local installation workflow rather than a public marketplace:
 
 - discover bundled and user-installed contributions;
 - inspect identity, version, author, license and permissions;
@@ -256,15 +223,10 @@ than a public marketplace:
 The repository should ship three intentionally small contribution examples:
 
 - **Hello World add-on:** adds one toolstrip action or read-only panel.
-- **Hello World provider:** evaluates a simple relationship through the public
-	provider protocol.
+- **Hello World provider:** evaluates a simple relationship through the public provider protocol.
 - **Hello World component:** inserts one reusable node or relationship template.
 
-Each example should be complete and runnable. Its documentation should show
-the manifest, source layout, build command, installation path, permissions,
-API version, debugging workflow, failure behavior and license. The examples
-should be tested in CI so they remain executable documentation rather than
-static snippets.
+Each example should be complete and runnable. Its documentation should show the manifest, source layout, build command, installation path, permissions, API version, debugging workflow, failure behavior and license. The examples should be tested in CI so they remain executable documentation rather than static snippets.
 
 The contributor path should be task-oriented:
 
@@ -274,13 +236,11 @@ The contributor path should be task-oriented:
 4. Verify the permission boundary.
 5. Package it for another user.
 
-This is more valuable initially than a sophisticated registry because it gives
-potential contributors a clear proof that the extension model is real.
+This is more valuable initially than a sophisticated registry because it gives potential contributors a clear proof that the extension model is real.
 
 ### Visualization add-on
 
-The visualization add-on should demonstrate the value of the extension system
-through synchronized analysis, not simply provide a larger chart menu.
+The visualization add-on should demonstrate the value of the extension system through synchronized analysis, not simply provide a larger chart menu.
 
 An initial release could provide:
 
@@ -293,18 +253,11 @@ An initial release could provide:
 - legends that include signal, unit, branch and timestamp; **partially shipped** (signal legends exist; unit/branch/timestamp not confirmed as part of them).
 - export of the current view and selected data; still open.
 
-The add-on should consume a stable, read-only visualization context. It should
-not reach into private result storage or duplicate simulation playback logic.
-That context should expose stable signal references, time samples, branches,
-units and selection events. A map-specific view can then be added without
-changing the engine or the core renderer.
+The add-on should consume a stable, read-only visualization context. It should not reach into private result storage or duplicate simulation playback logic. That context should expose stable signal references, time samples, branches, units and selection events. A map-specific view can then be added without changing the engine or the core renderer.
 
 ### Python comparison notebooks
 
-Python notebooks should serve as both education and numerical compatibility
-checks. Each notebook should define a small physical system independently,
-construct the equivalent Konjugate model, execute both and compare aligned
-signals.
+Python notebooks should serve as both education and numerical compatibility checks. Each notebook should define a small physical system independently, construct the equivalent Konjugate model, execute both and compare aligned signals.
 
 The first set should cover:
 
@@ -322,15 +275,11 @@ Every comparison should state its assumptions and report:
 - expected tolerance;
 - known reasons for disagreement.
 
-These notebooks should be versioned artifacts, not informal demonstrations.
-Where practical, a headless notebook or equivalent Python script should run in
-CI and detect numerical drift. The notebook should use the public CLI or a
-documented interchange format rather than reaching into private Electron APIs.
+These notebooks should be versioned artifacts, not informal demonstrations. Where practical, a headless notebook or equivalent Python script should run in CI and detect numerical drift. The notebook should use the public CLI or a documented interchange format rather than reaching into private Electron APIs.
 
 ### Reusable subsystems from other models
 
-Importing a subsystem from another `.kjt` should be treated as model
-composition, not file copying hidden behind a canvas gesture.
+Importing a subsystem from another `.kjt` should be treated as model composition, not file copying hidden behind a canvas gesture.
 
 The import operation should:
 
@@ -343,17 +292,11 @@ The import operation should:
 - record the source file, subsystem identity and import timestamp;
 - offer detach semantics if later refresh is not supported.
 
-Double-clicking an imported or local subsystem should open its focused view in
-a new project window. The new window should retain the parent context and
-breadcrumb, while edits should use the same document and undo ownership model
-as the parent. A live external reference should not be implied unless the
-product later defines explicit refresh, conflict and offline behavior.
+Double-clicking an imported or local subsystem should open its focused view in a new project window. The new window should retain the parent context and breadcrumb, while edits should use the same document and undo ownership model as the parent. A live external reference should not be implied unless the product later defines explicit refresh, conflict and offline behavior.
 
 ### Deterministic report generation
 
-Report generation should follow a predefined structure as much as possible.
-The report engine should consume model, validation, run and result data and
-produce a stable HTML report without requiring an AI provider.
+Report generation should follow a predefined structure as much as possible. The report engine should consume model, validation, run and result data and produce a stable HTML report without requiring an AI provider.
 
 A first report should contain:
 
@@ -368,22 +311,13 @@ A first report should contain:
 9. Branch and intervention history.
 10. Reproducibility information and warnings.
 
-The generator should support a user-selected report template, signal list,
-plot ranges and conclusion fields. The same input should produce materially
-the same output, apart from explicitly identified timestamps or generated
-file metadata.
+The generator should support a user-selected report template, signal list, plot ranges and conclusion fields. The same input should produce materially the same output, apart from explicitly identified timestamps or generated file metadata.
 
-AI may optionally draft a short summary from the structured report facts, but
-it must not invent measurements, conclusions, missing validation results or
-engineering recommendations. The generated draft should be visibly marked,
-editable and separate from the deterministic report sections. Report creation
-must remain fully functional with AI disabled.
+AI may optionally draft a short summary from the structured report facts, but it must not invent measurements, conclusions, missing validation results or engineering recommendations. The generated draft should be visibly marked, editable and separate from the deterministic report sections. Report creation must remain fully functional with AI disabled.
 
 ### Release trust and installer identity
 
-Platform security warnings are part of the adoption experience. Release work
-should establish a consistent publisher identity and verify every artifact
-before publication.
+Platform security warnings are part of the adoption experience. Release work should establish a consistent publisher identity and verify every artifact before publication.
 
 For Windows, the release pipeline should eventually:
 
@@ -394,11 +328,7 @@ For Windows, the release pipeline should eventually:
 - preserve consistent product metadata across releases;
 - submit releases to the relevant reputation and malware-reporting processes.
 
-Signing does not guarantee that SmartScreen warnings disappear immediately;
-reputation is accumulated over time. The same release discipline should cover
-macOS Developer ID signing and notarization. Unsigned alpha builds may remain
-available for contributors, but public release artifacts should make their
-trust state explicit.
+Signing does not guarantee that SmartScreen warnings disappear immediately; reputation is accumulated over time. The same release discipline should cover macOS Developer ID signing and notarization. Unsigned alpha builds may remain available for contributors, but public release artifacts should make their trust state explicit.
 
 The phases are ordered by user value and trust. A larger feature should not move ahead if it makes the core compose, validate, simulate and compare loop harder to understand.
 

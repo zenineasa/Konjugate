@@ -372,7 +372,6 @@ from konjugate import (
     ScalarPort,
 )
 
-
 class ThermalConduction(RelationshipProvider):
     def describe(self):
         return RelationshipDescription(

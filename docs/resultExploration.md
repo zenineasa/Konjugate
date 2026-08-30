@@ -4,42 +4,27 @@
 
 ## Status and purpose
 
-This document records the product and technical direction discussed for
-exploring Konjugate simulation results. It is a design proposal, not a promise
-that every idea will be implemented unchanged. Its purpose is to preserve the
-coherent experience behind the ideas, distinguish agreed decisions from open
-questions, and provide an incremental implementation path.
+This document records the product and technical direction discussed for exploring Konjugate simulation results. It is a design proposal, not a promise that every idea will be implemented unchanged. Its purpose is to preserve the coherent experience behind the ideas, distinguish agreed decisions from open questions, and provide an incremental implementation path.
 
-The central product opportunity is to avoid separating model construction,
-execution, post-processing, and scenario exploration into unrelated
-workspaces. The canvas should remain the spatial center of the workflow before,
-during, and after simulation.
+The central product opportunity is to avoid separating model construction, execution, post-processing, and scenario exploration into unrelated workspaces. The canvas should remain the spatial center of the workflow before, during, and after simulation.
 
 The proposed north star is a **spatial, branchable simulation player**.
 
 ## Design principles
 
-- The model and its results are separate. Playing a result must never overwrite
-  model initial conditions.
-- A displayed value always has an identifiable result branch and simulation
-  time.
-- Names are presentation; node, state, parameter, run, and branch references
-  use UUIDs.
+- The model and its results are separate. Playing a result must never overwrite model initial conditions.
+- A displayed value always has an identifiable result branch and simulation time.
+- Names are presentation; node, state, parameter, run, and branch references use UUIDs.
 - The canvas, timeline, inspector, and plots share one active time cursor.
-- Units guide honest presentation but never prevent arbitrary signal
-  comparison.
-- Completed runs and parent branches are immutable. New decisions create new
-  branches.
-- Playback rate and simulation pacing are different concepts and must have
-  separate controls.
+- Units guide honest presentation but never prevent arbitrary signal comparison.
+- Completed runs and parent branches are immutable. New decisions create new branches.
+- Playback rate and simulation pacing are different concepts and must have separate controls.
 - Engine checkpoints, not rounded UI values, are the basis of resumed runs.
-- The first implementation should remain useful without committing to every
-  advanced analysis feature.
+- The first implementation should remain useful without committing to every advanced analysis feature.
 
 ## Result values on the canvas
 
-When a result is active, node labels show state values at the selected time.
-Scrubbing or playing the timeline updates those values together.
+When a result is active, node labels show state values at the selected time. Scrubbing or playing the timeline updates those values together.
 
 The interface must distinguish these concepts:
 
@@ -48,18 +33,13 @@ The interface must distinguish these concepts:
 - final result value;
 - value arriving from a live or paced run.
 
-Compact labels should show pinned or primary states. Hovering or expanding a
-label may reveal every state, recent direction of change, and a small sparkline.
-Selecting a node opens its complete result inspector.
+Compact labels should show pinned or primary states. Hovering or expanding a label may reveal every state, recent direction of change, and a small sparkline. Selecting a node opens its complete result inspector.
 
-The user may select a compatible state or unit group to color nodes on the
-canvas. A legend, unit, branch, and current simulation time accompany any color
-mapping. Unrelated quantities are not silently combined into one color scale.
+The user may select a compatible state or unit group to color nodes on the canvas. A legend, unit, branch, and current simulation time accompany any color mapping. Unrelated quantities are not silently combined into one color scale.
 
 ## Simulation transport
 
-After results exist, a transport bar appears along the bottom of the canvas.
-The initial transport contains:
+After results exist, a transport bar appears along the bottom of the canvas. The initial transport contains:
 
 - play and pause;
 - previous and next output sample;
@@ -78,8 +58,7 @@ Later versions may add:
 - a `Fork here` action;
 - synchronized branch comparison.
 
-Scrubbing must be immediate. Node labels, canvas colors, plots, inspector values,
-and controller displays all follow the same cursor.
+Scrubbing must be immediate. Node labels, canvas colors, plots, inspector values, and controller displays all follow the same cursor.
 
 ## Node inspection and plotting
 
@@ -90,8 +69,7 @@ Plotting should use progressive disclosure:
 3. Pinning a state adds it to a persistent signal tray.
 4. Expanding the tray opens a larger analysis dock for multi-signal work.
 
-The contextual inspector is for the selected node. The analysis dock persists
-across selections and holds signals from multiple nodes and branches.
+The contextual inspector is for the selected node. The analysis dock persists across selections and holds signals from multiple nodes and branches.
 
 Each plotted signal is identified by a stable reference resembling:
 
@@ -103,14 +81,11 @@ SignalRef
 └── unit
 ```
 
-Selecting a curve highlights its node on the canvas. Hovering a node emphasizes
-its curves. Plot cursors and the simulation transport remain synchronized.
+Selecting a curve highlights its node on the canvas. Hovering a node emphasizes its curves. Plot cursors and the simulation transport remain synchronized.
 
 ## Cross-domain comparison
 
-Users may compare any signals, including quantities with incompatible units.
-For example, pressure may respond to temperature and both should be available
-in the same analysis without restriction.
+Users may compare any signals, including quantities with incompatible units. For example, pressure may respond to temperature and both should be available in the same analysis without restriction.
 
 Units control the default presentation, not eligibility:
 
@@ -132,15 +107,11 @@ Supported analysis views may eventually include:
 - correlation and lag estimation;
 - comparison of the same signal across branches.
 
-No fixed two-axis limit should prevent analysis. When additional axes would
-become illegible, the interface reorganizes signals into synchronized lanes and
-allows the user to override that choice.
+No fixed two-axis limit should prevent analysis. When additional axes would become illegible, the interface reorganizes signals into synchronized lanes and allows the user to override that choice.
 
 ## Branchable simulation
 
-A user should be able to select a result time, create a fork, change future
-decisions, and continue from the captured system state. The parent result remains
-immutable.
+A user should be able to select a result time, create a fork, change future decisions, and continue from the captured system state. The parent result remains immutable.
 
 A typical workflow is:
 
@@ -159,18 +130,13 @@ Baseline
 └── Disable pump at 5.0 s
 ```
 
-Initial branching should permit parameter decisions. Expert state overrides may
-be considered later because arbitrary state changes can produce physically
-inconsistent scenarios.
+Initial branching should permit parameter decisions. Expert state overrides may be considered later because arbitrary state changes can produce physically inconsistent scenarios.
 
-Comparison modes may show parent and child values, absolute or percentage
-difference, deviation color maps, and overlaid curves. Branch colors remain
-consistent across the transport, canvas, inspector, and plots.
+Comparison modes may show parent and child values, absolute or percentage difference, deviation color maps, and overlaid curves. Branch colors remain consistent across the transport, canvas, inspector, and plots.
 
 ## Checkpoints and reproducibility
 
-A fork begins from an engine checkpoint at a global synchronization boundary.
-A checkpoint needs enough information to resume deterministically:
+A fork begins from an engine checkpoint at a global synchronization boundary. A checkpoint needs enough information to resume deterministically:
 
 - exact state vector;
 - global simulation time;
@@ -182,16 +148,11 @@ A checkpoint needs enough information to resume deterministically:
 - model, schema, and engine versions;
 - parent run and branch UUIDs.
 
-Result output samples already occur at global synchronization boundaries. A
-sample becomes forkable only when the result carries the complete checkpoint
-information required by the engine. Display values rounded for labels are never
-used to resume execution.
+Result output samples already occur at global synchronization boundaries. A sample becomes forkable only when the result carries the complete checkpoint information required by the engine. Display values rounded for labels are never used to resume execution.
 
 ## Parameter interventions
 
-Live changes should be recorded as events rather than transient UI mutations.
-An intervention identifies its time, parameter UUID, value, and transition
-mode. Possible modes include:
+Live changes should be recorded as events rather than transient UI mutations. An intervention identifies its time, parameter UUID, value, and transition mode. Possible modes include:
 
 - step;
 - ramp;
@@ -201,19 +162,13 @@ mode. Possible modes include:
 - controller setpoint;
 - externally sampled input.
 
-Interventions appear as markers or tracks on the timeline. A child branch keeps
-the parent event history before its fork and owns a distinct future event
-sequence.
+Interventions appear as markers or tracks on the timeline. A child branch keeps the parent event history before its fork and owns a distinct future event sequence.
 
-The engine applies accepted interventions at global synchronization boundaries.
-The UI distinguishes a requested intervention from one acknowledged and applied
-by the engine.
+The engine applies accepted interventions at global synchronization boundaries. The UI distinguishes a requested intervention from one acknowledged and applied by the engine.
 
 ## Playback rate and simulation pacing
 
-Playback rate controls the presentation of existing samples. Simulation pacing
-controls how quickly the engine is permitted to advance relative to wall-clock
-time. They are independent.
+Playback rate controls the presentation of existing samples. Simulation pacing controls how quickly the engine is permitted to advance relative to wall-clock time. They are independent.
 
 Implemented engine pacing modes are:
 
@@ -223,20 +178,11 @@ Implemented engine pacing modes are:
 
 Manual stepping remains a future extension. Pausing is already implemented (see below).
 
-A pacing cap is a maximum, not a guarantee; expensive models may advance more
-slowly. Pausing occurs at a safe synchronization boundary. Pacing belongs in the
-C++ runner so Electron and command-line execution share the same semantics.
+A pacing cap is a maximum, not a guarantee; expensive models may advance more slowly. Pausing occurs at a safe synchronization boundary. Pacing belongs in the C++ runner so Electron and command-line execution share the same semantics.
 
-During a paced run, confirmed samples stream to the UI, the transport cursor
-advances, and node labels update at output intervals. Cancellation and pausing
-are sent as live protobuf control-stream commands rather than renderer delays or
-a file-based mechanism — see [Engine job protocol](jobProtocol.md).
+During a paced run, confirmed samples stream to the UI, the transport cursor advances, and node labels update at output intervals. Cancellation and pausing are sent as live protobuf control-stream commands rather than renderer delays or a file-based mechanism — see [Engine job protocol](jobProtocol.md).
 
-The implemented execution lifecycle is `running ↔ paused`, followed by either
-`completed` or `stopped`. Stop captures the current synchronization boundary and
-retains a partial result. The current UI can continue a stopped result from its
-latest checkpoint. Earlier-checkpoint restart and branch navigation remain part
-of the proposed branching phase rather than the live transport.
+The implemented execution lifecycle is `running ↔ paused`, followed by either `completed` or `stopped`. Stop captures the current synchronization boundary and retains a partial result. The current UI can continue a stopped result from its latest checkpoint. Earlier-checkpoint restart and branch navigation remain part of the proposed branching phase rather than the live transport.
 
 ## Proposed result-session model
 
@@ -260,24 +206,18 @@ ResultBranch
 └── completionState
 ```
 
-Results are immutable records. View state—active time, selected signals, canvas
-color variable, plot layout, and active comparison—is presentation data and
-should not mutate the engineering model.
+Results are immutable records. View state—active time, selected signals, canvas color variable, plot layout, and active comparison—is presentation data and should not mutate the engineering model.
 
 ## Proposed screen organization
 
 The experience uses four coordinated regions:
 
 - **Canvas:** spatial values, highlights, result colors, and branch differences.
-- **Bottom transport:** time, playback, event markers, branching, and execution
-  state.
-- **Right inspector:** selected-node values, compact plots, and contextual
-  controls.
-- **Expandable analysis dock:** pinned multi-node signals, arbitrary
-  cross-domain plots, and branch comparison.
+- **Bottom transport:** time, playback, event markers, branching, and execution state.
+- **Right inspector:** selected-node values, compact plots, and contextual controls.
+- **Expandable analysis dock:** pinned multi-node signals, arbitrary cross-domain plots, and branch comparison.
 
-The analysis dock should remain collapsed until needed so result exploration
-does not undermine the canvas-first modelling direction.
+The analysis dock should remain collapsed until needed so result exploration does not undermine the canvas-first modelling direction.
 
 ## Incremental delivery
 
@@ -320,21 +260,15 @@ does not undermine the canvas-first modelling direction.
 ## Open questions
 
 - How multiple immutable result sessions should be represented inside one project.
-- How many samples and branches remain resident before results are paged from
-  disk.
+- How many samples and branches remain resident before results are paged from disk.
 - Whether hover sparklines show every state or only primary and pinned states.
 - How users choose a primary state for compact labels.
 - How plot layouts are serialized and shared.
-- Which checkpoint fields are required for future stochastic and external-input
-  models.
+- Which checkpoint fields are required for future stochastic and external-input models.
 - Whether branch comparison permits more than two active branches on the canvas.
 - How intervention conflicts and late-arriving live commands are resolved.
 - Which derived-signal operations belong in the engine versus the analysis UI.
 
 ## Immediate next implementation
 
-The recommended first vertical slice is Phase 1: retain the sampled result,
-add a bottom transport with playback and scrubbing, and project the
-selected sample onto node labels. This establishes the result session and time
-cursor required by every later plotting, branching, comparison, and pacing
-feature without prematurely implementing the entire vision.
+The recommended first vertical slice is Phase 1: retain the sampled result, add a bottom transport with playback and scrubbing, and project the selected sample onto node labels. This establishes the result session and time cursor required by every later plotting, branching, comparison, and pacing feature without prematurely implementing the entire vision.

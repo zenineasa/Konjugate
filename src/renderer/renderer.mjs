@@ -2882,7 +2882,7 @@ let componentLibraryEntries = null;
 let componentLibraryDomains = new Set();
 let componentLibraryType = 'all';
 let componentLibraryPlacementCount = 0;
-let pendingBidirectionalTemplate = null;
+let pendingEdgeTemplate = null;
 
 function renderComponentLibraryItem(template) {
     const button = document.createElement('button');
@@ -2970,6 +2970,40 @@ function closeComponentLibraryPanel() {
     $('#componentLibraryButton').ariaExpanded = 'false';
 }
 
+// Canonical renderer-side insertion commands. Every interactive creation workflow supplies a
+// fully resolved definition, then comes through these functions for model insertion, scene
+// creation, selection, status refresh and undo/redo. Callers may still own workflow-specific
+// concerns such as placement, endpoint picking and imported-geometry cleanup, but must not
+// reproduce the actual commit sequence.
+function insertNodeDefinition(definition, { attachCurrentTransform = false, openInspector = true } = {}) {
+    model.nodes.push(definition);
+    createNode(definition);
+    updateModelStatus();
+    const object = nodeObjects.get(definition.id);
+    selectNode(object);
+    if (attachCurrentTransform && currentTool in transformPropertyForTool) transformControls.attach(object);
+    recordHistory({
+        undo: () => setNodeVisibility(definition.id, false),
+        redo: () => setNodeVisibility(definition.id, true)
+    });
+    if (openInspector) openNodeEditor(definition);
+    return object;
+}
+
+function insertRelationshipDefinition(definition, { openInspector = true } = {}) {
+    model.relationships.push(definition);
+    createRelationship(definition);
+    updateRelationships();
+    updateModelStatus();
+    selectRelationship(definition);
+    recordHistory({
+        undo: () => setRelationshipVisibility(definition.id, false),
+        redo: () => setRelationshipVisibility(definition.id, true)
+    });
+    if (openInspector) openRelationshipEditor(definition);
+    return definition;
+}
+
 // Places the new node with a small, deterministic per-application offset so repeated placements
 // from the sidebar don't stack exactly on top of one another -- there is no drag-to-position
 // interaction yet (see docs/proposals/componentLibrary.md), so this mirrors "Add node"'s own
@@ -3020,14 +3054,7 @@ function applyNodeTemplate(template) {
         return built;
     });
     hideCards();
-    model.nodes.push(definition);
-    createNode(definition);
-    updateModelStatus();
-    selectNode(nodeObjects.get(id));
-    recordHistory({
-        undo: () => setNodeVisibility(id, false),
-        redo: () => setNodeVisibility(id, true)
-    });
+    insertNodeDefinition(definition);
 }
 
 // Arms the existing endpoint-pick flow for both endpoints in sequence (no node needs to be
@@ -3039,6 +3066,7 @@ function applyNodeTemplate(template) {
 function applyEdgeTemplate(template) {
     openEdgeBuilder();
     $('#newEdgeName').value = template.name;
+    $('#newEdgeDirectionality').value = template.bidirectional ? 'bidirectional' : 'directed';
     if (template.color) $('#newEdgeColor').value = template.color;
     $('#edgeParameterRows').replaceChildren();
     (template.parameters ?? []).forEach((parameter) => addEdgeParameterRow(parameter));
@@ -3063,7 +3091,7 @@ function applyEdgeTemplate(template) {
             const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
             const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === `${template.output.role}:${state.id}`);
             if (option) $('#edgeEquationOutput').value = option.value;
-            if (template.bidirectional) pendingBidirectionalTemplate = template;
+            pendingEdgeTemplate = template;
         };
     };
 }
@@ -6416,7 +6444,7 @@ function openNodeBuilder(clientX, clientY) {
 function openEdgeBuilder(clientX, clientY) {
     const builder = $('#edgeBuilder');
     hideCards(builder);
-    pendingBidirectionalTemplate = null;
+    pendingEdgeTemplate = null;
     $('#newEdgeName').value = 'New relationship';
     $('#newEdgeDirectionality').value = 'directed';
     $('#newEdgeColor').value = '#9c83c4';
@@ -7943,18 +7971,10 @@ $('#createNode').addEventListener('click', () => {
     };
 
     hideCards();
-    model.nodes.push(definition);
-    createNode(definition);
+    insertNodeDefinition(definition, { attachCurrentTransform: true });
     pendingImportedGeometry?.dispose();
     pendingImportedGeometry = null;
     pendingGeometryFileName = '';
-    updateModelStatus();
-    selectNode(nodeObjects.get(id));
-    if (currentTool in transformPropertyForTool) transformControls.attach(nodeObjects.get(id));
-    recordHistory({
-        undo: () => setNodeVisibility(id, false),
-        redo: () => setNodeVisibility(id, true)
-    });
 });
 
 $('#createEdge').addEventListener('click', () => {
@@ -7962,7 +7982,13 @@ $('#createEdge').addEventListener('click', () => {
     $('#addEdgeError').textContent = '';
     const source = Number($('#edgeSource').value);
     const target = Number($('#edgeTarget').value);
-    if (!source || !target || source === target) {
+    if (!source || !target) {
+        $('#addEdgeError').textContent = 'Choose both a source and target node.';
+        (source ? $('#edgeTarget') : $('#edgeSource')).focus();
+        return;
+    }
+    if (source === target) {
+        $('#addEdgeError').textContent = 'An edge must connect two different nodes.';
         $('#edgeTarget').focus();
         return;
     }
@@ -8017,7 +8043,7 @@ $('#createEdge').addEventListener('click', () => {
         definition.equationModel.output = { role: outputRole, stateId: Number(outputStateId) };
     }
     if (implementationKind === 'equation') {
-        if (definition.equation && !definition.equationModel.mathJson) {
+        if (definition.equation && definition.equationModel.mathJson === null) {
             renderBuilderEquationDiagnostics(definition.equationModel.bindings);
             ($('#edgeMathField').hidden ? $('#edgeEquation') : $('#edgeMathField')).focus();
             return;
@@ -8042,35 +8068,17 @@ $('#createEdge').addEventListener('click', () => {
         };
     }
 
-    finishEndpointPick();
-    model.relationships.push(definition);
-    createRelationship(definition);
-    updateRelationships();
-    updateModelStatus();
-    $('#edgeBuilder').classList.add('hidden');
-    selectRelationship(definition);
-    recordHistory({
-        undo: () => setRelationshipVisibility(definition.id, false),
-        redo: () => setRelationshipVisibility(definition.id, true)
-    });
-});
+    if (pendingEdgeTemplate?.bidirectional) {
+        const otherRole = pendingEdgeTemplate.output.role === 'source' ? 'target' : 'source';
+        const otherNode = model.nodes.find((node) => node.id === definition[otherRole]);
+        const otherState = otherNode?.states.find((candidate) => candidate.symbol === pendingEdgeTemplate.output.state);
+        if (otherState) definition[otherRole === 'source' ? 'sourceStateId' : 'targetStateId'] = otherState.id;
+    }
+    pendingEdgeTemplate = null;
 
-// The builder's own "Create relationship" above always makes a directed edge -- bidirectional is
-// only exposed post-creation, in the edge editor. A template that needs it (e.g. Conduction, where
-// energy leaving one side must equal energy entering the other) sets pendingBidirectionalTemplate;
-// this listener, registered after the one above so it runs after the real creation completes,
-// applies it via the same setRelationshipDirectionality the editor itself uses.
-$('#createEdge').addEventListener('click', () => {
-    if (!pendingBidirectionalTemplate || !$('#edgeBuilder').classList.contains('hidden')) return;
-    const template = pendingBidirectionalTemplate;
-    pendingBidirectionalTemplate = null;
-    const definition = selectedRelationship;
-    if (!definition) return;
-    setRelationshipDirectionality(definition, 'bidirectional');
-    const otherRole = template.output.role === 'source' ? 'target' : 'source';
-    const otherNode = model.nodes.find((node) => node.id === definition[otherRole]);
-    const otherState = otherNode?.states.find((candidate) => candidate.symbol === template.output.state);
-    if (otherState) definition[otherRole === 'source' ? 'sourceStateId' : 'targetStateId'] = otherState.id;
+    finishEndpointPick();
+    $('#edgeBuilder').classList.add('hidden');
+    insertRelationshipDefinition(definition);
 });
 
 function setLabelDetail(detail, expanded) {

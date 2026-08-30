@@ -1374,7 +1374,8 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
     });
 
-    await run('Connect to chooses a canvas endpoint and restores the builder', async () => {
+    await run('Connect to chooses a canvas endpoint and creates through the shared relationship inspector', async () => {
+        const relationshipCountBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Electrical losses')).click()`);
         await evaluate(window, `document.querySelector('#connectFromNode').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#endpointPickBanner').hidden`), true);
@@ -1383,7 +1384,12 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelector('#endpointPickBanner').hidden`), true);
         assert.equal(await evaluate(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
         assert.notEqual(await evaluate(window, `document.querySelector('#edgeTarget').value`), '');
-        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+        await evaluate(window, `document.querySelector('#newEdgeName').value = 'Connect to regression'; document.querySelector('#createEdge').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Connect to regression');
+        assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipCountBefore);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
     });
 
     // Excludes "... copy" matches: a soft-deleted "... copy" node from an earlier paste test can
@@ -1538,6 +1544,8 @@ export async function runInteractionTests(window) {
             document.querySelector('#createNode').click();
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').value`), 'Interaction node');
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
@@ -1602,6 +1610,15 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
     });
 
+    await run('edge creation explains why missing endpoints prevent creation', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), false);
+        assert.match(await evaluate(window, `document.querySelector('#addEdgeError').textContent`), /source and target/);
+        assert.equal(await evaluate(window, `document.activeElement.id`), 'edgeSource');
+        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+    });
+
     await run('edge creation composes state references and supports undo', async () => {
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         await evaluate(window, `(() => {
@@ -1616,6 +1633,27 @@ export async function runInteractionTests(window) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
         assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Interaction relationship');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+    });
+
+    await run('edge creation accepts a constant zero equation', async () => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        await evaluate(window, `(() => {
+            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
+            choose('#edgeSource', 'Electrical losses');
+            choose('#edgeTarget', 'Enclosed air');
+            document.querySelector('#newEdgeName').value = 'Zero relationship';
+            const field = document.querySelector('#edgeMathField');
+            field.setValue('0');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#createEdge').click();
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Zero relationship');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });
@@ -1636,13 +1674,7 @@ export async function runInteractionTests(window) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
-
-        const point = await evaluate(window, `window.__relationshipScreenPoint('Interaction bidirectional relationship')`);
-        assert.ok(point, 'Could not locate the new relationship on screen.');
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
-        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the new relationship did not open the edge editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Interaction bidirectional relationship');
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'bidirectional',
             'The directionality chosen at creation time should have been saved onto the new edge.');
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);

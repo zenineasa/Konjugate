@@ -6090,7 +6090,14 @@ async function commitParameterTuning() {
         const parameterId = Number(checkbox.dataset.parameterId);
         const fitted = parameterTuningState.report.finalParameters.find((entry) => entry.parameterId === parameterId);
         return { kind: 'updateParameter', parameterRef: parameterId, value: fitted.value };
+    }).filter((operation) => {
+        const current = parameterTuningState.tunableParameters.find((parameter) => parameter.parameterId === operation.parameterRef);
+        return current && current.value !== operation.value;
     });
+    if (!operations.length) {
+        status.textContent = 'The selected fitted values already match the model.';
+        return;
+    }
     let prepared;
     try {
         prepared = buildAssistantProposal(baseDocument, { proposalVersion: 1, operations });
@@ -6108,7 +6115,12 @@ async function commitParameterTuning() {
     }
     const before = baseDocument;
     const after = prepared.document;
-    replaceModelContents(after);
+    try {
+        replaceModelContents(after);
+    } catch (error) {
+        status.textContent = `Could not apply the fitted parameters: ${error.message}`;
+        return;
+    }
     recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
     resetParameterTuning();
     $('#parameterTuning').classList.add('hidden');

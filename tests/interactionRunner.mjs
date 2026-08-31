@@ -3154,7 +3154,42 @@ export async function runInteractionTests(window) {
             'Undo should remove all created edges.');
     });
 
-    await run('digital-twin tuning marks a parameter tunable, fits it against measured data through the real engine, and applies the result', async () => {
+    await run('digital-twin tuning fits source-term and edge parameters together from CSV and applies them atomically', async () => {
+        // Add an independently-owned source-term parameter to Enclosed air. Its constant
+        // derivative contribution and the edge's transfer coefficient affect the measured
+        // target trajectory differently, so the optimizer can identify both in one fit.
+        await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')))`,
+            'The "Enclosed air" label did not settle back into the DOM after the previous test\'s undo.');
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Enclosed air node editor did not open.');
+        await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
+        await waitFor(window, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
+        await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
+        await evaluate(window, `document.querySelector('#termAddParameter').click()`);
+        await evaluate(window, `(() => {
+            const row = document.querySelector('#termParameters .editorParameterRow');
+            row.querySelector('[data-field="name"]').value = 'Source bias';
+            row.querySelector('[data-field="symbol"]').value = 'sourceBias';
+            row.querySelector('[data-field="value"]').value = '0.5';
+            row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await evaluate(window, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'sourceBias').click()`);
+        await waitFor(window, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The source-bias equation did not become valid.');
+        await evaluate(window, `(() => {
+            const row = document.querySelector('#termParameters .editorParameterRow');
+            const checkbox = row.querySelector('[data-field="tunable"]');
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await evaluate(window, `(() => {
+            const row = document.querySelector('#termParameters .editorParameterRow');
+            row.querySelector('[data-tuning-field="minimum"]').value = '-5';
+            row.querySelector('[data-tuning-field="maximum"]').value = '5';
+            row.querySelector('[data-tuning-field="minimum"]').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await evaluate(window, `document.querySelector('#sourceTermEditor [data-close-card]').click(); document.querySelector('#nodeEditor [data-close-card]').click()`);
+
         // Reuses the same edge the "live parameters" test above already opens -- Thermal
         // Management's Battery module -> Enclosed air relationship, whose one parameter is
         // "heatTransferCoefficient".
@@ -3165,21 +3200,21 @@ export async function runInteractionTests(window) {
             'The "Battery module" relationship bundle label did not appear.');
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Edge editor did not open.');
-        await waitFor(window, `document.querySelector('.editorParameterRow') !== null`, 'No parameter row rendered for this edge.');
+        await waitFor(window, `document.querySelector('#edgeEditorParameters .editorParameterRow') !== null`, 'No parameter row rendered for this edge.');
 
-        const beforeValue = await evaluate(window, `Number(document.querySelector('.editorParameterRow:first-child [data-field="value"]').value)`);
-        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child .parameterTuningFields').hidden`), true);
+        const beforeValue = await evaluate(window, `Number(document.querySelector('#edgeEditorParameters .editorParameterRow:first-child [data-field="value"]').value)`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditorParameters .editorParameterRow:first-child .parameterTuningFields').hidden`), true);
 
         await evaluate(window, `(() => {
-            const row = document.querySelector('.editorParameterRow:first-child');
+            const row = document.querySelector('#edgeEditorParameters .editorParameterRow:first-child');
             const checkbox = row.querySelector('[data-field="tunable"]');
             checkbox.checked = true;
             checkbox.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        assert.equal(await evaluate(window, `document.querySelector('.editorParameterRow:first-child .parameterTuningFields').hidden`), false,
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditorParameters .editorParameterRow:first-child .parameterTuningFields').hidden`), false,
             'Checking "Tunable" should reveal the fitting-bounds fields.');
         await evaluate(window, `(() => {
-            const row = document.querySelector('.editorParameterRow:first-child');
+            const row = document.querySelector('#edgeEditorParameters .editorParameterRow:first-child');
             row.querySelector('[data-tuning-field="minimum"]').value = '0';
             row.querySelector('[data-tuning-field="maximum"]').value = '50';
             row.querySelector('[data-tuning-field="minimum"]').dispatchEvent(new Event('change', { bubbles: true }));
@@ -3191,6 +3226,13 @@ export async function runInteractionTests(window) {
         assert.ok(tunableEdge, 'Expected an edge with a tunable parameter in the committed document.');
         const tunableParameter = tunableEdge.parameters.find((parameter) => parameter.tuning);
         assert.deepEqual(tunableParameter.tuning, { minimum: 0, maximum: 50 });
+        const tunableSourceTerm = document_.nodes.flatMap((node) => (node.sourceTerms ?? []).map((term) => ({ node, term })))
+            .find(({ term }) => (term.parameters ?? []).some((parameter) => parameter.tuning));
+        assert.ok(tunableSourceTerm, 'Expected a source term with a tunable parameter in the committed document.');
+        const tunableSourceParameter = tunableSourceTerm.term.parameters.find((parameter) => parameter.tuning);
+        assert.equal(tunableSourceParameter.symbol, 'sourceBias');
+        assert.deepEqual(tunableSourceParameter.tuning, { minimum: -5, maximum: 5 });
+        const sourceBeforeValue = tunableSourceParameter.value;
         const targetStateId = tunableEdge.equationModel?.output?.stateId ?? tunableEdge.target.stateId;
         const targetNode = document_.nodes.find((node) => (node.states ?? []).some((state) => state.id === targetStateId));
         const targetState = targetNode.states.find((state) => state.id === targetStateId);
@@ -3214,14 +3256,14 @@ export async function runInteractionTests(window) {
             'The backend dropdown should list exactly the ids the engine binary itself reports supporting.');
         await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(csvLines.join('\n'))})`);
         await waitFor(window, `!document.querySelector('#parameterTuningParametersSection').hidden`, 'Tunable parameters section did not appear.', 5000);
-        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows > div').length`), 1);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows > div').length`), 2);
 
         await evaluate(window, `document.querySelector('#runParameterTuning').click()`);
         await waitFor(window, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'Review section did not appear after running the fit.', 60000);
         const report = await evaluate(window, `window.__debugParameterTuning.report()`);
-        assert.equal(report.finalParameters.length, 1);
-        assert.equal(report.finalParameters[0].parameterId, tunableParameter.id);
-        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningReviewRows label').length`), 1);
+        assert.equal(report.finalParameters.length, 2);
+        assert.deepEqual(new Set(report.finalParameters.map((entry) => entry.parameterId)), new Set([tunableParameter.id, tunableSourceParameter.id]));
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningReviewRows label').length`), 2);
 
         // renderParameterTuningComparison() runs one more simulation with the fitted values
         // applied and plots it against the measured CSV; it catches its own errors into a status
@@ -3237,16 +3279,25 @@ export async function runInteractionTests(window) {
             'Expected one measured, one simulated and one residual trace for the single mapped signal.');
 
         await evaluate(window, `document.querySelector('#commitParameterTuning').click()`);
-        await waitFor(window, `document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not close after apply.', 5000);
+        await waitFor(window, `document.querySelector('#parameterTuning').classList.contains('hidden') || document.querySelector('#parameterTuningReviewStatus').textContent.length > 0`, 'Tuning apply did not complete.', 5000);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningReviewStatus').textContent`), '', 'Applying both fitted parameter types should not report an error.');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuning').classList.contains('hidden')`), true, 'Tuning panel did not close after apply.');
         const after = await evaluate(window, `window.__debugCausalInference.document()`);
         const appliedParameter = after.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === tunableParameter.id);
-        assert.equal(appliedParameter.value, report.finalParameters[0].value,
-            'The committed document should carry the fitted value once applied.');
+        const appliedSourceParameter = after.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+            .find((parameter) => parameter.id === tunableSourceParameter.id);
+        assert.equal(appliedParameter.value, report.finalParameters.find((entry) => entry.parameterId === tunableParameter.id).value,
+            'The committed edge should carry its fitted value once applied.');
+        assert.equal(appliedSourceParameter.value, report.finalParameters.find((entry) => entry.parameterId === tunableSourceParameter.id).value,
+            'The committed source term should carry its fitted value once applied.');
 
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         const afterUndo = await evaluate(window, `window.__debugCausalInference.document()`);
         const undoneParameter = afterUndo.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === tunableParameter.id);
+        const undoneSourceParameter = afterUndo.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+            .find((parameter) => parameter.id === tunableSourceParameter.id);
         assert.equal(undoneParameter.value, beforeValue, 'Undo should restore the pre-fit parameter value in one step.');
+        assert.equal(undoneSourceParameter.value, sourceBeforeValue, 'The same undo should restore the source-term parameter value.');
         await evaluate(window, `document.querySelector('#redoButton').click()`);
     });
 

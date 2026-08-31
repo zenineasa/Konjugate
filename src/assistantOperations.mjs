@@ -52,7 +52,10 @@ function projectEntities(document) {
     for (const node of document.nodes) {
         entities.set(node.id, { kind: 'node', value: node });
         for (const state of node.states ?? []) entities.set(state.id, { kind: 'state', value: state, parent: node });
-        for (const term of node.sourceTerms ?? []) entities.set(term.id, { kind: 'sourceTerm', value: term, parent: node });
+        for (const term of node.sourceTerms ?? []) {
+            entities.set(term.id, { kind: 'sourceTerm', value: term, parent: node });
+            for (const parameter of term.parameters ?? []) entities.set(parameter.id, { kind: 'parameter', value: parameter, parent: term, owner: node });
+        }
     }
     for (const edge of document.edges) {
         entities.set(edge.id, { kind: 'edge', value: edge });
@@ -369,7 +372,8 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
             }
             const fields = changedFields(before, parameter);
             if (!fields.length) throw new AssistantProposalError('updateParameter must change at least one field.', operationIndex);
-            changes.push({ kind: operation.kind, action: 'update', entityId: parameter.id, focusEntityId: entity.parent.id, label: `Update parameter ${parameter.symbol} on “${entity.parent.name}”`, fields });
+            const owner = entity.owner ?? entity.parent;
+            changes.push({ kind: operation.kind, action: 'update', entityId: parameter.id, focusEntityId: owner.id, label: `Update parameter ${parameter.symbol} on “${owner.name}”`, fields });
             break;
         }
         case 'removeEntity': {
@@ -407,10 +411,14 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
                     if (usesState) clearEdgeEquation(edge);
                 });
             } else if (entity.kind === 'parameter') {
-                focusEntityId = entity.parent.id;
-                label = `Remove parameter ${entity.value.symbol} from “${entity.parent.name}”`;
+                const owner = entity.owner ?? entity.parent;
+                focusEntityId = owner.id;
+                label = `Remove parameter ${entity.value.symbol} from “${owner.name}”`;
                 entity.parent.parameters = entity.parent.parameters.filter((parameter) => parameter.id !== key);
                 if (entity.parent.equationModel?.bindings?.some((binding) => binding.parameterId === key)) clearEdgeEquation(entity.parent);
+                if (entity.parent.expressionModel?.bindings?.some((binding) => binding.parameterId === key)) {
+                    entity.parent.expressionModel.mathJson = null;
+                }
             } else {
                 focusEntityId = entity.parent.id;
                 label = `Remove source term from “${entity.parent.name}”`;

@@ -27,7 +27,10 @@ struct FittingSignalMapping {
 // boost::property_tree::ptree has no id-indexed lookup -- every trial clones the base document
 // and re-addresses the same position, which is stable because the clone has the same structure.
 struct TunableParameter {
+    bool sourceTerm = false;
     std::size_t edgeIndex = 0;
+    std::size_t nodeIndex = 0;
+    std::size_t sourceTermIndex = 0;
     std::size_t parameterIndex = 0;
     std::uint64_t parameterId = 0;
     std::string name;
@@ -35,7 +38,7 @@ struct TunableParameter {
     ParameterBounds bounds;
 };
 
-// Scans document.edges[].parameters[] for every entry with a "tuning" child, in document order.
+// Scans relationship and source-term parameters for every entry with a "tuning" child.
 std::vector<TunableParameter> findTunableParameters(const boost::property_tree::ptree& document);
 
 // Case-insensitive exact match of each CSV column name against every state's own symbol or

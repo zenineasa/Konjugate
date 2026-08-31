@@ -212,6 +212,15 @@ function hydrateProjectDocument(document) {
             if (!stateSymbols.has(term.state)) {
                 throw new Error(`A source term in “${node.name ?? node.id}” references a missing state symbol.`);
             }
+            const parameterSymbols = new Set();
+            (term.parameters ?? []).forEach((parameter) => {
+                registerId(parameter.id, `Every source-term parameter in “${node.name ?? node.id}” must have a unique positive integer id.`);
+                if (!modelSymbolPattern.test(parameter.symbol) || parameterSymbols.has(parameter.symbol)) {
+                    throw new Error(`Source-term parameter symbols in “${node.name ?? node.id}” must be unique lower camel case identifiers.`);
+                }
+                if (!['constant', 'live'].includes(parameter.mode)) throw new Error('Source-term parameter mode must be constant or live.');
+                parameterSymbols.add(parameter.symbol);
+            });
         });
         stateIdsByNode.set(node.id, stateIds);
     });
@@ -277,7 +286,7 @@ function hydrateProjectDocument(document) {
             deleted: false,
             enabled: node.enabled !== false,
             substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
-            sourceTerms: node.sourceTerms ?? [],
+            sourceTerms: (node.sourceTerms ?? []).map((term) => ({ ...term, parameters: term.parameters ?? [] })),
             states: (node.states ?? []).map((state) => ({
                 id: state.id,
                 label: state.name,
@@ -1734,8 +1743,17 @@ function sourceTermBindingCandidates(definition) {
     return definition.states.map((state) => ({ kind: 'state', stateId: state.id, symbol: state.symbol, label: state.symbol }));
 }
 
+function sourceTermExpressionBindingCandidates(definition, term) {
+    return [
+        ...sourceTermBindingCandidates(definition),
+        ...(term.parameters ?? []).map((parameter) => ({
+            kind: 'parameter', parameterId: parameter.id, symbol: parameter.symbol, label: parameter.symbol
+        }))
+    ];
+}
+
 function normalizeSourceTermExpressionModel(definition, term, expressionModel = term.expressionModel) {
-    const bindings = sourceTermBindingCandidates(definition);
+    const bindings = sourceTermExpressionBindingCandidates(definition, term);
     const base = expressionModel ?? {
         latex: term.expression ?? '',
         output: { stateId: definition.states.find((state) => state.symbol === term.state)?.id ?? null },
@@ -1779,11 +1797,13 @@ function changeSourceTermModel(node, termId, mutate) {
 }
 
 function sourceTermReferenceValue(reference) {
-    return `state:${reference.stateId}`;
+    return reference.kind === 'parameter' ? `parameter:${reference.parameterId}` : `state:${reference.stateId}`;
 }
 
 function sourceTermReferenceToBinding(key, reference) {
-    return { key, kind: 'state', stateId: reference.stateId };
+    return reference.kind === 'parameter'
+        ? { key, kind: 'parameter', parameterId: reference.parameterId }
+        : { key, kind: 'state', stateId: reference.stateId };
 }
 
 function renderSourceTermProviderBindingRows(node, term) {
@@ -1791,7 +1811,7 @@ function renderSourceTermProviderBindingRows(node, term) {
     const container = $('#termProviderBindings');
     container.replaceChildren();
     const bindings = term.implementation?.bindings ?? [];
-    const candidates = sourceTermBindingCandidates(definition);
+    const candidates = sourceTermExpressionBindingCandidates(definition, term);
     if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
     bindings.forEach((binding, index) => {
         const row = document.createElement('div');
@@ -1823,12 +1843,83 @@ function renderSourceTermProviderBindingRows(node, term) {
     });
 }
 
+function renderSourceTermParameters(node, term) {
+    const container = $('#termParameters');
+    container.replaceChildren();
+    $('#termParameterError').textContent = '';
+    if (!(term.parameters ?? []).length) container.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
+    (term.parameters ?? []).forEach((parameter) => {
+        const control = normalizedParameterControl(parameter);
+        const tuning = normalizedParameterTuning(parameter);
+        const row = document.createElement('div');
+        row.className = 'editorParameterRow';
+        row.innerHTML = `
+            <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(parameter.name)}"></label>
+            <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(parameter.symbol)}"></label>
+            <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value)}"></label>
+            <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
+            <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
+            <button type="button" title="Remove parameter">×</button>
+            <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
+                <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
+                <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
+                <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+                <span class="parameterControlError" role="status"></span>
+            </div>
+            <label class="parameterTuningToggle"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' ? 'disabled' : ''}> Tunable (fitting target)</label>
+            <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
+                <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
+                <label class="parameterField"><span>Fitting maximum</span><input data-tuning-field="maximum" type="number" value="${tuning.maximum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
+                <span class="parameterTuningError" role="status"></span>
+            </div>`;
+        $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
+        const readControl = () => Object.fromEntries($$('[data-control-field]', row).map((input) => [input.dataset.controlField, Number(input.value)]));
+        const readTuning = () => Object.fromEntries($$('[data-tuning-field]', row).map((input) => [input.dataset.tuningField, Number(input.value)]));
+        const commit = (input) => {
+            const symbol = $('[data-field="symbol"]', row).value.trim();
+            const siblings = (term.parameters ?? []).filter((candidate) => candidate.id !== parameter.id);
+            if (!modelSymbolPattern.test(symbol) || siblings.some((candidate) => candidate.symbol === symbol)) {
+                $('#termParameterError').textContent = !modelSymbolPattern.test(symbol)
+                    ? `"${symbol}" is not a valid lower camel case symbol.` : 'Each parameter needs its own unique symbol.';
+                return;
+            }
+            const mode = $('[data-field="mode"]', row).value;
+            const value = Number($('[data-field="value"]', row).value) || 0;
+            if (mode === 'live' && parameterControlError(value, readControl())) return;
+            if ($('[data-field="tunable"]', row).checked && parameterTuningError(value, readTuning())) return;
+            changeSourceTermModel(node, term.id, (snapshotTerm) => {
+                const target = snapshotTerm.parameters.find((candidate) => candidate.id === parameter.id);
+                target.name = $('[data-field="name"]', row).value.trim();
+                target.symbol = symbol;
+                target.value = value;
+                target.unit = $('[data-field="unit"]', row).value.trim();
+                target.mode = mode;
+                if (mode === 'live') {
+                    target.control = readControl();
+                    delete target.tuning;
+                } else {
+                    delete target.control;
+                    if ($('[data-field="tunable"]', row).checked) target.tuning = readTuning();
+                    else delete target.tuning;
+                }
+            });
+        };
+        $$('input, select', row).forEach((input) => input.addEventListener('change', () => commit(input)));
+        $(':scope > button', row).addEventListener('click', () => changeSourceTermModel(node, term.id, (snapshotTerm) => {
+            snapshotTerm.parameters = snapshotTerm.parameters.filter((candidate) => candidate.id !== parameter.id);
+        }));
+        container.appendChild(row);
+    });
+}
+
 function renderSourceTermEditor(node, term) {
     const definition = node.userData.definition;
     $('#sourceTermEditorTitle').textContent = `${definition.title} · Source term`;
     const implementationKind = term.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
     $('#termImplementationKind').value = implementationKind;
+    term.parameters ??= [];
+    renderSourceTermParameters(node, term);
     $('#termEquationHeading').hidden = !isEquation;
     $('#termEquationDiagnostics').hidden = !isEquation;
     $('#termReferencePicker').hidden = !isEquation;
@@ -3795,9 +3886,7 @@ function updateLiveResultControls() {
     $$('.reviewControl').forEach((control) => { control.hidden = live; });
     $('#resultPlaybackRate').hidden = live;
     $('#simulationPacing').hidden = !live || activeResult?.pacing?.mode === 'fastest';
-    const liveParameters = model.relationships.flatMap((relationship) => (relationship.parameters ?? [])
-        .filter((parameter) => parameter.mode === 'live')
-        .map((parameter) => ({ relationship, parameter })));
+    const liveParameters = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
     const hasLiveControls = live && runLaunchSettings.online && liveParameters.length > 0;
     $('#liveParameterButton').hidden = !hasLiveControls;
     $('#liveParameterCount').textContent = liveParameters.length ? String(liveParameters.length) : '';
@@ -3852,18 +3941,26 @@ function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
     else liveParameterUpdateTimers.set(parameterId, setTimeout(apply, 50));
 }
 
+function parameterOwnersInModel() {
+    return [
+        ...model.relationships.flatMap((relationship) => (relationship.parameters ?? [])
+            .map((parameter) => ({ parameter, ownerLabel: relationship.title }))),
+        ...model.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
+            .map((parameter) => ({ parameter, ownerLabel: `${node.title} · source term` }))))
+    ];
+}
+
 function renderLiveParameterControls() {
     const container = $('#liveParameterRows');
     container.replaceChildren();
-    model.relationships.forEach((relationship) => (relationship.parameters ?? [])
-        .filter((parameter) => parameter.mode === 'live')
-        .forEach((parameter) => {
+    parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live')
+        .forEach(({ parameter, ownerLabel }) => {
             const { minimum, maximum, step } = liveParameterRange(parameter);
             const value = (liveParameterValues.get(parameter.id) ?? Number(parameter.value)) || 0;
             const row = document.createElement('div');
             row.className = 'liveParameterRow';
             row.innerHTML = `
-                <div class="liveParameterLabel"><strong>${escapeHtml(parameter.name)}</strong><small>${escapeHtml(relationship.title)}${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''}</small></div>
+                <div class="liveParameterLabel"><strong>${escapeHtml(parameter.name)}</strong><small>${escapeHtml(ownerLabel)}${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''}</small></div>
                 <button data-adjust="-1" type="button" aria-label="Decrease ${escapeHtml(parameter.name)}">−</button>
                 <input type="range" min="${minimum}" max="${maximum}" step="${step}" value="${value}" aria-label="${escapeHtml(parameter.name)}">
                 <button data-adjust="1" type="button" aria-label="Increase ${escapeHtml(parameter.name)}">+</button>
@@ -3883,7 +3980,7 @@ function renderLiveParameterControls() {
             $$('[data-adjust]', row).forEach((button) => button.addEventListener('click', () =>
                 setValue((Number(numberInput.value) || 0) + Number(button.dataset.adjust) * step, true)));
             container.appendChild(row);
-        }));
+        });
 }
 
 function applyLiveResult(jobId, result) {
@@ -4163,9 +4260,9 @@ async function initializeAddonToolstripContributions() {
 async function startSimulation() {
     if (simulationRunning || !currentValidation.valid) return;
     simulationRunning = true;
-    liveParameterValues = new Map(model.relationships.flatMap((relationship) =>
-        (relationship.parameters ?? []).filter((parameter) => parameter.mode === 'live')
-            .map((parameter) => [parameter.id, Number(parameter.value) || 0])));
+    liveParameterValues = new Map(parameterOwnersInModel()
+        .filter(({ parameter }) => parameter.mode === 'live')
+        .map(({ parameter }) => [parameter.id, Number(parameter.value) || 0]));
     if (pendingRestart && activeResult) {
         activeResult = { ...activeResult, lifecycle: 'running' };
         updateLiveResultControls();
@@ -4589,18 +4686,11 @@ function serializeProjectDocument() {
                     unit: state.unit ?? ''
                 })),
                 sourceTerms: (node.sourceTerms ?? []).map((term) => {
-                    const bindings = node.states.map((state) => ({
-                        kind: 'state', nodeId: node.id, stateId: state.id, symbol: state.symbol
-                    }));
-                    const validation = validateEquationLatex(term.expression, bindings);
+                    const normalized = normalizeSourceTermExpressionModel(node, term);
                     return {
                         ...term,
-                        expressionModel: {
-                            latex: term.expression,
-                            bindings,
-                            output: { stateId: node.states.find((state) => state.symbol === term.state)?.id ?? null },
-                            mathJson: validation.valid ? validation.mathJson : null
-                        }
+                        parameters: term.parameters ?? [],
+                        ...(!term.implementation ? { expressionModel: normalized } : {})
                     };
                 }),
                 appearance: node.importedGeometry
@@ -5722,6 +5812,18 @@ function findTunableParametersInModel() {
             }
         }
     }
+    for (const node of document.nodes) {
+        for (const term of node.sourceTerms ?? []) {
+            for (const parameter of term.parameters ?? []) {
+                if (parameter.tuning) {
+                    found.push({
+                        nodeId: node.id, sourceTermId: term.id, ownerName: `${node.name} · source term`, parameterId: parameter.id,
+                        name: parameter.name, symbol: parameter.symbol, value: parameter.value, tuning: parameter.tuning
+                    });
+                }
+            }
+        }
+    }
     return found;
 }
 
@@ -5787,7 +5889,7 @@ function renderParameterTuningParameters() {
         const row = document.createElement('div');
         row.className = 'causalInferenceMappingRow';
         const label = document.createElement('span');
-        label.textContent = `${parameter.edgeName} · ${parameter.symbol}`;
+        label.textContent = `${parameter.edgeName ?? parameter.ownerName} · ${parameter.symbol}`;
         const range = document.createElement('span');
         range.textContent = `current ${parameter.value}, bounds [${parameter.tuning.minimum}, ${parameter.tuning.maximum}]`;
         row.append(label, range);
@@ -5802,7 +5904,7 @@ async function loadParameterTuningCsv(content) {
         const tunableParameters = findTunableParametersInModel();
         if (!tunableParameters.length) {
             status.className = 'equationDiagnostics';
-            status.textContent = 'No parameters are marked "Tunable" yet -- mark at least one in a relationship editor first.';
+            status.textContent = 'No parameters are marked "Tunable" yet -- mark at least one in a relationship or source-term editor first.';
             return;
         }
         // Existing-states-only: unlike causal inference, tuning never creates a node -- it fits a
@@ -5866,7 +5968,7 @@ function renderParameterTuningReview() {
         checkbox.dataset.parameterId = String(entry.parameterId);
         const main = document.createElement('span');
         main.className = 'causalInferenceCandidateMain';
-        main.textContent = `${parameter.edgeName} · ${parameter.symbol}: ${parameter.value} → `
+        main.textContent = `${parameter.edgeName ?? parameter.ownerName} · ${parameter.symbol}: ${parameter.value} → `
             + (isFinite_ ? Number(entry.value).toPrecision(6) : 'not finite (fit diverged, cannot apply)');
         row.append(checkbox, main);
         container.append(row);
@@ -5909,6 +6011,9 @@ async function renderParameterTuningComparison() {
                 if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
             });
         });
+        document_.nodes.forEach((node) => (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => {
+            if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
+        })));
 
         const runResult = await window.engine.run(JSON.stringify(document_), { globalTimeStep: timeStep, outputInterval: timeStep, targetTime });
         if (!runResult.available) throw new Error('The native simulation engine is unavailable.');
@@ -7039,6 +7144,20 @@ $('#termOutputState').addEventListener('change', (event) => {
         }
     });
 });
+$('#termAddParameter').addEventListener('click', () => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    changeSourceTermModel(node, selectedSourceTermId, (term) => {
+        term.parameters ??= [];
+        const used = new Set(term.parameters.map((parameter) => parameter.symbol));
+        let suffix = term.parameters.length + 1;
+        while (used.has(`parameter${suffix}`)) suffix += 1;
+        term.parameters.push({
+            id: allocateModelEntityId(), name: `Parameter ${suffix}`, symbol: `parameter${suffix}`,
+            value: 1, unit: '', mode: 'constant'
+        });
+    });
+});
 $('#termImplementationKind').addEventListener('change', (event) => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
@@ -7947,7 +8066,7 @@ $('#createNode').addEventListener('click', () => {
             const kind = $('.sourceTermKind', row)?.value ?? 'equation';
             const termId = allocateModelEntityId();
             if (kind === 'equation') {
-                return { id: termId, state: stateSymbol, expression: $('.sourceExpression', row).value.trim() };
+                return { id: termId, state: stateSymbol, expression: $('.sourceExpression', row).value.trim(), parameters: [] };
             }
             const bindings = $$('.providerBindingRow', row).map((bindingRow) => ({
                 key: $('[data-field="key"]', bindingRow).value.trim(),
@@ -7958,6 +8077,7 @@ $('#createNode').addEventListener('click', () => {
                 id: termId,
                 state: stateSymbol,
                 expression: '',
+                parameters: [],
                 implementation: {
                     kind,
                     providerApiVersion: 1,

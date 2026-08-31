@@ -522,6 +522,10 @@
                     <option value="python">Python program</option>
                 </select></label>
                 <label class="editorField"><span>Updates</span><select id="termOutputState"></select></label>
+                <h3>Parameters <button id="termAddParameter" type="button">＋</button></h3>
+                <p class="builderHint">Live parameters can be adjusted during an online simulation; constant parameters can be fitted against measured data.</p>
+                <div id="termParameters"></div>
+                <div class="passwordError" id="termParameterError" role="alert"></div>
                 <div id="termEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div>
                 <math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field>
                 <textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>

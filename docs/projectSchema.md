@@ -37,14 +37,14 @@ For an executable relationship, `equationModel` is required and contains:
 
 LaTeX is never executed directly. Multiple relationships targeting the same state contribute additively to its derivative.
 
-Source terms use the same structure under `expressionModel`: integer-ID-backed local-state bindings, an output state, editable LaTeX, and executable MathJSON. Source terms and relationships targeting the same state are summed before each integration step.
+Source terms use the same structure under `expressionModel`: integer-ID-backed local-state and parameter bindings, an output state, editable LaTeX, and executable MathJSON. A source term may contain its own `parameters` array using exactly the relationship parameter shape described above, including mutually exclusive live-control and tuning bounds. Parameter ownership is local to that source term; symbols need only be unique within it. Source terms and relationships targeting the same state are summed before each integration step.
 
 An edge or source term may be programmable instead of an equation: it carries an `implementation` object (in place of `equationModel`/`expressionModel`) and its own top-level `expression`/`equation` field is left empty. `implementation` contains:
 
 - `kind`: `cpp` or `python`.
 - `providerApiVersion`: integer, currently `1`.
 - `source`: the inline C++ or Python source text the user authored in the Provider Editor, or (for Python) a path to a standalone script.
-- `bindings`: an array naming the provider's own port keys. A state binding is `{ key, kind: "state", nodeId, stateId }`; an edge may also bind `{ key, kind: "parameter", parameterId }`. No `role` is needed on a binding (unlike `equationModel`/`expressionModel` bindings) — it just names which state or parameter feeds that port key, for either a source term's one local side or either of an edge's two endpoints.
+- `bindings`: an array naming the provider's own port keys. A state binding is `{ key, kind: "state", nodeId, stateId }`; an edge or source term may also bind `{ key, kind: "parameter", parameterId }` to one of its own parameters. No `role` is needed on a binding (unlike `equationModel`/`expressionModel` bindings) — it just names which state or parameter feeds that port key, for either a source term's one local side or either of an edge's two endpoints.
 - `output`: `{ key, stateId }` for a source term, or `{ key, role, stateId }` for an edge — the port key the provider's `addGradient()` call fills, mapped to the state receiving the contribution (`role` disambiguates a bidirectional edge's two endpoints, exactly as it does for `equationModel`'s output).
 
 An installed provider may be referenced without embedding its source by using `kind: "plugin"`, `pluginId`, `pluginVersion` and `providerId` instead of `source`. Before validation and execution, the host resolves that reference to the installed plugin's declared `cpp` or `python` provider artifact. The version is required so numerical behavior is not silently changed by an upgrade. Plugin packages and their installation rules are documented in [Plugin development](pluginDevelopment.md).

@@ -101,9 +101,8 @@ SimulationSamples readSimulationSamples(const std::filesystem::path& path) {
 std::vector<TunableParameter> findTunableParameters(const boost::property_tree::ptree& document) {
     std::vector<TunableParameter> found;
     const auto edgesOptional = document.get_child_optional("edges");
-    if (!edgesOptional) return found;
     std::size_t edgeIndex = 0;
-    for (const auto& edgeEntry : *edgesOptional) {
+    if (edgesOptional) for (const auto& edgeEntry : *edgesOptional) {
         const auto& edge = edgeEntry.second;
         if (const auto parameterList = edge.get_child_optional("parameters")) {
             std::size_t parameterIndex = 0;
@@ -124,6 +123,34 @@ std::vector<TunableParameter> findTunableParameters(const boost::property_tree::
             }
         }
         ++edgeIndex;
+    }
+    if (const auto nodes = document.get_child_optional("nodes")) {
+        std::size_t nodeIndex = 0;
+        for (const auto& nodeEntry : *nodes) {
+            std::size_t sourceTermIndex = 0;
+            if (const auto terms = nodeEntry.second.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
+                std::size_t parameterIndex = 0;
+                if (const auto parameters = termEntry.second.get_child_optional("parameters")) for (const auto& parameterEntry : *parameters) {
+                    const auto& parameter = parameterEntry.second;
+                    if (parameter.get_child_optional("tuning")) {
+                        TunableParameter tunable;
+                        tunable.sourceTerm = true;
+                        tunable.nodeIndex = nodeIndex;
+                        tunable.sourceTermIndex = sourceTermIndex;
+                        tunable.parameterIndex = parameterIndex;
+                        tunable.parameterId = parameter.get<std::uint64_t>("id");
+                        tunable.name = parameter.get<std::string>("name", "");
+                        tunable.initialValue = parameter.get<double>("value");
+                        tunable.bounds.minimum = parameter.get<double>("tuning.minimum");
+                        tunable.bounds.maximum = parameter.get<double>("tuning.maximum");
+                        found.push_back(std::move(tunable));
+                    }
+                    ++parameterIndex;
+                }
+                ++sourceTermIndex;
+            }
+            ++nodeIndex;
+        }
     }
     return found;
 }
@@ -164,10 +191,12 @@ double evaluateFittingLoss(const FittingProblem& problem, const std::vector<doub
     // ptree assignment is a deep copy -- each trial gets its own document, the base is untouched.
     boost::property_tree::ptree document = problem.baseDocument;
     auto& edges = document.get_child("edges");
+    auto& nodes = document.get_child("nodes");
     for (std::size_t index = 0; index < problem.tunableParameters.size(); ++index) {
         const auto& tunable = problem.tunableParameters[index];
-        auto& edge = childAt(edges, tunable.edgeIndex);
-        auto& parameters = edge.get_child("parameters");
+        auto& parameters = tunable.sourceTerm
+            ? childAt(childAt(nodes, tunable.nodeIndex).get_child("sourceTerms"), tunable.sourceTermIndex).get_child("parameters")
+            : childAt(edges, tunable.edgeIndex).get_child("parameters");
         childAt(parameters, tunable.parameterIndex).put("value", parameterValues[index]);
     }
 

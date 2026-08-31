@@ -22,11 +22,28 @@ function remapEquationModel(equationModel, ids) {
     };
 }
 
+function remapImplementation(implementation, ids) {
+    if (!implementation) return implementation;
+    return {
+        ...structuredClone(implementation),
+        bindings: (implementation.bindings ?? []).map((binding) => ({
+            ...structuredClone(binding),
+            ...(ids.has(binding.nodeId) ? { nodeId: ids.get(binding.nodeId) } : {}),
+            ...(ids.has(binding.stateId) ? { stateId: ids.get(binding.stateId) } : {}),
+            ...(ids.has(binding.parameterId) ? { parameterId: ids.get(binding.parameterId) } : {})
+        })),
+        ...(implementation.output ? { output: {
+            ...structuredClone(implementation.output),
+            ...(ids.has(implementation.output.stateId) ? { stateId: ids.get(implementation.output.stateId) } : {})
+        } } : {})
+    };
+}
+
 function fragmentEntityIds(fragment) {
     return fragment.nodes.flatMap((node) => [
         node.id,
         ...(node.states ?? []).map((state) => state.id),
-        ...(node.sourceTerms ?? []).map((term) => term.id)
+        ...(node.sourceTerms ?? []).flatMap((term) => [term.id, ...(term.parameters ?? []).map((parameter) => parameter.id)])
     ]).concat(fragment.edges.flatMap((edge) => [edge.id, ...(edge.parameters ?? []).map((parameter) => parameter.id)]));
 }
 
@@ -65,7 +82,9 @@ export function remapGraphFragment(fragment, firstId, positionOffset = [1, 0, 1]
         sourceTerms: (node.sourceTerms ?? []).map((term) => ({
             ...structuredClone(term),
             id: ids.get(term.id),
-            ...(term.expressionModel ? { expressionModel: remapEquationModel(term.expressionModel, ids) } : {})
+            parameters: (term.parameters ?? []).map((parameter) => ({ ...structuredClone(parameter), id: ids.get(parameter.id) })),
+            ...(term.expressionModel ? { expressionModel: remapEquationModel(term.expressionModel, ids) } : {}),
+            ...(term.implementation ? { implementation: remapImplementation(term.implementation, ids) } : {})
         }))
     }));
     const edges = fragment.edges.map((edge) => ({
@@ -75,6 +94,7 @@ export function remapGraphFragment(fragment, firstId, positionOffset = [1, 0, 1]
         source: { ...structuredClone(edge.source), nodeId: ids.get(edge.source.nodeId), ...(ids.has(edge.source.stateId) ? { stateId: ids.get(edge.source.stateId) } : {}) },
         target: { ...structuredClone(edge.target), nodeId: ids.get(edge.target.nodeId), ...(ids.has(edge.target.stateId) ? { stateId: ids.get(edge.target.stateId) } : {}) },
         equationModel: remapEquationModel(edge.equationModel, ids),
+        ...(edge.implementation ? { implementation: remapImplementation(edge.implementation, ids) } : {}),
         parameters: (edge.parameters ?? []).map((parameter) => ({ ...structuredClone(parameter), id: ids.get(parameter.id) }))
     }));
     return { nodes, edges, nextId };

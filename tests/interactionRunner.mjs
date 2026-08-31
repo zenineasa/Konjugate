@@ -3360,5 +3360,24 @@ export async function runInteractionTests(window) {
         }
     });
 
+    await run('source terms expose parameters to equations and programmable bindings', async () => {
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
+        await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
+        await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(window, `document.querySelector('#termAddParameter').click()`);
+        await evaluate(window, `(() => {
+            const row = document.querySelector('#termParameters .editorParameterRow');
+            row.querySelector('[data-field="name"]').value = 'Source gain';
+            row.querySelector('[data-field="symbol"]').value = 'sourceGain';
+            row.querySelector('[data-field="value"]').value = '2';
+            row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#termStateReferenceChips button')].some((button) => button.textContent === 'sourceGain')`), true);
+        await evaluate(window, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'sourceGain').click()`);
+        await waitFor(window, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The source-term parameter was not accepted by the equation editor.');
+        await evaluate(window, `(() => { const select = document.querySelector('#termImplementationKind'); select.value = 'cpp'; select.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#termAddProviderBinding').click(); })()`);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#termProviderBindings option')].some((option) => option.textContent === 'sourceGain')`), true);
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

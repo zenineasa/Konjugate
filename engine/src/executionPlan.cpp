@@ -212,6 +212,10 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             task.outputStateIndex = localStateIndexes.at(task.outputStateId);
             task.bindings = compileBindings(term.get_child(termProgrammable ? "implementation.bindings" : "expressionModel.bindings"),
                 compiledNode.nodeId, true, plan.stateIndexes, localStateIndexes, termProgrammable ? "key" : "symbol");
+            if (const auto parameters = term.get_child_optional("parameters")) for (const auto& parameterItem : *parameters) {
+                const auto& parameter = parameterItem.second;
+                task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
+            }
             if (termProgrammable) {
                 task.implementation = termImplementationKind == "cpp"
                     ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;

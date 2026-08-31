@@ -330,7 +330,7 @@ The public SDK must remain independent of engine implementation types. It should
 
 ### Description and binding
 
-`describe()` declares provider-local input and output ports. It does not enumerate or acquire access to project states. The relationship or source-term editor binds those ports to concrete states and parameters using stable numeric model IDs, and the native validator approves the complete binding before a worker is initialized. A source term's bindings only ever reference its own node's states — there is no source/target duality and no node-level parameter concept, so a binding is simply `{key, kind: "state", stateId}` with no `nodeId`/`role`.
+`describe()` declares provider-local input and output ports. It does not enumerate or acquire access to project states. The relationship or source-term editor binds those ports to concrete states and parameters using stable numeric model IDs, and the native validator approves the complete binding before a worker is initialized. A source term's state bindings only ever reference its own node and therefore use `{key, kind: "state", stateId}` without `nodeId`/`role`; its parameter bindings use `{key, kind: "parameter", parameterId}` and may reference only parameters owned by that source term.
 
 For example:
 

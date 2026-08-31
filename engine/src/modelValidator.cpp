@@ -248,6 +248,38 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         if (const auto terms = node.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
             const auto& term = termEntry.second;
             registerId(value(term, "id"), "node", id, "Source term");
+            std::set<std::string> sourceParameterSymbols;
+            std::set<std::string> sourceParameterIds;
+            if (const auto parameters = term.get_child_optional("parameters")) for (const auto& parameterEntry : *parameters) {
+                const auto& parameter = parameterEntry.second;
+                registerId(value(parameter, "id"), "node", id, "Source-term parameter \"" + value(parameter, "name") + "\"");
+                sourceParameterIds.insert(value(parameter, "id"));
+                if (!nodeEnabled) continue;
+                const auto symbol = value(parameter, "symbol");
+                if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "node", id, "sourceTerms");
+                else if (!sourceParameterSymbols.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Source-term parameter symbols must be unique.", "node", id, "sourceTerms");
+                const auto mode = value(parameter, "mode");
+                if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "node", id, "sourceTerms");
+                if (parameter.get_child_optional("tuning")) {
+                    const auto minimum = parameter.get_optional<double>("tuning.minimum");
+                    const auto maximum = parameter.get_optional<double>("tuning.maximum");
+                    const auto initial = parameter.get_optional<double>("value");
+                    if (!minimum || !maximum || !initial || !std::isfinite(*minimum) || !std::isfinite(*maximum) ||
+                        !(*minimum < *maximum) || *initial < *minimum || *initial > *maximum) {
+                        add(result, "parameterTuningInvalid", "error", "Tunable parameter fitting bounds require minimum < maximum and an initial value within the bounds.", "node", id, "sourceTerms");
+                    }
+                }
+                if (mode == "live" && parameter.get_child_optional("control")) {
+                    const auto minimum = parameter.get_optional<double>("control.minimum");
+                    const auto maximum = parameter.get_optional<double>("control.maximum");
+                    const auto step = parameter.get_optional<double>("control.step");
+                    const auto initial = parameter.get_optional<double>("value");
+                    if (!minimum || !maximum || !step || !initial || !std::isfinite(*minimum) || !std::isfinite(*maximum) ||
+                        !std::isfinite(*step) || !(*minimum < *maximum) || !(*step > 0) || *initial < *minimum || *initial > *maximum) {
+                        add(result, "parameterControlInvalid", "error", "Live parameter slider settings require minimum < maximum, step > 0 and an initial value within the bounds.", "node", id, "sourceTerms");
+                    }
+                }
+            }
             if (!nodeEnabled) continue;
             const auto termImplementation = term.get_child_optional("implementation");
             const auto termImplementationKind = termImplementation ? value(*termImplementation, "kind") : "equation";
@@ -282,7 +314,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     } else if (!providerKeys.insert(key).second) {
                         add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "sourceTerms");
                     }
-                    if (value(binding, "kind") != "state" || !stateIds[id].contains(value(binding, "stateId"))) {
+                    if (value(binding, "kind") == "parameter") {
+                        if (!sourceParameterIds.contains(value(binding, "parameterId"))) add(result, "providerBindingMissing", "error", "Provider binding references a missing source-term parameter.", "node", id, "sourceTerms");
+                    } else if (value(binding, "kind") != "state" || !stateIds[id].contains(value(binding, "stateId"))) {
                         add(result, "providerBindingMissing", "error", "Provider binding references a missing local state.", "node", id, "sourceTerms");
                     }
                 }
@@ -306,7 +340,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (const auto bindings = term.get_child_optional("expressionModel.bindings")) {
                     for (const auto& binding : *bindings) {
                         executableSymbols.insert(value(binding.second, "symbol"));
-                        if (!stateIds[id].contains(value(binding.second, "stateId"))) {
+                        if (value(binding.second, "kind") == "parameter") {
+                            if (!sourceParameterIds.contains(value(binding.second, "parameterId"))) add(result, "sourceBindingMissing", "error", "Source term binding references a missing parameter.", "node", id, "sourceTerms");
+                        } else if (!stateIds[id].contains(value(binding.second, "stateId"))) {
                             add(result, "sourceBindingMissing", "error", "Source term binding references a missing local state.", "node", id, "sourceTerms");
                         }
                     }

@@ -90,19 +90,21 @@ const sourceProject = JSON.parse(project);
 sourceProject.nodes[0].states[0].initialValue = 1;
 sourceProject.nodes[0].numerics = { substepsPerGlobalStep: 2 };
 sourceProject.nodes[0].sourceTerms.push({
-    id: 3, state: 'state', expression: 'state',
+    id: 3, state: 'state', expression: 'gain * state',
+    parameters: [{ id: 4, name: 'Gain', symbol: 'gain', value: 2, unit: '1/s', mode: 'constant' }],
     expressionModel: {
-        latex: 'state', bindings: [{
+        latex: 'gain * state', bindings: [{
             kind: 'state', nodeId: 1,
             stateId: 2, symbol: 'state'
-        }], output: { stateId: 2 }, mathJson: 'state'
+        }, { kind: 'parameter', parameterId: 4, symbol: 'gain' }],
+        output: { stateId: 2 }, mathJson: ['Multiply', 'gain', 'state']
     }
 });
 await writeFile(input, await encodeProjectFile(JSON.stringify(sourceProject)));
 await writeFile(join(directory, 'sourceRun.json'), JSON.stringify({ name: 'Subcycling', targetTime: 0.1, globalTimeStep: 0.1, outputInterval: 0.1 }));
 assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'sourceRun.json'), '--output', join(directory, 'sourceResult.bin')]), 0);
 const sourceResult = decodeResultFile(await readFile(join(directory, 'sourceResult.bin')));
-assert.ok(Math.abs(sourceResult.states[0].value - 1.1025) < 1e-12);
+assert.ok(Math.abs(sourceResult.states[0].value - 1.21) < 1e-12);
 assert.deepEqual(sourceResult.nodeTimesteps[0], {
     nodeId: 1, substepsPerGlobalStep: 2, effectiveTimeStep: 0.05
 });

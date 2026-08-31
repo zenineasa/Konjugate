@@ -230,8 +230,13 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             }
         }
     }));
-    const liveParameterIds = new Set(JSON.parse(content).edges.flatMap((edge) =>
-        (edge.parameters ?? []).filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)));
+    const parsedDocument = JSON.parse(content);
+    const liveParameterIds = new Set([
+        ...parsedDocument.edges.flatMap((edge) => (edge.parameters ?? [])
+            .filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)),
+        ...parsedDocument.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
+            .filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)))
+    ]);
     const child = spawn(executable, [
         'run', inputPath,
         '--configuration', configurationPath,

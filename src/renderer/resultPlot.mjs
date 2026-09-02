@@ -142,6 +142,14 @@ export class ResultPlot {
     }
 }
 
+// Konjugate's own validated categorical slots 1 (blue) and 2 (orange) -- see the dataviz skill's
+// reference palette, dark-mode column, passed through the palette's six-check validator against
+// this app's real panel surface (#111d27): worst adjacent CVD Delta E 9.4, normal-vision 26.5,
+// both >= 3:1 contrast. A same-hue lighten/darken pair was tried first and, in real use, wasn't
+// distinguishable enough -- two genuinely different hues read far more clearly at a glance.
+const simulatedColor = '#3987e5';
+const measuredColor = '#d95926';
+
 // A one-shot, static comparison for the digital-twin tuning review step: measured versus
 // simulated (with the just-fitted parameter values applied) for each mapped signal, plus a
 // residual (simulated - measured) sub-trace on its own subplot underneath. Deliberately a plain
@@ -150,30 +158,46 @@ export class ResultPlot {
 // static, review-only comparison needs; every mapped signal shares one axis per subplot here
 // instead, which keeps this simple for the common case of a handful of mapped signals rather than
 // risking an under-tested multi-axis layout for a first version.
+//
+// Color now carries *measured vs. simulated* (fixed blue/orange, consistent across every entry),
+// not which signal -- reinforcing the dotted/solid distinction rather than a separate per-signal
+// identity. That's a deliberate trade: with more than one mapped entry, color no longer
+// disambiguates *which* signal is which (every entry's simulated line is blue, every measured
+// line is orange) -- the legend/hover still do, via each label carrying the entry's name (see
+// labelFor) whenever there's more than one entry, but two entries plotted close together are only
+// told apart by that label, not by hue. Revisit with small multiples if that turns out to matter
+// in practice; today's real usage is one mapped signal at a time.
+//
 // entries: [{ name, unit, times: number[], measured: number[], simulated: number[] }] -- times,
 // measured and simulated must already be the same length and index-paired per entry.
 export async function renderMeasuredVsSimulatedComparison(element, entries) {
     if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
+    const labelFor = (entry, kind) => (entries.length > 1 ? `${entry.name}: ${kind}` : kind);
     const traces = entries.flatMap((entry) => {
         const unitSuffix = entry.unit ? ` ${entry.unit}` : '';
         return [
+            // Simulated is listed first and Measured second so Plotly, which draws traces in
+            // array order (later = on top), draws the dotted measured line on top of the solid
+            // simulated one -- with the reverse order the solid line was covering the dots
+            // wherever the two nearly overlapped. legendrank keeps the legend itself reading
+            // Measured-then-Simulated (ground truth first) independent of this draw order.
             {
-                type: 'scatter', mode: 'lines', name: `${entry.name} (measured)`,
-                x: entry.times, y: entry.measured,
-                line: { width: 2, dash: 'dot' },
-                hovertemplate: `${entry.name} measured<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
-            },
-            {
-                type: 'scatter', mode: 'lines', name: `${entry.name} (simulated)`,
+                type: 'scatter', mode: 'lines', name: labelFor(entry, 'Simulated'), legendrank: 2,
                 x: entry.times, y: entry.simulated,
-                line: { width: 2 },
+                line: { width: 2, color: simulatedColor },
                 hovertemplate: `${entry.name} simulated<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
             },
             {
-                type: 'scatter', mode: 'lines', name: `${entry.name} (residual)`,
-                x: entry.times, y: entry.times.map((_, index) => entry.simulated[index] - entry.measured[index]),
+                type: 'scatter', mode: 'lines', name: labelFor(entry, 'Measured'), legendrank: 1,
+                x: entry.times, y: entry.measured,
+                line: { width: 2, dash: 'dot', color: measuredColor },
+                hovertemplate: `${entry.name} measured<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
+            },
+            {
+                type: 'scatter', mode: 'lines', name: `${entry.name} residual`, showlegend: false,
+                x: entry.times, y: entry.times.map((_, sampleIndex) => entry.simulated[sampleIndex] - entry.measured[sampleIndex]),
                 xaxis: 'x2', yaxis: 'y2',
-                line: { width: 1.5 },
+                line: { width: 2, color: simulatedColor },
                 hovertemplate: `${entry.name} residual<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
             }
         ];
@@ -181,17 +205,27 @@ export async function renderMeasuredVsSimulatedComparison(element, entries) {
     const allTimes = entries.flatMap((entry) => entry.times);
     const layout = {
         autosize: true,
-        margin: { l: 48, r: 18, t: 26, b: 34 },
+        margin: { l: 48, r: 18, t: 34, b: 34 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(7,15,21,.52)',
         font: { color: '#8297a1', family: 'system-ui, sans-serif', size: 9 },
         hovermode: 'x unified',
         showlegend: true,
-        legend: { orientation: 'h', x: 0, y: 1.16, yanchor: 'bottom', tracegroupgap: 8 },
-        xaxis: { range: paddedRange(allTimes, 0.04), gridcolor: '#1d303a', zerolinecolor: '#2b414c', anchor: 'y' },
-        xaxis2: { matches: 'x', gridcolor: '#1d303a', zerolinecolor: '#2b414c', anchor: 'y2' },
-        yaxis: { domain: [0.34, 1], gridcolor: '#1d303a', zerolinecolor: '#2b414c' },
-        yaxis2: { domain: [0, 0.22], title: 'Residual', gridcolor: '#1d303a', zerolinecolor: '#2b414c' }
+        legend: { orientation: 'h', x: 0, y: 1.14, yanchor: 'bottom', tracegroupgap: 12 },
+        xaxis: { range: paddedRange(allTimes, 0.04), gridcolor: '#1d303a', zerolinecolor: '#2b414c', anchor: 'y', automargin: true },
+        xaxis2: { matches: 'x', gridcolor: '#1d303a', zerolinecolor: '#2b414c', anchor: 'y2', automargin: true },
+        yaxis: { domain: [0.32, 1], gridcolor: '#1d303a', zerolinecolor: '#2b414c', automargin: true },
+        yaxis2: { domain: [0, 0.2], gridcolor: '#1d303a', zerolinecolor: '#2b414c', automargin: true },
+        // A horizontal paper-referenced annotation instead of a rotated yaxis2.title: a rotated
+        // title needs vertical room along its own axis span to draw, and this subplot's domain
+        // (20% of a container that's already only ~250px of actual plotting area) isn't tall
+        // enough for one -- confirmed by screenshot, the title silently never rendered at any
+        // margin setting. A horizontal label has no such constraint and reads better here anyway.
+        annotations: [{
+            text: 'Residual', xref: 'paper', yref: 'paper', x: 0, y: 0.2,
+            xanchor: 'left', yanchor: 'bottom', showarrow: false,
+            font: { color: '#8297a1', size: 9 }
+        }]
     };
     await globalThis.Plotly.newPlot(element, traces, layout, {
         responsive: true,

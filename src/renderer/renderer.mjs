@@ -6035,8 +6035,16 @@ async function renderParameterTuningComparison() {
         }).filter((entry) => entry.simulated.every(Number.isFinite));
 
         if (!entries.length) throw new Error('Could not align the simulated result with the measured data.');
-        await renderMeasuredVsSimulatedComparison(plotElement, entries);
+        // Unhidden *before* rendering, not after: Plotly.newPlot() measures the container's actual
+        // clientWidth/clientHeight at render time to size itself, even with responsive: true. A
+        // still-hidden ([hidden] { display: none; }) element measures 0x0, so Plotly silently
+        // falls back to an internal default width (~700px) instead of the real ~430px panel width
+        // -- nothing later tells it to re-measure once revealed, so the oversized plot just
+        // overflows the panel horizontally forever. Confirmed via a real screenshot: the whole
+        // #parameterTuning panel had a 283px horizontal overflow traced directly to Plotly's own
+        // SVG rendering at 675px wide inside a 430px-wide container.
         plotElement.hidden = false;
+        await renderMeasuredVsSimulatedComparison(plotElement, entries);
         status.textContent = '';
     } catch (error) {
         status.className = 'equationDiagnostics';

@@ -225,6 +225,33 @@ export async function runInteractionTests(window) {
         assert.ok(BrowserWindow.getAllWindows().some((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide')), 'Example guide did not reopen.');
     });
 
+    await run('export simulation code writes a standalone C++ or Python program', async () => {
+        for (const [buttonId, extension, expectedFragment] of [
+            ['#exportCppButton', 'cpp', 'int main('],
+            ['#exportPythonButton', 'py', 'def run(']
+        ]) {
+            const exportPath = join(tmpdir(), `konjugate-interaction-code-export-${extension}-${Date.now()}.${extension}`);
+            const originalShowSaveDialog = dialog.showSaveDialog;
+            dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
+            let exportedSource = null;
+            try {
+                assert.equal(await evaluate(window, `document.querySelector('#exportCodeMenu').classList.contains('hidden')`), true);
+                await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+                await waitFor(window, `!document.querySelector('#exportCodeMenu').classList.contains('hidden')`, 'Export code menu did not open.');
+                await evaluate(window, `document.querySelector('${buttonId}').click()`);
+                for (let attempt = 0; attempt < 100 && exportedSource === null; attempt += 1) {
+                    try { exportedSource = await readFile(exportPath, 'utf8'); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
+                }
+            } finally {
+                dialog.showSaveDialog = originalShowSaveDialog;
+            }
+            assert.ok(exportedSource, `Export as ${extension} did not write a file.`);
+            assert.match(exportedSource, /time \(s\)/);
+            assert.ok(exportedSource.includes(expectedFragment), `Exported ${extension} source is missing an expected "${expectedFragment}" fragment.`);
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeMenu').classList.contains('hidden')`), true);
+        }
+    });
+
     await run('a second project window opens independently and does not affect the first', async () => {
         const before = BrowserWindow.getAllWindows();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);

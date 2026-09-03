@@ -54,6 +54,9 @@
                 <button id="exportCsvButton" type="button" aria-label="Export results as CSV" data-tooltip="Export results as CSV" disabled>
                     <img class="documentActionIcon" src="../../assets/exportCsv.svg" alt="">
                 </button>
+                <button id="exportCodeButton" type="button" aria-label="Export simulation code" data-tooltip="Export simulation code" aria-haspopup="menu">
+                    <img class="documentActionIcon" src="../../assets/exportCode.svg" alt="">
+                </button>
                 <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="dialog">
                     <span>Examples</span><i aria-hidden="true"></i>
                 </button>
@@ -80,6 +83,11 @@
     <div id="encryptionMenu" class="contextCard encryptionMenu hidden" role="menu">
         <button id="changePasswordButton" type="button" role="menuitem"><strong>Change password…</strong><span>Re-encrypt this file with a new password</span></button>
         <button id="removeEncryptionButton" type="button" role="menuitem"><strong>Remove encryption…</strong><span>Keep compression but remove password protection</span></button>
+    </div>
+
+    <div id="exportCodeMenu" class="contextCard encryptionMenu hidden" role="menu">
+        <button id="exportCppButton" type="button" role="menuitem"><strong>Export as C++ program…</strong><span>A standalone, compilable .cpp file that reproduces one run</span></button>
+        <button id="exportPythonButton" type="button" role="menuitem"><strong>Export as Python program…</strong><span>A standalone .py script that reproduces one run</span></button>
     </div>
 
     <div id="diagnosticsPanel" class="contextCard diagnosticsPanel hidden" role="dialog" aria-label="Diagnostics log">

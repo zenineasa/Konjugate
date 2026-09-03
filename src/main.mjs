@@ -1232,6 +1232,21 @@ ipcMain.handle('projectExportResultsCsv', async (event, { suggestedFilename, csv
     return { path, fileName: basename(path) };
 });
 
+ipcMain.handle('projectExportGeneratedProgram', async (event, { suggestedFilename, source, kind }) => {
+    const targetWindow = getWindowFromEvent(event);
+    const extension = kind === 'cpp' ? 'cpp' : 'py';
+    const result = await dialog.showSaveDialog(targetWindow, {
+        title: kind === 'cpp' ? 'Export as C++ program' : 'Export as Python program',
+        defaultPath: suggestedFilename || `results.${extension}`,
+        filters: [{ name: kind === 'cpp' ? 'C++' : 'Python', extensions: [extension] }]
+    });
+    if (result.canceled) return null;
+    let path = result.filePath;
+    if (!path.toLowerCase().endsWith(`.${extension}`)) path += `.${extension}`;
+    await writeFile(path, source, 'utf8');
+    return { path, fileName: basename(path) };
+});
+
 ipcMain.handle('projectConfirmDiscard', async (event) => {
     const result = await dialog.showMessageBox(getWindowFromEvent(event), {
         type: 'warning',

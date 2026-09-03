@@ -20,6 +20,7 @@ import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
+import { generateStandaloneProgram } from '../codeExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
 import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
 import {
@@ -4055,6 +4056,21 @@ async function exportResultsCsv() {
     }
 }
 
+async function exportGeneratedProgram(kind) {
+    $('#exportCodeMenu').classList.add('hidden');
+    try {
+        const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
+        document_.exportDefaultTargetTime = runLaunchSettings.targetTime;
+        const source = generateStandaloneProgram(document_, kind);
+        const extension = kind === 'cpp' ? 'cpp' : 'py';
+        const outcome = await window.projectFiles.exportGeneratedProgram(`${filenameStem(currentProjectFilename)}.${extension}`, source, kind);
+        if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
+    } catch (error) {
+        console.error('The simulation could not be exported as code.', error);
+        $('#statusText').textContent = 'Code export failed';
+    }
+}
+
 function requestCloseResultsConfirmation() {
     const dialog = $('#closeResultsDialog');
     const form = $('form', dialog);
@@ -4164,6 +4180,21 @@ $('#continueRun').addEventListener('click', () => {
 $('#closeResults').addEventListener('click', closeResultPlayback);
 $('#saveResults').addEventListener('click', () => saveProject());
 $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
+$('#exportCodeButton').addEventListener('click', (event) => {
+    const menu = $('#exportCodeMenu');
+    const rect = event.currentTarget.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, rect.right - 245)}px`;
+    menu.style.top = `${rect.bottom + 5}px`;
+    menu.classList.toggle('hidden');
+});
+$('#exportCodeMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
+$('#exportCppButton').addEventListener('click', () => exportGeneratedProgram('cpp'));
+$('#exportPythonButton').addEventListener('click', () => exportGeneratedProgram('python'));
+window.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('#exportCodeButton') && !event.target.closest('#exportCodeMenu')) {
+        $('#exportCodeMenu').classList.add('hidden');
+    }
+});
 window.addons.onRequest('timeline.seek', (time) => {
     if (!activeResult) return;
     stopResultPlayback();

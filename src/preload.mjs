@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('projectFiles', {
     unlock: (path, password) => ipcRenderer.invoke('projectUnlock', { path, password }),
     save: (path, content, suggestedFilename, password, resultSessionId) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password, resultSessionId }),
     exportResultsCsv: (suggestedFilename, csv) => ipcRenderer.invoke('projectExportResultsCsv', { suggestedFilename, csv }),
+    exportGeneratedProgram: (suggestedFilename, source, kind) => ipcRenderer.invoke('projectExportGeneratedProgram', { suggestedFilename, source, kind }),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });
 

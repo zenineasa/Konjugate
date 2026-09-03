@@ -206,6 +206,7 @@ function createProjectWindow(pendingFileOpen) {
             backgroundThrottling: false
         }
     });
+    window.maximize();
     projectWindows.add(window);
     projectWindowState.set(window, createProjectWindowState());
     if (pendingFileOpen) pendingWindowOpens.set(window, pendingFileOpen);

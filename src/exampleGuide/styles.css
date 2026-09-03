@@ -28,3 +28,13 @@ code { padding: 2px 5px; color: #83d7cf; background: #10242b; border-radius: 4px
 pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243944; border-radius: 7px; }
 .inlineMath { display: inline-block; padding: 0 2px; color: #d3e7e8; font-size: 1em; vertical-align: -.15em; }
 .equation { display: flex; width: 100%; min-height: 48px; margin: 16px 0; padding: 14px; align-items: center; justify-content: safe center; overflow-x: auto; color: #d3e7e8; background: rgb(66 201 188 / 6%); border-left: 2px solid #42c9bc; font-size: 17px; }
+/* One reusable card for every card-shaped content type this window shows (curated videos, recent
+   blog posts, and eventually sponsored content) -- see renderCard()/renderCardSection() in
+   renderer.mjs. Built entirely from colors already used elsewhere in this file, no new palette. */
+.cardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 14px 0 26px; }
+.card { display: flex; flex-direction: column; overflow: hidden; color: inherit; text-decoration: none; background: #10242b; border: 1px solid #243944; border-radius: 7px; transition: border-color .15s; }
+.card:hover, .card:focus-visible { border-color: #42c9bc; }
+.cardThumb { aspect-ratio: 16 / 9; overflow: hidden; background: #071017; }
+.cardThumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cardThumbPlaceholder { width: 100%; height: 100%; background: linear-gradient(135deg, #0d1e24, #142e35); }
+.cardTitle { padding: 8px 10px 10px; color: #cfe0e3; font-size: 11.5px; line-height: 1.4; }

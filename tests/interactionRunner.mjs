@@ -241,27 +241,27 @@ export async function runInteractionTests(window) {
         // (the first window has an example loaded by this point in the suite).
         assert.equal(await evaluate(second, `document.querySelectorAll('.node-label-container').length`), 0);
 
-        // An auxiliary window (About) opened from each project window stays scoped to its own
+        // An auxiliary window (Welcome) opened from each project window stays scoped to its own
         // parent -- win.getParentWindow() is a free, exact check since auxiliaryWindowPresentation
         // already sets `parent:` on every auxiliary window.
-        const findAboutWindowFor = async (parent) => {
+        const findWelcomeWindowFor = async (parent) => {
             const startedAt = Date.now();
             while (Date.now() - startedAt < 5000) {
-                const found = BrowserWindow.getAllWindows().find((candidate) => candidate.getParentWindow() === parent && candidate.getTitle().includes('About'));
+                const found = BrowserWindow.getAllWindows().find((candidate) => candidate.getParentWindow() === parent && candidate.getTitle().includes('Welcome'));
                 if (found) return found;
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
-            throw new Error('About window did not open for its project window.');
+            throw new Error('Welcome window did not open for its project window.');
         };
-        await evaluate(window, `window.applicationInfo.openAbout()`);
-        await evaluate(second, `window.applicationInfo.openAbout()`);
-        const aboutFromFirst = await findAboutWindowFor(window);
-        const aboutFromSecond = await findAboutWindowFor(second);
-        assert.notEqual(aboutFromFirst, aboutFromSecond, 'Each project window should get its own About window.');
-        aboutFromFirst.close();
+        await evaluate(window, `window.applicationInfo.openWelcome()`);
+        await evaluate(second, `window.applicationInfo.openWelcome()`);
+        const welcomeFromFirst = await findWelcomeWindowFor(window);
+        const welcomeFromSecond = await findWelcomeWindowFor(second);
+        assert.notEqual(welcomeFromFirst, welcomeFromSecond, 'Each project window should get its own Welcome window.');
+        welcomeFromFirst.close();
         await new Promise((resolve) => setTimeout(resolve, 200));
-        assert.ok(!aboutFromSecond.isDestroyed(), "Closing window A's About window must not affect window B's.");
-        aboutFromSecond.close();
+        assert.ok(!welcomeFromSecond.isDestroyed(), "Closing window A's Welcome window must not affect window B's.");
+        welcomeFromSecond.close();
 
         // Closing a project window must not quit the app or affect the other window.
         second.close();

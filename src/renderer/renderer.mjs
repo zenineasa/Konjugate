@@ -559,9 +559,9 @@ function initializeWindowControls() {
 initializeWindowControls();
 
 window.applicationInfo.get().then(({ version }) => {
-    $('#aboutButton').dataset.tooltip = `Konjugate · version ${version}`;
+    $('#welcomeButton').dataset.tooltip = `Konjugate · version ${version}`;
 });
-$('#aboutButton').addEventListener('click', () => window.applicationInfo.openAbout());
+$('#welcomeButton').addEventListener('click', () => window.applicationInfo.openWelcome());
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0a131b, 0.022);

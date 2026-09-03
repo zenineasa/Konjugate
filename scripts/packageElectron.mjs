@@ -54,7 +54,7 @@ export function createPackageOptions({ platform, arch, appVersion, icon, name, a
             'out/packageResources/engine',
             'thirdPartyNotices.md',
             'thirdPartyLicenses',
-            'docs/About.md',
+            'docs/welcome.md',
             'docs/causalInferenceInteractionHelp.md',
         ],
         ignore: shouldIgnorePackagePath,

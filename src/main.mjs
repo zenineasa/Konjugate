@@ -28,6 +28,9 @@ import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
+import { fetchRecentBlogPosts } from './welcomeContent.mjs';
+import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
+import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
 import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
@@ -268,16 +271,6 @@ async function checkForUpdates(window) {
     if (response === 0) shell.openExternal(update.url);
 }
 
-// Kept as one small mapping shared by both title-setting call sites in openGuideWindow below
-// (initial creation and reuse-existing-window), rather than inlining the ternary twice, since a
-// third guide kind was added after the original about/example-only version -- easy to miss
-// keeping two inline ternaries in sync when a fourth one shows up later.
-function guideKindSuffix(kind) {
-    if (kind === 'about') return 'About';
-    if (kind === 'help') return 'Help';
-    return 'Example Guide';
-}
-
 async function openGuideWindow(projectWindow, payload) {
     const state = projectWindowState.get(projectWindow);
     if (!state.exampleGuideWindow || state.exampleGuideWindow.isDestroyed()) {
@@ -324,24 +317,48 @@ async function openExampleGuide(projectWindow, id) {
 }
 
 // docs/ is excluded wholesale from packaging (see ignoredTopLevelDirectories in
-// packageElectron.mjs) -- About.md is shipped individually as its own extraResource instead,
+// packageElectron.mjs) -- welcome.md is shipped individually as its own extraResource instead,
 // which @electron/packager copies flattened directly into Resources/, not Resources/docs/.
-function aboutMarkdownPath() {
-    return app.isPackaged ? join(process.resourcesPath, 'About.md') : join(currentDir, '..', 'docs', 'About.md');
+function welcomeMarkdownPath() {
+    return app.isPackaged ? join(process.resourcesPath, 'welcome.md') : join(currentDir, '..', 'docs', 'welcome.md');
 }
 
-async function openAboutWindow(projectWindow) {
-    const markdown = (await readFile(aboutMarkdownPath(), 'utf8'))
-        .replace('**runtime version**', `**${app.getVersion()}**`);
+// assets/ is never excluded from packaging (unlike docs/ above), so these need no extraResource
+// entry and no app.isPackaged branch -- same as the app icon reference a few lines up.
+const welcomeAssetsDir = join(currentDir, '..', 'assets', 'welcome');
+
+let welcomeVideoCardsCache = null;
+async function welcomeVideoCards() {
+    if (!welcomeVideoCardsCache) {
+        const manifest = JSON.parse(await readFile(join(welcomeAssetsDir, 'videos.json'), 'utf8'));
+        welcomeVideoCardsCache = manifest.videos.map((video) => ({
+            section: 'video',
+            title: video.title,
+            url: `https://www.youtube.com/watch?v=${video.videoId}`,
+            thumbnailUrl: pathToFileURL(join(welcomeAssetsDir, `${video.id}.jpg`)).href
+        }));
+    }
+    return welcomeVideoCardsCache;
+}
+
+async function openWelcomeWindow(projectWindow) {
+    const [markdown, videoCards, posts] = await Promise.all([
+        readFile(welcomeMarkdownPath(), 'utf8'),
+        welcomeVideoCards(),
+        fetchRecentBlogPosts()
+    ]);
+    const postCards = posts.map((post) => ({ section: 'post', title: post.title, url: post.link, thumbnailUrl: post.thumbnailUrl }));
     return openGuideWindow(projectWindow, {
         title: 'Konjugate',
+        version: app.getVersion(),
         markdown,
-        kind: 'about'
+        cards: [...videoCards, ...postCards],
+        kind: 'welcome'
     });
 }
 
-// Same docs/-exclusion-from-packaging reasoning as aboutMarkdownPath() above -- this doc needs
-// its own extraResource entry in packageElectron.mjs for the same reason About.md has one.
+// Same docs/-exclusion-from-packaging reasoning as welcomeMarkdownPath() above -- this doc needs
+// its own extraResource entry in packageElectron.mjs for the same reason welcome.md has one.
 function causalInferenceInteractionHelpMarkdownPath() {
     return app.isPackaged
         ? join(process.resourcesPath, 'causalInferenceInteractionHelp.md')
@@ -804,10 +821,17 @@ ipcMain.on('windowClose', (event) => {
 });
 
 ipcMain.handle('applicationInfo', () => ({ version: app.getVersion() }));
-ipcMain.handle('applicationOpenAbout', (event) => openAboutWindow(getWindowFromEvent(event)));
+ipcMain.handle('applicationOpenWelcome', (event) => openWelcomeWindow(getWindowFromEvent(event)));
 ipcMain.on('newProjectWindow', () => createProjectWindow());
+const allowedExternalLinkPrefixes = [
+    'https://discord.gg/',
+    'https://github.com/zenineasa/Konjugate/',
+    'https://www.youtube.com/',
+    'https://youtu.be/',
+    'https://www.konjugate.com/'
+];
 ipcMain.handle('applicationOpenExternal', (event, url) => {
-    if (typeof url !== 'string' || !['https://discord.gg/', 'https://github.com/zenineasa/Konjugate/'].some((prefix) => url.startsWith(prefix))) return false;
+    if (typeof url !== 'string' || !allowedExternalLinkPrefixes.some((prefix) => url.startsWith(prefix))) return false;
     shell.openExternal(url);
     return true;
 });
@@ -2002,10 +2026,12 @@ app.whenReady().then(async () => {
             }
         });
     }
+    if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(firstWindow);
 
     app.on('activate', () => {
         if (projectWindows.size === 0) {
-            createProjectWindow();
+            const window = createProjectWindow();
+            if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(window);
         }
     });
 });

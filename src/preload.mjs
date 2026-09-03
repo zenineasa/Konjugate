@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('windowControls', {
 
 contextBridge.exposeInMainWorld('applicationInfo', {
     get: () => ipcRenderer.invoke('applicationInfo'),
-    openAbout: () => ipcRenderer.invoke('applicationOpenAbout')
+    openWelcome: () => ipcRenderer.invoke('applicationOpenWelcome')
 });
 
 contextBridge.exposeInMainWorld('diagnostics', {

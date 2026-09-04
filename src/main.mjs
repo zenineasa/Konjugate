@@ -10,6 +10,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { generateFmuPackage } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
@@ -1244,6 +1245,24 @@ ipcMain.handle('projectExportGeneratedProgram', async (event, { suggestedFilenam
     let path = result.filePath;
     if (!path.toLowerCase().endsWith(`.${extension}`)) path += `.${extension}`;
     await writeFile(path, source, 'utf8');
+    return { path, fileName: basename(path) };
+});
+
+ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName }) => {
+    const targetWindow = getWindowFromEvent(event);
+    const buffer = await generateFmuPackage(document, {
+        modelName,
+        engineOptions: { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged }
+    });
+    const result = await dialog.showSaveDialog(targetWindow, {
+        title: 'Export as FMU',
+        defaultPath: suggestedFilename || 'model.fmu',
+        filters: [{ name: 'FMU', extensions: ['fmu'] }]
+    });
+    if (result.canceled) return null;
+    let path = result.filePath;
+    if (!path.toLowerCase().endsWith('.fmu')) path += '.fmu';
+    await writeFile(path, buffer);
     return { path, fileName: basename(path) };
 });
 

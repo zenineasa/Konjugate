@@ -133,6 +133,7 @@ add_executable(konjugateEngine
     src/partitionPlan.cpp
     src/partitionRuntime.cpp
     src/projectContainer.cpp
+    src/cppToolchain.cpp
     src/providerRuntime.cpp
     src/simulationRunner.cpp
     src/taskExecutor.cpp
@@ -174,9 +175,15 @@ install(TARGETS konjugateEngine RUNTIME DESTINATION .)
 # PYTHONPATH. See cppProviderSdkPath()/pythonProviderSdkPath() in engineAdapter.mjs, which
 # expect exactly this layout under the packaged resources directory.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/konjugate" DESTINATION include)
+# fmi2/ (the vendored FMI 2.0 headers) and fmiGlue.cpp are this same convention's FMU-export
+# sibling: buildSharedLibrary (main.cpp) compiles a generated model's source against
+# include/konjugate/simulationModel.hpp and links it against src/fmiGlue.cpp, exactly how
+# buildCppProvider() already compiles/links relationship providers against this same include dir.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi2" DESTINATION include)
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/fmiGlue.cpp"
     DESTINATION src
 )
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sdk/python/konjugate" DESTINATION sdk/python
@@ -236,6 +243,7 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
         src/modelValidator.cpp
+        src/cppToolchain.cpp
         src/providerRuntime.cpp
     )
     target_include_directories(relationshipProviderTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
@@ -270,6 +278,7 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
         src/modelValidator.cpp
+        src/cppToolchain.cpp
         src/providerRuntime.cpp
     )
     target_include_directories(nodeProviderRuntimeTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
@@ -281,6 +290,19 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
     )
+
+    add_executable(fmiGlueTests
+        tests/fmiGlueTests.cpp
+        src/fmiGlue.cpp
+    )
+    set_target_properties(fmiGlueTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(fmiGlueTests PRIVATE include)
+    add_test(NAME fmiGlueTests COMMAND fmiGlueTests)
 
     add_executable(causalInferenceTests
         tests/causalInferenceTests.cpp
@@ -334,6 +356,7 @@ if(BUILD_TESTING)
         src/parameterFittingReport.cpp
         src/partitionPlan.cpp
         src/partitionRuntime.cpp
+        src/cppToolchain.cpp
         src/providerRuntime.cpp
         src/simulationRunner.cpp
         src/taskExecutor.cpp
@@ -364,6 +387,7 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_SOURCES}
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
+        src/cppToolchain.cpp
         src/providerRuntime.cpp
     )
     target_include_directories(providerBatchingBenchmark PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")

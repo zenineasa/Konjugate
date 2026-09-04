@@ -31,7 +31,7 @@ export async function resolveEnginePath({ applicationPath, resourcesPath, packag
     return null;
 }
 
-function runEngine(executable, args, environment = {}, signal = null) {
+export function runEngine(executable, args, environment = {}, signal = null) {
     return new Promise((resolve, reject) => {
         const child = spawn(executable, args, {
             env: { ...process.env, ...environment },

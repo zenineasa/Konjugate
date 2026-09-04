@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
+import { unzipSync } from 'fflate';
 
 async function evaluate(window, expression) {
     return window.webContents.executeJavaScript(expression, true);
@@ -257,6 +258,38 @@ export async function runInteractionTests(window) {
             assert.ok(exportedSource.includes(expectedFragment), `Exported (${language}/${parallelism}) source is missing an expected "${expectedFragment}" fragment.`);
             assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false, 'Export dialog should close after a successful export.');
         }
+    });
+
+    await run('export simulation code as an FMU produces a real, valid FMI 2.0 Co-Simulation package', async () => {
+        const exportPath = join(tmpdir(), `konjugate-interaction-fmu-export-${Date.now()}.fmu`);
+        const originalShowSaveDialog = dialog.showSaveDialog;
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
+        let exportedBuffer = null;
+        try {
+            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
+            await evaluate(window, `document.querySelector('#exportCodeFormat').value = 'fmu'`);
+            await evaluate(window, `document.querySelector('#exportCodeFormat').dispatchEvent(new Event('change'))`);
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeLanguagePython').disabled`), true,
+                'Python should be unavailable once FMU format is selected.');
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelism').closest('label').hidden`), true,
+                'The Execution row has no meaning for an FMU export and should be hidden.');
+            await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+            for (let attempt = 0; attempt < 400 && exportedBuffer === null; attempt += 1) {
+                try { exportedBuffer = await readFile(exportPath); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
+            }
+        } finally {
+            dialog.showSaveDialog = originalShowSaveDialog;
+        }
+        assert.ok(exportedBuffer, 'FMU export did not write a file.');
+        const entries = unzipSync(exportedBuffer);
+        assert.ok(entries['modelDescription.xml'], 'The .fmu is missing modelDescription.xml.');
+        const xml = Buffer.from(entries['modelDescription.xml']).toString('utf8');
+        assert.match(xml, /fmiVersion="2\.0"/);
+        assert.match(xml, /<CoSimulation /);
+        const binaryEntry = Object.keys(entries).find((name) => name.startsWith('binaries/') && name !== 'binaries/');
+        assert.ok(binaryEntry, 'The .fmu is missing a compiled binaries/<platform>/ shared library.');
+        assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false, 'Export dialog should close after a successful export.');
     });
 
     await run('a second project window opens independently and does not affect the first', async () => {

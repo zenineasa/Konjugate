@@ -91,8 +91,9 @@
             <strong>Export simulation code</strong>
             <p>Generate a standalone program that reproduces one run of this model, with no
                 runtime dependency on Konjugate itself.</p>
-            <label><span>Language</span><select id="exportCodeLanguage"><option value="cpp">C++</option><option value="python">Python</option></select></label>
-            <label><span>Execution</span><select id="exportCodeParallelism"><option value="serial">Serial</option><option id="exportCodeParallelismOpenmp" value="openmp">OpenMP</option><option id="exportCodeParallelismStdThread" value="stdThread">std::thread</option><option value="mpi">MPI</option></select></label>
+            <label><span>Format</span><select id="exportCodeFormat"><option value="source">Standalone program</option><option value="fmu">FMU (FMI 2.0 Co-Simulation)</option></select></label>
+            <label><span>Language</span><select id="exportCodeLanguage"><option value="cpp">C++</option><option id="exportCodeLanguagePython" value="python">Python</option></select></label>
+            <label><span>Execution</span><select id="exportCodeParallelism"><option value="serial">Serial</option><option id="exportCodeParallelismOpenmp" value="openmp">OpenMP</option><option id="exportCodeParallelismStdThread" value="stdThread">std::thread</option><option id="exportCodeParallelismMpi" value="mpi">MPI</option></select></label>
             <div class="passwordError" id="exportCodeError" role="alert"></div>
             <footer><button id="exportCodeCancel" type="button">Cancel</button><button id="exportCodeSubmit" class="doneButton" type="submit">Export…</button></footer>
         </form>

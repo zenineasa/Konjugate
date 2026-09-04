@@ -24,7 +24,7 @@ const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
 const minimumArgumentCounts = { Negate: 1, Divide: 2, Power: 2, Sqrt: 1, Abs: 1, Exp: 1, Ln: 1, Log: 1, Sin: 1, Cos: 1, Tan: 1, Min: 2, Max: 2 };
 
-const cppOperators = {
+export const cppOperators = {
     Add: (args) => (args.length ? `(${args.join(' + ')})` : '0.0'),
     Multiply: (args) => (args.length ? `(${args.join(' * ')})` : '1.0'),
     Negate: (args) => `(-${args[0]})`,
@@ -64,7 +64,7 @@ const pythonOperators = {
     Max: (args) => `max(${args[0]}, ${args[1]})`
 };
 
-function doubleLiteral(value) {
+export function doubleLiteral(value) {
     if (!Number.isFinite(value)) throw new Error(`Cannot embed a non-finite constant (${value}) in generated code.`);
     return Object.is(value, -0) ? '-0.0' : String(value);
 }
@@ -73,7 +73,7 @@ function csvField(value) {
     return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-function compileExpressionNode(node) {
+export function compileExpressionNode(node) {
     if (Array.isArray(node)) {
         const [operator, ...args] = node;
         return { op: operator, args: args.map(compileExpressionNode) };
@@ -82,7 +82,7 @@ function compileExpressionNode(node) {
     return numericLiteralPattern.test(text) ? { literal: Number(text) } : { symbol: text };
 }
 
-function emitExpression(node, symbols, operators) {
+export function emitExpression(node, symbols, operators) {
     if ('literal' in node) return doubleLiteral(node.literal);
     if ('symbol' in node) {
         const resolved = symbols.get(node.symbol);
@@ -99,7 +99,7 @@ function emitExpression(node, symbols, operators) {
 // ---- graph build: mirrors engine/src/executionPlan.cpp's compileExecutionPlan exactly enough to
 // reproduce its numerics, without needing any of its parallel-execution/checkpoint machinery. ----
 
-function buildModel(document) {
+export function buildModel(document) {
     const enabledNodes = (document.nodes ?? []).filter((node) => node.enabled !== false);
     const disabledNodeIds = new Set((document.nodes ?? []).filter((node) => node.enabled === false).map((node) => node.id));
     const stateOwnerNodeId = new Map();
@@ -189,7 +189,11 @@ function buildContribution(spec, stateRecord) {
         if (binding.kind === 'parameter') {
             const parameter = (parameters ?? []).find((item) => item.id === binding.parameterId);
             if (!parameter) throw new Error(`The ${entityLabel} has an unresolved parameter binding.`);
-            symbols.set(key, { text: doubleLiteral(parameter.value), comment: parameter.symbol });
+            // `parameter` is also exposed on the symbol entry (beyond text/comment) so a caller
+            // that cares about liveness -- fmiCodeGen.mjs, which exposes a live parameter as a
+            // real FMI input rather than baking it, unlike this module's own C++/Python export --
+            // can tell without re-deriving the binding. Existing callers only read text/comment.
+            symbols.set(key, { text: doubleLiteral(parameter.value), comment: parameter.symbol, parameter });
         } else {
             const record = stateRecord.get(binding.stateId);
             if (!record) throw new Error(`The ${entityLabel} references a disabled or missing state.`);
@@ -222,7 +226,7 @@ function buildNodeProvider(plan, stateRecord) {
 // ---- provider blocking + registry: validates every provider-bearing entity up front (no partial
 // output is ever emitted) and assigns each a stable, collision-free instance name. ----
 
-function collectProviders(model, kind) {
+export function collectProviders(model, kind) {
     const providers = [];
     const visit = (owner) => {
         if (!owner.implementation) return;
@@ -248,7 +252,7 @@ function collectProviders(model, kind) {
     return providers;
 }
 
-function stripLeadingCppInclude(source) {
+export function stripLeadingCppInclude(source) {
     return source.replace(/^#include\s*<konjugate\/relationshipProvider\.hpp>\s*\n/, '');
 }
 
@@ -400,7 +404,7 @@ function commentLines(symbols, prefix, marker) {
 
 // ---- C++ ----
 
-function emitCppRegularContribution(contribution) {
+export function emitCppRegularContribution(contribution) {
     const symbols = new Map(Array.from(contribution.symbols, ([key, value]) => [key, value.text]));
     const expression = emitExpression(compileExpressionNode(contribution.mathJson), symbols, cppOperators);
     return [
@@ -414,7 +418,7 @@ function emitCppRegularContribution(contribution) {
     ].filter(Boolean).join('\n');
 }
 
-function emitCppProviderContribution(contribution, info) {
+export function emitCppProviderContribution(contribution, info) {
     const keys = Array.from(contribution.symbols.keys());
     const values = keys.map((key) => contribution.symbols.get(key).text).join(', ') || '0.0';
     const keyLiterals = keys.map((key) => `std::string_view("${key}")`).join(', ') || 'std::string_view("")';
@@ -634,7 +638,7 @@ function generateCpp(model, providers, meta, document) {
     ].filter((line) => line !== null).join('\n');
 }
 
-const cppSdkNamespace = `namespace konjugate::sdk::v1 {
+export const cppSdkNamespace = `namespace konjugate::sdk::v1 {
 
 struct ScalarPort { std::string key; std::string name; std::string unit; };
 struct RelationshipDescription { std::string providerId; std::string name; std::vector<ScalarPort> inputs; ScalarPort output; };

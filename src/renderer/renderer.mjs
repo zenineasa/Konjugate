@@ -4071,6 +4071,22 @@ async function exportGeneratedProgram(kind, parallelism) {
     }
 }
 
+async function exportFmu() {
+    try {
+        const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
+        const modelName = filenameStem(currentProjectFilename);
+        // Unlike exportGeneratedProgram, the document itself (not a pre-rendered source string) is
+        // sent over IPC: generateFmuPackage runs in the main process, since it needs to spawn the
+        // engine binary to actually compile the model into a shared library (see src/fmiExport.mjs).
+        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName);
+        $('#exportCodeDialog').close();
+        if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
+    } catch (error) {
+        console.error('The simulation could not be exported as an FMU.', error);
+        $('#exportCodeError').textContent = error.message || 'FMU export failed.';
+    }
+}
+
 function requestCloseResultsConfirmation() {
     const dialog = $('#closeResultsDialog');
     const form = $('form', dialog);
@@ -4181,26 +4197,38 @@ $('#closeResults').addEventListener('click', closeResultPlayback);
 $('#saveResults').addEventListener('click', () => saveProject());
 $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
 // Python has no thread-based parallel option (the GIL means threads would not actually run this
-// CPU-bound loop in parallel -- see src/codeExport.mjs), but it does support mpi via mpi4py.
+// CPU-bound loop in parallel -- see src/codeExport.mjs), but it does support mpi via mpi4py. An
+// FMU is a compiled binary loaded as a single shared library by one host process, so it is C++
+// only (no Python option) and has no MPI mode either (see src/fmiCodeGen.mjs/docs/codeExport.md).
 function updateExportCodeFields() {
-    const isPython = $('#exportCodeLanguage').value === 'python';
+    const isFmu = $('#exportCodeFormat').value === 'fmu';
+    const languageField = $('#exportCodeLanguage');
     const parallelismField = $('#exportCodeParallelism');
+    $('#exportCodeLanguagePython').disabled = isFmu;
+    if (isFmu && languageField.value === 'python') languageField.value = 'cpp';
+    const isPython = languageField.value === 'python';
     $('#exportCodeParallelismOpenmp').disabled = isPython;
     $('#exportCodeParallelismStdThread').disabled = isPython;
+    $('#exportCodeParallelismMpi').disabled = isFmu;
     if (isPython && (parallelismField.value === 'openmp' || parallelismField.value === 'stdThread')) parallelismField.value = 'serial';
+    if (isFmu && parallelismField.value === 'mpi') parallelismField.value = 'serial';
+    parallelismField.closest('label').hidden = isFmu;
 }
 $('#exportCodeButton').addEventListener('click', () => {
+    $('#exportCodeFormat').value = 'source';
     $('#exportCodeLanguage').value = 'cpp';
     $('#exportCodeParallelism').value = 'serial';
     updateExportCodeFields();
     $('#exportCodeError').textContent = '';
     $('#exportCodeDialog').showModal();
 });
+$('#exportCodeFormat').addEventListener('change', updateExportCodeFields);
 $('#exportCodeLanguage').addEventListener('change', updateExportCodeFields);
 $('#exportCodeCancel').addEventListener('click', () => $('#exportCodeDialog').close());
 $('#exportCodeDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
-    exportGeneratedProgram($('#exportCodeLanguage').value, $('#exportCodeParallelism').value);
+    if ($('#exportCodeFormat').value === 'fmu') exportFmu();
+    else exportGeneratedProgram($('#exportCodeLanguage').value, $('#exportCodeParallelism').value);
 });
 window.addons.onRequest('timeline.seek', (time) => {
     if (!activeResult) return;

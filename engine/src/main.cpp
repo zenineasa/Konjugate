@@ -2,6 +2,7 @@
 
 #include "causalInference.hpp"
 #include "causalInferenceReport.hpp"
+#include "cppToolchain.hpp"
 #include "modelValidator.hpp"
 #include "nloptBackend.hpp"
 #include "parameterFitting.hpp"
@@ -146,6 +147,28 @@ int main(int argc, char** argv) {
                   << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}"
                   << ",\"optimizerBackendIds\":[" << backendIdsJson.str() << "]}\n";
         std::cout.flush();
+        std::_Exit(0);
+    }
+    // Generic native-build command, not specific to any one caller -- given an explicit source
+    // file and glue file (two ordinary C++ translation units, compiled and linked together in one
+    // invocation), produces a shared library at the given output path. Reuses the exact
+    // compiler-discovery/flag logic buildCppProvider() already relies on (cppToolchain.hpp), just
+    // parameterized by explicit paths instead of provider-specific hash-based caching. Used by the
+    // FMU-export feature to build the generated simulation's shared library; deliberately generic
+    // so it isn't FMI-specific -- the engine doesn't need to know anything about FMI.
+    if (argc >= 4 && std::string(argv[1]) == "buildSharedLibrary") {
+        const std::filesystem::path sourcePath = argv[2];
+        const std::filesystem::path gluePath = argv[3];
+        const auto outputOption = optionPath(argc, argv, "--output").string();
+        if (outputOption.empty()) {
+            std::cerr << "buildSharedLibrary requires --output <path>.\n";
+            std::_Exit(64);
+        }
+        const auto sdkPathOption = optionPath(argc, argv, "--sdk-path").string();
+        const auto compilerOption = optionPath(argc, argv, "--compiler").string();
+        konjugate::cppToolchain::buildNativeArtifact(sourcePath, gluePath,
+            sdkPathOption.empty() ? std::filesystem::path() : std::filesystem::path(sdkPathOption) / "include",
+            outputOption, /*sharedLibrary=*/true, compilerOption, "the shared library");
         std::_Exit(0);
     }
     if (argc < 3) {

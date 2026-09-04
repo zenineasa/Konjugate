@@ -258,14 +258,23 @@ function pythonProviderClassName(source, entityLabel) {
     return { className: match[1], baseClassName: match[2], pattern: new RegExp(`\\bclass\\s+${match[1]}\\s*\\(`) };
 }
 
-export function generateStandaloneProgram(document, kind) {
+const parallelismModes = ['serial', 'openmp', 'stdThread', 'mpi'];
+
+export function generateStandaloneProgram(document, kind, options = {}) {
     if (kind !== 'cpp' && kind !== 'python') throw new Error(`Unknown export kind "${kind}" -- expected "cpp" or "python".`);
+    const parallelism = options.parallelism ?? 'serial';
+    if (!parallelismModes.includes(parallelism)) {
+        throw new Error(`Unknown parallelism option "${parallelism}" -- expected one of ${parallelismModes.join(', ')}.`);
+    }
+    if (kind === 'python' && parallelism !== 'serial' && parallelism !== 'mpi') {
+        throw new Error(`"${parallelism}" has no meaningful Python equivalent -- Python threads are GIL-bound and would not actually run this CPU-bound loop in parallel. Only "serial" and "mpi" are available for a Python export.`);
+    }
     const model = buildModel(document);
     const providers = collectProviders(model, kind);
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     const outputInterval = runConfiguration?.outputInterval ?? globalTimeStep;
-    const meta = { globalTimeStep, outputInterval, defaultTargetTime: document.exportDefaultTargetTime ?? 1 };
+    const meta = { globalTimeStep, outputInterval, defaultTargetTime: document.exportDefaultTargetTime ?? 1, parallelism };
     return kind === 'cpp' ? generateCpp(model, providers, meta, document) : generatePython(model, providers, meta, document);
 }
 
@@ -289,8 +298,46 @@ function stateIndexComment(model, commentPrefix) {
     return lines.join('\n');
 }
 
-function runInstructions(kind, meta, marker) {
-    const lines = kind === 'cpp' ? [
+function cppRunInstructionLines(parallelism, marker) {
+    if (parallelism === 'openmp') {
+        return [
+            `${marker}How to run this program (OpenMP -- parallel across nodes on one machine):`,
+            `${marker}  1. Compile it:`,
+            `${marker}       Linux:   c++ -std=c++20 -O2 -fopenmp <this file> -o simulation`,
+            `${marker}       macOS:   Xcode's clang++ has no bundled OpenMP -- run "brew install libomp"`,
+            `${marker}                once, then (libomp is keg-only, so -I/-L must point at it explicitly):`,
+            `${marker}                c++ -std=c++20 -O2 -Xpreprocessor -fopenmp \\`,
+            `${marker}                    -I"$(brew --prefix libomp)/include" -L"$(brew --prefix libomp)/lib" -lomp \\`,
+            `${marker}                    <this file> -o simulation`,
+            `${marker}       Windows: cl /std:c++20 /O2 /openmp <this file>`,
+            `${marker}  2. Run it (OMP_NUM_THREADS controls the worker count, e.g. OMP_NUM_THREADS=4):`,
+            `${marker}       macOS/Linux: ./simulation`,
+            `${marker}       Windows:     simulation.exe`
+        ];
+    }
+    if (parallelism === 'stdThread') {
+        return [
+            `${marker}How to run this program (std::thread -- parallel across nodes on one machine):`,
+            `${marker}  1. Compile it:`,
+            `${marker}       macOS/Linux: c++ -std=c++20 -O2 -pthread <this file> -o simulation`,
+            `${marker}       Windows (Developer Command Prompt for VS): cl /std:c++20 /O2 <this file>`,
+            `${marker}  2. Run it:`,
+            `${marker}       macOS/Linux: ./simulation`,
+            `${marker}       Windows:     simulation.exe`
+        ];
+    }
+    if (parallelism === 'mpi') {
+        return [
+            `${marker}How to run this program (MPI -- distributed across ranks/machines):`,
+            `${marker}  Needs an MPI implementation installed (e.g. OpenMPI or MPICH).`,
+            `${marker}  1. Compile it:  mpic++ -std=c++20 -O2 <this file> -o simulation`,
+            `${marker}  2. Run it with the desired number of ranks: mpirun -n 4 ./simulation`,
+            `${marker}  Nodes are split into contiguous blocks across ranks by node count, not by`,
+            `${marker}  estimated work -- a simple partition, unlike the engine's own METIS/`,
+            `${marker}  communication-aware partitioner. Only rank 0 writes the output file.`
+        ];
+    }
+    return [
         `${marker}How to run this program:`,
         `${marker}  1. Compile it:`,
         `${marker}       macOS/Linux (clang or gcc): c++ -std=c++20 -O2 <this file> -o simulation`,
@@ -298,11 +345,30 @@ function runInstructions(kind, meta, marker) {
         `${marker}  2. Run it:`,
         `${marker}       macOS/Linux: ./simulation`,
         `${marker}       Windows:     simulation.exe`
-    ] : [
+    ];
+}
+
+function pythonRunInstructionLines(parallelism, marker) {
+    if (parallelism === 'mpi') {
+        return [
+            `${marker}How to run this program (MPI -- distributed across ranks/machines):`,
+            `${marker}  Needs mpi4py ("pip install mpi4py") and a system MPI implementation (e.g.`,
+            `${marker}  OpenMPI or MPICH) -- mpi4py links against whichever MPI your "mpirun" points to.`,
+            `${marker}  Run it with the desired number of ranks: mpirun -n 4 python3 <this file>`,
+            `${marker}  Nodes are split into contiguous blocks across ranks by node count, not by`,
+            `${marker}  estimated work -- a simple partition, unlike the engine's own METIS/`,
+            `${marker}  communication-aware partitioner. Only rank 0 writes the output file.`
+        ];
+    }
+    return [
         `${marker}How to run this program:`,
         `${marker}  macOS/Linux: python3 <this file>`,
         `${marker}  Windows:     python <this file>`
     ];
+}
+
+function runInstructions(kind, meta, marker) {
+    const lines = kind === 'cpp' ? cppRunInstructionLines(meta.parallelism ?? 'serial', marker) : pythonRunInstructionLines(meta.parallelism ?? 'serial', marker);
     lines.push(
         `${marker}Optional flags on either platform: --target-time <seconds> (default ${doubleLiteral(meta.defaultTargetTime)}), --output <path> (default results.csv)`
     );
@@ -311,6 +377,21 @@ function runInstructions(kind, meta, marker) {
 
 function initialStateLiterals(model) {
     return Array.from(model.stateRecord.values()).map((record) => doubleLiteral(record.state.initialValue ?? 0)).join(', ');
+}
+
+// Prefix sums of per-node state counts, e.g. node state counts [1, 2, 1] -> [0, 1, 3, 4]: node i
+// owns global state indices [offsets[i], offsets[i + 1]). Only used by MPI's dispatch, where it is
+// what makes a single contiguous-block partition (by node order) correspond to a contiguous
+// global-state-index range per rank, which is what lets one MPI_Allgatherv reconcile the whole
+// state vector each step instead of needing an indexed/scattered exchange.
+function nodeStateOffsetLiterals(model) {
+    const offsets = [0];
+    let running = 0;
+    for (const plan of model.nodePlans) {
+        running += plan.node.states.length;
+        offsets.push(running);
+    }
+    return offsets.join(', ');
 }
 
 function commentLines(symbols, prefix, marker) {
@@ -352,6 +433,93 @@ function emitCppProviderContribution(contribution, info) {
     ].filter(Boolean).join('\n');
 }
 
+// Every parallelism mode calls the same per-node lambda body -- only how (and which subset of)
+// nodes get called differs. Correctness relies on each lambda touching disjoint globalState
+// indices (confirmed: a node's commit lines only ever write its own states' global indices), so
+// running them concurrently (openmp/stdThread) or on separate processes (mpi) needs no locking.
+function cppNodeIntegratorLambdas(model, providerInfo) {
+    return model.nodePlans.map((plan, nodeIndex) => {
+        const stateCount = plan.node.states.length;
+        const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
+        const contributionLines = plan.contributions.map((contribution) => (
+            contribution.implementation
+                ? emitCppProviderContribution(contribution, providerInfo.get(contribution))
+                : emitCppRegularContribution(contribution)
+        )).join('\n');
+        const commitLines = plan.node.states.map((state, index) => (
+            `        globalState[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`
+        )).join('\n');
+        return [
+            `    // Node: ${plan.node.name}`,
+            `    const auto integrateNode${nodeIndex} = [&]() {`,
+            `        double state[${stateCount}] = { ${seed} };`,
+            `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
+            `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
+            '            const double stepTime = currentTime + substep * nodeTimeStep;',
+            `            double derivative[${stateCount}] = {};`,
+            contributionLines,
+            `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
+            '        }',
+            commitLines,
+            '    };'
+        ].join('\n');
+    }).join('\n');
+}
+
+function cppDispatchLines(parallelism) {
+    if (parallelism === 'openmp') {
+        return [
+            '        #pragma omp parallel for',
+            '        for (int nodeIndex = 0; nodeIndex < nodeCount; ++nodeIndex) nodeIntegrators[static_cast<std::size_t>(nodeIndex)]();'
+        ];
+    }
+    if (parallelism === 'stdThread') {
+        return [
+            '        // Spawns and joins a thread per node every step -- the simplest correct approach.',
+            '        // A persistent worker pool would avoid the repeated spawn cost; left as a possible',
+            '        // follow-up rather than obscuring the reference logic here.',
+            '        std::vector<std::thread> workers;',
+            '        workers.reserve(nodeIntegrators.size());',
+            '        for (const auto& integrate : nodeIntegrators) workers.emplace_back(integrate);',
+            '        for (auto& worker : workers) worker.join();'
+        ];
+    }
+    if (parallelism === 'mpi') {
+        return [
+            '        for (int nodeIndex = myNodeStart; nodeIndex < myNodeEnd; ++nodeIndex) nodeIntegrators[static_cast<std::size_t>(nodeIndex)]();',
+            '        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, globalState.data(), recvCounts.data(), displacements.data(), MPI_DOUBLE, MPI_COMM_WORLD);'
+        ];
+    }
+    return ['        for (const auto& integrate : nodeIntegrators) integrate();'];
+}
+
+// Splits nodes into contiguous, evenly-sized-by-node-count blocks across MPI ranks, computed at
+// runtime since the rank count is an `mpirun -n` choice, not known at generation time. Contiguous
+// blocks mean each rank's owned states are also one contiguous global-index range (global indices
+// are assigned in node order), which is what lets one MPI_Allgatherv reconcile the full state
+// vector -- every rank derives the same recvCounts/displacements independently, no extra
+// coordination message needed.
+function mpiSetupLines(model) {
+    return [
+        '    int worldRank = 0;',
+        '    int worldSize = 1;',
+        '    MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);',
+        '    MPI_Comm_size(MPI_COMM_WORLD, &worldSize);',
+        `    constexpr std::size_t nodeStateOffsets[] = { ${nodeStateOffsetLiterals(model)} };`,
+        '    const int nodesPerRank = (nodeCount + worldSize - 1) / worldSize;',
+        '    const int myNodeStart = std::min(worldRank * nodesPerRank, nodeCount);',
+        '    const int myNodeEnd = std::min(myNodeStart + nodesPerRank, nodeCount);',
+        '    std::vector<int> recvCounts(static_cast<std::size_t>(worldSize));',
+        '    std::vector<int> displacements(static_cast<std::size_t>(worldSize));',
+        '    for (int rank = 0; rank < worldSize; ++rank) {',
+        '        const int rankNodeStart = std::min(rank * nodesPerRank, nodeCount);',
+        '        const int rankNodeEnd = std::min(rankNodeStart + nodesPerRank, nodeCount);',
+        '        displacements[static_cast<std::size_t>(rank)] = static_cast<int>(nodeStateOffsets[static_cast<std::size_t>(rankNodeStart)]);',
+        '        recvCounts[static_cast<std::size_t>(rank)] = static_cast<int>(nodeStateOffsets[static_cast<std::size_t>(rankNodeEnd)] - nodeStateOffsets[static_cast<std::size_t>(rankNodeStart)]);',
+        '    }'
+    ].join('\n');
+}
+
 function generateCpp(model, providers, meta, document) {
     // collectProviders already rejects any node-level computational provider before this function
     // is ever reached (there is no C++ equivalent in the engine), so every entry here is an
@@ -365,32 +533,11 @@ function generateCpp(model, providers, meta, document) {
         return `namespace ${namespaceName} {\n${stripLeadingCppInclude(provider.implementation.source)}\n}\n`;
     });
 
-    const nodeBlocks = model.nodePlans.map((plan) => {
-        const stateCount = plan.node.states.length;
-        const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
-        const contributionLines = plan.contributions.map((contribution) => (
-            contribution.implementation
-                ? emitCppProviderContribution(contribution, providerInfo.get(contribution))
-                : emitCppRegularContribution(contribution)
-        )).join('\n');
-        const commitLines = plan.node.states.map((state, index) => (
-            `        globalState[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`
-        )).join('\n');
-        return [
-            `    // Node: ${plan.node.name}`,
-            '    {',
-            `        double state[${stateCount}] = { ${seed} };`,
-            `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
-            `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
-            '            const double stepTime = currentTime + substep * nodeTimeStep;',
-            `            double derivative[${stateCount}] = {};`,
-            contributionLines,
-            `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
-            '        }',
-            commitLines,
-            '    }'
-        ].join('\n');
-    }).join('\n');
+    const isMpi = meta.parallelism === 'mpi';
+    const nodeCount = model.nodePlans.length;
+    const nodeLambdas = cppNodeIntegratorLambdas(model, providerInfo);
+    const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `integrateNode${nodeIndex}`).join(', ');
+    const dispatchLines = cppDispatchLines(meta.parallelism);
 
     const providerDeclarations = providers.map((provider) => {
         const info = providerInfo.get(provider);
@@ -398,16 +545,20 @@ function generateCpp(model, providers, meta, document) {
     }).join('\n');
 
     const includes = [
+        '#include <algorithm>',
         '#include <cmath>',
         '#include <cstddef>',
         '#include <fstream>',
+        '#include <functional>',
         '#include <iomanip>',
         '#include <iostream>',
+        meta.parallelism === 'mpi' ? '#include <mpi.h>' : '',
         '#include <memory>',
         providers.length ? '#include <span>' : '',
         '#include <stdexcept>',
         '#include <string>',
         '#include <string_view>',
+        meta.parallelism === 'stdThread' ? '#include <thread>' : '',
         '#include <vector>'
     ].filter(Boolean).join('\n');
 
@@ -418,6 +569,30 @@ function generateCpp(model, providers, meta, document) {
 
     const escapedHeader = csvHeader(model).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
+    const outputSetupLines = isMpi ? [
+        '    std::ofstream output;',
+        '    if (worldRank == 0) {',
+        '        output.open(outputPath);',
+        '        output << std::setprecision(15);',
+        `        output << "${escapedHeader}\\n";`,
+        '    }',
+        '    const auto writeRow = [&](double time) {',
+        '        if (worldRank != 0) return;',
+        '        output << time;',
+        '        for (double value : globalState) output << \',\' << value;',
+        '        output << \'\\n\';',
+        '    };'
+    ] : [
+        '    std::ofstream output(outputPath);',
+        '    output << std::setprecision(15);',
+        `    output << "${escapedHeader}\\n";`,
+        '    const auto writeRow = [&](double time) {',
+        '        output << time;',
+        '        for (double value : globalState) output << \',\' << value;',
+        '        output << \'\\n\';',
+        '    };'
+    ];
+
     return [
         header,
         includes,
@@ -425,6 +600,7 @@ function generateCpp(model, providers, meta, document) {
         providers.length ? `${cppSdkNamespace}\n` : '',
         providerBlocks.join('\n'),
         'int main(int argc, char** argv) {',
+        isMpi ? '    MPI_Init(&argc, &argv);' : null,
         `    double targetTime = ${doubleLiteral(meta.defaultTargetTime)};`,
         '    std::string outputPath = "results.csv";',
         '    for (int index = 1; index < argc; ++index) {',
@@ -435,29 +611,27 @@ function generateCpp(model, providers, meta, document) {
         `    constexpr double globalTimeStep = ${doubleLiteral(meta.globalTimeStep)};`,
         `    constexpr double outputInterval = ${doubleLiteral(meta.outputInterval)};`,
         '    const std::size_t outputEveryStep = static_cast<std::size_t>(outputInterval / globalTimeStep + 0.5);',
+        `    constexpr int nodeCount = ${nodeCount};`,
+        isMpi ? mpiSetupLines(model) : null,
         providerDeclarations,
         `    std::vector<double> globalState = { ${initialStateLiterals(model)} };`,
-        '    std::ofstream output(outputPath);',
-        '    output << std::setprecision(15);',
-        `    output << "${escapedHeader}\\n";`,
-        '    const auto writeRow = [&](double time) {',
-        '        output << time;',
-        '        for (double value : globalState) output << \',\' << value;',
-        '        output << \'\\n\';',
-        '    };',
+        outputSetupLines.join('\n'),
         '    writeRow(0);',
         '    const auto steps = static_cast<std::size_t>(std::ceil(targetTime / globalTimeStep - 1e-9));',
         '    for (std::size_t step = 0; step < steps; ++step) {',
         '        const std::vector<double> snapshot = globalState;',
         '        const double currentTime = step * globalTimeStep;',
-        nodeBlocks.split('\n').map((line) => `    ${line}`).join('\n'),
+        nodeLambdas.split('\n').map((line) => `    ${line}`).join('\n'),
+        `        std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
+        dispatchLines.join('\n'),
         '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
         '    }',
-        '    std::cerr << "Wrote " << outputPath << "\\n";',
+        isMpi ? '    if (worldRank == 0) std::cerr << "Wrote " << outputPath << "\\n";' : '    std::cerr << "Wrote " << outputPath << "\\n";',
+        isMpi ? '    MPI_Finalize();' : null,
         '    return 0;',
         '}',
         ''
-    ].join('\n');
+    ].filter((line) => line !== null).join('\n');
 }
 
 const cppSdkNamespace = `namespace konjugate::sdk::v1 {
@@ -549,19 +723,12 @@ function emitPythonNodeProvider(nodeProvider, info) {
     ].join('\n');
 }
 
-function generatePython(model, providers, meta, document) {
-    let providerIndex = 0;
-    const providerInfo = new Map();
-    const providerBlocks = providers.map((provider) => {
-        const { className, pattern } = pythonProviderClassName(provider.implementation.source, provider.entityLabel);
-        const uniqueName = `${className}Provider${providerIndex}`;
-        providerIndex += 1;
-        providerInfo.set(provider, { className: uniqueName, instanceVariable: `${uniqueName.charAt(0).toLowerCase()}${uniqueName.slice(1)}` });
-        const withoutImport = provider.implementation.source.replace(/^from konjugate import\s*(\([^)]*\)|[^\n]*)\n?/m, '');
-        return withoutImport.replace(pattern, `class ${uniqueName}(`);
-    });
-
-    const nodeBlocks = model.nodePlans.map((plan) => {
+// Only used for parallelism 'mpi': wraps a node's block in a guard so each rank executes only the
+// nodes in its own contiguous block (see mpiSetupLines's C++ counterpart / nodeStateOffsetLiterals
+// for why a contiguous-by-node-order partition is what makes the later single comm.allgather()
+// sufficient to reconcile the full state list).
+function pythonNodeBlockLines(model, providerInfo, isMpi) {
+    return model.nodePlans.map((plan, nodeIndex) => {
         const stateCount = plan.node.states.length;
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
         const contributionLines = plan.contributions.map((contribution) => (
@@ -573,7 +740,7 @@ function generatePython(model, providers, meta, document) {
         const commitLines = plan.node.states.map((state, index) => (
             `    global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`
         )).join('\n');
-        return [
+        const body = [
             `    # Node: ${plan.node.name}`,
             `    state = [${seed}]`,
             `    node_time_step = global_time_step / ${plan.substeps}`,
@@ -586,7 +753,43 @@ function generatePython(model, providers, meta, document) {
             '            state[index] += node_time_step * derivative[index]',
             commitLines
         ].filter(Boolean).join('\n');
+        if (!isMpi) return body;
+        return [`    if my_node_start <= ${nodeIndex} < my_node_end:`, body.split('\n').map((line) => `    ${line}`).join('\n')].join('\n');
     }).join('\n');
+}
+
+// See generateCpp's mpiSetupLines for the identical partition scheme (contiguous node blocks by
+// node count, computed at runtime from the rank count). mpi4py initializes/finalizes MPI on
+// import/interpreter-exit automatically, so unlike C++ there is no explicit Init/Finalize here.
+function pythonMpiSetupLines(model) {
+    return [
+        '    comm = MPI.COMM_WORLD',
+        '    world_rank = comm.Get_rank()',
+        '    world_size = comm.Get_size()',
+        `    node_state_offsets = [${nodeStateOffsetLiterals(model)}]`,
+        '    nodes_per_rank = -(-node_count // world_size)  # ceiling division',
+        '    my_node_start = min(world_rank * nodes_per_rank, node_count)',
+        '    my_node_end = min(my_node_start + nodes_per_rank, node_count)',
+        '    my_state_start = node_state_offsets[my_node_start]',
+        '    my_state_end = node_state_offsets[my_node_end]'
+    ].join('\n');
+}
+
+function generatePython(model, providers, meta, document) {
+    let providerIndex = 0;
+    const providerInfo = new Map();
+    const providerBlocks = providers.map((provider) => {
+        const { className, pattern } = pythonProviderClassName(provider.implementation.source, provider.entityLabel);
+        const uniqueName = `${className}Provider${providerIndex}`;
+        providerIndex += 1;
+        providerInfo.set(provider, { className: uniqueName, instanceVariable: `${uniqueName.charAt(0).toLowerCase()}${uniqueName.slice(1)}` });
+        const withoutImport = provider.implementation.source.replace(/^from konjugate import\s*(\([^)]*\)|[^\n]*)\n?/m, '');
+        return withoutImport.replace(pattern, `class ${uniqueName}(`);
+    });
+
+    const isMpi = meta.parallelism === 'mpi';
+    const nodeCount = model.nodePlans.length;
+    const nodeBlocks = pythonNodeBlockLines(model, providerInfo, isMpi);
 
     const providerInstances = providers.map((provider) => {
         const info = providerInfo.get(provider);
@@ -603,10 +806,31 @@ function generatePython(model, providers, meta, document) {
 
     const escapedHeader = csvHeader(model).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
+    const outputSetupLines = isMpi ? [
+        "    output = open(output_path, 'w') if world_rank == 0 else None",
+        '    if output:',
+        `        output.write("${escapedHeader}\\n")`,
+        '    def write_row(time):',
+        '        if output is None:',
+        '            return',
+        '        output.write(",".join(f"{value:.10g}" for value in [time, *global_state]) + "\\n")'
+    ] : [
+        "    output = open(output_path, 'w')",
+        `    output.write("${escapedHeader}\\n")`,
+        '    def write_row(time):',
+        '        output.write(",".join(f"{value:.10g}" for value in [time, *global_state]) + "\\n")'
+    ];
+
+    const gatherLines = isMpi ? [
+        '        gathered_chunks = comm.allgather(global_state[my_state_start:my_state_end])',
+        '        global_state = [value for chunk in gathered_chunks for value in chunk]'
+    ] : [];
+
     return [
         header,
         'import argparse',
         'import math',
+        isMpi ? 'from mpi4py import MPI' : '',
         '',
         providers.length ? `${pythonSdkModule}\n` : '',
         providerBlocks.join('\n\n\n'),
@@ -615,21 +839,23 @@ function generatePython(model, providers, meta, document) {
         `    global_time_step = ${doubleLiteral(meta.globalTimeStep)}`,
         `    output_interval = ${doubleLiteral(meta.outputInterval)}`,
         '    output_every_step = round(output_interval / global_time_step)',
+        `    node_count = ${nodeCount}`,
+        isMpi ? pythonMpiSetupLines(model) : '',
         providerInstances,
         `    global_state = [${initialStateLiterals(model)}]`,
-        '    with open(output_path, \'w\') as output:',
-        `        output.write("${escapedHeader}\\n")`,
-        '        def write_row(time):',
-        '            output.write(",".join(f"{value:.10g}" for value in [time, *global_state]) + "\\n")',
-        '        write_row(0)',
-        '        steps = math.ceil(target_time / global_time_step - 1e-9)',
-        '        for step in range(steps):',
-        '            snapshot = list(global_state)',
-        '            current_time = step * global_time_step',
-        nodeBlocks.split('\n').map((line) => `        ${line}`).join('\n'),
-        '            if (step + 1) % output_every_step == 0:',
-        '                write_row((step + 1) * global_time_step)',
-        '    print(f"Wrote {output_path}")',
+        outputSetupLines.join('\n'),
+        '    write_row(0)',
+        '    steps = math.ceil(target_time / global_time_step - 1e-9)',
+        '    for step in range(steps):',
+        '        snapshot = list(global_state)',
+        '        current_time = step * global_time_step',
+        nodeBlocks.split('\n').map((line) => `    ${line}`).join('\n'),
+        ...gatherLines,
+        '        if (step + 1) % output_every_step == 0:',
+        '            write_row((step + 1) * global_time_step)',
+        '    if output:',
+        '        output.close()',
+        '        print(f"Wrote {output_path}")',
         '',
         '',
         'if __name__ == "__main__":',

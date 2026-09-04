@@ -4056,18 +4056,18 @@ async function exportResultsCsv() {
     }
 }
 
-async function exportGeneratedProgram(kind) {
-    $('#exportCodeMenu').classList.add('hidden');
+async function exportGeneratedProgram(kind, parallelism) {
     try {
         const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
         document_.exportDefaultTargetTime = runLaunchSettings.targetTime;
-        const source = generateStandaloneProgram(document_, kind);
+        const source = generateStandaloneProgram(document_, kind, { parallelism });
         const extension = kind === 'cpp' ? 'cpp' : 'py';
         const outcome = await window.projectFiles.exportGeneratedProgram(`${filenameStem(currentProjectFilename)}.${extension}`, source, kind);
+        $('#exportCodeDialog').close();
         if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
     } catch (error) {
         console.error('The simulation could not be exported as code.', error);
-        $('#statusText').textContent = 'Code export failed';
+        $('#exportCodeError').textContent = error.message || 'Code export failed.';
     }
 }
 
@@ -4180,20 +4180,27 @@ $('#continueRun').addEventListener('click', () => {
 $('#closeResults').addEventListener('click', closeResultPlayback);
 $('#saveResults').addEventListener('click', () => saveProject());
 $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
-$('#exportCodeButton').addEventListener('click', (event) => {
-    const menu = $('#exportCodeMenu');
-    const rect = event.currentTarget.getBoundingClientRect();
-    menu.style.left = `${Math.max(8, rect.right - 245)}px`;
-    menu.style.top = `${rect.bottom + 5}px`;
-    menu.classList.toggle('hidden');
+// Python has no thread-based parallel option (the GIL means threads would not actually run this
+// CPU-bound loop in parallel -- see src/codeExport.mjs), but it does support mpi via mpi4py.
+function updateExportCodeFields() {
+    const isPython = $('#exportCodeLanguage').value === 'python';
+    const parallelismField = $('#exportCodeParallelism');
+    $('#exportCodeParallelismOpenmp').disabled = isPython;
+    $('#exportCodeParallelismStdThread').disabled = isPython;
+    if (isPython && (parallelismField.value === 'openmp' || parallelismField.value === 'stdThread')) parallelismField.value = 'serial';
+}
+$('#exportCodeButton').addEventListener('click', () => {
+    $('#exportCodeLanguage').value = 'cpp';
+    $('#exportCodeParallelism').value = 'serial';
+    updateExportCodeFields();
+    $('#exportCodeError').textContent = '';
+    $('#exportCodeDialog').showModal();
 });
-$('#exportCodeMenu').addEventListener('pointerdown', (event) => event.stopPropagation());
-$('#exportCppButton').addEventListener('click', () => exportGeneratedProgram('cpp'));
-$('#exportPythonButton').addEventListener('click', () => exportGeneratedProgram('python'));
-window.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest('#exportCodeButton') && !event.target.closest('#exportCodeMenu')) {
-        $('#exportCodeMenu').classList.add('hidden');
-    }
+$('#exportCodeLanguage').addEventListener('change', updateExportCodeFields);
+$('#exportCodeCancel').addEventListener('click', () => $('#exportCodeDialog').close());
+$('#exportCodeDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    exportGeneratedProgram($('#exportCodeLanguage').value, $('#exportCodeParallelism').value);
 });
 window.addons.onRequest('timeline.seek', (time) => {
     if (!activeResult) return;

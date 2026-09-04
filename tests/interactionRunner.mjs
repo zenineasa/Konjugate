@@ -226,29 +226,36 @@ export async function runInteractionTests(window) {
     });
 
     await run('export simulation code writes a standalone C++ or Python program', async () => {
-        for (const [buttonId, extension, expectedFragment] of [
-            ['#exportCppButton', 'cpp', 'int main('],
-            ['#exportPythonButton', 'py', 'def run(']
+        for (const [language, parallelism, extension, expectedFragment] of [
+            ['cpp', 'serial', 'cpp', 'int main('],
+            ['cpp', 'openmp', 'cpp', '#pragma omp parallel for'],
+            ['python', 'serial', 'py', 'def run('],
+            ['python', 'mpi', 'py', 'from mpi4py import MPI']
         ]) {
-            const exportPath = join(tmpdir(), `konjugate-interaction-code-export-${extension}-${Date.now()}.${extension}`);
+            const exportPath = join(tmpdir(), `konjugate-interaction-code-export-${language}-${parallelism}-${Date.now()}.${extension}`);
             const originalShowSaveDialog = dialog.showSaveDialog;
             dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
             let exportedSource = null;
             try {
-                assert.equal(await evaluate(window, `document.querySelector('#exportCodeMenu').classList.contains('hidden')`), true);
+                assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false);
                 await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
-                await waitFor(window, `!document.querySelector('#exportCodeMenu').classList.contains('hidden')`, 'Export code menu did not open.');
-                await evaluate(window, `document.querySelector('${buttonId}').click()`);
+                await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
+                await evaluate(window, `document.querySelector('#exportCodeLanguage').value = '${language}'`);
+                await evaluate(window, `document.querySelector('#exportCodeLanguage').dispatchEvent(new Event('change'))`);
+                assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelismOpenmp').disabled`), language === 'python',
+                    'OpenMP/std::thread options should only be disabled for a Python export.');
+                await evaluate(window, `document.querySelector('#exportCodeParallelism').value = '${parallelism}'`);
+                await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
                 for (let attempt = 0; attempt < 100 && exportedSource === null; attempt += 1) {
                     try { exportedSource = await readFile(exportPath, 'utf8'); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
                 }
             } finally {
                 dialog.showSaveDialog = originalShowSaveDialog;
             }
-            assert.ok(exportedSource, `Export as ${extension} did not write a file.`);
+            assert.ok(exportedSource, `Export (${language}/${parallelism}) did not write a file.`);
             assert.match(exportedSource, /time \(s\)/);
-            assert.ok(exportedSource.includes(expectedFragment), `Exported ${extension} source is missing an expected "${expectedFragment}" fragment.`);
-            assert.equal(await evaluate(window, `document.querySelector('#exportCodeMenu').classList.contains('hidden')`), true);
+            assert.ok(exportedSource.includes(expectedFragment), `Exported (${language}/${parallelism}) source is missing an expected "${expectedFragment}" fragment.`);
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false, 'Export dialog should close after a successful export.');
         }
     });
 

@@ -210,6 +210,64 @@ test('a plugin-referenced provider always blocks export', () => {
     assert.throws(() => generateStandaloneProgram(document, 'python'), /"Plugged"[\s\S]*plugin/);
 });
 
+test('serial (default) dispatches node integrators with a plain sequential loop', () => {
+    const source = generateStandaloneProgram(singleNodeSourceTermModel(), 'cpp');
+    assert.match(source, /for \(const auto& integrate : nodeIntegrators\) integrate\(\);/);
+    assert.doesNotMatch(source, /#pragma omp/);
+    assert.doesNotMatch(source, /std::thread/);
+    assert.doesNotMatch(source, /MPI_/);
+});
+
+test('openmp mode wraps node dispatch in a parallel-for pragma and needs no extra includes', () => {
+    const source = generateStandaloneProgram(singleNodeSourceTermModel(), 'cpp', { parallelism: 'openmp' });
+    assert.match(source, /#pragma omp parallel for/);
+    assert.match(source, /for \(int nodeIndex = 0; nodeIndex < nodeCount; \+\+nodeIndex\) nodeIntegrators\[static_cast<std::size_t>\(nodeIndex\)\]\(\);/);
+    assert.match(source, /OMP_NUM_THREADS/);
+    balanced(source, /[{[]/g, /[}\]]/g);
+});
+
+test('stdThread mode spawns and joins a std::thread per node', () => {
+    const source = generateStandaloneProgram(singleNodeSourceTermModel(), 'cpp', { parallelism: 'stdThread' });
+    assert.match(source, /#include <thread>/);
+    assert.match(source, /workers\.emplace_back\(integrate\);/);
+    assert.match(source, /worker\.join\(\);/);
+    balanced(source, /[{[]/g, /[}\]]/g);
+});
+
+test('mpi mode partitions nodes into contiguous blocks and only rank 0 writes output', () => {
+    const source = generateStandaloneProgram(singleNodeSourceTermModel(), 'cpp', { parallelism: 'mpi' });
+    assert.match(source, /#include <mpi\.h>/);
+    assert.match(source, /MPI_Init\(&argc, &argv\);/);
+    assert.match(source, /MPI_Comm_rank\(MPI_COMM_WORLD, &worldRank\);/);
+    assert.match(source, /MPI_Allgatherv\(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, globalState\.data\(\), recvCounts\.data\(\), displacements\.data\(\), MPI_DOUBLE, MPI_COMM_WORLD\);/);
+    assert.match(source, /if \(worldRank == 0\) \{\s*\n\s*output\.open/);
+    assert.match(source, /if \(worldRank != 0\) return;/);
+    assert.match(source, /MPI_Finalize\(\);/);
+    balanced(source, /[{[]/g, /[}\]]/g);
+});
+
+test('an unknown parallelism option is rejected', () => {
+    assert.throws(() => generateStandaloneProgram(singleNodeSourceTermModel(), 'cpp', { parallelism: 'bogus' }), /Unknown parallelism option "bogus"/);
+});
+
+test('Python export rejects thread-based parallelism (GIL-bound, would not actually parallelize)', () => {
+    for (const parallelism of ['openmp', 'stdThread']) {
+        assert.throws(() => generateStandaloneProgram(singleNodeSourceTermModel(), 'python', { parallelism }), /GIL-bound/);
+    }
+});
+
+test('Python mpi mode imports mpi4py, partitions nodes into contiguous blocks and only rank 0 writes output', () => {
+    const source = generateStandaloneProgram(singleNodeSourceTermModel(), 'python', { parallelism: 'mpi' });
+    assert.match(source, /from mpi4py import MPI/);
+    assert.match(source, /comm = MPI\.COMM_WORLD/);
+    assert.match(source, /world_rank = comm\.Get_rank\(\)/);
+    assert.match(source, /gathered_chunks = comm\.allgather\(global_state\[my_state_start:my_state_end\]\)/);
+    assert.match(source, /global_state = \[value for chunk in gathered_chunks for value in chunk\]/);
+    assert.match(source, /output = open\(output_path, 'w'\) if world_rank == 0 else None/);
+    assert.match(source, /if my_node_start <= 0 < my_node_end:/);
+    balanced(source, /[{[(]/g, /[}\])]/g);
+});
+
 test('a node-level computational provider always blocks C++ export', () => {
     const document = baseDocument();
     const nodeId = id(); const stateId = id();

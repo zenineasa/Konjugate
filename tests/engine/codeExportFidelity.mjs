@@ -2,10 +2,13 @@
 
 // Confirms src/codeExport.mjs's standalone C++ and Python output is not just internally
 // consistent (tests/codeExport.test.mjs, structural assertions only) but numerically matches the
-// REAL Konjugate engine on the same model -- the actual claim the feature makes. Needs a C++
-// compiler (CXX env var, default "c++") and python3 (PYTHON env var, default "python3") in
-// addition to the built engine binary, so this is a separate, explicitly-invoked script rather
-// than part of the npm run test:engine chain.
+// REAL Konjugate engine on the same model -- the actual claim the feature makes. Covers every C++
+// parallelism mode (serial, openmp, stdThread), since they should all reproduce identical math and
+// only differ in dispatch. Needs a C++ compiler (CXX env var, default "c++") and python3 (PYTHON
+// env var, default "python3") in addition to the built engine binary, so this is a separate,
+// explicitly-invoked script rather than part of the npm run test:engine chain. Also checks the mpi
+// mode when mpic++/mpirun (MPICXX/MPIRUN env vars) are found on PATH, but skips it (not a failure)
+// otherwise -- MPI is a materially less universal dependency than a plain C++ compiler.
 
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -34,6 +37,10 @@ function closeEnough(actual, expected, absoluteTolerance, relativeTolerance) {
 function parseCsv(text) {
     const rows = text.trim().split('\n').map((line) => line.split(',').map(Number));
     return rows.slice(1); // drop the header row
+}
+
+function commandExists(executable) {
+    return execute(process.platform === 'win32' ? 'where' : 'which', [executable]).then(({ code }) => code === 0);
 }
 
 // A 5-node model deliberately touching most of what the generator has to reproduce: a plain decay
@@ -161,55 +168,94 @@ try {
     document.runConfigurations = [{ id: 900, globalTimeStep, outputInterval }];
     document.activeRunConfigurationId = 900;
 
-    const cppPath = join(directory, 'exported.cpp');
-    const cppBinaryPath = join(directory, process.platform === 'win32' ? 'exported.exe' : 'exported');
-    const cppCsvPath = join(directory, 'cpp.csv');
-    await writeFile(cppPath, generateStandaloneProgram(document, 'cpp'));
-    const compile = await execute(cxx, ['-std=c++20', '-O2', cppPath, '-o', cppBinaryPath]);
-    assert.equal(compile.code, 0, 'The exported C++ program must compile.');
-    assert.equal((await execute(cppBinaryPath, ['--target-time', String(targetTime), '--output', cppCsvPath])).code, 0, 'The exported C++ program must run.');
-    const cppRows = parseCsv(await readFile(cppCsvPath, 'utf8'));
+    // Column 0 is time; columns 1.. follow document.nodes/states order, which is exactly how
+    // codeExport.mjs assigns its global state indices (buildModel walks the same document).
+    const orderedStateIds = document.nodes.flatMap((node) => node.states.map((state) => state.id));
+    const expectedTimes = [];
+    for (let time = 0; time <= targetTime + 1e-9; time += outputInterval) expectedTimes.push(Number(time.toFixed(10)));
+
+    let comparisons = 0;
+    const compareRowsAgainstEngine = (rows, label) => {
+        for (const time of expectedTimes) {
+            const engineSample = engineResult.samples.find((sample) => Math.abs(sample.time - time) < 1e-6);
+            assert.ok(engineSample, `The real engine did not emit a sample at ${time} s.`);
+            const engineValues = new Map(engineSample.states.map((state) => [state.stateId, state.value]));
+            const row = rows.find((candidate) => Math.abs(candidate[0] - time) < 1e-6);
+            assert.ok(row, `${label} did not emit a row at ${time} s.`);
+            orderedStateIds.forEach((stateId, index) => {
+                const engineValue = engineValues.get(stateId);
+                const value = row[index + 1];
+                assert.ok(Number.isFinite(engineValue) && Number.isFinite(value),
+                    `Non-finite value for state ${stateId} at ${time} s (engine=${engineValue}, ${label}=${value}).`);
+                assert.ok(closeEnough(value, engineValue, absoluteTolerance, relativeTolerance),
+                    `${label} diverges from the real engine for state ${stateId} at ${time} s: engine=${engineValue}, ${label}=${value}.`);
+                comparisons += 1;
+            });
+        }
+    };
+
+    // Every C++ parallelism mode reproduces the exact same math (only dispatch differs -- see
+    // src/codeExport.mjs), so each is checked against the real engine the same way the plain
+    // serial export always was.
+    let variantIndex = 0;
+    const verifyCppVariant = async (parallelism, { compilerArgs = [], runViaMpi = null } = {}) => {
+        const cppPath = join(directory, `exported${variantIndex}.cpp`);
+        const cppBinaryPath = join(directory, `exported${variantIndex}${process.platform === 'win32' ? '.exe' : ''}`);
+        const cppCsvPath = join(directory, `cpp${variantIndex}.csv`);
+        variantIndex += 1;
+        await writeFile(cppPath, generateStandaloneProgram(document, 'cpp', { parallelism }));
+        const compiler = runViaMpi ? (process.env.MPICXX || 'mpic++') : cxx;
+        const compile = await execute(compiler, [...compilerArgs, '-std=c++20', '-O2', cppPath, '-o', cppBinaryPath]);
+        assert.equal(compile.code, 0, `The exported C++ (${parallelism}) program must compile.`);
+        const runArgs = ['--target-time', String(targetTime), '--output', cppCsvPath];
+        const runResult = runViaMpi
+            ? await execute(process.env.MPIRUN || 'mpirun', ['--oversubscribe', '-n', String(runViaMpi), cppBinaryPath, ...runArgs])
+            : await execute(cppBinaryPath, runArgs);
+        assert.equal(runResult.code, 0, `The exported C++ (${parallelism}) program must run.`);
+        compareRowsAgainstEngine(parseCsv(await readFile(cppCsvPath, 'utf8')), `C++ (${parallelism})`);
+    };
+
+    // libomp is keg-only on macOS (not symlinked into the Homebrew prefix), so -I/-L must name its
+    // keg path explicitly -- matches the exact flags documented in the generated header comment
+    // (src/codeExport.mjs's cppRunInstructionLines).
+    let openmpCompilerArgs = ['-fopenmp'];
+    if (process.platform === 'darwin') {
+        const libompPrefix = (await execute('brew', ['--prefix', 'libomp'])).stdout.trim();
+        openmpCompilerArgs = ['-Xpreprocessor', '-fopenmp', '-I', `${libompPrefix}/include`, '-L', `${libompPrefix}/lib`, '-lomp'];
+    }
+
+    await verifyCppVariant('serial');
+    await verifyCppVariant('openmp', { compilerArgs: openmpCompilerArgs });
+    await verifyCppVariant('stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
+
+    if (await commandExists(process.env.MPICXX || 'mpic++') && await commandExists(process.env.MPIRUN || 'mpirun')) {
+        // 5 ranks against a model with fewer nodes deliberately exercises the "this rank owns zero
+        // nodes" edge case in the contiguous block partition (src/codeExport.mjs's mpiSetupLines).
+        await verifyCppVariant('mpi', { runViaMpi: 5 });
+    } else {
+        console.log('  (skipping mpi variant: mpic++/mpirun not found on PATH)');
+    }
 
     const pythonPath = join(directory, 'exported.py');
     const pythonCsvPath = join(directory, 'python.csv');
     await writeFile(pythonPath, generateStandaloneProgram(document, 'python'));
     assert.equal((await execute(python, [pythonPath, '--target-time', String(targetTime), '--output', pythonCsvPath])).code, 0, 'The exported Python program must run.');
-    const pythonRows = parseCsv(await readFile(pythonCsvPath, 'utf8'));
+    compareRowsAgainstEngine(parseCsv(await readFile(pythonCsvPath, 'utf8')), 'Python');
 
-    // Column 0 is time; columns 1.. follow document.nodes/states order, which is exactly how
-    // codeExport.mjs assigns its global state indices (buildModel walks the same document).
-    const orderedStateIds = document.nodes.flatMap((node) => node.states.map((state) => state.id));
-
-    // --- 3. compare all three at every output time ---
-    const expectedTimes = [];
-    for (let time = 0; time <= targetTime + 1e-9; time += outputInterval) expectedTimes.push(Number(time.toFixed(10)));
-
-    let comparisons = 0;
-    for (const time of expectedTimes) {
-        const engineSample = engineResult.samples.find((sample) => Math.abs(sample.time - time) < 1e-6);
-        assert.ok(engineSample, `The real engine did not emit a sample at ${time} s.`);
-        const engineValues = new Map(engineSample.states.map((state) => [state.stateId, state.value]));
-
-        const cppRow = cppRows.find((row) => Math.abs(row[0] - time) < 1e-6);
-        const pythonRow = pythonRows.find((row) => Math.abs(row[0] - time) < 1e-6);
-        assert.ok(cppRow, `The exported C++ program did not emit a row at ${time} s.`);
-        assert.ok(pythonRow, `The exported Python program did not emit a row at ${time} s.`);
-
-        orderedStateIds.forEach((stateId, index) => {
-            const engineValue = engineValues.get(stateId);
-            const cppValue = cppRow[index + 1];
-            const pythonValue = pythonRow[index + 1];
-            assert.ok(Number.isFinite(engineValue) && Number.isFinite(cppValue) && Number.isFinite(pythonValue),
-                `Non-finite value for state ${stateId} at ${time} s (engine=${engineValue}, cpp=${cppValue}, python=${pythonValue}).`);
-            assert.ok(closeEnough(cppValue, engineValue, absoluteTolerance, relativeTolerance),
-                `C++ export diverges from the real engine for state ${stateId} at ${time} s: engine=${engineValue}, cpp=${cppValue}.`);
-            assert.ok(closeEnough(pythonValue, engineValue, absoluteTolerance, relativeTolerance),
-                `Python export diverges from the real engine for state ${stateId} at ${time} s: engine=${engineValue}, python=${pythonValue}.`);
-            comparisons += 1;
-        });
+    if (await commandExists(process.env.MPIRUN || 'mpirun') && (await execute(python, ['-c', 'import mpi4py'])).code === 0) {
+        const pythonMpiPath = join(directory, 'exportedMpi.py');
+        const pythonMpiCsvPath = join(directory, 'pythonMpi.csv');
+        await writeFile(pythonMpiPath, generateStandaloneProgram(document, 'python', { parallelism: 'mpi' }));
+        // Same 5-ranks-against-4-nodes edge case as the C++ mpi variant.
+        const runResult = await execute(process.env.MPIRUN || 'mpirun', ['--oversubscribe', '-n', '5', python, pythonMpiPath, '--target-time', String(targetTime), '--output', pythonMpiCsvPath]);
+        assert.equal(runResult.code, 0, 'The exported Python (mpi) program must run.');
+        compareRowsAgainstEngine(parseCsv(await readFile(pythonMpiCsvPath, 'utf8')), 'Python (mpi)');
+    } else {
+        console.log('  (skipping python mpi variant: mpirun/mpi4py not available)');
     }
-    assert.ok(comparisons >= 5 * expectedTimes.length, 'Expected at least 5 states compared at every sampled time.');
-    console.log(`✓ code export fidelity: C++ and Python standalone output matched the real engine across ${comparisons} state/time comparisons.`);
+
+    assert.ok(comparisons >= 5 * expectedTimes.length * 3, 'Expected at least 5 states compared at every sampled time across several variants.');
+    console.log(`✓ code export fidelity: every generated variant matched the real engine across ${comparisons} state/time comparisons.`);
 } finally {
     // Matches this project's other engine test scripts (see numericalRegression.mjs): always
     // remove the temp directory, even on failure. The exact generated .cpp/.py that failed can be

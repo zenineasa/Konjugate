@@ -44,6 +44,7 @@
         "homebrew:generate-cask": "node scripts/generateHomebrewCask.mjs",
         "test:codeExportFidelity": "npm run build:engine && node tests/engine/codeExportFidelity.mjs",
         "test:fmiExportFidelity": "npm run build:engine && node tests/engine/fmiExportFidelity.mjs",
+        "test:fmiRoundTrip": "npm run build:engine && node tests/engine/fmiRoundTrip.mjs",
         "benchmark:engine": "npm run build:engine && node tests/engine/executionBenchmark.mjs",
         "benchmark:providers": "npm run build:engine && node tests/engine/providerExecutionBenchmark.mjs",
         "benchmark:protocol": "node scripts/benchmarkProtocolEncoding.mjs",

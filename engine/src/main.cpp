@@ -3,6 +3,7 @@
 #include "causalInference.hpp"
 #include "causalInferenceReport.hpp"
 #include "cppToolchain.hpp"
+#include "fmiImport.hpp"
 #include "modelValidator.hpp"
 #include "nloptBackend.hpp"
 #include "parameterFitting.hpp"
@@ -169,6 +170,32 @@ int main(int argc, char** argv) {
         konjugate::cppToolchain::buildNativeArtifact(sourcePath, gluePath,
             sdkPathOption.empty() ? std::filesystem::path() : std::filesystem::path(sdkPathOption) / "include",
             outputOption, /*sharedLibrary=*/true, compilerOption, "the shared library");
+        std::_Exit(0);
+    }
+    // The complementary half of buildSharedLibrary/fmiGlue.cpp: loads a compiled FMI2
+    // Co-Simulation shared library (e.g. extracted from a Konjugate-exported .fmu) and drives it
+    // through the real FMI2 C API, writing a CSV a caller can diff against the real engine's own
+    // run of the same model. Used today as a narrow, dependency-free round-trip validator for
+    // Konjugate's own FMU export, not a general-purpose FMI import capability. See fmiImport.hpp
+    // and docs/codeExport.md.
+    if (argc >= 3 && std::string(argv[1]) == "runFmu") {
+        const std::filesystem::path libraryPath = argv[2];
+        const auto stateCountOption = optionPath(argc, argv, "--state-count").string();
+        const auto configurationOption = optionPath(argc, argv, "--configuration").string();
+        const auto outputOption = optionPath(argc, argv, "--output").string();
+        if (stateCountOption.empty() || configurationOption.empty() || outputOption.empty()) {
+            std::cerr << "runFmu requires --state-count, --configuration and --output.\n";
+            std::_Exit(64);
+        }
+        bool verifyRollback = false;
+        for (int index = 3; index < argc; ++index) {
+            if (std::string(argv[index]) == "--verify-rollback") verifyRollback = true;
+        }
+        boost::property_tree::ptree runConfiguration;
+        boost::property_tree::read_json(configurationOption, runConfiguration);
+        konjugate::runFmu(libraryPath, std::stoi(stateCountOption),
+            runConfiguration.get<double>("targetTime"), runConfiguration.get<double>("globalTimeStep"),
+            runConfiguration.get<double>("outputInterval"), outputOption, verifyRollback);
         std::_Exit(0);
     }
     if (argc < 3) {

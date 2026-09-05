@@ -134,6 +134,7 @@ add_executable(konjugateEngine
     src/partitionRuntime.cpp
     src/projectContainer.cpp
     src/cppToolchain.cpp
+    src/fmiImport.cpp
     src/providerRuntime.cpp
     src/simulationRunner.cpp
     src/taskExecutor.cpp

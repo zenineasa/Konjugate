@@ -12,8 +12,10 @@
 #include "konjugate/simulationModel.hpp"
 
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -139,6 +141,64 @@ fmi2Status fmi2CancelStep(fmi2Component c) {
     return asInstance(c) ? fmi2OK : fmi2Error;
 }
 
+// --- Rollback: only supported when the model itself reports supportsStateCapture() (a model with
+// no embedded C++ provider -- see konjugate/simulationModel.hpp). A captured snapshot is a plain
+// heap-allocated std::vector<double> behind the opaque fmi2FMUstate handle; serializing it is
+// always reloaded against the same compiled .fmu, never cross-platform/cross-ABI, so a raw memcpy
+// of the doubles is safe. ---
+
+fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
+    auto* instance = asInstance(c);
+    if (!instance || !FMUstate || !instance->model->supportsStateCapture()) return fmi2Error;
+    try {
+        *FMUstate = new std::vector<double>(instance->model->captureState());
+        return fmi2OK;
+    } catch (...) {
+        return fmi2Error;
+    }
+}
+
+fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate) {
+    auto* instance = asInstance(c);
+    if (!instance || !FMUstate) return fmi2Error;
+    try {
+        instance->model->restoreState(*static_cast<const std::vector<double>*>(FMUstate));
+        return fmi2OK;
+    } catch (...) {
+        return fmi2Error;
+    }
+}
+
+fmi2Status fmi2FreeFMUstate(fmi2Component, fmi2FMUstate* FMUstate) {
+    if (!FMUstate) return fmi2Error;
+    delete static_cast<std::vector<double>*>(*FMUstate);
+    *FMUstate = nullptr;
+    return fmi2OK;
+}
+
+fmi2Status fmi2SerializedFMUstateSize(fmi2Component, fmi2FMUstate FMUstate, size_t* size) {
+    if (!FMUstate || !size) return fmi2Error;
+    *size = static_cast<const std::vector<double>*>(FMUstate)->size() * sizeof(double);
+    return fmi2OK;
+}
+
+fmi2Status fmi2SerializeFMUstate(fmi2Component, fmi2FMUstate FMUstate, fmi2Byte serializedState[], size_t size) {
+    if (!FMUstate || !serializedState) return fmi2Error;
+    const auto* snapshot = static_cast<const std::vector<double>*>(FMUstate);
+    const size_t needed = snapshot->size() * sizeof(double);
+    if (size < needed) return fmi2Error;
+    std::memcpy(serializedState, snapshot->data(), needed);
+    return fmi2OK;
+}
+
+fmi2Status fmi2DeSerializeFMUstate(fmi2Component, const fmi2Byte serializedState[], size_t size, fmi2FMUstate* FMUstate) {
+    if (!serializedState || !FMUstate || size % sizeof(double) != 0) return fmi2Error;
+    auto* snapshot = new std::vector<double>(size / sizeof(double));
+    std::memcpy(snapshot->data(), serializedState, size);
+    *FMUstate = snapshot;
+    return fmi2OK;
+}
+
 // --- Declined/unsupported: modelDescription.xml declares no matching capability, so a compliant
 // host never calls these. Implemented defensively rather than left unresolved. ---
 
@@ -148,13 +208,6 @@ fmi2Status fmi2GetString(fmi2Component, const fmi2ValueReference[], size_t nvr, 
 fmi2Status fmi2SetInteger(fmi2Component, const fmi2ValueReference[], size_t nvr, const fmi2Integer[]) { return nvr == 0 ? fmi2OK : fmi2Error; }
 fmi2Status fmi2SetBoolean(fmi2Component, const fmi2ValueReference[], size_t nvr, const fmi2Boolean[]) { return nvr == 0 ? fmi2OK : fmi2Error; }
 fmi2Status fmi2SetString(fmi2Component, const fmi2ValueReference[], size_t nvr, const fmi2String[]) { return nvr == 0 ? fmi2OK : fmi2Error; }
-
-fmi2Status fmi2GetFMUstate(fmi2Component, fmi2FMUstate*) { return fmi2Error; }
-fmi2Status fmi2SetFMUstate(fmi2Component, fmi2FMUstate) { return fmi2Error; }
-fmi2Status fmi2FreeFMUstate(fmi2Component, fmi2FMUstate*) { return fmi2Error; }
-fmi2Status fmi2SerializedFMUstateSize(fmi2Component, fmi2FMUstate, size_t*) { return fmi2Error; }
-fmi2Status fmi2SerializeFMUstate(fmi2Component, fmi2FMUstate, fmi2Byte[], size_t) { return fmi2Error; }
-fmi2Status fmi2DeSerializeFMUstate(fmi2Component, const fmi2Byte[], size_t, fmi2FMUstate*) { return fmi2Error; }
 
 fmi2Status fmi2GetDirectionalDerivative(fmi2Component, const fmi2ValueReference[], size_t, const fmi2ValueReference[], size_t, const fmi2Real[], fmi2Real[]) { return fmi2Error; }
 fmi2Status fmi2SetRealInputDerivatives(fmi2Component, const fmi2ValueReference[], size_t, const fmi2Integer[], const fmi2Real[]) { return fmi2Error; }

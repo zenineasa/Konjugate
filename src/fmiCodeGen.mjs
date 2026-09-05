@@ -19,32 +19,40 @@ import {
     emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude
 } from './codeExport.mjs';
 
-// Assigns a stable FMI valueReference to every state (as an "output") and every live parameter
-// (as an "input"), deduped by parameter id since the same live parameter can appear in more than
-// one contribution's bindings. States come first, matching codeExport.mjs's own global state
-// index order, so downstream tooling that already understands that ordering needs no new mapping.
+// Assigns a stable FMI valueReference to every state (as an "output") and every parameter --
+// live (mode: "live") as causality="input"/variability="continuous", constant otherwise as
+// causality="parameter"/variability="tunable" -- deduped by parameter id since the same parameter
+// can appear in more than one contribution's bindings. States come first, matching
+// codeExport.mjs's own global state index order, so downstream tooling that already understands
+// that ordering needs no new mapping. Unlike the plain export (which always bakes every
+// parameter to a constant, since a standalone program has no runtime control stream), *every*
+// parameter here becomes a real, settable FMI variable: fmi2SetReal between fmi2DoStep calls is
+// exactly the runtime control stream a live parameter needs, and there's no reason a constant
+// parameter can't also be exposed for a host to tune -- it just defaults to never being touched,
+// reproducing the same constant behavior as today unless a host deliberately changes it.
 function assignValueReferences(model) {
     const stateVariables = [];
     let nextValueReference = 0;
     for (const plan of model.nodePlans) {
         for (const state of plan.node.states) {
             stateVariables.push({
-                valueReference: nextValueReference, causality: 'output',
+                valueReference: nextValueReference, causality: 'output', variability: 'continuous',
                 name: `${plan.node.name}.${state.name}`, unit: state.unit ?? '', start: state.initialValue ?? 0
             });
             nextValueReference += 1;
         }
     }
 
-    const inputVariables = [];
+    const parameterVariables = [];
     const parameterValueReferences = new Map(); // parameter.id -> valueReference
     const visitSymbols = (symbols) => {
         for (const value of symbols.values()) {
             const parameter = value.parameter;
-            if (!parameter || parameter.mode !== 'live' || parameterValueReferences.has(parameter.id)) continue;
+            if (!parameter || parameterValueReferences.has(parameter.id)) continue;
             parameterValueReferences.set(parameter.id, nextValueReference);
-            inputVariables.push({
-                valueReference: nextValueReference, causality: 'input',
+            const live = parameter.mode === 'live';
+            parameterVariables.push({
+                valueReference: nextValueReference, causality: live ? 'input' : 'parameter', variability: live ? 'continuous' : 'tunable',
                 name: parameter.symbol, unit: parameter.unit ?? '', start: parameter.value ?? 0
             });
             nextValueReference += 1;
@@ -52,20 +60,20 @@ function assignValueReferences(model) {
     };
     for (const plan of model.nodePlans) for (const contribution of plan.contributions) visitSymbols(contribution.symbols);
 
-    return { stateVariables, inputVariables, parameterValueReferences };
+    return { stateVariables, parameterVariables, parameterValueReferences };
 }
 
-// Live-parameter symbol entries carry their baked literal text (codeExport.mjs's own export
-// target -- a standalone program has no runtime control stream to read a live value from) --
-// overwritten here to reference a per-instance input member instead, the one place FMU export's
-// codegen genuinely diverges from the plain export's.
-function rewriteLiveParameterSymbols(model, parameterValueReferences) {
+// Every parameter symbol entry carries its baked literal text (codeExport.mjs's own export
+// target -- a standalone program has no runtime control stream at all) -- overwritten here to
+// reference a per-instance mutable member instead, the one place FMU export's codegen genuinely
+// diverges from the plain export's.
+function rewriteParameterSymbols(model, parameterValueReferences) {
     for (const plan of model.nodePlans) {
         for (const contribution of plan.contributions) {
             for (const value of contribution.symbols.values()) {
                 const parameter = value.parameter;
-                if (!parameter || parameter.mode !== 'live') continue;
-                value.text = `liveInput_${parameterValueReferences.get(parameter.id)}`;
+                if (!parameter) continue;
+                value.text = `parameterValue_${parameterValueReferences.get(parameter.id)}`;
             }
         }
     }
@@ -110,8 +118,12 @@ export function generateFmiModel(document) {
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     const model = buildModel(document);
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
-    const { stateVariables, inputVariables, parameterValueReferences } = assignValueReferences(model);
-    rewriteLiveParameterSymbols(model, parameterValueReferences);
+    const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model);
+    rewriteParameterSymbols(model, parameterValueReferences);
+    // A model with any embedded C++ provider can carry arbitrary internal state across evaluate()
+    // calls with no generic way to serialize it -- only a provider-free model supports rollback
+    // (fmi2Get/SetFMUstate). See konjugate/simulationModel.hpp's supportsStateCapture().
+    const supportsStateCapture = providers.length === 0;
 
     let providerIndex = 0;
     const providerInfo = new Map();
@@ -133,18 +145,39 @@ export function generateFmiModel(document) {
         return `        ${info.instanceVariable} = ${info.namespaceName}::createRelationshipProvider();\n        ${info.instanceVariable}->initialize({});`;
     }).join('\n');
 
-    const inputSwitchCases = inputVariables.map((variable) => (
-        `            case ${variable.valueReference}: liveInput_${variable.valueReference} = value; break;`
+    const parameterSwitchCases = parameterVariables.map((variable) => (
+        `            case ${variable.valueReference}: parameterValue_${variable.valueReference} = value; break;`
     )).join('\n');
-    const outputSwitchCases = stateVariables.map((variable, index) => (
-        `            case ${variable.valueReference}: return state_[${index}];`
-    )).join('\n');
-    const inputMembers = inputVariables.map((variable) => `    double liveInput_${variable.valueReference} = ${doubleLiteral(variable.start)};`).join('\n');
+    // getOutput answers fmi2GetReal for ANY value reference, not just state outputs -- a host
+    // reading back what it just set via fmi2SetReal, or a parameter's current value, needs a real
+    // answer here too, not the default 0.0.
+    const outputSwitchCases = [
+        ...stateVariables.map((variable, index) => `            case ${variable.valueReference}: return state_[${index}];`),
+        ...parameterVariables.map((variable) => `            case ${variable.valueReference}: return parameterValue_${variable.valueReference};`)
+    ].join('\n');
+    const parameterMembers = parameterVariables.map((variable) => `    double parameterValue_${variable.valueReference} = ${doubleLiteral(variable.start)};`).join('\n');
+
+    const stateCaptureMethods = supportsStateCapture ? [
+        '',
+        '    bool supportsStateCapture() const override { return true; }',
+        '',
+        '    std::vector<double> captureState() const override {',
+        '        std::vector<double> snapshot = state_;',
+        parameterVariables.map((variable) => `        snapshot.push_back(parameterValue_${variable.valueReference});`).join('\n'),
+        '        return snapshot;',
+        '    }',
+        '',
+        '    void restoreState(const std::vector<double>& snapshot) override {',
+        '        for (std::size_t index = 0; index < state_.size(); ++index) state_[index] = snapshot[index];',
+        parameterVariables.map((variable, index) => `        parameterValue_${variable.valueReference} = snapshot[state_.size() + ${index}];`).join('\n'),
+        '    }'
+    ].join('\n') : '';
 
     const includes = [
         '#include "konjugate/simulationModel.hpp"',
         '#include <algorithm>',
         '#include <cmath>',
+        '#include <cstddef>',
         '#include <memory>',
         '#include <stdexcept>',
         providers.length ? '#include <span>' : '',
@@ -170,7 +203,7 @@ export function generateFmiModel(document) {
         '',
         '    void setInput(int valueReference, double value) override {',
         '        switch (valueReference) {',
-        inputSwitchCases,
+        parameterSwitchCases,
         '            default: break;',
         '        }',
         '    }',
@@ -188,10 +221,11 @@ export function generateFmiModel(document) {
         '    }',
         '',
         `    double globalTimeStep() const override { return ${doubleLiteral(globalTimeStep)}; }`,
+        stateCaptureMethods,
         '',
         'private:',
         `    std::vector<double> state_ = { ${stateVariables.map((variable) => doubleLiteral(variable.start)).join(', ')} };`,
-        inputMembers,
+        parameterMembers,
         providerMembers,
         '};',
         '',
@@ -203,5 +237,5 @@ export function generateFmiModel(document) {
         ''
     ].join('\n');
 
-    return { source, stateVariables, inputVariables };
+    return { source, stateVariables, parameterVariables, supportsStateCapture };
 }

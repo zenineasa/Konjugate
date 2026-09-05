@@ -7,12 +7,20 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+// Toggled by rollback/serialization tests before fmi2Instantiate; a real generated model's
+// supportsStateCapture() is a fixed, compile-time decision (see src/fmiCodeGen.mjs) -- this is
+// purely a test-only shim so one hand-written model can exercise both the "declined" path
+// (already covered by declinedCapabilitiesFailCleanlyRatherThanCrashing, default false) and the
+// "supported" path without a second CTest target.
+bool gSupportsStateCapture = false;
 
 // A minimal decay model: dx/dt = -k*x, k a live-parameter input (valueReference 1), x the sole
 // output state (valueReference 0). Exercises the whole SimulationModel contract fmiGlue.cpp
@@ -23,12 +31,20 @@ public:
         if (valueReference == 1) k_ = value;
     }
     double getOutput(int valueReference) const override {
-        return valueReference == 0 ? x_ : 0.0;
+        if (valueReference == 0) return x_;
+        if (valueReference == 1) return k_;
+        return 0.0;
     }
     void doStep(double, double stepSize) override {
         x_ += stepSize * (-k_ * x_);
     }
     double globalTimeStep() const override { return 0.1; }
+    bool supportsStateCapture() const override { return gSupportsStateCapture; }
+    std::vector<double> captureState() const override { return { x_, k_ }; }
+    void restoreState(const std::vector<double>& snapshot) override {
+        x_ = snapshot[0];
+        k_ = snapshot[1];
+    }
 
 private:
     double x_ = 10.0;
@@ -120,6 +136,82 @@ void declinedCapabilitiesFailCleanlyRatherThanCrashing() {
     fmi2FreeInstance(c);
 }
 
+void getRealReadsBackAParameterValueJustSet() {
+    fmi2Component c = fmi2Instantiate("test", fmi2CoSimulation, "guid", "", nullptr, fmi2False, fmi2False);
+    require(c != nullptr, "fmi2Instantiate failed.");
+    const fmi2ValueReference kVr = 1;
+    const fmi2Real kValue = 0.75;
+    require(fmi2SetReal(c, &kVr, 1, &kValue) == fmi2OK, "fmi2SetReal failed.");
+    fmi2Real readback = 0;
+    require(fmi2GetReal(c, &kVr, 1, &readback) == fmi2OK, "fmi2GetReal failed.");
+    require(readback == 0.75, "fmi2GetReal should read back the value just set via fmi2SetReal, not a hardcoded default.");
+    fmi2FreeInstance(c);
+}
+
+void rollbackRoundTripsThroughGetSetFMUstate() {
+    gSupportsStateCapture = true;
+    fmi2Component c = fmi2Instantiate("test", fmi2CoSimulation, "guid", "", nullptr, fmi2False, fmi2False);
+    require(c != nullptr, "fmi2Instantiate failed.");
+    require(fmi2SetupExperiment(c, fmi2False, 0, 0.0, fmi2False, 0) == fmi2OK, "fmi2SetupExperiment failed.");
+    require(fmi2DoStep(c, 0.0, 0.5, fmi2False) == fmi2OK, "fmi2DoStep failed.");
+
+    fmi2FMUstate snapshot = nullptr;
+    require(fmi2GetFMUstate(c, &snapshot) == fmi2OK, "fmi2GetFMUstate should succeed once supportsStateCapture() is true.");
+
+    const fmi2ValueReference xVr = 0;
+    fmi2Real capturedValue = 0;
+    require(fmi2GetReal(c, &xVr, 1, &capturedValue) == fmi2OK, "fmi2GetReal failed.");
+
+    require(fmi2DoStep(c, 0.5, 0.5, fmi2False) == fmi2OK, "fmi2DoStep failed.");
+    fmi2Real movedValue = 0;
+    require(fmi2GetReal(c, &xVr, 1, &movedValue) == fmi2OK, "fmi2GetReal failed.");
+    require(std::abs(movedValue - capturedValue) > 1e-9, "Sanity check: state should have moved further before rollback.");
+
+    require(fmi2SetFMUstate(c, snapshot) == fmi2OK, "fmi2SetFMUstate failed.");
+    fmi2Real afterRollback = 0;
+    require(fmi2GetReal(c, &xVr, 1, &afterRollback) == fmi2OK, "fmi2GetReal after rollback failed.");
+    require(std::abs(afterRollback - capturedValue) < 1e-12, "Rollback should restore the exact captured state.");
+
+    require(fmi2FreeFMUstate(c, &snapshot) == fmi2OK, "fmi2FreeFMUstate failed.");
+    require(snapshot == nullptr, "fmi2FreeFMUstate should null out the handle.");
+    fmi2FreeInstance(c);
+    gSupportsStateCapture = false;
+}
+
+void serializeAndDeserializeFMUstateRoundTrips() {
+    gSupportsStateCapture = true;
+    fmi2Component c = fmi2Instantiate("test", fmi2CoSimulation, "guid", "", nullptr, fmi2False, fmi2False);
+    require(c != nullptr, "fmi2Instantiate failed.");
+    require(fmi2SetupExperiment(c, fmi2False, 0, 0.0, fmi2False, 0) == fmi2OK, "fmi2SetupExperiment failed.");
+    require(fmi2DoStep(c, 0.0, 0.3, fmi2False) == fmi2OK, "fmi2DoStep failed.");
+
+    fmi2FMUstate snapshot = nullptr;
+    require(fmi2GetFMUstate(c, &snapshot) == fmi2OK, "fmi2GetFMUstate failed.");
+    size_t size = 0;
+    require(fmi2SerializedFMUstateSize(c, snapshot, &size) == fmi2OK, "fmi2SerializedFMUstateSize failed.");
+    require(size == 2 * sizeof(double), "Expected exactly 2 doubles (x_ and k_) in the serialized snapshot.");
+    std::vector<fmi2Byte> bytes(size);
+    require(fmi2SerializeFMUstate(c, snapshot, bytes.data(), bytes.size()) == fmi2OK, "fmi2SerializeFMUstate failed.");
+
+    fmi2FMUstate restored = nullptr;
+    require(fmi2DeSerializeFMUstate(c, bytes.data(), bytes.size(), &restored) == fmi2OK, "fmi2DeSerializeFMUstate failed.");
+
+    require(fmi2DoStep(c, 0.3, 0.3, fmi2False) == fmi2OK, "fmi2DoStep failed."); // move state away
+    const fmi2ValueReference xVr = 0;
+    fmi2Real beforeRestore = 0;
+    require(fmi2GetReal(c, &xVr, 1, &beforeRestore) == fmi2OK, "fmi2GetReal failed.");
+
+    require(fmi2SetFMUstate(c, restored) == fmi2OK, "fmi2SetFMUstate (deserialized) failed.");
+    fmi2Real afterRestore = 0;
+    require(fmi2GetReal(c, &xVr, 1, &afterRestore) == fmi2OK, "fmi2GetReal failed.");
+    require(std::abs(afterRestore - beforeRestore) > 1e-9, "Restoring the deserialized snapshot should have moved the state back.");
+
+    require(fmi2FreeFMUstate(c, &snapshot) == fmi2OK, "fmi2FreeFMUstate (snapshot) failed.");
+    require(fmi2FreeFMUstate(c, &restored) == fmi2OK, "fmi2FreeFMUstate (restored) failed.");
+    fmi2FreeInstance(c);
+    gSupportsStateCapture = false;
+}
+
 } // namespace
 
 int main() {
@@ -128,4 +220,7 @@ int main() {
     doStepRejectsANonIntegerMultipleCommunicationStep();
     resetReturnsTheModelToItsInitialState();
     declinedCapabilitiesFailCleanlyRatherThanCrashing();
+    getRealReadsBackAParameterValueJustSet();
+    rollbackRoundTripsThroughGetSetFMUstate();
+    serializeAndDeserializeFMUstateRoundTrips();
 }

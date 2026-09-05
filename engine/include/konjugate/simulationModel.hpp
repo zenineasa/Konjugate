@@ -3,6 +3,8 @@
 #pragma once
 
 #include <memory>
+#include <stdexcept>
+#include <vector>
 
 namespace konjugate::sdk::v1 {
 
@@ -32,6 +34,14 @@ public:
     // The model's own baked-in global step -- fmi2DoStep uses this to compute how many internal
     // steps a host-requested communicationStepSize covers.
     virtual double globalTimeStep() const = 0;
+
+    // Optional: backs fmi2Get/SetFMUstate (rollback). A model with any embedded C++ provider can
+    // carry arbitrary internal state across evaluate() calls with no generic way to serialize it,
+    // so only a provider-free generated model overrides these -- the default here is "unsupported",
+    // matching modelDescription.xml's canGetAndSetFMUstate="false" for such a model.
+    virtual bool supportsStateCapture() const { return false; }
+    virtual std::vector<double> captureState() const { throw std::logic_error("State capture is not supported by this model."); }
+    virtual void restoreState(const std::vector<double>&) { throw std::logic_error("State restore is not supported by this model."); }
 };
 
 std::unique_ptr<SimulationModel> createSimulationModel();

@@ -21,14 +21,15 @@ function escapeXml(text) {
 
 function scalarVariablesXml(variables) {
     // causality="output" defaults to initial="calculated", which the standard forbids from
-    // carrying a start value -- confirmed against a real validator (FMPy), not assumed. An input
-    // has no initial attribute at all; its start is just its default before the host ever calls
+    // carrying a start value -- confirmed against a real validator (FMPy), not assumed.
+    // causality="input"/"parameter" variables carry no initial attribute at all (the standard
+    // forbids that combination too); their start is just their default before a host ever calls
     // fmi2SetReal. Units aren't emitted: Konjugate's own unit strings are free-form author text,
     // not the SI-exponent decomposition FMI's <UnitDefinitions> requires a referenced unit name to
     // resolve to -- declaring them properly is a real, separate scope item, not something to
     // fake with an undeclared unit= attribute (which a validator correctly rejects).
     return variables.map((variable) => (
-        `        <ScalarVariable name="${escapeXml(variable.name)}" valueReference="${variable.valueReference}" causality="${variable.causality}" variability="continuous"${variable.causality === 'output' ? ' initial="exact"' : ''}>\n`
+        `        <ScalarVariable name="${escapeXml(variable.name)}" valueReference="${variable.valueReference}" causality="${variable.causality}" variability="${variable.variability}"${variable.causality === 'output' ? ' initial="exact"' : ''}>\n`
         + `            <Real start="${variable.start}"/>\n`
         + `        </ScalarVariable>`
     )).join('\n');
@@ -50,13 +51,14 @@ function libraryExtension() {
     return '.so';
 }
 
-function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, inputVariables }) {
+function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture }) {
+    const rollback = supportsStateCapture ? 'true' : 'false';
     return `<?xml version="1.0" encoding="UTF-8"?>
 <fmiModelDescription fmiVersion="2.0" modelName="${escapeXml(modelName)}" guid="${guid}" generationTool="Konjugate">
     <CoSimulation modelIdentifier="${escapeXml(modelIdentifier)}" canHandleVariableCommunicationStepSize="true"
-        canGetAndSetFMUstate="false" canSerializeFMUstate="false" providesDirectionalDerivative="false"/>
+        canGetAndSetFMUstate="${rollback}" canSerializeFMUstate="${rollback}" providesDirectionalDerivative="false"/>
     <ModelVariables>
-${scalarVariablesXml([...stateVariables, ...inputVariables])}
+${scalarVariablesXml([...stateVariables, ...parameterVariables])}
     </ModelVariables>
     <ModelStructure>
         <Outputs>
@@ -75,7 +77,7 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
     const executable = await resolveEnginePath(engineOptions);
     if (!executable) throw new Error('The Konjugate engine binary could not be found -- FMU export needs it to compile the generated model.');
 
-    const { source, stateVariables, inputVariables } = generateFmiModel(document);
+    const { source, stateVariables, parameterVariables, supportsStateCapture } = generateFmiModel(document);
     const modelIdentifier = (modelName || 'model').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(?=\d)/, '_');
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuExport-'));
     try {
@@ -92,7 +94,7 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
 
         const libraryBytes = new Uint8Array(await readFile(artifactPath));
         const xml = modelDescriptionXml({
-            modelName: modelName || 'model', guid: randomUUID(), modelIdentifier, stateVariables, inputVariables
+            modelName: modelName || 'model', guid: randomUUID(), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture
         });
         const archive = zipSync({
             'modelDescription.xml': new TextEncoder().encode(xml),

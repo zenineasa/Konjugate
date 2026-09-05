@@ -47,18 +47,19 @@ test('a state becomes an output valueReference and a live parameter becomes an i
             parameters: [{ id: parameterId, name: 'Decay', symbol: 'k', value: 0.5, mode: 'live', control: { minimum: 0, maximum: 1, step: 0.01 } }]
         }]
     });
-    const { source, stateVariables, inputVariables } = generateFmiModel(document);
-    assert.deepEqual(stateVariables, [{ valueReference: 0, causality: 'output', name: 'Tank.Pressure', unit: 'Pa', start: 100 }]);
-    assert.deepEqual(inputVariables, [{ valueReference: 1, causality: 'input', name: 'k', unit: '', start: 0.5 }]);
-    // 0.5 legitimately appears once, as liveInput_1's own default member value (used before any
-    // fmi2SetReal call) -- the point of this assertion is that the *contribution expression*
-    // itself references the input, not a baked literal, unlike the plain export's behavior.
-    assert.match(source, /double liveInput_1 = 0\.5;/);
-    assert.match(source, /double contributionValue = \(\(-liveInput_1\) \* state\[0\]\);/);
+    const { source, stateVariables, parameterVariables } = generateFmiModel(document);
+    assert.deepEqual(stateVariables, [{ valueReference: 0, causality: 'output', variability: 'continuous', name: 'Tank.Pressure', unit: 'Pa', start: 100 }]);
+    assert.deepEqual(parameterVariables, [{ valueReference: 1, causality: 'input', variability: 'continuous', name: 'k', unit: '', start: 0.5 }]);
+    // 0.5 legitimately appears once, as parameterValue_1's own default member value (used before
+    // any fmi2SetReal call) -- the point of this assertion is that the *contribution expression*
+    // itself references the parameter member, not a baked literal, unlike the plain export's
+    // behavior.
+    assert.match(source, /double parameterValue_1 = 0\.5;/);
+    assert.match(source, /double contributionValue = \(\(-parameterValue_1\) \* state\[0\]\);/);
     balanced(source);
 });
 
-test('a constant parameter is still baked as a literal, unlike a live one', () => {
+test('a constant parameter also becomes a real FMI variable, but tunable rather than a continuous input', () => {
     const document = baseDocument();
     const nodeId = id(); const stateId = id(); const parameterId = id();
     document.nodes.push({
@@ -69,12 +70,16 @@ test('a constant parameter is still baked as a literal, unlike a live one', () =
             parameters: [{ id: parameterId, name: 'Gain', symbol: 'k', value: 7.5, mode: 'constant' }]
         }]
     });
-    const { source, inputVariables } = generateFmiModel(document);
-    assert.equal(inputVariables.length, 0, 'A constant parameter must not become an FMI input.');
-    assert.match(source, /double contributionValue = 7\.5;/);
+    const { source, parameterVariables } = generateFmiModel(document);
+    assert.deepEqual(parameterVariables, [{ valueReference: 1, causality: 'parameter', variability: 'tunable', name: 'k', unit: '', start: 7.5 }]);
+    // Unlike the plain export (which always bakes a constant parameter as a literal, since a
+    // standalone program has no runtime control stream), the FMU export makes every parameter --
+    // live or not -- a real, settable member, so a host can tune it via fmi2SetReal.
+    assert.match(source, /double contributionValue = parameterValue_1;/);
+    assert.doesNotMatch(source, /double contributionValue = 7\.5;/);
 });
 
-test('setInput and getOutput switch on the assigned valueReferences', () => {
+test('setInput and getOutput switch on the assigned valueReferences, including a parameter\'s own readback', () => {
     const document = baseDocument();
     const nodeId = id(); const stateId = id(); const parameterId = id();
     document.nodes.push({
@@ -86,10 +91,43 @@ test('setInput and getOutput switch on the assigned valueReferences', () => {
         }]
     });
     const { source } = generateFmiModel(document);
-    assert.match(source, /case 1: liveInput_1 = value; break;/);
+    assert.match(source, /case 1: parameterValue_1 = value; break;/);
     assert.match(source, /case 0: return state_\[0\];/);
+    // getOutput must also answer a parameter's own value reference (fmi2GetReal on an
+    // input/parameter causality variable, e.g. reading back what fmi2SetReal just set) -- not
+    // fall through to the hardcoded 0.0 default.
+    assert.match(source, /case 1: return parameterValue_1;/);
     assert.match(source, /class GeneratedModel final : public konjugate::sdk::v1::SimulationModel/);
     assert.match(source, /std::unique_ptr<konjugate::sdk::v1::SimulationModel> konjugate::sdk::v1::createSimulationModel\(\)/);
+});
+
+test('a providerless model supports state capture (rollback); one with a provider does not', () => {
+    const withoutProvider = baseDocument();
+    const nodeId1 = id(); const stateId1 = id();
+    withoutProvider.nodes.push({ id: nodeId1, name: 'Node', states: [{ id: stateId1, name: 'X', symbol: 'x', initialValue: 0, unit: '' }], sourceTerms: [] });
+    const { source: sourceWithoutProvider, supportsStateCapture: withoutProviderSupport } = generateFmiModel(withoutProvider);
+    assert.equal(withoutProviderSupport, true);
+    assert.match(sourceWithoutProvider, /bool supportsStateCapture\(\) const override \{ return true; \}/);
+    assert.match(sourceWithoutProvider, /std::vector<double> captureState\(\) const override \{/);
+    assert.match(sourceWithoutProvider, /void restoreState\(const std::vector<double>& snapshot\) override \{/);
+    balanced(sourceWithoutProvider);
+
+    const withProvider = baseDocument();
+    const nodeId2 = id(); const stateId2 = id();
+    withProvider.nodes.push({
+        id: nodeId2, name: 'Node', states: [{ id: stateId2, name: 'X', symbol: 'x', initialValue: 0, unit: '' }],
+        sourceTerms: [{
+            id: id(), state: 'x', expression: '',
+            implementation: {
+                kind: 'cpp', providerApiVersion: 1,
+                source: '#include <konjugate/relationshipProvider.hpp>\n\nnamespace {\nclass P final : public konjugate::sdk::v1::RelationshipProvider {\npublic:\n    konjugate::sdk::v1::RelationshipDescription describe() const override { return {"p", "P", {}, konjugate::sdk::v1::ScalarPort{"output", "output", ""}}; }\n    void evaluate(const konjugate::sdk::v1::EvaluationContext&, konjugate::sdk::v1::OutputCollector& output) override { output.addGradient(1.0); }\n};\n}\n\nstd::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider() { return std::make_unique<P>(); }\n',
+                bindings: [], output: { key: 'output', stateId: stateId2 }
+            }
+        }]
+    });
+    const { source: sourceWithProvider, supportsStateCapture: withProviderSupport } = generateFmiModel(withProvider);
+    assert.equal(withProviderSupport, false);
+    assert.doesNotMatch(sourceWithProvider, /supportsStateCapture/, 'A model with a provider should not override supportsStateCapture -- it inherits the base class default (false).');
 });
 
 test('globalTimeStep is read from the active run configuration', () => {

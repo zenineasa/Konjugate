@@ -33,10 +33,11 @@ The engine itself reads a top-level `providers.executionMode` string in the run 
 
 ## Build artifacts
 
-`buildCppProvider()` compiles an inline C++ provider's source once per `(source hash, artifact kind)` pair, cached under the same hash-named directory regardless of mode:
+`buildCppProvider()` compiles an inline C++ provider's source once per `(source hash, glue file content hash, artifact kind)` pair, cached under the same hash-named directory regardless of mode. Folding the glue file's own content into the cache key (not just the user's source text) means a Konjugate upgrade that changes the glue itself -- a shim bug fix, an SDK change -- invalidates a previously-compiled artifact instead of silently reusing code built against the old glue forever, since the underlying OS temp directory this caches under is not itself versioned by Konjugate's own version number.
 
 - `pipeWorker`/`sharedMemoryWorker`: the source is paired with `providerWorker.cpp` and compiled to a standalone executable (`provider`/`provider.exe`).
-- `inProcess`: the source is paired with `providerInProcessShim.cpp` and compiled to a shared library (`provider.dylib`/`provider.so`/`provider.dll`) with `-shared -fPIC` (or MSVC `/LD`).
+- `inProcess`, relationship-shaped: the source is paired with `providerInProcessShim.cpp` and compiled to a shared library (`provider.dylib`/`provider.so`/`provider.dll`) with `-shared -fPIC` (or MSVC `/LD`).
+- `inProcess`, computational-node-shaped (`cpp` node providers only run this way -- no worker-process fallback exists): the source is paired with `providerInProcessNodeShim.cpp` instead, driving a distinct ABI (`KonjugateInProcessNodeProviderV1`) with N named outputs and checkpoint/restore, rather than the relationship shim's single-output, stateless one. Each bound node instance gets its own freshly constructed `NodeProvider` object inside the shim, even when multiple nodes share one compiled artifact (identical source), so their state is never accidentally shared.
 
 Both glue files, plus the public SDK header, ship under `include/konjugate/`/`src/` in a packaged build (see the `install()` rules in `engine/CMakeLists.txt`) so `buildCppProvider()` can find them at the same layout in dev and packaged builds. `konjugateProviderWorker` and `konjugateProviderInProcessShim` are compile-check-only CMake targets — they catch a broken glue file during the ordinary build; the actual per-provider compile always happens at run time, outside CMake.
 

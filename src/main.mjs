@@ -36,6 +36,7 @@ import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLife
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, packageKey, uninstallPackage } from './packageArchive.mjs';
+import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -1100,12 +1101,39 @@ ipcMain.handle('packageInstall', async (event) => {
     const result = await dialog.showOpenDialog(targetWindow, {
         title: 'Install Konjugate package',
         properties: ['openFile'],
-        filters: [{ name: 'Konjugate packages', extensions: ['kja', 'kjp'] }]
+        filters: [{ name: 'Konjugate packages and FMUs', extensions: ['kja', 'kjp', 'fmu'] }]
     });
     if (result.canceled) return null;
     const [path] = result.filePaths;
-    const extension = path.toLowerCase().endsWith('.kja') ? '.kja' : path.toLowerCase().endsWith('.kjp') ? '.kjp' : null;
-    if (!extension) throw new Error('Only .kja add-ons and .kjp plugins can be installed.');
+    const lowerPath = path.toLowerCase();
+
+    if (lowerPath.endsWith('.fmu')) {
+        const archive = await readFile(path);
+        const inspected = inspectFmuArchive(archive);
+        const detail = [
+            `${inspected.description.modelName} (FMI ${inspected.description.fmiVersion})`,
+            `guid: ${inspected.description.guid}`,
+            `Platforms in this file: ${inspected.platforms.join(', ')}`
+        ].join('\n');
+        const confirmation = await dialog.showMessageBox(targetWindow, {
+            type: 'question',
+            buttons: ['Cancel', 'Install'],
+            defaultId: 1,
+            cancelId: 0,
+            title: 'Review FMU installation',
+            message: `Install ${inspected.description.modelName}?`,
+            detail
+        });
+        if (confirmation.response !== 1) return null;
+        const installed = await installFmuArchive(archive, {
+            directory: join(app.getPath('userData'), 'packages'),
+            sourceFileName: basename(path)
+        });
+        return { packageType: 'fmu', packageId: installed.guid, version: installed.version };
+    }
+
+    const extension = lowerPath.endsWith('.kja') ? '.kja' : lowerPath.endsWith('.kjp') ? '.kjp' : null;
+    if (!extension) throw new Error('Only .kja add-ons, .kjp plugins and .fmu files can be installed.');
     const archive = await readFile(path);
     const inspected = inspectPackageArchive(archive, { extension });
     const permissions = inspected.contributionManifest.permissions ?? [];
@@ -1151,10 +1179,17 @@ ipcMain.handle('packageList', async () => {
     const installed = (await listInstalledPackages(join(app.getPath('userData'), 'packages'))).map((entry) => ({
         ...entry, enabled: !disabledKeys.includes(packageKey(entry.packageType, entry.packageId, entry.version))
     }));
-    return [...bundled, ...installed];
+    const fmus = (await listInstalledFmus(join(app.getPath('userData'), 'packages'))).map((entry) => ({
+        ...entry, enabled: !disabledKeys.includes(packageKey('fmu', entry.packageId, entry.version))
+    }));
+    return [...bundled, ...installed, ...fmus];
 });
 
 ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, version }) => {
+    if (packageType === 'fmu') {
+        await uninstallFmu({ directory: join(app.getPath('userData'), 'packages'), guid: packageId, version });
+        return { packageType, packageId, version };
+    }
     await uninstallPackage({ directory: join(app.getPath('userData'), 'packages'), packageType, packageId, version });
     await discoverAddons();
     await discoverComponentLibrary();
@@ -1742,12 +1777,19 @@ const engineOptions = async () => {
     const resolvedCpp = await resolveCppCompiler();
     const resolvedPython = await resolvePythonInterpreter();
     const { executionMode } = await providerToolchainStore.get();
+    const packagesDirectory = join(app.getPath('userData'), 'packages');
+    const disabledExtensionKeys = await extensionStateStore.list();
     return {
         applicationPath: app.getAppPath(),
         resourcesPath: process.resourcesPath,
         packaged: app.isPackaged,
-        pluginDirectory: join(app.getPath('userData'), 'packages'),
-        disabledPluginKeys: await extensionStateStore.list(),
+        pluginDirectory: packagesDirectory,
+        disabledPluginKeys: disabledExtensionKeys,
+        // Same root and the same disabled-key list as plugins above -- packageKey()'s type
+        // prefix ("fmu:"/"plugin:"/...) is what keeps one shared disabled-extension list
+        // unambiguous across every installed package kind.
+        fmuDirectory: packagesDirectory,
+        disabledFmuKeys: disabledExtensionKeys,
         providerToolchains: {
             cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
             python: { interpreterPath: resolvedPython ?? '' },

@@ -9,6 +9,7 @@ import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
 import { decodeFittingReport, decodeInferenceReport, decodeValidationReport } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
+import { resolveInstalledFmus } from './fmiResolver.mjs';
 
 function engineFileName() {
     return process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine';
@@ -84,7 +85,7 @@ export async function validateWithEngine(content, options) {
     const inputPath = join(directory, 'input.kjt');
     const reportPath = join(directory, 'validation.bin');
     try {
-        const resolvedContent = await resolveInstalledPlugins(content, options);
+        const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
         const execution = await runEngine(executable, ['validate', inputPath, '--report', reportPath], {}, options.signal);
         if (execution.code !== 0 && execution.code !== 2) {
@@ -140,7 +141,7 @@ export async function fitWithEngine(content, csvContent, config, options) {
     const csvPath = join(directory, 'measured.csv');
     const reportPath = join(directory, 'fitting.bin');
     try {
-        const resolvedContent = await resolveInstalledPlugins(content, options);
+        const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
         await writeFile(csvPath, csvContent, 'utf8');
         const args = ['fit', inputPath, csvPath, '--report', reportPath];
@@ -199,8 +200,15 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const outputPath = join(directory, 'simulationResult.bin');
     const jobId = randomUUID();
     const initialPacing = normalizePacing(configuration.pacing);
-    const resolvedContent = await resolveInstalledPlugins(content, options);
+    const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
     await writeFile(inputPath, await encodeProjectFile(resolvedContent));
+    // A cpp computational-node provider (an FMI import is always one; a hand-authored one could
+    // be too) only ever runs in-process -- engine/src/providerRuntime.cpp deliberately gives it
+    // no worker-process fallback, since providerWorker.cpp has no node-provider protocol for C++
+    // at all. Falling back to the ordinary sharedMemoryWorker default for such a document would
+    // fail the run outright, so its presence overrides the default tier (but never an executionMode
+    // the caller/env/toolchain preference actually asked for -- see the precedence comment below).
+    const requiresInProcessNodeProvider = JSON.parse(resolvedContent).nodes?.some((node) => node.implementation?.kind === 'cpp') ?? false;
     await writeFile(configurationPath, JSON.stringify({
         ...configuration,
         pacing: initialPacing,
@@ -211,13 +219,15 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             // over a developer's session-scoped env var override, which wins over the user's
             // own choice in the Provider Toolchains dialog's advanced section (empty string
             // there means "Automatic" — deliberately falsy, so it falls through here), which
-            // falls back to sharedMemoryWorker as the default. ProviderRuntime already falls
-            // back to the pipe transport per-process on any higher-tier setup failure, so
-            // defaulting sharedMemoryWorker on is safe even for users who never touch this.
+            // falls back to sharedMemoryWorker as the default -- unless the resolved document
+            // requires the in-process transport outright (see above), in which case that default
+            // becomes inProcess instead. ProviderRuntime already falls back to the pipe transport
+            // per-process on any higher-tier setup failure, so defaulting sharedMemoryWorker on
+            // is safe even for users who never touch this.
             executionMode: configuration.providers?.executionMode
                 || process.env.KONJUGATE_PROVIDER_EXECUTION_MODE
                 || options.providerToolchains?.executionMode
-                || 'sharedMemoryWorker',
+                || (requiresInProcessNodeProvider ? 'inProcess' : 'sharedMemoryWorker'),
             cpp: {
                 sdkPath: cppProviderSdkPath(options),
                 ...(options.providerToolchains?.cpp?.compilerPath ? { compiler: options.providerToolchains.cpp.compilerPath } : {}),

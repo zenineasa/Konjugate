@@ -189,6 +189,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/konjugate" DESTINATION in
 # include/konjugate/simulationModel.hpp and links it against src/fmiGlue.cpp, exactly how
 # buildCppProvider() already compiles/links relationship providers against this same include dir.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi2" DESTINATION include)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi3" DESTINATION include)
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"

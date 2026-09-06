@@ -7787,7 +7787,8 @@ function renderExtensionsResults() {
         button.innerHTML = `<b>${escapeHtml(entry.name)}</b><span class="extensionsItemMeta">${meta}</span>`;
         return button;
     }));
-    $('#extensionsEmpty').textContent = extensionsTab === 'addon' ? 'No add-ons are installed.' : 'No plugins are installed.';
+    $('#extensionsEmpty').textContent = extensionsTab === 'addon' ? 'No add-ons are installed.'
+        : extensionsTab === 'plugin' ? 'No plugins are installed.' : 'No FMUs are imported.';
     $('#extensionsEmpty').hidden = matches.length > 0;
 }
 
@@ -7859,7 +7860,9 @@ $('#extensionsInstall').addEventListener('click', async () => {
         $$('.extensionsTab').forEach((tab) => tab.classList.toggle('active', tab.dataset.extensionsTab === extensionsTab));
         renderExtensionsResults();
         renderExtensionsDetail();
-        showExtensionsNotice(`Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate it.`);
+        showExtensionsNotice(installed.packageType === 'fmu'
+            ? `Installed ${installed.packageId} ${installed.version}. It's ready to reference from a node's implementation immediately -- no restart needed.`
+            : `Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate it.`);
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`);
     }
@@ -7886,7 +7889,9 @@ $('#extensionsUninstall').addEventListener('click', async () => {
         await window.extensions.uninstall(entry.packageType, entry.packageId, entry.version);
         extensionsSelectedKey = null;
         await refreshExtensionsList();
-        showExtensionsNotice(`Uninstalled ${entry.packageId} ${entry.version}. Restart Konjugate if it was active.`);
+        showExtensionsNotice(entry.packageType === 'fmu'
+            ? `Uninstalled ${entry.packageId} ${entry.version}. Any node still referencing it will fail to run until it is reinstalled or the reference is removed.`
+            : `Uninstalled ${entry.packageId} ${entry.version}. Restart Konjugate if it was active.`);
     } catch (error) {
         showExtensionsNotice(`Uninstall failed: ${error.message}`);
     }

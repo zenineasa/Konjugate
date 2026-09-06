@@ -90,7 +90,7 @@ The current package archive tests and plugin resolver tests cover:
 - safe archive paths and manifest identities;
 - execution through the existing Python provider worker contract.
 
-Stateful providers, computational-node providers, FMUs, remote services and hardware connectors remain future plugin kinds.
+Stateful (computational-node) providers and general FMI import are now implemented, but not as *plugin* kinds -- see [Computational-node provider](#computational-node-provider) below and [Project schema](projectSchema.md)'s `kind: "fmi"`. Remote services and hardware connectors remain future plugin kinds; plugin-*packaged* (as opposed to inline) computational-node providers remain future work too.
 
 ## Expanded plugin scope
 

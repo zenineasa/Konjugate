@@ -17,27 +17,33 @@ namespace {
 // Mirrors providerInProcessShim.cpp exactly (see that file's comments for the full rationale):
 // no C++ exception is ever allowed to cross the C ABI boundary, so every entry point below
 // catches internally and reports failure through the vtable's return values/lastError() instead.
+//
+// Unlike the relationship shim, a NodeProvider is explicitly stateful (it declares checkpoint()/
+// restore()), and one compiled artifact can back MULTIPLE bound Konjugate node instances sharing
+// the same source/provider process key (e.g. two different nodes importing the identical FMU) --
+// so, unlike RelationshipProvider (stateless by design, one shared object is safe), each instance
+// here gets its OWN freshly constructed NodeProvider object rather than sharing one.
 
 thread_local std::string g_createError;
 
 struct InstanceBinding {
     std::vector<std::size_t> keyIndexes;
+    std::unique_ptr<konjugate::sdk::v1::NodeProvider> provider;
+    // Filled by requestCheckpoint()'s "query" call and read back by its matching "fill" half --
+    // per-instance (not shared) so two instances' in-flight checkpoint sequences on the same
+    // artifact can never cross-contaminate, even though the engine serializes calls with a mutex.
+    std::vector<std::byte> pendingCheckpoint;
 };
 
 struct ShimState {
-    std::unique_ptr<konjugate::sdk::v1::NodeProvider> provider;
+    // Fixed per artifact, exactly like inputCount()/inputKey() already are: populated once from a
+    // throwaway probe instance in create() (constructed and immediately discarded -- describe()
+    // must not depend on initialize() having run), never from any bound instance's own object.
     konjugate::sdk::v1::NodeProviderDescription description;
     std::map<std::uint64_t, InstanceBinding> instanceBindings;
     std::string lastError;
     std::vector<std::string_view> inputKeys;
     std::vector<double> scratchValues;
-    // Filled by evaluateInstance()/requestCheckpoint()'s "query" call and read back by their
-    // matching "fill" half -- safe to reuse a single buffer across calls because the engine
-    // already serializes every call into one provider object with a mutex (see
-    // InProcessNodeProviderBackend::{evaluateNode,requestCheckpoint}), so at most one of these
-    // sequences is ever in flight.
-    std::vector<std::pair<std::string, double>> lastGradients;
-    std::vector<std::byte> lastCheckpoint;
 };
 
 ShimState& state(void* self) { return *static_cast<ShimState*>(self); }
@@ -45,12 +51,12 @@ ShimState& state(void* self) { return *static_cast<ShimState*>(self); }
 void* create() {
     try {
         auto shimState = std::make_unique<ShimState>();
-        shimState->provider = createNodeProvider();
-        if (!shimState->provider) {
+        const auto probe = createNodeProvider();
+        if (!probe) {
             g_createError = "createNodeProvider returned null.";
             return nullptr;
         }
-        shimState->description = shimState->provider->describe();
+        shimState->description = probe->describe();
         shimState->inputKeys.reserve(shimState->description.inputs.size());
         for (const auto& input : shimState->description.inputs) shimState->inputKeys.push_back(input.key);
         shimState->scratchValues.assign(shimState->description.inputs.size(), 0.0);
@@ -97,8 +103,10 @@ bool initializeInstance(void* self, std::uint64_t instanceId,
             }
             binding.keyIndexes.push_back(static_cast<std::size_t>(found - inputs.begin()));
         }
+        binding.provider = createNodeProvider();
+        if (!binding.provider) throw std::runtime_error("createNodeProvider returned null for a new instance.");
+        binding.provider->initialize({instanceId});
         shimState.instanceBindings[instanceId] = std::move(binding);
-        shimState.provider->initialize({instanceId});
         return true;
     } catch (const std::exception& error) {
         shimState.lastError = error.what();
@@ -121,14 +129,14 @@ bool evaluateInstance(void* self, std::uint64_t instanceId, double simulationTim
         if (outValueCount != shimState.description.outputs.size()) {
             throw std::runtime_error("In-process node evaluation was given a mismatched output buffer size.");
         }
-        const auto& binding = found->second;
+        auto& binding = found->second;
         std::fill(shimState.scratchValues.begin(), shimState.scratchValues.end(), 0.0);
         for (std::size_t index = 0; index < binding.keyIndexes.size() && index < inputCountArg; ++index) {
             shimState.scratchValues[binding.keyIndexes[index]] = inputs[index];
         }
 
         konjugate::sdk::v1::NodeOutputCollector output;
-        shimState.provider->evaluate(
+        binding.provider->evaluate(
             {simulationTime, stepSize, {shimState.scratchValues, shimState.inputKeys}}, output);
 
         // The provider is free to name gradients in any order (and to omit an output it did not
@@ -158,22 +166,24 @@ bool requestCheckpoint(void* self, std::uint64_t instanceId,
                       std::uint8_t* buffer, std::uint32_t bufferCapacity, std::uint32_t* outSize) {
     auto& shimState = state(self);
     try {
-        if (shimState.instanceBindings.find(instanceId) == shimState.instanceBindings.end()) {
+        const auto found = shimState.instanceBindings.find(instanceId);
+        if (found == shimState.instanceBindings.end()) {
             throw std::runtime_error("In-process node checkpoint references an uninitialized instance.");
         }
+        auto& binding = found->second;
         if (buffer == nullptr) {
             // Query call: (re)compute the checkpoint now and cache it for the matching fill call,
             // rather than computing it twice -- checkpoint() may not be cheap or side-effect-free
             // to call repeatedly (an FMU's fmi2GetFMUstate, say, allocates on the vendor side).
-            shimState.lastCheckpoint = shimState.provider->checkpoint();
-            *outSize = static_cast<std::uint32_t>(shimState.lastCheckpoint.size());
+            binding.pendingCheckpoint = binding.provider->checkpoint();
+            *outSize = static_cast<std::uint32_t>(binding.pendingCheckpoint.size());
             return true;
         }
-        if (bufferCapacity < shimState.lastCheckpoint.size()) {
+        if (bufferCapacity < binding.pendingCheckpoint.size()) {
             throw std::runtime_error("In-process node checkpoint buffer is smaller than the queried size.");
         }
-        std::memcpy(buffer, shimState.lastCheckpoint.data(), shimState.lastCheckpoint.size());
-        *outSize = static_cast<std::uint32_t>(shimState.lastCheckpoint.size());
+        std::memcpy(buffer, binding.pendingCheckpoint.data(), binding.pendingCheckpoint.size());
+        *outSize = static_cast<std::uint32_t>(binding.pendingCheckpoint.size());
         return true;
     } catch (const std::exception& error) {
         shimState.lastError = error.what();
@@ -187,12 +197,13 @@ bool requestCheckpoint(void* self, std::uint64_t instanceId,
 bool requestRestore(void* self, std::uint64_t instanceId, const std::uint8_t* payload, std::uint32_t payloadSize) {
     auto& shimState = state(self);
     try {
-        if (shimState.instanceBindings.find(instanceId) == shimState.instanceBindings.end()) {
+        const auto found = shimState.instanceBindings.find(instanceId);
+        if (found == shimState.instanceBindings.end()) {
             throw std::runtime_error("In-process node restore references an uninitialized instance.");
         }
         std::vector<std::byte> bytes(payloadSize);
         std::memcpy(bytes.data(), payload, payloadSize);
-        shimState.provider->restore(bytes);
+        found->second.provider->restore(bytes);
         return true;
     } catch (const std::exception& error) {
         shimState.lastError = error.what();
@@ -209,9 +220,12 @@ const char* lastError(void* self) {
 }
 
 void shutdownProvider(void* self) {
-    try {
-        state(self).provider->shutdown();
-    } catch (...) {} // NOLINT(bugprone-empty-catch)
+    auto& shimState = state(self);
+    for (auto& [instanceId, binding] : shimState.instanceBindings) {
+        try {
+            binding.provider->shutdown();
+        } catch (...) {} // NOLINT(bugprone-empty-catch)
+    }
 }
 
 constexpr KonjugateInProcessNodeProviderV1 kVtable{

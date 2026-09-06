@@ -38,14 +38,14 @@ function scalarVariablesXml(variables) {
 // Platform directory naming follows the FMI standard's own convention (win32/win64/linux32/
 // linux64/darwin32/darwin64) -- predates Apple Silicon, so arm64 is folded into the 64-bit bucket
 // like most real-world FMU exporters do, rather than inventing a nonstandard directory name.
-function platformDirectory() {
+export function platformDirectory() {
     const bitness = process.arch === 'x86' || process.arch === 'ia32' ? '32' : '64';
     if (process.platform === 'win32') return `win${bitness}`;
     if (process.platform === 'darwin') return `darwin${bitness}`;
     return `linux${bitness}`;
 }
 
-function libraryExtension() {
+export function libraryExtension() {
     if (process.platform === 'win32') return '.dll';
     if (process.platform === 'darwin') return '.dylib';
     return '.so';

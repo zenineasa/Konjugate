@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <openssl/evp.h>
@@ -152,8 +153,12 @@ enum class CppProviderArtifactKind { executable, sharedLibrary, nodeSharedLibrar
 
 // Compiles an inline C++ relationship's source, together with the public SDK header and one of
 // Konjugate's glue wrappers, into a native provider artifact. The build is cached on disk by a
-// hash of the source text, so repeated runs of the same inline implementation only pay the
-// compile cost once. This is a minimal first build pipeline: it does not yet run declared
+// hash of the source text AND the glue file's own content, so repeated runs of the same inline
+// implementation only pay the compile cost once -- but a Konjugate upgrade that changes the glue
+// file itself (a shim bug fix, an SDK change) still invalidates a previously-compiled artifact
+// rather than silently reusing code built against the old glue forever, since the fixed OS temp
+// directory this caches under (see buildRoot below) is not itself versioned by Konjugate's own
+// version number. This is a minimal first build pipeline: it does not yet run declared
 // conformance tests or record compiler identity/artifact hash in the project.
 std::string buildCppProvider(const std::string& source, const ProviderConfiguration& config, CppProviderArtifactKind kind) {
     if (config.cppSdkPath.empty()) {
@@ -161,11 +166,6 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
             "A C++ relationship provider requires providers.cpp.sdkPath to locate the Konjugate C++ SDK.");
     }
 
-    const auto hash = sha256Hex(source);
-    const std::filesystem::path buildRoot = config.buildDirectory.empty()
-        ? std::filesystem::temp_directory_path() / "konjugateProviders"
-        : std::filesystem::path(config.buildDirectory);
-    const auto providerDirectory = buildRoot / hash;
     const bool sharedLibrary = kind != CppProviderArtifactKind::executable;
     const std::string glueFile = kind == CppProviderArtifactKind::nodeSharedLibrary ? "providerInProcessNodeShim.cpp"
         : kind == CppProviderArtifactKind::sharedLibrary ? "providerInProcessShim.cpp" : "providerWorker.cpp";
@@ -173,6 +173,18 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
     // (e.g. an imported FMU's own compiled binary) -- on Linux that symbol lives in libdl, which
     // (unlike macOS's libSystem or Windows' LoadLibrary) is not linked in by default.
     const bool needsDynamicLoaderLibrary = kind == CppProviderArtifactKind::nodeSharedLibrary;
+    const std::filesystem::path sdkRoot(config.cppSdkPath);
+    const auto gluePath = sdkRoot / "src" / glueFile;
+
+    std::ifstream glueStream(gluePath, std::ios::binary);
+    if (!glueStream) throw std::runtime_error("Failed to read the provider glue file at " + gluePath.string());
+    const std::string glueContent((std::istreambuf_iterator<char>(glueStream)), std::istreambuf_iterator<char>());
+
+    const auto hash = sha256Hex(source + '\0' + glueContent);
+    const std::filesystem::path buildRoot = config.buildDirectory.empty()
+        ? std::filesystem::temp_directory_path() / "konjugateProviders"
+        : std::filesystem::path(config.buildDirectory);
+    const auto providerDirectory = buildRoot / hash;
 #ifdef _WIN32
     const auto artifactPath = providerDirectory / (sharedLibrary ? "provider.dll" : "provider.exe");
 #elif defined(__APPLE__)
@@ -189,8 +201,7 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
         sourceFile << source;
         sourceFile.close();
 
-        const std::filesystem::path sdkRoot(config.cppSdkPath);
-        cppToolchain::buildNativeArtifact(sourcePath, sdkRoot / "src" / glueFile, sdkRoot / "include",
+        cppToolchain::buildNativeArtifact(sourcePath, gluePath, sdkRoot / "include",
             artifactPath, sharedLibrary, config.cppCompiler,
             kind == CppProviderArtifactKind::nodeSharedLibrary ? "the C++ computational-node provider" : "the C++ relationship provider",
             needsDynamicLoaderLibrary);

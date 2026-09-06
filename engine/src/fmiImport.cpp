@@ -2,93 +2,19 @@
 
 #include "fmiImport.hpp"
 #include "fmi2/fmi2Functions.h"
+#include "konjugate/fmiDynamicLoad.hpp"
 
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 namespace konjugate {
 namespace {
 
-// Mirrors providerRuntime.cpp's InProcessProviderBackend::loadLibrary exactly -- the same
-// cross-platform dlopen()/LoadLibrary() pattern already proven there, just resolving a different
-// set of symbols (the FMI2 C API instead of the in-process provider ABI's single vtable entry
-// point).
-class LoadedLibrary {
-public:
-    explicit LoadedLibrary(const std::filesystem::path& path) {
-#ifdef _WIN32
-        handle_ = ::LoadLibraryA(path.string().c_str());
-        if (!handle_) throw std::runtime_error("Failed to load FMU shared library '" + path.string() + "'.");
-#else
-        handle_ = ::dlopen(path.string().c_str(), RTLD_LOCAL | RTLD_NOW);
-        if (!handle_) throw std::runtime_error("Failed to load FMU shared library '" + path.string() + "': " + std::string(::dlerror()));
-#endif
-    }
-
-    ~LoadedLibrary() {
-#ifdef _WIN32
-        if (handle_) ::FreeLibrary(handle_);
-#else
-        if (handle_) ::dlclose(handle_);
-#endif
-    }
-
-    LoadedLibrary(const LoadedLibrary&) = delete;
-    LoadedLibrary& operator=(const LoadedLibrary&) = delete;
-
-    template <typename FunctionPointer>
-    FunctionPointer resolve(const char* symbolName) const {
-#ifdef _WIN32
-        auto* address = ::GetProcAddress(handle_, symbolName);
-#else
-        auto* address = ::dlsym(handle_, symbolName);
-#endif
-        if (!address) throw std::runtime_error(std::string("The FMU shared library is missing the symbol '") + symbolName + "'.");
-        return reinterpret_cast<FunctionPointer>(address);
-    }
-
-private:
-#ifdef _WIN32
-    HMODULE handle_ = nullptr;
-#else
-    void* handle_ = nullptr;
-#endif
-};
-
-struct Fmi2Api {
-    fmi2InstantiateTYPE instantiate;
-    fmi2SetupExperimentTYPE setupExperiment;
-    fmi2EnterInitializationModeTYPE enterInitializationMode;
-    fmi2ExitInitializationModeTYPE exitInitializationMode;
-    fmi2DoStepTYPE doStep;
-    fmi2GetRealTYPE getReal;
-    fmi2GetFMUstateTYPE getFMUstate;
-    fmi2SetFMUstateTYPE setFMUstate;
-    fmi2FreeFMUstateTYPE freeFMUstate;
-    fmi2TerminateTYPE terminate;
-    fmi2FreeInstanceTYPE freeInstance;
-
-    explicit Fmi2Api(const LoadedLibrary& library)
-        : instantiate(library.resolve<fmi2InstantiateTYPE>("fmi2Instantiate")),
-          setupExperiment(library.resolve<fmi2SetupExperimentTYPE>("fmi2SetupExperiment")),
-          enterInitializationMode(library.resolve<fmi2EnterInitializationModeTYPE>("fmi2EnterInitializationMode")),
-          exitInitializationMode(library.resolve<fmi2ExitInitializationModeTYPE>("fmi2ExitInitializationMode")),
-          doStep(library.resolve<fmi2DoStepTYPE>("fmi2DoStep")),
-          getReal(library.resolve<fmi2GetRealTYPE>("fmi2GetReal")),
-          getFMUstate(library.resolve<fmi2GetFMUstateTYPE>("fmi2GetFMUstate")),
-          setFMUstate(library.resolve<fmi2SetFMUstateTYPE>("fmi2SetFMUstate")),
-          freeFMUstate(library.resolve<fmi2FreeFMUstateTYPE>("fmi2FreeFMUstate")),
-          terminate(library.resolve<fmi2TerminateTYPE>("fmi2Terminate")),
-          freeInstance(library.resolve<fmi2FreeInstanceTYPE>("fmi2FreeInstance")) {}
-};
+using konjugate::fmi::Fmi2Api;
+using konjugate::fmi::LoadedLibrary;
 
 std::vector<double> readState(const Fmi2Api& api, fmi2Component instance, int stateCount) {
     std::vector<fmi2ValueReference> valueReferences(static_cast<std::size_t>(stateCount));

@@ -60,6 +60,57 @@ boost::property_tree::ptree projectWithNodeImplementation(const std::string& imp
     return project;
 }
 
+// Two separate nodes whose implementation blocks carry the IDENTICAL source text (bindings/
+// outputs differ per node, pointing at each node's own states, but providerProcessKeyCache is
+// derived from source text alone) -- exactly the shape that shares one compiled/loaded artifact
+// between them (see providerProcessKey()/ProviderRuntime::initialize). Proves an in-process node
+// provider's per-instance state (providerInProcessNodeShim.cpp's InstanceBinding) is genuinely
+// independent per node, not accidentally shared -- the bug this shim design was specifically
+// fixed to avoid before any real FMI-import glue could depend on it.
+boost::property_tree::ptree twoNodesSharingOneCppImplementation(const std::string& source) {
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "nodes": [
+            {
+                "id": 1, "name": "A",
+                "states": [{"id": 11, "name": "Level", "symbol": "level", "initialValue": 0}],
+                "sourceTerms": [],
+                "implementation": {
+                    "kind": "cpp",
+                    "providerApiVersion": 1,
+                    "source": "placeholder-replaced-below",
+                    "bindings": [{"key": "input", "kind": "state", "stateId": 11}],
+                    "outputs": [{"key": "output", "stateId": 11}]
+                }
+            },
+            {
+                "id": 2, "name": "B",
+                "states": [{"id": 21, "name": "Level", "symbol": "level", "initialValue": 0}],
+                "sourceTerms": [],
+                "implementation": {
+                    "kind": "cpp",
+                    "providerApiVersion": 1,
+                    "source": "placeholder-replaced-below",
+                    "bindings": [{"key": "input", "kind": "state", "stateId": 21}],
+                    "outputs": [{"key": "output", "stateId": 21}]
+                }
+            }
+        ],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    // Set directly on the ptree rather than embedding in the JSON literal above, so the inline
+    // C++ source's quotes and braces never have to survive JSON-string escaping -- same reasoning
+    // as providerRuntimeCompilesAndExecutesAnInlineCppProviderEndToEnd in relationshipProviderTests.cpp.
+    auto nodeIt = project.get_child("nodes").begin();
+    nodeIt->second.put("implementation.source", source);
+    ++nodeIt;
+    nodeIt->second.put("implementation.source", source);
+    return project;
+}
+
 std::string validNodeImplementation() {
     return R"json({
         "kind": "python",
@@ -387,6 +438,43 @@ void providerRuntimeExecutesNodeProviderCppInProcessEndToEnd() {
     runtime.shutdown();
 }
 
+void providerRuntimeGivesEachCppNodeProviderInstanceIndependentState() {
+    auto project = twoNodesSharingOneCppImplementation(cppInlineAccumulatorNodeSource());
+    const auto plan = konjugate::compileExecutionPlan(project);
+    require(plan.nodes[0].nodeProvider->providerProcessKeyCache == plan.nodes[1].nodeProvider->providerProcessKeyCache,
+        "Test setup expected both nodes to share one provider process key.");
+
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto& taskA = *plan.nodes[0].nodeProvider;
+    const auto& taskB = *plan.nodes[1].nodeProvider;
+
+    // Drive A far ahead of B, then confirm B still reads back as if it had never been touched --
+    // if the shim accidentally shared one NodeProvider object across both instances, B would see
+    // A's accumulated total instead of its own.
+    const double drive[] = {4.0};
+    runtime.evaluateNode(taskA, drive, 0.0, 1.0);
+    runtime.evaluateNode(taskA, drive, 1.0, 1.0);
+    runtime.evaluateNode(taskA, drive, 2.0, 1.0);
+
+    const double zero[] = {0.0};
+    const auto resultB = runtime.evaluateNode(taskB, zero, 0.0, 1.0);
+    require(resultB.front().second == 0.0,
+        "Two node-provider instances sharing one in-process artifact did not have independent state.");
+
+    const auto checkpointA = runtime.requestNodeCheckpoint(taskA);
+    const auto checkpointB = runtime.requestNodeCheckpoint(taskB);
+    require(checkpointA != checkpointB,
+        "Two independently-driven node-provider instances produced identical checkpoints -- state is likely shared.");
+
+    runtime.shutdown();
+}
+
 void providerRuntimeRejectsACppNodeProviderOutsideInProcessMode() {
     const std::string implementation = R"json({
         "kind": "cpp",
@@ -426,6 +514,7 @@ int main() {
         executionPlanFoldsNodeProviderOutputsIntoNodeDerivatives();
         providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd();
         providerRuntimeExecutesNodeProviderCppInProcessEndToEnd();
+        providerRuntimeGivesEachCppNodeProviderInstanceIndependentState();
         providerRuntimeRejectsACppNodeProviderOutsideInProcessMode();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "nodeProviderRuntimeTests failed: %s\n", error.what());

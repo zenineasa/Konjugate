@@ -64,7 +64,6 @@ struct ExecutionSettings {
     std::size_t estimatedOperationsPerSynchronization = 0;
     std::size_t automaticParallelThreshold = 128;
 };
-struct NodeIntegrationResult { Values states; std::uint64_t computeNanoseconds = 0; };
 struct NodeRuntimeMetrics {
     std::uint64_t invocations = 0;
     std::uint64_t executedSubsteps = 0;
@@ -282,30 +281,6 @@ ExecutionSettings executionSettingsFromTree(const boost::property_tree::ptree& t
     return settings;
 }
 
-NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
-                                    const Values& synchronizationSnapshot,
-                                    const EntityValues& liveParameterValues,
-                                    double simulationTime,
-                                    double synchronizationStep,
-                                    ProviderEvaluator* providerEvaluator = nullptr) {
-    const auto startedAt = std::chrono::steady_clock::now();
-    Values localStates(node.stateIndexes.size());
-    for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
-        localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
-    }
-    const auto parameterValues = resolveParameterValues(node, liveParameterValues);
-    const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
-    for (std::size_t substep = 0; substep < node.substeps; ++substep) {
-        const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
-        const auto evaluated = evaluateContributionTasks(
-            node, localStates, synchronizationSnapshot, parameterValues,
-            substepTime, nodeTimeStep, providerEvaluator);
-        const auto derivatives = reduceContributions(evaluated);
-        for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
-    }
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
-    return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
-}
 }
 
 void runSimulation(const boost::property_tree::ptree& document,
@@ -828,7 +803,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             auto& metrics = nodeMetrics[index];
             ++metrics.invocations;
             metrics.executedSubsteps += node.substeps;
-            metrics.evaluatedContributions += node.substeps * node.contributions.size();
+            metrics.evaluatedContributions += node.substeps * (node.contributions.size() + node.algebraicTasks.size());
             metrics.computeNanoseconds += result.computeNanoseconds;
         }
         const auto synchronizationElapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(

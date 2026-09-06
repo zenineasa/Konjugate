@@ -7,6 +7,10 @@
 namespace konjugate {
 namespace {
 
+// Thin wrapper adding this backend's own nodeIndex around the shared integrateNode()
+// (executionPlan.hpp/.cpp) -- the actual substep loop (including algebraic-task recomputation)
+// lives in exactly one place now, shared verbatim with the serial/thread-pool backend
+// (simulationRunner.cpp), so the two can never silently diverge on that logic.
 PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
                                   std::size_t nodeIndex,
                                   const StateValues& synchronizationSnapshot,
@@ -14,24 +18,9 @@ PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
                                   double simulationTime,
                                   double synchronizationStep,
                                   ProviderEvaluator* providerEvaluator = nullptr) {
-    const auto startedAt = std::chrono::steady_clock::now();
-    StateValues localStates(node.stateIndexes.size());
-    for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
-        localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
-    }
-    const auto parameterValues = resolveParameterValues(node, liveParameterValues);
-    const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
-    for (std::size_t substep = 0; substep < node.substeps; ++substep) {
-        const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
-        const auto evaluated = evaluateContributionTasks(
-            node, localStates, synchronizationSnapshot, parameterValues,
-            substepTime, nodeTimeStep, providerEvaluator);
-        const auto derivatives = reduceContributions(evaluated);
-        for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
-    }
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now() - startedAt).count();
-    return {nodeIndex, std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+    auto result = konjugate::integrateNode(node, synchronizationSnapshot, liveParameterValues,
+                                            simulationTime, synchronizationStep, providerEvaluator);
+    return {nodeIndex, std::move(result.states), result.computeNanoseconds};
 }
 
 }

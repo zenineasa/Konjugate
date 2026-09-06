@@ -2,7 +2,9 @@
 
 #include "executionPlan.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <functional>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -201,10 +203,12 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             localStateIndexes[compiledNode.stateIds[index]] = index;
         }
         std::size_t sequence = 0;
+        std::vector<ContributionTask> algebraicCandidates;
         for (const auto& termItem : node.get_child("sourceTerms")) {
             const auto& term = termItem.second;
             const auto termImplementationKind = value(term, "implementation.kind");
             const auto termProgrammable = termImplementationKind == "cpp" || termImplementationKind == "python";
+            const bool termSetsValue = value(term, "setsValue") == "true";
             ContributionTask task;
             task.sequence = sequence++;
             task.sourceId = idValue(term, "id");
@@ -226,7 +230,50 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             }
             bindTask(task);
             compiledNode.estimatedOperationsPerSubstep += termProgrammable ? task.bindings.size() + 1 : task.expression.operationCount();
-            compiledNode.contributions.push_back(std::move(task));
+            if (termSetsValue) algebraicCandidates.push_back(std::move(task));
+            else compiledNode.contributions.push_back(std::move(task));
+        }
+        // Algebraic ("sets the value") source terms are recomputed fresh every substep, never
+        // integrated -- see NodeExecutionPlan::algebraicTasks. One may itself bind another
+        // algebraic task's own output state (e.g. "y = 2x, z = y + 1"), so they must be stored in
+        // dependency order for applyAlgebraicTasks() to evaluate correctly in one pass. Binding
+        // one's own output state is rejected outright (not just left for the generic cycle
+        // check below) -- that would readmit exactly the hidden-recurrence, solver-specific
+        // feedback this mechanism exists to eliminate, not a legitimate algebraic dependency.
+        if (!algebraicCandidates.empty()) {
+            std::unordered_map<EntityId, std::size_t> algebraicIndexByStateId;
+            for (std::size_t index = 0; index < algebraicCandidates.size(); ++index) {
+                algebraicIndexByStateId[algebraicCandidates[index].outputStateId] = index;
+            }
+            for (const auto& task : algebraicCandidates) {
+                for (const auto& binding : task.bindings) {
+                    if (binding.source == BindingSource::localState && binding.valueId == task.outputStateId) {
+                        throw std::runtime_error(
+                            "A source term that sets its value directly may not reference its own state.");
+                    }
+                }
+            }
+            std::vector<int> visitState(algebraicCandidates.size(), 0); // 0=unvisited, 1=visiting, 2=done
+            std::vector<std::size_t> algebraicOrder;
+            algebraicOrder.reserve(algebraicCandidates.size());
+            std::function<void(std::size_t)> visit = [&](std::size_t index) {
+                if (visitState[index] == 2) return;
+                if (visitState[index] == 1) {
+                    throw std::runtime_error(
+                        "Two or more source terms that set their value directly form a dependency cycle, which has no defined solution.");
+                }
+                visitState[index] = 1;
+                for (const auto& binding : algebraicCandidates[index].bindings) {
+                    if (binding.source != BindingSource::localState) continue;
+                    const auto found = algebraicIndexByStateId.find(binding.valueId);
+                    if (found != algebraicIndexByStateId.end()) visit(found->second);
+                }
+                visitState[index] = 2;
+                algebraicOrder.push_back(index);
+            };
+            for (std::size_t index = 0; index < algebraicCandidates.size(); ++index) visit(index);
+            compiledNode.algebraicTasks.reserve(algebraicOrder.size());
+            for (const auto index : algebraicOrder) compiledNode.algebraicTasks.push_back(std::move(algebraicCandidates[index]));
         }
         if (const auto implementation = node.get_child_optional("implementation")) {
             const auto kind = value(*implementation, "kind");
@@ -426,7 +473,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
         }
         for (std::size_t index = 0; index < tasks.size(); ++index) {
             const auto& task = *tasks[index];
-            evaluated.push_back({task.sequence, task.outputStateIndex, finalizeContribution(task, results[index])});
+            const auto contribution = finalizeContribution(task, results[index]);
+            evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
         }
     }
 
@@ -458,10 +506,10 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     return evaluated;
 }
 
-NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues) {
+NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues) {
     NodeParameterValues resolved;
-    resolved.reserve(node.contributions.size());
-    for (const auto& task : node.contributions) {
+    resolved.reserve(tasks.size());
+    for (const auto& task : tasks) {
         auto& values = resolved.emplace_back();
         values.reserve(task.parameters.size());
         for (const auto& parameter : task.parameters) {
@@ -470,6 +518,10 @@ NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const 
         }
     }
     return resolved;
+}
+
+NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues) {
+    return resolveParameterValues(node.contributions, liveParameterValues);
 }
 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
@@ -489,6 +541,77 @@ std::vector<std::pair<std::size_t, double>> reduceContributions(
         }
     }
     return derivatives;
+}
+
+void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, StateValues& localStates,
+                         const NodeParameterValues& parameterValues, double simulationTime, double stepSize,
+                         ProviderEvaluator* providerEvaluator) {
+    for (std::size_t taskIndex = 0; taskIndex < algebraicTasks.size(); ++taskIndex) {
+        const auto& task = algebraicTasks[taskIndex];
+        std::vector<double> symbols(task.bindings.size());
+        for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+            const auto& binding = task.bindings[index];
+            if (binding.source == BindingSource::parameter) {
+                symbols[index] = parameterValues.at(taskIndex).at(binding.parameterIndex);
+            } else if (binding.source == BindingSource::localState) {
+                symbols[index] = localStates.at(binding.valueIndex);
+            } else {
+                // Structurally unreachable: compileBindings() forces every source term's
+                // bindings to BindingSource::localState unconditionally (an algebraic task is
+                // always a source term), so this should never fire. Fail loudly rather than
+                // silently reading a stale cross-node snapshot if that invariant is ever broken.
+                throw std::runtime_error("An algebraic task unexpectedly referenced the cross-node synchronization snapshot.");
+            }
+        }
+
+        double value = 0;
+        if (task.implementation == ContributionImplementation::equation) {
+            value = task.expression.evaluate(symbols);
+        } else {
+            if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
+            const std::vector<const ContributionTask*> batchTasks{&task};
+            const std::vector<std::span<const double>> inputs{symbols};
+            const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, simulationTime, stepSize);
+            if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
+            value = results.front();
+        }
+        if (!std::isfinite(value)) throw std::runtime_error("An algebraic source term produced a non-finite value.");
+        // A plain replacement, never accumulated and never divided by anything -- this is the
+        // whole point: an algebraic state is recomputed fresh, not integrated, so it composes
+        // with any solver (see NodeExecutionPlan::algebraicTasks and this function's declaration
+        // comment in executionPlan.hpp).
+        localStates.at(task.outputStateIndex) = value;
+    }
+}
+
+NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
+                                    const StateValues& synchronizationSnapshot,
+                                    const EntityValues& liveParameterValues,
+                                    double simulationTime,
+                                    double synchronizationStep,
+                                    ProviderEvaluator* providerEvaluator) {
+    const auto startedAt = std::chrono::steady_clock::now();
+    StateValues localStates(node.stateIndexes.size());
+    for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
+        localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
+    }
+    const auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues);
+    const auto algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues);
+    const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
+    for (std::size_t substep = 0; substep < node.substeps; ++substep) {
+        const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
+        // Algebraic states are recomputed first, in their precomputed dependency order, so both
+        // a later algebraic task and every ordinary (differential) contribution evaluated next
+        // in this same substep see the fresh value -- never the previous substep's.
+        applyAlgebraicTasks(node.algebraicTasks, localStates, algebraicParameterValues, substepTime, nodeTimeStep, providerEvaluator);
+        const auto evaluated = evaluateContributionTasks(
+            node, localStates, synchronizationSnapshot, parameterValues,
+            substepTime, nodeTimeStep, providerEvaluator);
+        const auto derivatives = reduceContributions(evaluated);
+        for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
+    return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
 }
 
 }

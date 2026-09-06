@@ -1919,8 +1919,11 @@ function renderSourceTermEditor(node, term) {
     const implementationKind = term.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
     $('#termImplementationKind').value = implementationKind;
+    $('#termSetsValue').value = term.setsValue ? 'true' : 'false';
+    $('#termSetsValueHint').hidden = !term.setsValue;
     term.parameters ??= [];
     renderSourceTermParameters(node, term);
+    $('h3', $('#termEquationHeading')).textContent = term.setsValue ? 'Value' : 'Equation';
     $('#termEquationHeading').hidden = !isEquation;
     $('#termEquationDiagnostics').hidden = !isEquation;
     $('#termReferencePicker').hidden = !isEquation;
@@ -7275,6 +7278,16 @@ $('#termImplementationKind').addEventListener('change', (event) => {
             bindings,
             output
         };
+    });
+});
+$('#termSetsValue').addEventListener('change', (event) => {
+    if (!selectedSourceTermNodeId) return;
+    const node = nodeObjects.get(selectedSourceTermNodeId);
+    const setsValue = event.target.value === 'true';
+    $('#termSetsValueHint').hidden = !setsValue;
+    changeSourceTermModel(node, selectedSourceTermId, (term) => {
+        if (setsValue) term.setsValue = true;
+        else delete term.setsValue;
     });
 });
 $('#termInsertProviderTemplate').addEventListener('click', () => {

@@ -972,6 +972,239 @@ void validatorWarnsWithoutBlockingAnUntouchedProgrammableSourceTermTemplate() {
         "Writing real source should clear the incomplete-template warning even with zero bindings.");
 }
 
+boost::property_tree::ptree oneEquationSourceTermProject(bool setsValue) {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Node",
+            "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}],
+            "sourceTerms": [{
+                "id": 21, "state": "x", "expression": "5",
+                )json" + std::string(setsValue ? "\"setsValue\": true," : "") + R"json(
+                "expressionModel": {"latex": "5", "bindings": [], "output": {"stateId": 11}, "mathJson": 5}
+            }]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+boost::property_tree::ptree twoEquationSourceTermsSharingOneStateProject(bool firstSetsValue) {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Node",
+            "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}],
+            "sourceTerms": [
+                {
+                    "id": 21, "state": "x", "expression": "5",
+                    )json" + std::string(firstSetsValue ? "\"setsValue\": true," : "") + R"json(
+                    "expressionModel": {"latex": "5", "bindings": [], "output": {"stateId": 11}, "mathJson": 5}
+                },
+                {
+                    "id": 22, "state": "x", "expression": "1",
+                    "expressionModel": {"latex": "1", "bindings": [], "output": {"stateId": 11}, "mathJson": 1}
+                }
+            ]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+boost::property_tree::ptree setsValueSourceTermWithIncomingEdgeProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [
+            {
+                "id": 1, "name": "A",
+                "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}],
+                "sourceTerms": [{
+                    "id": 21, "state": "x", "expression": "5", "setsValue": true,
+                    "expressionModel": {"latex": "5", "bindings": [], "output": {"stateId": 11}, "mathJson": 5}
+                }]
+            },
+            {
+                "id": 2, "name": "B",
+                "states": [{"id": 12, "name": "Y", "symbol": "y", "initialValue": 0}],
+                "sourceTerms": []
+            }
+        ],
+        "edges": [{
+            "id": 31, "name": "B to A",
+            "source": {"nodeId": 2, "stateId": 12}, "target": {"nodeId": 1, "stateId": 11},
+            "directionality": "directed",
+            "equationModel": {
+                "latex": "y", "bindings": [{"kind": "state", "role": "source", "nodeId": 2, "stateId": 12, "symbol": "y"}],
+                "output": {"role": "target", "stateId": 11}, "mathJson": "y"
+            },
+            "parameters": []
+        }]
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+void validatorAcceptsASetsValueEquationSourceTermAsSoleContributor() {
+    const auto result = konjugate::validateModel(oneEquationSourceTermProject(true));
+    require(result.valid, "A setsValue equation source term as the sole contributor to its state was rejected.");
+    require(!hasIssue(result, "setsValueNotSoleContributor"), "A sole setsValue contributor was incorrectly flagged.");
+
+    const auto plan = konjugate::compileExecutionPlan(oneEquationSourceTermProject(true));
+    require(plan.nodes.at(0).contributions.empty() && plan.nodes.at(0).algebraicTasks.size() == 1,
+        "A setsValue source term should compile into algebraicTasks, not an ordinary derivative contribution.");
+}
+
+void validatorAcceptsASetsValueProgrammableSourceTermAsSoleContributor() {
+    auto project = sourceTermWithImplementationProject();
+    project.get_child("nodes").begin()->second.get_child("sourceTerms").begin()->second.put("setsValue", true);
+    const auto result = konjugate::validateModel(project);
+    require(result.valid, "A setsValue programmable source term as the sole contributor to its state was rejected.");
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    require(plan.nodes.at(0).contributions.empty() && plan.nodes.at(0).algebraicTasks.size() == 1,
+        "A setsValue programmable source term should compile into algebraicTasks, not an ordinary derivative contribution.");
+}
+
+void validatorRejectsASetsValueSourceTermSharingItsStateWithAnotherSourceTerm() {
+    const auto sharedButNeitherSetsValue = konjugate::validateModel(twoEquationSourceTermsSharingOneStateProject(false));
+    require(sharedButNeitherSetsValue.valid, "Two ordinary source terms sharing a state should validate (they simply sum).");
+
+    const auto sharedWithSetsValue = konjugate::validateModel(twoEquationSourceTermsSharingOneStateProject(true));
+    require(!sharedWithSetsValue.valid, "A setsValue source term sharing its state with another source term was accepted.");
+    require(hasIssue(sharedWithSetsValue, "setsValueNotSoleContributor"),
+        "The shared-state setsValue conflict was not diagnosed with the expected issue code.");
+}
+
+void validatorRejectsASetsValueSourceTermSharingItsStateWithAnIncomingEdge() {
+    const auto result = konjugate::validateModel(setsValueSourceTermWithIncomingEdgeProject());
+    require(!result.valid, "A setsValue source term with an incoming edge to the same state was accepted.");
+    require(hasIssue(result, "setsValueNotSoleContributor"),
+        "A setsValue/edge conflict on the same state was not diagnosed with the expected issue code.");
+}
+
+boost::property_tree::ptree setsValueSelfReferenceProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Node",
+            "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}],
+            "sourceTerms": [{
+                "id": 21, "state": "x", "expression": "x", "setsValue": true,
+                "expressionModel": {
+                    "latex": "x", "bindings": [{"kind": "state", "stateId": 11, "symbol": "x"}],
+                    "output": {"stateId": 11}, "mathJson": "x"
+                }
+            }]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+boost::property_tree::ptree setsValueAlgebraicLoopProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Node",
+            "states": [
+                {"id": 11, "name": "X", "symbol": "x", "initialValue": 0},
+                {"id": 12, "name": "Y", "symbol": "y", "initialValue": 0}
+            ],
+            "sourceTerms": [
+                {
+                    "id": 21, "state": "x", "expression": "y", "setsValue": true,
+                    "expressionModel": {"latex": "y", "bindings": [{"kind": "state", "stateId": 12, "symbol": "y"}], "output": {"stateId": 11}, "mathJson": "y"}
+                },
+                {
+                    "id": 22, "state": "y", "expression": "x", "setsValue": true,
+                    "expressionModel": {"latex": "x", "bindings": [{"kind": "state", "stateId": 11, "symbol": "x"}], "output": {"stateId": 12}, "mathJson": "x"}
+                }
+            ]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+boost::property_tree::ptree setsValueDependencyChainProject() {
+    // y = 2 (algebraic), z = y + 1 (algebraic, depends on y) -- proves dependency ordering, not
+    // just cycle rejection, both in the validator (implicitly, by validating cleanly) and in
+    // compileExecutionPlan's resulting algebraicTasks order.
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Node",
+            "states": [
+                {"id": 11, "name": "Y", "symbol": "y", "initialValue": 0},
+                {"id": 12, "name": "Z", "symbol": "z", "initialValue": 0}
+            ],
+            "sourceTerms": [
+                {
+                    "id": 22, "state": "z", "expression": "y + 1", "setsValue": true,
+                    "expressionModel": {"latex": "y + 1", "bindings": [{"kind": "state", "stateId": 11, "symbol": "y"}], "output": {"stateId": 12}, "mathJson": ["Add", "y", 1]}
+                },
+                {
+                    "id": 21, "state": "y", "expression": "2", "setsValue": true,
+                    "expressionModel": {"latex": "2", "bindings": [], "output": {"stateId": 11}, "mathJson": 2}
+                }
+            ]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+void validatorRejectsASetsValueSourceTermReferencingItsOwnState() {
+    const auto result = konjugate::validateModel(setsValueSelfReferenceProject());
+    require(!result.valid, "A setsValue source term referencing its own state was accepted.");
+    require(hasIssue(result, "setsValueSelfReference"), "Self-reference was not diagnosed with the expected issue code.");
+
+    bool threw = false;
+    try {
+        konjugate::compileExecutionPlan(setsValueSelfReferenceProject());
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    require(threw, "compileExecutionPlan should also defensively reject self-reference (main.cpp's run path skips validateModel entirely).");
+}
+
+void validatorRejectsASetsValueAlgebraicLoop() {
+    const auto result = konjugate::validateModel(setsValueAlgebraicLoopProject());
+    require(!result.valid, "A dependency cycle between two setsValue source terms was accepted.");
+    require(hasIssue(result, "setsValueAlgebraicLoop"), "The algebraic loop was not diagnosed with the expected issue code.");
+
+    bool threw = false;
+    try {
+        konjugate::compileExecutionPlan(setsValueAlgebraicLoopProject());
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    require(threw, "compileExecutionPlan should also defensively reject an algebraic loop (main.cpp's run path skips validateModel entirely).");
+}
+
+void compileExecutionPlanOrdersDependentAlgebraicTasksCorrectly() {
+    const auto result = konjugate::validateModel(setsValueDependencyChainProject());
+    require(result.valid, "A valid algebraic dependency chain (not a cycle) was incorrectly rejected.");
+
+    const auto plan = konjugate::compileExecutionPlan(setsValueDependencyChainProject());
+    const auto& tasks = plan.nodes.at(0).algebraicTasks;
+    require(tasks.size() == 2, "Both algebraic source terms should compile into algebraicTasks.");
+    require(tasks.front().outputStateId == 11 && tasks.back().outputStateId == 12,
+        "y's task (no dependencies) should be ordered before z's task (which depends on y), regardless of authored order.");
+}
+
 void providerRuntimeExecutesAProgrammableSourceTermEndToEnd() {
     const auto plan = konjugate::compileExecutionPlan(sourceTermWithImplementationProject());
     konjugate::ProviderConfiguration config;
@@ -1017,5 +1250,12 @@ int main() {
     validatorRejectsAnIncompleteProgrammableSourceTerm();
     validatorAndExecutionPlanAcceptAProgrammableSourceTermWithNoBindings();
     validatorWarnsWithoutBlockingAnUntouchedProgrammableSourceTermTemplate();
+    validatorAcceptsASetsValueEquationSourceTermAsSoleContributor();
+    validatorAcceptsASetsValueProgrammableSourceTermAsSoleContributor();
+    validatorRejectsASetsValueSourceTermSharingItsStateWithAnotherSourceTerm();
+    validatorRejectsASetsValueSourceTermSharingItsStateWithAnIncomingEdge();
+    validatorRejectsASetsValueSourceTermReferencingItsOwnState();
+    validatorRejectsASetsValueAlgebraicLoop();
+    compileExecutionPlanOrdersDependentAlgebraicTasksCorrectly();
     providerRuntimeExecutesAProgrammableSourceTermEndToEnd();
 }

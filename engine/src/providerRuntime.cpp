@@ -1249,6 +1249,25 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             proc->addInstance(instanceId, task.bindings);
         }
 
+        // A programmable ("sets the value") algebraic task is evaluated through the exact same
+        // evaluateBatch()/providerProcessKey()/sourceId lookup path as an ordinary programmable
+        // contribution (see applyAlgebraicTasks in executionPlan.cpp) -- it must be registered
+        // here identically, or its first evaluation throws "Task not registered in ProviderRuntime."
+        for (const auto& task : node.algebraicTasks) {
+            if (task.implementation == ContributionImplementation::equation) continue;
+
+            const std::string key = providerProcessKey(task);
+            auto& proc = processes_[key];
+            if (!proc) {
+                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_, false);
+            }
+
+            const std::uint64_t instanceId = nextInstanceId_++;
+            taskInstanceIds_[task.sourceId] = instanceId;
+
+            proc->addInstance(instanceId, task.bindings);
+        }
+
         if (node.nodeProvider) {
             // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- guarded by the if() directly above.
             const auto& task = *node.nodeProvider;
@@ -1383,6 +1402,9 @@ bool planRequiresProviders(const ExecutionPlan& plan) {
     for (const auto& node : plan.nodes) {
         if (node.nodeProvider) return true;
         for (const auto& task : node.contributions) {
+            if (task.implementation != ContributionImplementation::equation) return true;
+        }
+        for (const auto& task : node.algebraicTasks) {
             if (task.implementation != ContributionImplementation::equation) return true;
         }
     }

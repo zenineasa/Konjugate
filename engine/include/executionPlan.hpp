@@ -153,6 +153,17 @@ struct NodeExecutionPlan {
     std::vector<EntityId> stateIds;
     std::vector<std::size_t> stateIndexes;
     std::vector<ContributionTask> contributions;
+    // Source terms authored as "sets the value" rather than "updates the derivative" -- a genuine
+    // algebraic state (in the Differential-Algebraic-Equation sense), never integrated via any
+    // solver's update rule. Stored in dependency-resolved order (an algebraic task may bind
+    // another algebraic task's own output state, e.g. "y = 2x, z = y + 1" -- z's task follows y's
+    // here) so applyAlgebraicTasks() can evaluate them once, in this order, before any ordinary
+    // (differential) contribution in the same substep, with each write immediately visible to
+    // whatever comes after it. Never contains edges (edges always contribute a derivative) --
+    // see docs/projectSchema.md's `setsValue` paragraph and
+    // docs/proposals/causalInferenceInputReplay.md for why this needs to be a genuinely
+    // recomputed-fresh value rather than a solver-specific derivative trick.
+    std::vector<ContributionTask> algebraicTasks;
     std::optional<NodeProviderTask> nodeProvider;
     std::size_t estimatedOperationsPerSubstep = 0;
 };
@@ -186,8 +197,44 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     ProviderEvaluator* providerEvaluator = nullptr);
 
 NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues);
+// Shared by evaluateContributionTasks (indexed by position in node.contributions) and
+// applyAlgebraicTasks (indexed by position in node.algebraicTasks) -- two structurally separate
+// lists, so each needs its own resolved-values vector rather than sharing one keyed by a single
+// shared index space.
+NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues);
 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions);
+
+// A node's genuine algebraic states (see NodeExecutionPlan::algebraicTasks): recomputes each task
+// in algebraicTasks, in the caller-supplied (already dependency-sorted) order, and writes the
+// result directly into localStates.at(task.outputStateIndex) -- a plain replacement, never
+// accumulated, never divided by stepSize. Because each write lands in the same localStates array
+// every later algebraic task and every ordinary (differential) contribution in this same substep
+// reads from, this composes with any solver: there is no derivative or stepSize-dependent
+// arithmetic here at all, unlike the Euler-specific pseudo-derivative trick this replaces. Always
+// intra-node (see compileExecutionPlan's dependency-ordering comment) -- takes no
+// synchronizationSnapshot because a source term's bindings are never cross-node.
+void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, StateValues& localStates,
+                         const NodeParameterValues& parameterValues, double simulationTime, double stepSize,
+                         ProviderEvaluator* providerEvaluator);
+
+struct NodeIntegrationResult {
+    StateValues states;
+    std::uint64_t computeNanoseconds = 0;
+};
+
+// Owns one node's full substep loop for one global step: seeds localStates from the frozen
+// synchronizationSnapshot, then per substep applies algebraic tasks (recomputed fresh, see above)
+// before evaluating and Euler-integrating the node's ordinary differential contributions. Shared
+// verbatim by the serial/thread-pool backend (simulationRunner.cpp) and the partitioned backend
+// (partitionRuntime.cpp, which wraps this with its own node index) so the two can never silently
+// diverge on this logic.
+NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
+                                    const StateValues& synchronizationSnapshot,
+                                    const EntityValues& liveParameterValues,
+                                    double simulationTime,
+                                    double synchronizationStep,
+                                    ProviderEvaluator* providerEvaluator = nullptr);
 
 }

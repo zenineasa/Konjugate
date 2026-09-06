@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <functional>
 #include <regex>
 #include <cstdlib>
 #include <set>
@@ -50,6 +51,18 @@ void validateProviderOutput(ValidationResult& result,
     if (stateId.empty() || states == stateIds.end() || !states->second.contains(stateId)) {
         add(result, "providerOutputMissing", "error", "Provider output must reference an existing endpoint state.", "edge", edgeId, "implementation");
     }
+}
+
+// Mirrors executionPlan.cpp's bidirectional-edge "other endpoint" defaulting exactly (a
+// bidirectional edge's reciprocal contribution targets that node's own source/target.stateId when
+// given, else its first state) -- needed so the setsValue "sole contributor" count below can see
+// a bidirectional edge's implicit second target, not just its declared primary one.
+std::string firstStateIdOf(const std::unordered_map<std::string, const boost::property_tree::ptree*>& nodesById, const std::string& nodeId) {
+    const auto found = nodesById.find(nodeId);
+    if (found == nodesById.end()) return {};
+    const auto states = found->second->get_child_optional("states");
+    if (!states || states->empty()) return {};
+    return value(states->begin()->second, "id");
 }
 
 std::string upperFirst(std::string input) {
@@ -173,6 +186,15 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     std::unordered_map<std::string, std::set<std::string>> stateIds;
     std::unordered_map<std::string, std::set<std::string>> stateSymbols;
     std::unordered_map<std::string, const boost::property_tree::ptree*> nodesById;
+    // Populated while walking source terms and edges below, then checked once at the end: a
+    // source term authored as "sets the value" (setsValue) must be the SOLE contribution to its
+    // state -- no other source term, no edge -- since a directly-set value and an
+    // additively-summed derivative from anything else would silently fight each other every
+    // substep. stateContributorCounts counts every enabled contribution (source term or edge)
+    // targeting a given stateId; setsValueStateIds names which states have a setsValue source
+    // term at all (most states have none, and never need the count checked).
+    std::unordered_map<std::string, int> stateContributorCounts;
+    std::set<std::string> setsValueStateIds;
     auto registerId = [&](const std::string& id, const std::string& kind, const std::string& entityId, const std::string& label) {
         bool validId = std::regex_match(id, entityIdPattern);
         if (validId) {
@@ -245,6 +267,12 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (!std::regex_match(symbol, symbolPattern)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
             else if (!stateSymbols[id].insert(symbol).second) add(result, "stateSymbolDuplicate", "error", "State symbol \"" + symbol + "\" is duplicated in this node.", "node", id, "states");
         }
+        // Per-node: (outputStateId, [stateIds its bindings reference]) for this node's own
+        // setsValue ("algebraic") source terms -- checked for a dependency cycle or self-reference
+        // once the whole sourceTerms loop below finishes, mirroring compileExecutionPlan's own
+        // dependency-ordering pass exactly (see executionPlan.cpp) so a user hits this validator's
+        // clear error message before ever reaching that pass's defensive throw.
+        std::vector<std::pair<std::string, std::vector<std::string>>> algebraicCandidates;
         if (const auto terms = node.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
             const auto& term = termEntry.second;
             registerId(value(term, "id"), "node", id, "Source term");
@@ -283,6 +311,24 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (!nodeEnabled) continue;
             const auto termImplementation = term.get_child_optional("implementation");
             const auto termImplementationKind = termImplementation ? value(*termImplementation, "kind") : "equation";
+            {
+                const bool termProgrammable = termImplementationKind == "cpp" || termImplementationKind == "python";
+                const auto termOutputStateId = value(term, termProgrammable ? "implementation.output.stateId" : "expressionModel.output.stateId");
+                if (!termOutputStateId.empty()) {
+                    stateContributorCounts[termOutputStateId] += 1;
+                    if (value(term, "setsValue") == "true") {
+                        setsValueStateIds.insert(termOutputStateId);
+                        std::vector<std::string> referencedStateIds;
+                        if (const auto bindings = term.get_child_optional(termProgrammable ? "implementation.bindings" : "expressionModel.bindings")) {
+                            for (const auto& bindingEntry : *bindings) {
+                                const auto& binding = bindingEntry.second;
+                                if (value(binding, "kind") == "state") referencedStateIds.push_back(value(binding, "stateId"));
+                            }
+                        }
+                        algebraicCandidates.emplace_back(termOutputStateId, std::move(referencedStateIds));
+                    }
+                }
+            }
             if (termImplementationKind != "equation" && termImplementationKind != "cpp" && termImplementationKind != "python") {
                 add(result, "sourceKindInvalid", "error", "Source term implementation kind must be equation, cpp or python.", "node", id, "sourceTerms");
             }
@@ -355,6 +401,41 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 add(result, "sourceOutputMissing", "error", "Source term requires an existing output state.", "node", id, "sourceTerms");
             }
         }
+        if (!algebraicCandidates.empty()) {
+            std::unordered_map<std::string, std::size_t> algebraicIndexByStateId;
+            for (std::size_t index = 0; index < algebraicCandidates.size(); ++index) {
+                algebraicIndexByStateId[algebraicCandidates[index].first] = index;
+            }
+            bool selfReferenceFound = false;
+            for (const auto& [outputStateId, referencedStateIds] : algebraicCandidates) {
+                if (std::find(referencedStateIds.begin(), referencedStateIds.end(), outputStateId) != referencedStateIds.end()) {
+                    selfReferenceFound = true;
+                }
+            }
+            if (selfReferenceFound) {
+                add(result, "setsValueSelfReference", "error",
+                    "A source term that sets its value directly may not reference its own state.", "node", id, "sourceTerms");
+            } else {
+                std::vector<int> visitState(algebraicCandidates.size(), 0); // 0=unvisited, 1=visiting, 2=done
+                bool cycleFound = false;
+                std::function<void(std::size_t)> visit = [&](std::size_t index) {
+                    if (cycleFound || visitState[index] == 2) return;
+                    if (visitState[index] == 1) { cycleFound = true; return; }
+                    visitState[index] = 1;
+                    for (const auto& referencedStateId : algebraicCandidates[index].second) {
+                        const auto found = algebraicIndexByStateId.find(referencedStateId);
+                        if (found != algebraicIndexByStateId.end()) visit(found->second);
+                    }
+                    visitState[index] = 2;
+                };
+                for (std::size_t index = 0; index < algebraicCandidates.size() && !cycleFound; ++index) visit(index);
+                if (cycleFound) {
+                    add(result, "setsValueAlgebraicLoop", "error",
+                        "Two or more source terms that set their value directly form a dependency cycle, which has no defined solution.",
+                        "node", id, "sourceTerms");
+                }
+            }
+        }
         if (nodeEnabled) {
             if (const auto implementation = node.get_child_optional("implementation")) {
                 const auto kind = value(*implementation, "kind");
@@ -424,6 +505,19 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         registerId(id, "edge", id, "Relationship \"" + value(edge, "name") + "\"");
         const auto sourceNode = value(edge, "source.nodeId");
         const auto targetNode = value(edge, "target.nodeId");
+        // Counts this edge's contribution(s) towards stateContributorCounts (see its declaration
+        // above) for the setsValue "sole contributor" check -- a directed edge targets one state
+        // (role/stateId); a bidirectional edge also reciprocates onto the other endpoint.
+        const auto countEdgeContribution = [&](const std::string& role, const std::string& stateId) {
+            if (stateId.empty()) return;
+            stateContributorCounts[stateId] += 1;
+            if (value(edge, "directionality") != "bidirectional") return;
+            const auto otherNodeId = role == "target" ? sourceNode : targetNode;
+            const auto otherStateField = role == "target" ? "source.stateId" : "target.stateId";
+            auto otherStateId = value(edge, otherStateField);
+            if (otherStateId.empty()) otherStateId = firstStateIdOf(nodesById, otherNodeId);
+            if (!otherStateId.empty()) stateContributorCounts[otherStateId] += 1;
+        };
         // An edge is inert -- and its content unvalidated -- if it's disabled itself, or either
         // endpoint node is (an edge into a disabled node can't contribute to anything either,
         // exactly as if it had been deleted alongside that node).
@@ -526,6 +620,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 }
             }
             validateProviderOutput(result, *implementation, stateIds, sourceNode, targetNode, id);
+            countEdgeContribution(value(*implementation, "output.role"), value(*implementation, "output.stateId"));
             continue;
         }
         if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& bindingEntry : *bindings) {
@@ -564,9 +659,18 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (role != "source" && role != "target") add(result, "edgeOutputMissing", "error", "Equation output role must be source or target.", "edge", id, "output");
             const auto& candidates = role == "source" ? stateIds[sourceNode] : stateIds[targetNode];
             if (!candidates.contains(outputState)) add(result, "edgeOutputMissing", "error", "Choose an existing state updated by this equation.", "edge", id, "output");
+            countEdgeContribution(role, outputState);
         } else if (targetState.empty()) {
             add(result, "edgeOutputMissing", "error", "Choose the state updated by this equation.", "edge", id, "output");
         }
+    }
+    for (const auto& stateId : setsValueStateIds) {
+        if (stateContributorCounts[stateId] == 1) continue;
+        const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(),
+            [&](const auto& entry) { return entry.second.contains(stateId); });
+        add(result, "setsValueNotSoleContributor", "error",
+            "A source term that sets its state's value directly must be the only contribution to that state.",
+            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{}, "sourceTerms");
     }
     result.valid = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
     return result;

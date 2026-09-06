@@ -141,11 +141,14 @@ std::string preparePythonProviderSource(const std::string& source, const Provide
 
 // executable pairs the inline source with providerWorker.cpp into a standalone process (used
 // by the pipe and shared-memory transports); sharedLibrary pairs it with
-// providerInProcessShim.cpp into a dlopen()'d/LoadLibrary()'d plugin (used by the in-process
-// transport). Both live under the same source-hash build directory, just as different
-// filenames, so choosing a different mode for the same source never collides with a
-// previously-built artifact of the other kind.
-enum class CppProviderArtifactKind { executable, sharedLibrary };
+// providerInProcessShim.cpp into a dlopen()'d/LoadLibrary()'d relationship-shaped plugin (used
+// by the in-process transport); nodeSharedLibrary pairs it with providerInProcessNodeShim.cpp
+// into a dlopen()'d/LoadLibrary()'d NODE-shaped plugin (N inputs, M named outputs, optional
+// checkpoint/restore -- see providerInProcessAbi.hpp's two distinct vtables). All three live
+// under the same source-hash build directory, just as different filenames, so choosing a
+// different mode/shape for the same source never collides with a previously-built artifact of
+// another kind.
+enum class CppProviderArtifactKind { executable, sharedLibrary, nodeSharedLibrary };
 
 // Compiles an inline C++ relationship's source, together with the public SDK header and one of
 // Konjugate's glue wrappers, into a native provider artifact. The build is cached on disk by a
@@ -163,8 +166,13 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
         ? std::filesystem::temp_directory_path() / "konjugateProviders"
         : std::filesystem::path(config.buildDirectory);
     const auto providerDirectory = buildRoot / hash;
-    const bool sharedLibrary = kind == CppProviderArtifactKind::sharedLibrary;
-    const std::string glueFile = sharedLibrary ? "providerInProcessShim.cpp" : "providerWorker.cpp";
+    const bool sharedLibrary = kind != CppProviderArtifactKind::executable;
+    const std::string glueFile = kind == CppProviderArtifactKind::nodeSharedLibrary ? "providerInProcessNodeShim.cpp"
+        : kind == CppProviderArtifactKind::sharedLibrary ? "providerInProcessShim.cpp" : "providerWorker.cpp";
+    // A node-shaped artifact's generated glue dlopen()s a second, external library of its own
+    // (e.g. an imported FMU's own compiled binary) -- on Linux that symbol lives in libdl, which
+    // (unlike macOS's libSystem or Windows' LoadLibrary) is not linked in by default.
+    const bool needsDynamicLoaderLibrary = kind == CppProviderArtifactKind::nodeSharedLibrary;
 #ifdef _WIN32
     const auto artifactPath = providerDirectory / (sharedLibrary ? "provider.dll" : "provider.exe");
 #elif defined(__APPLE__)
@@ -183,7 +191,9 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
 
         const std::filesystem::path sdkRoot(config.cppSdkPath);
         cppToolchain::buildNativeArtifact(sourcePath, sdkRoot / "src" / glueFile, sdkRoot / "include",
-            artifactPath, sharedLibrary, config.cppCompiler, "the C++ relationship provider");
+            artifactPath, sharedLibrary, config.cppCompiler,
+            kind == CppProviderArtifactKind::nodeSharedLibrary ? "the C++ computational-node provider" : "the C++ relationship provider",
+            needsDynamicLoaderLibrary);
     }
 
     return artifactPath.string();
@@ -985,6 +995,168 @@ private:
     std::mutex mutex_;
 };
 
+// The node-shaped counterpart to InProcessProviderBackend above: same dlopen()/LoadLibrary()
+// mechanism, same "no crash isolation, opt-in only" tradeoff (see providerInProcessAbi.hpp and
+// docs/providerExecution.md), but drives KonjugateInProcessNodeProviderV1 (N inputs, M named
+// outputs, optional checkpoint/restore) instead of the relationship-shaped V1 -- overriding
+// evaluateNode/requestCheckpoint/requestRestore rather than evaluateBatch.
+class InProcessNodeProviderBackend final : public ProviderBackend {
+public:
+    InProcessNodeProviderBackend(std::string processKey, std::string libraryPath, const ProviderConfiguration& config)
+        : processKey_(std::move(processKey)) {
+        static_cast<void>(config);
+        loadLibrary(libraryPath);
+        instance_ = vtable_->create();
+        if (!instance_) {
+            const std::string message = vtable_->lastError(nullptr);
+            unloadLibrary();
+            throw std::runtime_error("Failed to construct in-process computational-node provider '" + processKey_ + "': " + message);
+        }
+    }
+
+    ~InProcessNodeProviderBackend() override { unload(); }
+
+    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
+        std::vector<std::string> keys;
+        keys.reserve(bindings.size());
+        for (const auto& binding : bindings) keys.push_back(binding.symbol);
+        pendingInstances_.emplace_back(instanceId, std::move(keys));
+    }
+
+    void sendInitialization() override {
+        for (const auto& [instanceId, keys] : pendingInstances_) {
+            std::vector<const char*> keyPointers;
+            keyPointers.reserve(keys.size());
+            for (const auto& key : keys) keyPointers.push_back(key.c_str());
+            if (!vtable_->initializeInstance(instance_, instanceId, keyPointers.data(),
+                                             static_cast<std::uint32_t>(keyPointers.size()))) {
+                throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' failed to initialize an instance: " +
+                    std::string(vtable_->lastError(instance_)));
+            }
+        }
+        pendingInstances_.clear();
+    }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t, double, double,
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>&) override {
+        throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' does not support relationship-shaped batch evaluation.");
+    }
+
+    std::vector<std::pair<std::string, double>> evaluateNode(
+        std::uint64_t instanceId, double simulationTime, double stepSize, std::span<const double> inputs) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (outputKeys_.empty()) cacheOutputKeys();
+        std::vector<double> outValues(outputKeys_.size(), 0.0);
+        if (!vtable_->evaluateInstance(instance_, instanceId, simulationTime, stepSize,
+                                       inputs.data(), static_cast<std::uint32_t>(inputs.size()),
+                                       outValues.data(), static_cast<std::uint32_t>(outValues.size()))) {
+            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' evaluation failed: " +
+                std::string(vtable_->lastError(instance_)));
+        }
+        std::vector<std::pair<std::string, double>> results;
+        results.reserve(outputKeys_.size());
+        for (std::size_t index = 0; index < outputKeys_.size(); ++index) results.emplace_back(outputKeys_[index], outValues[index]);
+        return results;
+    }
+
+    std::vector<std::byte> requestCheckpoint(std::uint64_t instanceId) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::uint32_t size = 0;
+        if (!vtable_->requestCheckpoint(instance_, instanceId, nullptr, 0, &size)) {
+            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' declined checkpointing: " +
+                std::string(vtable_->lastError(instance_)));
+        }
+        std::vector<std::uint8_t> buffer(size);
+        std::uint32_t written = 0;
+        if (!vtable_->requestCheckpoint(instance_, instanceId, buffer.data(), static_cast<std::uint32_t>(buffer.size()), &written)) {
+            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' failed to fill its checkpoint buffer: " +
+                std::string(vtable_->lastError(instance_)));
+        }
+        std::vector<std::byte> result(written);
+        std::memcpy(result.data(), buffer.data(), written);
+        return result;
+    }
+
+    void requestRestore(std::uint64_t instanceId, std::span<const std::byte> payload) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!vtable_->requestRestore(instance_, instanceId,
+                                     reinterpret_cast<const std::uint8_t*>(payload.data()),
+                                     static_cast<std::uint32_t>(payload.size()))) {
+            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' failed to restore from a checkpoint: " +
+                std::string(vtable_->lastError(instance_)));
+        }
+    }
+
+    void shutdown() noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        unload();
+    }
+
+private:
+    void cacheOutputKeys() {
+        const auto count = vtable_->outputCount(instance_);
+        outputKeys_.reserve(count);
+        for (std::uint32_t index = 0; index < count; ++index) outputKeys_.emplace_back(vtable_->outputKey(instance_, index));
+    }
+
+    void loadLibrary(const std::string& path) {
+#ifdef _WIN32
+        handle_ = ::LoadLibraryA(path.c_str());
+        if (!handle_) throw std::runtime_error("Failed to load in-process computational-node provider library '" + path + "'.");
+        auto entryPoint = reinterpret_cast<KonjugateInProcessNodeProviderV1Fn>(
+            ::GetProcAddress(handle_, kKonjugateInProcessNodeProviderEntryPoint));
+#else
+        handle_ = ::dlopen(path.c_str(), RTLD_LOCAL | RTLD_NOW);
+        if (!handle_) {
+            throw std::runtime_error("Failed to load in-process computational-node provider library '" + path + "': " +
+                std::string(::dlerror()));
+        }
+        auto entryPoint = reinterpret_cast<KonjugateInProcessNodeProviderV1Fn>(
+            ::dlsym(handle_, kKonjugateInProcessNodeProviderEntryPoint));
+#endif
+        if (!entryPoint) {
+            unloadLibrary();
+            throw std::runtime_error("In-process computational-node provider library '" + path + "' is missing its entry point.");
+        }
+        vtable_ = entryPoint();
+        if (!vtable_) {
+            unloadLibrary();
+            throw std::runtime_error("In-process computational-node provider library '" + path + "' returned a null vtable.");
+        }
+    }
+
+    void unloadLibrary() noexcept {
+#ifdef _WIN32
+        if (handle_) { ::FreeLibrary(handle_); handle_ = nullptr; }
+#else
+        if (handle_) { ::dlclose(handle_); handle_ = nullptr; }
+#endif
+        vtable_ = nullptr;
+    }
+
+    void unload() noexcept {
+        if (instance_ && vtable_) {
+            vtable_->shutdownProvider(instance_);
+            vtable_->destroy(instance_);
+            instance_ = nullptr;
+        }
+        unloadLibrary();
+    }
+
+    std::string processKey_;
+    const KonjugateInProcessNodeProviderV1* vtable_ = nullptr;
+    void* instance_ = nullptr;
+#ifdef _WIN32
+    HMODULE handle_ = nullptr;
+#else
+    void* handle_ = nullptr;
+#endif
+    std::vector<std::pair<std::uint64_t, std::vector<std::string>>> pendingInstances_;
+    std::vector<std::string> outputKeys_;
+    std::mutex mutex_;
+};
+
 namespace {
 
 // Each tier is only attempted for cppProvider tasks in its matching (or a higher) execution
@@ -992,8 +1164,25 @@ namespace {
 // platform — falls back down the chain (inProcess -> sharedMemoryWorker -> pipeWorker) so a
 // single unsupported/misconfigured host never blocks a whole run. Python providers always use
 // the pipe backend: neither faster transport has a story for an interpreted language.
+//
+// isNodeShaped distinguishes a NodeProviderTask from a ContributionTask -- both can carry
+// implementation == cppProvider, but they need different artifacts (a node-shaped shim exports a
+// different ABI/entry point, see providerInProcessNodeShim.cpp) and different execution
+// guarantees: providerWorker.cpp has no node-provider protocol handling for C++ at all (only the
+// Python worker speaks those messages), so a node-shaped cpp task deliberately gets NO
+// worker-process fallback chain -- it either runs in-process or fails clearly, rather than
+// falling through into pipe/shared-memory code that doesn't understand it.
 std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, ContributionImplementation implementation,
-                                                        const std::string& providerSource, const ProviderConfiguration& config) {
+                                                        const std::string& providerSource, const ProviderConfiguration& config,
+                                                        bool isNodeShaped) {
+    if (implementation == ContributionImplementation::cppProvider && isNodeShaped) {
+        if (config.executionMode != ProviderExecutionMode::inProcess) {
+            throw std::runtime_error(
+                "C++ computational-node provider '" + key + "' requires the in-process provider execution mode.");
+        }
+        const auto libraryPath = buildCppProvider(providerSource, config, CppProviderArtifactKind::nodeSharedLibrary);
+        return std::make_unique<InProcessNodeProviderBackend>(key, libraryPath, config);
+    }
     if (implementation == ContributionImplementation::cppProvider) {
         if (config.executionMode == ProviderExecutionMode::inProcess) {
             try {
@@ -1040,7 +1229,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             const std::string key = providerProcessKey(task);
             auto& proc = processes_[key];
             if (!proc) {
-                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_);
+                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_, false);
             }
 
             const std::uint64_t instanceId = nextInstanceId_++;
@@ -1055,7 +1244,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             const auto& key = task.providerProcessKeyCache;
             auto& proc = processes_[key];
             if (!proc) {
-                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_);
+                proc = createProviderBackend(key, task.implementation, task.providerSource, configuration_, true);
             }
 
             const std::uint64_t instanceId = nextInstanceId_++;

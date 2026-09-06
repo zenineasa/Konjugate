@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('projectFiles', {
     exportResultsCsv: (suggestedFilename, csv) => ipcRenderer.invoke('projectExportResultsCsv', { suggestedFilename, csv }),
     exportGeneratedProgram: (suggestedFilename, source, kind) => ipcRenderer.invoke('projectExportGeneratedProgram', { suggestedFilename, source, kind }),
     exportFmu: (suggestedFilename, document, modelName) => ipcRenderer.invoke('projectExportFmu', { suggestedFilename, document, modelName }),
+    mergeFmus: () => ipcRenderer.invoke('projectMergeFmus'),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });
 

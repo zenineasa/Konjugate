@@ -118,3 +118,8 @@ public:
 } // namespace konjugate::sdk::v1
 
 std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider();
+
+// Defined by node-provider-shaped inline C++ sources (see providerInProcessNodeShim.cpp), exactly
+// like createRelationshipProvider() above is defined by relationship-shaped ones -- which factory
+// a given artifact needs to define is determined entirely by which glue file it's compiled with.
+std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider();

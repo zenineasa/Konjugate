@@ -7,11 +7,11 @@
 // implementation), and zips the result into one .fmu (fflate's zipSync, the same library already
 // used for .kja/.kjp packages in src/packageArchive.mjs). See docs/codeExport.md.
 
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { zipSync } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
 import { generateFmiModel } from './fmiCodeGen.mjs';
 import { cppProviderSdkPath, resolveEnginePath, runEngine } from './engineAdapter.mjs';
 
@@ -49,6 +49,18 @@ function libraryExtension() {
     if (process.platform === 'win32') return '.dll';
     if (process.platform === 'darwin') return '.dylib';
     return '.so';
+}
+
+// Deterministic, not random: two exports of the identical document (generated C++ is
+// platform-independent -- fmiCodeGen.mjs never branches on process.platform/arch) must land on the
+// same GUID no matter which machine or platform runs the export, since that's exactly what lets
+// mergeFmuPackages() below verify that a set of single-platform .fmu files are genuinely exports of
+// the same model before combining their binaries into one multi-platform .fmu. Formatted to look
+// like the RFC4122 GUIDs FMI tooling expects, but derived from a SHA-256 of the model's own
+// identity rather than randomUUID().
+function deterministicGuid(modelIdentifier, source) {
+    const digest = createHash('sha256').update(modelIdentifier).update('\n').update(source).digest('hex');
+    return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
 function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture }) {
@@ -94,7 +106,7 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
 
         const libraryBytes = new Uint8Array(await readFile(artifactPath));
         const xml = modelDescriptionXml({
-            modelName: modelName || 'model', guid: randomUUID(), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture
+            modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture
         });
         const archive = zipSync({
             'modelDescription.xml': new TextEncoder().encode(xml),
@@ -104,4 +116,55 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+function guidOf(name, xmlBytes) {
+    const match = /guid="([^"]*)"/.exec(new TextDecoder().decode(xmlBytes));
+    if (!match) throw new Error(`'${name}' has no modelDescription.xml guid -- it doesn't look like a Konjugate-exported FMU.`);
+    return match[1];
+}
+
+// Konjugate never cross-compiles: each machine's export only ever contains one platform's
+// binaries/<dir>/ (see generateFmuPackage above). A "multi-platform FMU" is built by exporting the
+// identical model separately on each target platform, then combining those single-platform .fmu
+// files here -- pure zip surgery, no compiler involved. Files is [{name, data}], data a
+// Buffer/Uint8Array of one .fmu's bytes; name is only used for error messages. Returns a Buffer.
+export function mergeFmuPackages(files) {
+    if (files.length < 2) throw new Error('Merging an FMU needs at least two files.');
+
+    const archives = files.map(({ name, data }) => {
+        let entries;
+        try {
+            entries = unzipSync(data instanceof Uint8Array ? data : new Uint8Array(data));
+        } catch (error) {
+            throw new Error(`'${name}' could not be read as a zip archive: ${error.message}`);
+        }
+        if (!entries['modelDescription.xml']) throw new Error(`'${name}' has no modelDescription.xml -- it doesn't look like an FMU.`);
+        return { name, entries, guid: guidOf(name, entries['modelDescription.xml']) };
+    });
+
+    const { guid: expectedGuid } = archives[0];
+    for (const archive of archives) {
+        if (archive.guid !== expectedGuid) {
+            throw new Error(`'${archive.name}' is not an export of the same model as '${archives[0].name}' -- their modelDescription.xml guids differ. Re-export every platform from the identical project before merging.`);
+        }
+    }
+
+    const merged = { 'modelDescription.xml': archives[0].entries['modelDescription.xml'] };
+    for (const archive of archives) {
+        for (const [path, bytes] of Object.entries(archive.entries)) {
+            if (!path.startsWith('binaries/')) continue;
+            if (merged[path] && !areBytesEqual(merged[path], bytes)) {
+                throw new Error(`Two of the given files both contain '${path}' with different contents -- they can't be the same export.`);
+            }
+            merged[path] = bytes;
+        }
+    }
+    return Buffer.from(zipSync(merged, { level: 6 }));
+}
+
+function areBytesEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) if (a[index] !== b[index]) return false;
+    return true;
 }

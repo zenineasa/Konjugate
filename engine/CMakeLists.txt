@@ -168,6 +168,14 @@ add_library(konjugateProviderInProcessShim STATIC
 )
 target_include_directories(konjugateProviderInProcessShim PUBLIC include)
 
+# Node-shaped counterpart to konjugateProviderInProcessShim above, same compile-check purpose:
+# buildCppProvider() compiles and links this against a user's inline computational-node-provider
+# source at run time, outside of CMake entirely.
+add_library(konjugateProviderInProcessNodeShim STATIC
+    src/providerInProcessNodeShim.cpp
+)
+target_include_directories(konjugateProviderInProcessNodeShim PUBLIC include)
+
 install(TARGETS konjugateEngine RUNTIME DESTINATION .)
 # The C++/Python provider SDKs are source, not build output, but a packaged app still needs
 # them on disk: buildCppProvider() compiles inline C++ providers against the public header and
@@ -184,6 +192,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi2" DESTINATION include
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessNodeShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/fmiGlue.cpp"
     DESTINATION src
 )

@@ -4213,6 +4213,7 @@ function updateExportCodeFields() {
     if (isPython && (parallelismField.value === 'openmp' || parallelismField.value === 'stdThread')) parallelismField.value = 'serial';
     if (isFmu && parallelismField.value === 'mpi') parallelismField.value = 'serial';
     parallelismField.closest('label').hidden = isFmu;
+    $('#mergeFmuButton').hidden = !isFmu;
 }
 $('#exportCodeButton').addEventListener('click', () => {
     $('#exportCodeFormat').value = 'source';
@@ -4223,6 +4224,16 @@ $('#exportCodeButton').addEventListener('click', () => {
     $('#exportCodeDialog').showModal();
 });
 $('#exportCodeFormat').addEventListener('change', updateExportCodeFields);
+$('#mergeFmuButton').addEventListener('click', async () => {
+    $('#exportCodeError').textContent = '';
+    try {
+        const outcome = await window.projectFiles.mergeFmus();
+        if (outcome) $('#statusText').textContent = `Merged ${outcome.mergedCount} FMUs into ${outcome.fileName}`;
+    } catch (error) {
+        console.error('The FMUs could not be merged.', error);
+        $('#exportCodeError').textContent = error.message || 'Merging the FMUs failed.';
+    }
+});
 $('#exportCodeLanguage').addEventListener('change', updateExportCodeFields);
 $('#exportCodeCancel').addEventListener('click', () => $('#exportCodeDialog').close());
 $('#exportCodeDialog form').addEventListener('submit', (event) => {

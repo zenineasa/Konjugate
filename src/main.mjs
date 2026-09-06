@@ -10,7 +10,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
-import { generateFmuPackage } from './fmiExport.mjs';
+import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
@@ -1264,6 +1264,30 @@ ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, 
     if (!path.toLowerCase().endsWith('.fmu')) path += '.fmu';
     await writeFile(path, buffer);
     return { path, fileName: basename(path) };
+});
+
+ipcMain.handle('projectMergeFmus', async (event) => {
+    const targetWindow = getWindowFromEvent(event);
+    const picked = await dialog.showOpenDialog(targetWindow, {
+        title: 'Select FMUs to merge (one export per target platform)',
+        filters: [{ name: 'FMU', extensions: ['fmu'] }],
+        properties: ['openFile', 'multiSelections']
+    });
+    if (picked.canceled || picked.filePaths.length < 2) return null;
+
+    const files = await Promise.all(picked.filePaths.map(async (path) => ({ name: basename(path), data: await readFile(path) })));
+    const buffer = mergeFmuPackages(files);
+
+    const saved = await dialog.showSaveDialog(targetWindow, {
+        title: 'Save merged FMU',
+        defaultPath: 'model.fmu',
+        filters: [{ name: 'FMU', extensions: ['fmu'] }]
+    });
+    if (saved.canceled) return null;
+    let path = saved.filePath;
+    if (!path.toLowerCase().endsWith('.fmu')) path += '.fmu';
+    await writeFile(path, buffer);
+    return { path, fileName: basename(path), mergedCount: files.length };
 });
 
 ipcMain.handle('projectConfirmDiscard', async (event) => {

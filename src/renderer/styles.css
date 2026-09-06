@@ -110,6 +110,7 @@ input, select, textarea { user-select: text; }
 .passwordDialog :is(input, select):focus { border-color: #478177; }
 .passwordError { min-height: 16px; padding-top: 6px; color: #d48288; font-size: 8px; }
 .passwordDialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
+.passwordDialog footer .footerLeftButton { margin-right: auto; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .runConfigurationDialog { width: 360px; }

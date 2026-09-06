@@ -55,7 +55,7 @@ Install a `.kjp` through **Install add-on or plugin**. Installation validates th
 
 The current first slice supports local Python and C++ provider artifacts. A future trust manager should add publisher signatures, artifact hashes, platform selection, external dependency declarations and stronger review for native code. A package being installed is not the same as a package being trusted by every project.
 
-The native engine now launches computational-node providers from a model: a node's `implementation` block (Python only this release) is compiled into the execution plan, evaluated once per substep through `ProviderRuntime`, and checkpointed/restored across pause, resume and restart alongside the ordinary state vector. See [examples/providers/piControllerNode.py](../examples/providers/piControllerNode.py) and [examples/providers/piControlledTankProject.json](../examples/providers/piControlledTankProject.json) for a runnable example, and [examples/providers/accumulatorNode.py](../examples/providers/accumulatorNode.py) for the underlying wire-contract demonstration. C++ computational-node execution, the partitioned execution backend, and plugin-packaged (as opposed to inline) node providers remain future work.
+The native engine now launches computational-node providers from a model: a node's `implementation` block (`kind: "python"` or `kind: "cpp"`) is compiled into the execution plan, evaluated once per substep through `ProviderRuntime`, and checkpointed/restored across pause, resume and restart alongside the ordinary state vector. See [examples/providers/piControllerNode.py](../examples/providers/piControllerNode.py) and [examples/providers/piControlledTankProject.json](../examples/providers/piControlledTankProject.json) for a runnable example, and [examples/providers/accumulatorNode.py](../examples/providers/accumulatorNode.py) for the underlying wire-contract demonstration. A `cpp` node provider runs only through the in-process transport (`engine/src/providerInProcessNodeShim.cpp`, driving a new `KonjugateInProcessNodeProviderV1` ABI distinct from the relationship-shaped one) -- `providerWorker.cpp` has no node-provider protocol for C++ at all, so unlike a relationship provider there is deliberately no worker-process fallback; requesting one outside `ProviderExecutionMode::inProcess` fails clearly instead. There is still no editor UI for authoring either kind of node provider -- both are hand-authored inline JSON today. The partitioned execution backend and plugin-packaged (as opposed to inline) node providers remain future work.
 
 ## Example
 
@@ -102,7 +102,7 @@ The planned capability levels are:
 | --- | --- | --- |
 | Relationship provider | Stateless behavior on an edge or source term | Implemented |
 | Component provider | A reusable node/edge vocabulary with declared ports and defaults | Implemented |
-| Computational-node provider | A stateful component with lifecycle and checkpoint support | Implemented (Python, inline source only) |
+| Computational-node provider | A stateful component with lifecycle and checkpoint support | Implemented (Python, or C++ in-process only; inline source only) |
 | Connector | Timestamped data from an approved device or external service | Planned |
 | Domain validator | Additional diagnostics that supplement native validation | Planned |
 | Visualization contribution | Read-only views synchronized with graph and result identity | Add-on API |

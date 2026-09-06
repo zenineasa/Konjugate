@@ -119,15 +119,33 @@ void validatorAcceptsACompleteComputationalNodeProvider() {
 
 void validatorRejectsInvalidNodeProviderKind() {
     const std::string implementation = R"json({
-        "kind": "cpp",
+        "kind": "rust",
         "providerApiVersion": 1,
         "source": "provider source",
         "bindings": [],
         "outputs": [{"key": "levelRate", "stateId": 11}]
     })json";
     const auto result = konjugate::validateModel(projectWithNodeImplementation(implementation));
-    require(!result.valid, "A cpp-kind computational-node provider was incorrectly accepted.");
+    require(!result.valid, "An unsupported-kind computational-node provider was incorrectly accepted.");
     require(hasIssue(result, "nodeProviderKindInvalid"), "The validator did not flag the unsupported node provider kind.");
+}
+
+void validatorAcceptsACppComputationalNodeProvider() {
+    const std::string implementation = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "provider source",
+        "bindings": [{"key": "input", "kind": "state", "stateId": 11}],
+        "outputs": [{"key": "levelRate", "stateId": 11}]
+    })json";
+    const auto result = konjugate::validateModel(projectWithNodeImplementation(implementation));
+    require(result.valid, "A complete cpp-kind computational-node provider was rejected.");
+    const auto plan = konjugate::compileExecutionPlan(projectWithNodeImplementation(implementation));
+    const auto& task = *plan.nodes.front().nodeProvider;
+    require(task.implementation == konjugate::ContributionImplementation::cppProvider,
+        "The execution plan did not preserve the cpp computational-node implementation kind.");
+    require(task.providerProcessKeyCache == "cpp:provider source",
+        "The execution plan did not derive the expected provider process key for a cpp node provider.");
 }
 
 void validatorRejectsDuplicateAndMissingNodeProviderOutputs() {
@@ -268,16 +286,147 @@ void providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd() {
     runtime.shutdown();
 }
 
+// The C++ analogue of inlineAccumulatorNodeSource() above/providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd:
+// proves InProcessNodeProviderBackend (dlopen, KonjugateInProcessNodeProviderV1, no worker
+// process at all) drives evaluate/checkpoint/restore correctly against a real compiled artifact,
+// not just the in-memory SDK contract sdkProvidesCheckpointableNodeProviderContract already
+// covers in relationshipProviderTests.cpp.
+std::string cppInlineAccumulatorNodeSource() {
+    return R"cpp(
+#include <konjugate/relationshipProvider.hpp>
+#include <cstring>
+#include <memory>
+#include <vector>
+
+namespace {
+
+class AccumulatorNode final : public konjugate::sdk::v1::NodeProvider {
+public:
+    konjugate::sdk::v1::NodeProviderDescription describe() const override {
+        return {"test.cppAccumulatorNode", "Accumulator node",
+            {{"input", "Input", ""}},
+            {{"output", "Output", ""}}};
+    }
+
+    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
+                  konjugate::sdk::v1::NodeOutputCollector& outputs) override {
+        total_ += context.inputs.at("input") * context.stepSize;
+        outputs.addGradient("output", total_);
+    }
+
+    std::vector<std::byte> checkpoint() const override {
+        std::vector<std::byte> bytes(sizeof(double));
+        std::memcpy(bytes.data(), &total_, sizeof(double));
+        return bytes;
+    }
+
+    void restore(std::span<const std::byte> payload) override {
+        std::memcpy(&total_, payload.data(), sizeof(double));
+    }
+
+private:
+    double total_ = 0.0;
+};
+
+}
+
+std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
+    return std::make_unique<AccumulatorNode>();
+}
+)cpp";
+}
+
+void providerRuntimeExecutesNodeProviderCppInProcessEndToEnd() {
+    const std::string implementation = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "input", "kind": "state", "stateId": 11}
+        ],
+        "outputs": [
+            {"key": "output", "stateId": 11}
+        ]
+    })json";
+
+    auto project = projectWithNodeImplementation(implementation);
+    project.get_child("nodes").begin()->second.put("implementation.source", cppInlineAccumulatorNodeSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    const auto& task = *plan.nodes.front().nodeProvider;
+
+    const double firstInputs[] = {4.0};
+    const auto firstResult = runtime.evaluateNode(task, firstInputs, 0.0, 0.5);
+    require(firstResult.size() == 1 && firstResult.front().first == "output" && firstResult.front().second == 2.0,
+        "The first in-process C++ node provider evaluation produced the wrong result.");
+
+    const auto secondResult = runtime.evaluateNode(task, firstInputs, 0.5, 0.5);
+    require(secondResult.front().second == 4.0,
+        "The second in-process C++ node provider evaluation did not accumulate state across calls.");
+
+    const auto checkpoint = runtime.requestNodeCheckpoint(task);
+    require(checkpoint.size() == sizeof(double), "The C++ node provider checkpoint payload had an unexpected size.");
+
+    const double mutateInputs[] = {100.0};
+    runtime.evaluateNode(task, mutateInputs, 1.0, 0.5);
+
+    runtime.requestNodeRestore(task, checkpoint);
+
+    const double thirdInputs[] = {0.0};
+    const auto thirdResult = runtime.evaluateNode(task, thirdInputs, 1.5, 0.5);
+    require(thirdResult.front().second == 4.0,
+        "Restore did not reach the in-process artifact: the accumulated total was not rolled back.");
+
+    runtime.shutdown();
+}
+
+void providerRuntimeRejectsACppNodeProviderOutsideInProcessMode() {
+    const std::string implementation = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [{"key": "input", "kind": "state", "stateId": 11}],
+        "outputs": [{"key": "output", "stateId": 11}]
+    })json";
+
+    auto project = projectWithNodeImplementation(implementation);
+    project.get_child("nodes").begin()->second.put("implementation.source", cppInlineAccumulatorNodeSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::sharedMemoryWorker;
+
+    konjugate::ProviderRuntime runtime(config);
+    bool threw = false;
+    try {
+        runtime.initialize(plan);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    require(threw, "A cpp computational-node provider outside in-process mode should fail clearly, not fall back to a worker process.");
+}
+
 }
 
 int main() {
     try {
         validatorAcceptsACompleteComputationalNodeProvider();
         validatorRejectsInvalidNodeProviderKind();
+        validatorAcceptsACppComputationalNodeProvider();
         validatorRejectsDuplicateAndMissingNodeProviderOutputs();
         validatorWarnsOnUntouchedNodeProviderTemplate();
         executionPlanFoldsNodeProviderOutputsIntoNodeDerivatives();
         providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd();
+        providerRuntimeExecutesNodeProviderCppInProcessEndToEnd();
+        providerRuntimeRejectsACppNodeProviderOutsideInProcessMode();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "nodeProviderRuntimeTests failed: %s\n", error.what());
         return 1;

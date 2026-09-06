@@ -358,9 +358,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         if (nodeEnabled) {
             if (const auto implementation = node.get_child_optional("implementation")) {
                 const auto kind = value(*implementation, "kind");
-                if (kind != "python") {
+                if (kind != "python" && kind != "cpp") {
                     add(result, "nodeProviderKindInvalid", "error",
-                        "Computational-node provider implementation kind must be python (C++ computational-node execution is not implemented yet).",
+                        "Computational-node provider implementation kind must be python or cpp.",
                         "node", id, "implementation");
                 }
                 if (value(*implementation, "providerApiVersion") != "1") {

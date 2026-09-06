@@ -290,7 +290,8 @@ MsvcEnvironmentFlags getMsvcEnvironmentFlags(const std::string& compilerPath) {
 
 void buildNativeArtifact(const std::filesystem::path& sourcePath, const std::filesystem::path& gluePath,
                           const std::filesystem::path& includeDirectory, const std::filesystem::path& artifactPath,
-                          bool sharedLibrary, const std::string& compilerOverride, const std::string& failureContext) {
+                          bool sharedLibrary, const std::string& compilerOverride, const std::string& failureContext,
+                          bool needsDynamicLoaderLibrary) {
     const std::string compiler = resolveCompiler(compilerOverride);
 
     std::string compilerLower = compiler;
@@ -344,6 +345,7 @@ void buildNativeArtifact(const std::filesystem::path& sourcePath, const std::fil
             // libc only since glibc 2.34); passing -lrt is harmless on newer glibc too.
             arguments.push_back("-lrt");
         }
+        if (needsDynamicLoaderLibrary) arguments.push_back("-ldl");
 #endif
     }
 

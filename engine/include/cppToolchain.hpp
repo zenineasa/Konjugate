@@ -17,10 +17,14 @@ std::string resolveCompiler(const std::string& overrideCompiler);
 // invocation) against includeDirectory, producing either a shared library (sharedLibrary=true) or
 // an executable at artifactPath. compilerOverride, if non-empty, is used verbatim instead of
 // auto-detecting. failureContext names what was being built, for the thrown error message (e.g.
-// "the C++ relationship provider" or "the shared library"). Throws std::runtime_error, with the
-// compiler's captured stdout+stderr, on a nonzero exit.
+// "the C++ relationship provider" or "the shared library"). needsDynamicLoaderLibrary links libdl
+// on Linux (a no-op everywhere else -- macOS's dlopen lives in libSystem, Windows uses
+// LoadLibrary): only an artifact whose own glue code dlopen()s a further, external library (e.g.
+// providerInProcessNodeShim.cpp dlopening an imported FMU's binary) needs it. Throws
+// std::runtime_error, with the compiler's captured stdout+stderr, on a nonzero exit.
 void buildNativeArtifact(const std::filesystem::path& sourcePath, const std::filesystem::path& gluePath,
     const std::filesystem::path& includeDirectory, const std::filesystem::path& artifactPath,
-    bool sharedLibrary, const std::string& compilerOverride, const std::string& failureContext);
+    bool sharedLibrary, const std::string& compilerOverride, const std::string& failureContext,
+    bool needsDynamicLoaderLibrary = false);
 
 } // namespace konjugate::cppToolchain

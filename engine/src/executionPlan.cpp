@@ -230,11 +230,12 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         }
         if (const auto implementation = node.get_child_optional("implementation")) {
             const auto kind = value(*implementation, "kind");
-            if (kind != "python") {
-                throw std::runtime_error("A computational-node provider implementation kind must be python.");
+            if (kind != "python" && kind != "cpp") {
+                throw std::runtime_error("A computational-node provider implementation kind must be python or cpp.");
             }
             NodeProviderTask providerTask;
-            providerTask.implementation = ContributionImplementation::pythonProvider;
+            providerTask.implementation = kind == "cpp"
+                ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
             providerTask.nodeId = compiledNode.nodeId;
             providerTask.providerSource = value(*implementation, "source");
             if (const auto bindingsNode = implementation->get_child_optional("bindings")) {
@@ -249,7 +250,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 output.stateIndex = localStateIndexes.at(output.stateId);
                 providerTask.outputs.push_back(std::move(output));
             }
-            providerTask.providerProcessKeyCache = "py:" + providerTask.providerSource;
+            providerTask.providerProcessKeyCache = (kind == "cpp" ? "cpp:" : "py:") + providerTask.providerSource;
             compiledNode.estimatedOperationsPerSubstep += providerTask.bindings.size() + providerTask.outputs.size() + 1;
             compiledNode.nodeProvider = std::move(providerTask);
         }

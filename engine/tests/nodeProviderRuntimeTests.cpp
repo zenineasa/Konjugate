@@ -126,6 +126,91 @@ std::string validNodeImplementation() {
     })json";
 }
 
+// One setsValue output (level, driven algebraically) and one ordinary derivative output (effort) --
+// binds only "effort" as an input, so this is deliberately not self-referencing (see
+// nodeProviderSelfReferencingSetsValueImplementation below for that case).
+std::string nodeImplementationWithSetsValueOutput() {
+    return R"json({
+        "kind": "python",
+        "providerApiVersion": 1,
+        "source": "provider source",
+        "bindings": [
+            {"key": "input", "kind": "state", "stateId": 12}
+        ],
+        "outputs": [
+            {"key": "levelRate", "stateId": 11, "setsValue": true},
+            {"key": "effortRateSquared", "stateId": 12}
+        ]
+    })json";
+}
+
+// A setsValue output whose own target state (11) is also one of this provider's own input
+// bindings -- the self-reference case setsValueSelfReference exists to reject.
+std::string nodeProviderSelfReferencingSetsValueImplementation() {
+    return R"json({
+        "kind": "python",
+        "providerApiVersion": 1,
+        "source": "provider source",
+        "bindings": [
+            {"key": "input", "kind": "state", "stateId": 11}
+        ],
+        "outputs": [
+            {"key": "levelRate", "stateId": 11, "setsValue": true}
+        ]
+    })json";
+}
+
+// A node whose own computational-node-provider output sets state 11's value directly, while an
+// ordinary equation source term on the same node ALSO contributes to state 11 -- the same
+// silently-fight-each-other conflict setsValueNotSoleContributor exists to reject, just with a
+// node-provider output on one side instead of two source terms.
+boost::property_tree::ptree nodeProviderSetsValueSharingStateWithSourceTermProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "nodes": [{
+            "id": 1,
+            "name": "Tank",
+            "states": [
+                {"id": 11, "name": "Level", "symbol": "level", "initialValue": 0},
+                {"id": 12, "name": "Effort", "symbol": "effort", "initialValue": 0}
+            ],
+            "sourceTerms": [{
+                "id": 21, "state": "level", "expression": "1",
+                "expressionModel": {"latex": "1", "bindings": [], "output": {"stateId": 11}, "mathJson": 1}
+            }],
+            "implementation": {
+                "kind": "python",
+                "providerApiVersion": 1,
+                "source": "provider source",
+                "bindings": [],
+                "outputs": [{"key": "levelRate", "stateId": 11, "setsValue": true}]
+            }
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+// Proves evaluateContributionTasks routes a setsValue output into algebraicNodeProviderWrites (a
+// plain replacement) rather than the ordinary derivative-contribution list, while an unmarked
+// output on the same provider is unaffected.
+class SetsValueNodeEvaluator final : public konjugate::ProviderEvaluator {
+public:
+    std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>&,
+                                      const std::vector<std::span<const double>>&,
+                                      double, double) override {
+        throw std::runtime_error("This test expects only computational-node evaluation.");
+    }
+
+    std::vector<std::pair<std::string, double>> evaluateNode(
+        const konjugate::NodeProviderTask&, std::span<const double>, double, double) override {
+        return {{"levelRate", 42.0}, {"effortRateSquared", 3.0}};
+    }
+};
+
 // Proves evaluateContributionTasks resolves a NodeProviderTask's bindings and folds its named
 // outputs into the right state indexes, without spawning a real worker process.
 class RecordingNodeEvaluator final : public konjugate::ProviderEvaluator {
@@ -244,6 +329,78 @@ void executionPlanFoldsNodeProviderOutputsIntoNodeDerivatives() {
         else if (contribution.outputStateIndex == 1) require(contribution.value == 2.0, "effortRateSquared was folded into the wrong state.");
         else throw std::runtime_error("A node provider contribution targeted an unexpected state index.");
     }
+}
+
+void validatorAcceptsANodeProviderSetsValueOutputAsSoleContributor() {
+    const auto project = projectWithNodeImplementation(nodeImplementationWithSetsValueOutput());
+    const auto result = konjugate::validateModel(project);
+    require(result.valid, "A setsValue node-provider output as the sole contributor to its state was rejected.");
+    require(!hasIssue(result, "setsValueNotSoleContributor"), "A sole setsValue node-provider contributor was incorrectly flagged.");
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto& outputs = plan.nodes.front().nodeProvider->outputs;
+    require(outputs[0].setsValue, "The execution plan did not preserve the node provider output's setsValue flag.");
+    require(!outputs[1].setsValue, "The execution plan incorrectly set setsValue on an ordinary node provider output.");
+}
+
+void validatorRejectsANodeProviderSetsValueOutputSharingItsStateWithASourceTerm() {
+    const auto result = konjugate::validateModel(nodeProviderSetsValueSharingStateWithSourceTermProject());
+    require(!result.valid, "A setsValue node-provider output sharing its state with a source term was incorrectly accepted.");
+    require(hasIssue(result, "setsValueNotSoleContributor"),
+        "The validator did not flag a setsValue node-provider output sharing its state with a source term.");
+}
+
+void validatorRejectsANodeProviderSetsValueSelfReference() {
+    const auto project = projectWithNodeImplementation(nodeProviderSelfReferencingSetsValueImplementation());
+    const auto result = konjugate::validateModel(project);
+    require(!result.valid, "A self-referencing setsValue node-provider output was incorrectly accepted.");
+    require(hasIssue(result, "setsValueSelfReference"),
+        "The validator did not flag a setsValue node-provider output bound as one of its own provider's inputs.");
+    bool threw = false;
+    try {
+        konjugate::compileExecutionPlan(project);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    require(threw, "compileExecutionPlan should defensively reject a self-referencing setsValue node-provider output too, "
+        "since main.cpp's run command compiles without validating first.");
+}
+
+void executionPlanRoutesSetsValueNodeProviderOutputsAsAlgebraicWrites() {
+    const auto plan = konjugate::compileExecutionPlan(projectWithNodeImplementation(nodeImplementationWithSetsValueOutput()));
+    const auto& node = plan.nodes.front();
+    SetsValueNodeEvaluator evaluator;
+    std::vector<std::pair<std::size_t, double>> algebraicWrites;
+    const auto evaluated = konjugate::evaluateContributionTasks(
+        node, {0, 0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &evaluator, &algebraicWrites);
+    require(evaluated.size() == 1 && evaluated.front().outputStateIndex == 1 && evaluated.front().value == 3.0,
+        "The ordinary (non-setsValue) node provider output should still be folded into the derivative-contribution list.");
+    require(algebraicWrites.size() == 1 && algebraicWrites.front().first == 0 && algebraicWrites.front().second == 42.0,
+        "The setsValue node provider output should be routed into algebraicNodeProviderWrites, not the derivative list.");
+}
+
+void executionPlanThrowsWhenASetsValueNodeProviderOutputHasNowhereToRouteTo() {
+    const auto plan = konjugate::compileExecutionPlan(projectWithNodeImplementation(nodeImplementationWithSetsValueOutput()));
+    const auto& node = plan.nodes.front();
+    SetsValueNodeEvaluator evaluator;
+    bool threw = false;
+    try {
+        konjugate::evaluateContributionTasks(
+            node, {0, 0}, plan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &evaluator);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    require(threw, "A setsValue node provider output with no algebraicNodeProviderWrites sink should fail loudly, not silently drop the write.");
+}
+
+void integrateNodeAppliesSetsValueNodeProviderOutputsDirectlyNotIntegrated() {
+    const auto plan = konjugate::compileExecutionPlan(projectWithNodeImplementation(nodeImplementationWithSetsValueOutput()));
+    const auto& node = plan.nodes.front();
+    SetsValueNodeEvaluator evaluator;
+    const auto result = konjugate::integrateNode(node, plan.initialStates, {}, 0.0, 1.0, &evaluator);
+    // "level" (setsValue) should snap directly to 42, never accumulated across the (single)
+    // substep -- "effort" (ordinary) should Euler-integrate its derivative: 0 + 1.0 * 3.0 = 3.
+    require(result.states.at(0) == 42.0, "A setsValue node-provider output should be written directly into its state, not integrated.");
+    require(result.states.at(1) == 3.0, "An ordinary node-provider output should still be Euler-integrated as a derivative.");
 }
 
 // The key end-to-end case: a real ProviderRuntime, talking the actual worker protocol to a real
@@ -512,6 +669,12 @@ int main() {
         validatorRejectsDuplicateAndMissingNodeProviderOutputs();
         validatorWarnsOnUntouchedNodeProviderTemplate();
         executionPlanFoldsNodeProviderOutputsIntoNodeDerivatives();
+        validatorAcceptsANodeProviderSetsValueOutputAsSoleContributor();
+        validatorRejectsANodeProviderSetsValueOutputSharingItsStateWithASourceTerm();
+        validatorRejectsANodeProviderSetsValueSelfReference();
+        executionPlanRoutesSetsValueNodeProviderOutputsAsAlgebraicWrites();
+        executionPlanThrowsWhenASetsValueNodeProviderOutputHasNowhereToRouteTo();
+        integrateNodeAppliesSetsValueNodeProviderOutputsDirectlyNotIntegrated();
         providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd();
         providerRuntimeExecutesNodeProviderCppInProcessEndToEnd();
         providerRuntimeGivesEachCppNodeProviderInstanceIndependentState();

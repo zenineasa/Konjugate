@@ -462,6 +462,11 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         "This computational-node provider has no input bindings and still contains the generated template.",
                         "node", id, "implementation");
                 }
+                // Collected alongside the ordinary per-binding checks below so the setsValue
+                // self-reference check after the outputs loop can tell whether any of this
+                // provider's own (shared, not per-output) input bindings reads a state one of its
+                // setsValue outputs also targets -- see that check for why this matters.
+                std::set<std::string> nodeProviderBindingStateIds;
                 if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
                     const auto& binding = bindingEntry.second;
                     const auto key = value(binding, "key");
@@ -472,13 +477,21 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     }
                     if (value(binding, "kind") != "state" || !stateIds[id].contains(value(binding, "stateId"))) {
                         add(result, "providerBindingMissing", "error", "Provider binding references a missing local state.", "node", id, "implementation");
+                    } else {
+                        nodeProviderBindingStateIds.insert(value(binding, "stateId"));
                     }
                 }
                 // Unlike an edge/source term's single output, a computational-node provider
                 // declares N named outputs -- each needs its own key-uniqueness check, and at
                 // least one is required since zero outputs would mean the provider contributes
-                // nothing at all, defeating the point of owning a node's dynamics.
+                // nothing at all, defeating the point of owning a node's dynamics. An output may
+                // additionally carry setsValue (see docs/projectSchema.md), mirroring a source
+                // term's own setsValue flag: its state becomes a genuine algebraic one rather than
+                // a derivative contribution, so it's folded into the same stateContributorCounts/
+                // setsValueStateIds machinery the sourceTerms loop above already populates, and
+                // gets the same sole-contributor check at the bottom of this function.
                 std::set<std::string> outputKeys;
+                bool nodeProviderSelfReference = false;
                 const auto outputs = implementation->get_child_optional("outputs");
                 if (!outputs || outputs->empty()) {
                     add(result, "nodeProviderOutputsEmpty", "error", "A computational-node provider must declare at least one named output.", "node", id, "implementation");
@@ -490,9 +503,27 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     } else if (!outputKeys.insert(key).second) {
                         add(result, "nodeProviderOutputKeyDuplicate", "error", "Provider output key \"" + key + "\" is duplicated.", "node", id, "implementation");
                     }
-                    if (!stateIds[id].contains(value(output, "stateId"))) {
+                    const auto outputStateId = value(output, "stateId");
+                    if (!stateIds[id].contains(outputStateId)) {
                         add(result, "nodeProviderOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "implementation");
+                    } else {
+                        stateContributorCounts[outputStateId] += 1;
+                        if (value(output, "setsValue") == "true") {
+                            setsValueStateIds.insert(outputStateId);
+                            // A setsValue output reading its own target state back through one of
+                            // this provider's (shared, per-node not per-output) bindings would make
+                            // it a hidden, substep-count-dependent recurrence rather than a genuine
+                            // algebraic value -- exactly the same reasoning as an ordinary source
+                            // term's own self-reference rejection above, just checked against a
+                            // shared binding list instead of one expression's own bindings.
+                            if (nodeProviderBindingStateIds.contains(outputStateId)) nodeProviderSelfReference = true;
+                        }
                     }
+                }
+                if (nodeProviderSelfReference) {
+                    add(result, "setsValueSelfReference", "error",
+                        "A computational-node-provider output that sets its state's value directly may not also be one of that provider's own input bindings.",
+                        "node", id, "implementation");
                 }
             }
         }
@@ -669,8 +700,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(),
             [&](const auto& entry) { return entry.second.contains(stateId); });
         add(result, "setsValueNotSoleContributor", "error",
-            "A source term that sets its state's value directly must be the only contribution to that state.",
-            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{}, "sourceTerms");
+            "A source term or computational-node-provider output that sets its state's value directly must be the only contribution to that state.",
+            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
     }
     result.valid = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
     return result;

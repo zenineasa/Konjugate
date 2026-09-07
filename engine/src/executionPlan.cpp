@@ -295,7 +295,22 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 output.key = value(outputEntry, "key");
                 output.stateId = idValue(outputEntry, "stateId");
                 output.stateIndex = localStateIndexes.at(output.stateId);
+                output.setsValue = value(outputEntry, "setsValue") == "true";
                 providerTask.outputs.push_back(std::move(output));
+            }
+            // Same reasoning, and same defensive necessity (main.cpp's run command compiles
+            // without validating), as the algebraic-source-term self-reference throw above: a
+            // setsValue output reading its own target state back through one of this provider's
+            // own (shared, not per-output) bindings would make it a hidden, substep-count-dependent
+            // recurrence rather than a genuine algebraic value.
+            for (const auto& output : providerTask.outputs) {
+                if (!output.setsValue) continue;
+                for (const auto& binding : providerTask.bindings) {
+                    if (binding.source == BindingSource::localState && binding.valueId == output.stateId) {
+                        throw std::runtime_error(
+                            "A computational-node-provider output that sets its state's value directly may not also be one of that provider's own input bindings.");
+                    }
+                }
             }
             providerTask.providerProcessKeyCache = (kind == "cpp" ? "cpp:" : "py:") + providerTask.providerSource;
             compiledNode.estimatedOperationsPerSubstep += providerTask.bindings.size() + providerTask.outputs.size() + 1;
@@ -417,7 +432,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeParameterValues& parameterValues,
     double simulationTime,
     double stepSize,
-    ProviderEvaluator* providerEvaluator) {
+    ProviderEvaluator* providerEvaluator,
+    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites) {
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
 
@@ -497,9 +513,18 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             if (found == task.outputs.end()) {
                 throw std::runtime_error("A computational-node provider returned an undeclared output key '" + outputKey + "'.");
             }
-            if (!std::isfinite(outputValue)) throw std::runtime_error("A computational-node provider produced a non-finite derivative.");
-            const auto sequence = node.contributions.size() + static_cast<std::size_t>(std::distance(task.outputs.begin(), found));
-            evaluated.push_back({sequence, found->stateIndex, outputValue});
+            if (!std::isfinite(outputValue)) throw std::runtime_error("A computational-node provider produced a non-finite value.");
+            if (found->setsValue) {
+                // A plain replacement, exactly like applyAlgebraicTasks -- see
+                // NodeProviderOutputBinding::setsValue and this function's declaration comment.
+                if (!algebraicNodeProviderWrites) {
+                    throw std::runtime_error("A setsValue computational-node-provider output requires the caller to accept algebraic writes.");
+                }
+                algebraicNodeProviderWrites->emplace_back(found->stateIndex, outputValue);
+            } else {
+                const auto sequence = node.contributions.size() + static_cast<std::size_t>(std::distance(task.outputs.begin(), found));
+                evaluated.push_back({sequence, found->stateIndex, outputValue});
+            }
         }
     }
 
@@ -615,9 +640,16 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         // a later algebraic task and every ordinary (differential) contribution evaluated next
         // in this same substep see the fresh value -- never the previous substep's.
         applyAlgebraicTasks(node.algebraicTasks, localStates, algebraicParameterValues, substepTime, nodeTimeStep, providerEvaluator);
+        std::vector<std::pair<std::size_t, double>> algebraicNodeProviderWrites;
         const auto evaluated = evaluateContributionTasks(
             node, localStates, synchronizationSnapshot, parameterValues,
-            substepTime, nodeTimeStep, providerEvaluator);
+            substepTime, nodeTimeStep, providerEvaluator, &algebraicNodeProviderWrites);
+        // Same plain-replacement treatment as applyAlgebraicTasks, applied here rather than inside
+        // evaluateContributionTasks itself -- see that function's declaration comment. Order versus
+        // the Euler integration below never matters: a setsValue nodeProvider output's state index
+        // can never also appear in `derivatives` (validated as its state's sole contributor), so the
+        // two loops always touch disjoint state indices.
+        for (const auto& [stateIndex, algebraicValue] : algebraicNodeProviderWrites) localStates.at(stateIndex) = algebraicValue;
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
     }

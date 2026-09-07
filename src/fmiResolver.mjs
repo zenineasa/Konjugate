@@ -10,19 +10,17 @@
 // (engine/src/providerInProcessNodeShim.cpp) -- see docs/interactionProviders.md.
 //
 // Output-value semantics: an FMU's causality="output" variable is an algebraic VALUE (e.g. a
-// reported temperature), not a rate -- but every contribution in Konjugate's engine, node
-// providers included, is folded into its target state as a DERIVATIVE and Euler-integrated
-// (`state += contribution * stepSize`). To make the target state land exactly on the FMU's
-// reported value every substep, with zero approximation error, the generated glue contributes
-// `(fmuValue - stateAtStartOfSubstep) / stepSize` instead of the raw value -- algebraically
-// `state_new = state_old + (fmuValue - state_old) = fmuValue`. Reading "stateAtStartOfSubstep"
-// requires a value the generic NodeProvider interface does not otherwise expose (a provider only
-// ever sees its own declared inputs), so a synthetic extra input port is added per output --
-// `__konjugateFeedback_<outputName>`, bound by this resolver (not the user) to the very same
-// state that output's own `outputs[]` entry targets. Konjugate evaluates every contribution in a
-// substep from the same frozen start-of-substep snapshot before applying any of them (see
-// executionPlan.cpp's evaluateContributionTasks), so this feedback binding is guaranteed to read
-// exactly the right value, including on the very first substep.
+// reported temperature), not a rate -- so every generated output is marked `setsValue: true`
+// (see docs/projectSchema.md), the engine's real DAE-style algebraic-state mechanism, rather than
+// folded into its target state as a derivative and Euler-integrated. The engine writes the FMU's
+// reported value directly into the target state every substep, with zero approximation error and
+// no dependency on any particular solver's arithmetic -- see NodeProviderOutputBinding::setsValue
+// in engine/include/executionPlan.hpp. An earlier version of this resolver used a synthetic
+// feedback input port and contributed `(fmuValue - stateAtStartOfSubstep) / stepSize` instead --
+// exact only because Explicit Euler's specific single-stage arithmetic happens to cancel that back
+// to `fmuValue`, the same Euler-specific trick `setsValue` itself replaced elsewhere (see
+// docs/interactionProviders.md's `addGradient` section and docs/proposals/causalInferenceInputReplay.md)
+// -- before being replaced with this one.
 
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -80,10 +78,6 @@ function keyByVariableName(variables, describeWhat) {
     return keys;
 }
 
-function feedbackKey(sanitizedOutputKey) {
-    return `konjugateFeedback${sanitizedOutputKey.charAt(0).toUpperCase()}${sanitizedOutputKey.slice(1)}`;
-}
-
 // A valid, safe C++ string literal for any JS string: JSON's escaping (\\, \", \n, ...) is a
 // strict subset of C++'s for the ASCII text these values are (a modelName, a guid, a filesystem
 // path), so this is exact, not an approximation.
@@ -96,10 +90,7 @@ function cppStringLiteral(text) {
 // per version.
 function buildPortDeclarations(inputVariables, outputVariables, inputKeys, outputKeys) {
     const scalarPort = (key) => `        {${cppStringLiteral(key)}, ${cppStringLiteral(key)}, ""}`;
-    const inputPorts = [
-        ...inputVariables.map((variable) => scalarPort(inputKeys.get(variable.name))),
-        ...outputVariables.map((variable) => scalarPort(feedbackKey(outputKeys.get(variable.name))))
-    ].join(',\n');
+    const inputPorts = inputVariables.map((variable) => scalarPort(inputKeys.get(variable.name))).join(',\n');
     const outputPorts = outputVariables.map((variable) => scalarPort(outputKeys.get(variable.name))).join(',\n');
     return { inputPorts, outputPorts };
 }
@@ -126,7 +117,7 @@ function generateFmi2Glue({ description, binaryPath, guid, version, contentHash,
             throw std::runtime_error("fmi2GetReal failed for the imported FMU.");
         }
 ${outputVariables.map((variable, index) =>
-        `        outputs.addGradient(${cppStringLiteral(outputKeys.get(variable.name))}, (static_cast<double>(outputValues[${index}]) - context.inputs.at(${cppStringLiteral(feedbackKey(outputKeys.get(variable.name)))})) / context.stepSize);`
+        `        outputs.addGradient(${cppStringLiteral(outputKeys.get(variable.name))}, static_cast<double>(outputValues[${index}]));`
     ).join('\n')}
 ` : '';
 
@@ -135,6 +126,9 @@ ${outputVariables.map((variable, index) =>
 // Content hash ${cppStringLiteral(contentHash)} -- embedded only so replacing the installed FMU's
 // binary in place invalidates Konjugate's build cache instead of silently reusing a stale
 // compiled artifact (see buildCppProvider's caching in engine/src/providerRuntime.cpp).
+// Every declared output is marked setsValue in the resolved implementation's outputs[] (see
+// resolveFmiSource below), so addGradient's value here is read by the engine as the state's
+// algebraic value, not a derivative -- see this file's header comment.
 #include <konjugate/relationshipProvider.hpp>
 #include <konjugate/fmiDynamicLoad.hpp>
 
@@ -236,7 +230,7 @@ std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
 `;
 }
 
-// The FMI 3.0 counterpart to generateFmi2Glue above -- same port-list/pseudo-derivative shape
+// The FMI 3.0 counterpart to generateFmi2Glue above -- same port-list/setsValue-output shape
 // (see the file header comment), different C API calls: fmi3EnterInitializationMode folds what
 // FMI2 splits into fmi2SetupExperiment+fmi2EnterInitializationMode into one call; fmi3DoStep gains
 // event/terminate/early-return/last-successful-time out-params, which this synchronous,
@@ -264,7 +258,7 @@ function generateFmi3Glue({ description, binaryPath, guid, version, contentHash,
             throw std::runtime_error("fmi3GetFloat64 failed for the imported FMU.");
         }
 ${outputVariables.map((variable, index) =>
-        `        outputs.addGradient(${cppStringLiteral(outputKeys.get(variable.name))}, (static_cast<double>(outputValues[${index}]) - context.inputs.at(${cppStringLiteral(feedbackKey(outputKeys.get(variable.name)))})) / context.stepSize);`
+        `        outputs.addGradient(${cppStringLiteral(outputKeys.get(variable.name))}, static_cast<double>(outputValues[${index}]));`
     ).join('\n')}
 ` : '';
 
@@ -273,6 +267,9 @@ ${outputVariables.map((variable, index) =>
 // Content hash ${cppStringLiteral(contentHash)} -- embedded only so replacing the installed FMU's
 // binary in place invalidates Konjugate's build cache instead of silently reusing a stale
 // compiled artifact (see buildCppProvider's caching in engine/src/providerRuntime.cpp).
+// Every declared output is marked setsValue in the resolved implementation's outputs[] (see
+// resolveFmiSource below), so addGradient's value here is read by the engine as the state's
+// algebraic value, not a derivative -- see this file's header comment.
 #include <konjugate/relationshipProvider.hpp>
 #include <konjugate/fmiDynamicLoad.hpp>
 
@@ -465,20 +462,21 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
         }
     }
 
-    // The synthetic feedback bindings this resolver alone adds -- see the file header comment.
-    // Each reads the very state its own output targets, so it never appears in (and is not
-    // expected to be authored in) the project's own bindings array.
-    const feedbackBindings = outputs.map((output) => ({ key: feedbackKey(output.key), kind: 'state', stateId: output.stateId }));
-
     const generateGlue = description.fmiVersion.startsWith('3.') ? generateFmi3Glue : generateFmi2Glue;
     const source = generateGlue({ description, binaryPath: platformBinaryPath, guid, version, contentHash, inputKeys, outputKeys });
+
+    // Every FMU output is algebraic (see the file header comment), so this resolver marks each one
+    // setsValue itself rather than requiring the user to author that -- an FMU import couldn't
+    // mean anything else.
+    const setsValueOutputs = outputs.map((output) => ({ ...output, setsValue: true }));
 
     return {
         ...implementation,
         kind: 'cpp',
         providerApiVersion: 1,
         source,
-        bindings: [...bindings, ...feedbackBindings]
+        bindings,
+        outputs: setsValueOutputs
     };
 }
 

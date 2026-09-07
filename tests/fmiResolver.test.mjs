@@ -55,12 +55,14 @@ test('resolves a valid fmi implementation into a cpp node-provider implementatio
         assert.equal(resolved.providerApiVersion, 1);
         assert.ok(resolved.source.includes('createNodeProvider'));
         assert.ok(resolved.source.includes(installed.guid));
-        // The resolver-owned feedback binding must be appended, reading the SAME state as the
-        // output it corrects for.
-        assert.equal(resolved.bindings.length, 2);
-        const feedback = resolved.bindings.find((binding) => binding.key !== 'k');
-        assert.equal(feedback.stateId, 12);
-        assert.match(feedback.key, /^konjugateFeedback/);
+        // No synthetic feedback binding: bindings pass through unchanged, and every output is
+        // marked setsValue instead (see src/fmiResolver.mjs's file header comment).
+        assert.equal(resolved.bindings.length, 1);
+        assert.equal(resolved.bindings[0].key, 'k');
+        assert.equal(resolved.outputs.length, 1);
+        assert.equal(resolved.outputs[0].key, 'decayLevel');
+        assert.equal(resolved.outputs[0].setsValue, true);
+        assert.ok(resolved.source.includes('outputs.addGradient("decayLevel", static_cast<double>(outputValues[0]));'));
     });
 });
 

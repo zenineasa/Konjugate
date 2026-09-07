@@ -101,12 +101,22 @@ struct NodeProviderOutputBinding {
     std::string key;
     EntityId stateId = 0;
     std::size_t stateIndex = std::numeric_limits<std::size_t>::max();
+    // Mirrors a source term's own setsValue (see NodeExecutionPlan::algebraicTasks and
+    // docs/projectSchema.md's setsValue paragraph): by default an output's returned number is a
+    // derivative, folded additively into its target state like any other contribution. When true,
+    // the engine instead writes that same number directly into the target state every substep -- a
+    // plain replacement, never integrated -- making it a genuine algebraic state rather than the
+    // Euler-specific pseudo-derivative trick FMI import used before this field existed (see
+    // src/fmiResolver.mjs). No SDK change: NodeOutputCollector::addGradient's value is reinterpreted
+    // exactly like a source term's addGradient value is.
+    bool setsValue = false;
 };
 
 // Owns ALL the dynamics of one node, unlike ContributionTask which owns one scalar derivative
-// into one state: evaluated once per substep, returns N named derivative contributions (one per
-// declared output), each folded additively into its own target state exactly like an ordinary
-// contribution. A node has at most one of these. Python-only for now (see providerRuntime.cpp);
+// into one state: evaluated once per substep, returns N named outputs (one per declared output),
+// each either folded additively into its own target state as a derivative, or -- when that
+// output's binding has setsValue set -- written directly into its target state as a genuine
+// algebraic value. A node has at most one of these. Python-only for now (see providerRuntime.cpp);
 // implementation is retained (rather than assumed) so a future C++ node-provider slice only has
 // to add a branch here, not a new field.
 struct NodeProviderTask {
@@ -187,6 +197,15 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document);
 
 std::vector<std::size_t> planTaskSubmissionOrder(const std::vector<NodeExecutionPlan>& nodes);
 
+// localStates is only ever read here -- but a nodeProvider output with setsValue needs to write its
+// target state directly (see NodeProviderOutputBinding::setsValue), exactly like
+// applyAlgebraicTasks does. Rather than taking localStates by mutable reference (which would force
+// every caller, including every existing test, to supply a named lvalue instead of a plain
+// brace-init StateValues), such a write is appended to algebraicNodeProviderWrites instead -- a
+// caller-supplied out-parameter, nullptr by default -- as a (stateIndex, value) pair for the caller
+// to apply once this call returns, exactly how integrateNode already applies the derivatives it
+// gets back from reduceContributions. A setsValue nodeProvider output encountered with a null
+// algebraicNodeProviderWrites throws rather than silently discarding the write.
 std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeExecutionPlan& node,
     const StateValues& localStates,
@@ -194,7 +213,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const NodeParameterValues& parameterValues,
     double simulationTime = 0,
     double stepSize = 0,
-    ProviderEvaluator* providerEvaluator = nullptr);
+    ProviderEvaluator* providerEvaluator = nullptr,
+    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites = nullptr);
 
 NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues);
 // Shared by evaluateContributionTasks (indexed by position in node.contributions) and

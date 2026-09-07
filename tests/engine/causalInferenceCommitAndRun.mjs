@@ -120,7 +120,8 @@ function buildOperations(mapping, report, columnSeries, replayColumns) {
         const target = resolvedColumns.get(columnName);
         operations.push({
             kind: 'addSourceTerm', ref: `input${index}`, nodeRef: target.nodeRef, outputStateRef: target.stateRef,
-            implementation: { kind: 'cpp', source: replayProviderSource(columnName, columnSeries(columnName), columnName) }
+            implementation: { kind: 'cpp', source: replayProviderSource(columnName, columnSeries(columnName), columnName) },
+            setsValue: true
         });
     });
     return operations;

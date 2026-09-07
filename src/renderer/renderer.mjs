@@ -5677,15 +5677,18 @@ async function commitCausalInference() {
     });
     // No bindings needed -- the generated provider only reads context.simulationTime, the same
     // no-bindings, time-driven pattern already used for a hand-authored kinematic driver source
-    // term. See docs/proposals/causalInferenceInputReplay.md for why this is exact (not
-    // approximate) at any substep count, and why a gradient-based provider rather than a new
-    // direct-value-set SDK primitive is the right mechanism.
+    // term. setsValue: true marks this as a genuine algebraic state (docs/projectSchema.md) --
+    // the engine writes the provider's value directly into the state every substep rather than
+    // integrating it as a derivative, which is why this is exact at any substep count with no
+    // dependency on the state's starting value being exactly right. See
+    // docs/proposals/causalInferenceInputReplay.md for the full design history.
     acceptedInputs.forEach((input, index) => {
         const target = resolvedColumns.get(input.columnName);
         operations.push({
             kind: 'addSourceTerm', ref: `causalInferenceInput${index}`,
             nodeRef: target.nodeRef ?? target.nodeId, outputStateRef: target.stateRef ?? target.stateId,
-            implementation: { kind: 'cpp', source: replayProviderSource(input.columnName, columnSeries(input.columnName), input.columnName) }
+            implementation: { kind: 'cpp', source: replayProviderSource(input.columnName, columnSeries(input.columnName), input.columnName) },
+            setsValue: true
         });
     });
 

@@ -111,6 +111,26 @@ test('creates a programmable (cpp) source term in place of an equation', () => {
     assert.equal(term.implementation.output.stateId, document.nodes[0].states[0].id);
 });
 
+test('addSourceTerm passes setsValue through, on both the equation and implementation paths', () => {
+    const proposal = {
+        proposalVersion: 1,
+        operations: [
+            { kind: 'addNode', ref: 'input', name: 'Ambient temperature' },
+            { kind: 'addState', ref: 'inputState', nodeRef: 'input', name: 'Temperature', symbol: 'temperature', initialValue: 293.15, unit: 'K' },
+            {
+                kind: 'addSourceTerm', ref: 'replay', nodeRef: 'input', outputStateRef: 'inputState',
+                implementation: { kind: 'cpp', source: '// replay provider source' }, setsValue: true
+            },
+            { kind: 'addNode', ref: 'plain', name: 'Plain' },
+            { kind: 'addState', ref: 'plainState', nodeRef: 'plain', name: 'X', symbol: 'x', initialValue: 0, unit: '' },
+            { kind: 'addSourceTerm', ref: 'plainTerm', nodeRef: 'plain', outputStateRef: 'plainState', latex: '5' }
+        ]
+    };
+    const { document } = applyAssistantProposal(emptyProject(), proposal, { idFactory: idFactory() });
+    assert.equal(document.nodes[0].sourceTerms[0].setsValue, true);
+    assert.equal(document.nodes[1].sourceTerms[0].setsValue, undefined);
+});
+
 test('rejects a source-term implementation kind other than cpp or python', () => {
     const proposal = {
         proposalVersion: 1,

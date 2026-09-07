@@ -244,6 +244,11 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
                     }
                 };
             }
+            // Orthogonal to the equation/implementation choice above -- see docs/projectSchema.md's
+            // `setsValue` paragraph. Used by the causal-inference input-replay feature so a marked
+            // column's state is recomputed directly from its recorded values every substep, rather
+            // than accumulating a derivative from a starting point that has to be exactly right.
+            if (operation.setsValue === true) term.setsValue = true;
             allocate(operation, 'sourceTerm', term, node, operationIndex);
             node.sourceTerms.push(term);
             changes.push({ kind: operation.kind, action: 'add', entityId: term.id, focusEntityId: node.id, label: `Add local term for ${output.value.symbol}` });

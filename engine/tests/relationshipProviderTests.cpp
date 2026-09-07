@@ -1205,6 +1205,83 @@ void compileExecutionPlanOrdersDependentAlgebraicTasksCorrectly() {
         "y's task (no dependencies) should be ordered before z's task (which depends on y), regardless of authored order.");
 }
 
+std::string cppInlineTimeReportingProviderSource() {
+    return R"cpp(
+#include <konjugate/relationshipProvider.hpp>
+#include <memory>
+
+namespace {
+
+class TimeReporter final : public konjugate::sdk::v1::RelationshipProvider {
+public:
+    konjugate::sdk::v1::RelationshipDescription describe() const override {
+        return {"test.timeReporter", "Time reporter", {}, {"output", "Output", ""}};
+    }
+
+    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
+                  konjugate::sdk::v1::OutputCollector& output) override {
+        output.addGradient(context.simulationTime);
+    }
+};
+
+}
+
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider() {
+    return std::make_unique<TimeReporter>();
+}
+)cpp";
+}
+
+boost::property_tree::ptree setsValueProgrammableTimeReportingProject() {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Node",
+            "numerics": {"substepsPerGlobalStep": 2},
+            "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}],
+            "sourceTerms": [{
+                "id": 21, "state": "x", "expression": "", "setsValue": true,
+                "implementation": {
+                    "kind": "cpp", "providerApiVersion": 1, "source": "placeholder-replaced-below",
+                    "bindings": [], "output": {"key": "output", "stateId": 11}
+                }
+            }]
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    project.get_child("nodes").begin()->second.get_child("sourceTerms").begin()->second
+        .put("implementation.source", cppInlineTimeReportingProviderSource());
+    return project;
+}
+
+// Proves the fix for a real bug found via the causal-inference input-replay migration: a
+// time-dependent PROGRAMMABLE algebraic task must be evaluated at the END of each substep, not
+// its start, or its value (and everything reading it) lags by exactly one substep. An
+// equation-based algebraic task can never surface this (a MathJSON expression has no notion of
+// simulation time at all), which is exactly why the earlier unit-level applyAlgebraicTasks tests
+// in executionPlanTests.cpp -- all equation-based -- never caught it.
+void setsValueProgrammableTaskEvaluatesAtEndOfEachSubstepNotStart() {
+    const auto plan = konjugate::compileExecutionPlan(setsValueProgrammableTimeReportingProject());
+    require(plan.nodes.at(0).algebraicTasks.size() == 1, "The setsValue provider source term should compile into algebraicTasks.");
+
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+
+    // One global step of duration 1.0, split into 2 substeps of 0.5 each: substep 0 ends at
+    // simulationTime 0.5, substep 1 (the final, reported one) ends at 1.0.
+    const konjugate::StateValues snapshot = {0};
+    const auto result = konjugate::integrateNode(plan.nodes.at(0), snapshot, {}, 0.0, 1.0, &runtime);
+    require(std::abs(result.states[0] - 1.0) < 1e-9,
+        "The algebraic state should report the global step's END time (1.0), not the last substep's START time (0.5).");
+
+    runtime.shutdown();
+}
+
 void providerRuntimeExecutesAProgrammableSourceTermEndToEnd() {
     const auto plan = konjugate::compileExecutionPlan(sourceTermWithImplementationProject());
     konjugate::ProviderConfiguration config;
@@ -1257,5 +1334,6 @@ int main() {
     validatorRejectsASetsValueSourceTermReferencingItsOwnState();
     validatorRejectsASetsValueAlgebraicLoop();
     compileExecutionPlanOrdersDependentAlgebraicTasksCorrectly();
+    setsValueProgrammableTaskEvaluatesAtEndOfEachSubstepNotStart();
     providerRuntimeExecutesAProgrammableSourceTermEndToEnd();
 }

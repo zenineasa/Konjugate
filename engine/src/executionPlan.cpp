@@ -571,7 +571,18 @@ void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, St
             if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
             const std::vector<const ContributionTask*> batchTasks{&task};
             const std::vector<std::span<const double>> inputs{symbols};
-            const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, simulationTime, stepSize);
+            // simulationTime + stepSize (this substep's END, not its start) is deliberate, not a
+            // typo against evaluateContributionTasks' own convention: a differential
+            // contribution's derivative is sampled at the START of the interval it will be
+            // Euler-applied over (standard forward-Euler), but an algebraic task's result IS the
+            // state's value -- it needs to represent "this state's value once this substep
+            // completes," the same instant the Euler-updated differential states it composes
+            // with will represent. Using the start time here would make a time-dependent
+            // algebraic provider (e.g. src/providerTemplate.mjs's causal-inference CSV replay)
+            // report every value one substep late. This matches the standard semi-explicit DAE
+            // convention of resolving the algebraic relationship at the new time step before
+            // using it in that same step's differential update.
+            const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, simulationTime + stepSize, stepSize);
             if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
             value = results.front();
         }

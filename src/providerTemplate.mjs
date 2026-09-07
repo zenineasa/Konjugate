@@ -124,17 +124,22 @@ function cppDoubleLiteral(value) {
 }
 
 /**
- * Generates a no-bindings C++ source term that replays one CSV column's own recorded (time,
- * value) samples exactly, rather than fitting a model to it -- for a column causal inference
- * found nothing predicting (see docs/proposals/causalInferenceInputReplay.md). Each evaluate()
- * call emits the local slope between the two recorded samples straddling the current simulation
- * time, which integrates exactly under Euler at any substep count because a constant-rate
- * segment's true solution genuinely is linear -- not an approximation the way a fitted rate's
- * single-Euler-step calibration is. Past the last recorded sample (and before the first), the
- * gradient is zero: the value holds at its last/first known point rather than extrapolating.
+ * Generates a no-bindings, `setsValue` C++ source term that replays one CSV column's own recorded
+ * (time, value) samples exactly, rather than fitting a model to it -- for a column causal
+ * inference found nothing predicting (see docs/proposals/causalInferenceInputReplay.md). Each
+ * evaluate() call emits the linearly-interpolated value between the two recorded samples
+ * straddling the current simulation time; the caller marks the owning source term `setsValue:
+ * true` (docs/projectSchema.md), so the engine writes that value directly into the state every
+ * substep instead of integrating it as a derivative. This is exact at any substep count and,
+ * unlike an earlier version of this generator that emitted the interval's local slope for the
+ * engine to Euler-integrate, has no dependency on the state's starting value ever being exactly
+ * right -- there is nothing to integrate from, so a wrong initial value can never leave a
+ * permanent offset the way it could under the derivative-based approach. Past the last recorded
+ * sample (and before the first), the value holds at its last/first known point rather than
+ * extrapolating.
  *
  * pairs: [{ time, value }, ...] in chronological row order, already regularly spaced (the same
- * guarantee parseInferenceCsv enforces on its input). Requires at least 2 samples -- a slope
+ * guarantee parseInferenceCsv enforces on its input). Requires at least 2 samples -- interpolation
  * needs two points, and a `double[]` embedded with zero entries is a compiler extension, not
  * standard C++ (confirmed: clang accepts it but flags it under -Wpedantic, which this project's
  * engine build enables) -- rejected outright rather than silently emitting that.
@@ -171,7 +176,7 @@ public:
 
     void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
                   konjugate::sdk::v1::OutputCollector& output) override {
-        if (kSampleCount < 2) { output.addGradient(0); return; }
+        if (kSampleCount < 2) { output.addGradient(kValues[0]); return; }
         const double rowTimeStep = kTimes[1] - kTimes[0];
         // position is dimensionless (row-index units), so a fixed small nudge here is safe
         // regardless of the CSV's own absolute time scale or sampling interval. Needed because
@@ -180,17 +185,17 @@ public:
         // precision) -- both range boundaries below and the interior interval lookup all derive
         // from this one nudged value, so "just before the end" and "just past an interior
         // boundary" get the same tolerant treatment rather than two independently-tuned checks
-        // drifting out of sync with each other. Confirmed by a direct Euler-integration test
-        // across several substep counts (including a case where the un-nudged version leaked
-        // slightly past the recorded end at very fine substep counts) before this fix was added;
-        // see docs/proposals/causalInferenceInputReplay.md.
+        // drifting out of sync with each other. See docs/proposals/causalInferenceInputReplay.md.
         const double position = (context.simulationTime - kTimes[0]) / rowTimeStep + 1e-6;
         // Before the first recorded sample, or past the last one (any run longer than the CSV's
-        // own recorded span will reach this): hold, emitting no further change.
-        if (position < 0 || position >= kSampleCount - 1) { output.addGradient(0); return; }
+        // own recorded span will reach this): hold at the nearest known point rather than
+        // extrapolating.
+        if (position < 0) { output.addGradient(kValues[0]); return; }
+        if (position >= kSampleCount - 1) { output.addGradient(kValues[kSampleCount - 1]); return; }
         std::size_t index = static_cast<std::size_t>(position);
         if (index >= kSampleCount - 1) index = kSampleCount - 2;
-        output.addGradient((kValues[index + 1] - kValues[index]) / rowTimeStep);
+        const double fraction = position - static_cast<double>(index);
+        output.addGradient(kValues[index] + fraction * (kValues[index + 1] - kValues[index]));
     }
 };
 

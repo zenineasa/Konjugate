@@ -90,10 +90,16 @@ test('replayProviderSource embeds every recorded sample as a C++ double literal,
     assert.match(source, /constexpr double kValues\[\] = \{ 1\.5, -2\.25, 0 \};/);
 });
 
-test('replayProviderSource holds past the recorded range rather than extrapolating', () => {
+test('replayProviderSource holds at the nearest known value past the recorded range rather than extrapolating', () => {
     const source = replayProviderSource('x', [{ time: 0, value: 1 }, { time: 1, value: 2 }], 'x');
-    assert.match(source, /position < 0 \|\| position >= kSampleCount - 1/);
-    assert.match(source, /output\.addGradient\(0\);/);
+    assert.match(source, /if \(position < 0\) \{ output\.addGradient\(kValues\[0\]\); return; \}/);
+    assert.match(source, /if \(position >= kSampleCount - 1\) \{ output\.addGradient\(kValues\[kSampleCount - 1\]\); return; \}/);
+});
+
+test('replayProviderSource interpolates linearly between the two straddling samples', () => {
+    const source = replayProviderSource('x', [{ time: 0, value: 1 }, { time: 1, value: 2 }], 'x');
+    assert.match(source, /const double fraction = position - static_cast<double>\(index\);/);
+    assert.match(source, /output\.addGradient\(kValues\[index\] \+ fraction \* \(kValues\[index \+ 1\] - kValues\[index\]\)\);/);
 });
 
 test('produces syntactically balanced braces at 2 samples and above', () => {

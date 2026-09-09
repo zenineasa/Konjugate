@@ -31,6 +31,7 @@ import {
     unresolvedGroupSymbols
 } from '../edgeGroups.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
+import { detectInstabilityFingerprint } from '../instabilityFingerprint.mjs';
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import {
     CSS2DObject,
@@ -908,11 +909,18 @@ function createNodeLabel(definition, geometry) {
                 <strong>${escapeHtml(definition.title)}</strong>
                 <span class="typeBadge ${escapeHtml(definition.badgeClass ?? '')}">${escapeHtml(definition.type)}</span>
                 <span class="disabledBadge">Disabled</span>
+                <button class="stabilityBadge" type="button" aria-label="Numerical stability findings for this node" title="Numerical stability findings for this node">⚠</button>
             </div>
             <dl>${stateRows}</dl>
             <span class="stateCount">${definition.states.length} ${definition.states.length === 1 ? 'state' : 'states'}</span>
         </div>
     `;
+
+    wrapper.querySelector('.stabilityBadge').addEventListener('pointerdown', (event) => event.stopPropagation());
+    wrapper.querySelector('.stabilityBadge').addEventListener('click', (event) => {
+        event.stopPropagation();
+        openStabilityFindingsForNode(definition.id);
+    });
 
     wrapper.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
@@ -3871,6 +3879,127 @@ function renderExecutionSummary() {
     });
 }
 
+// Post-run phase (docs/proposals/numericalStabilityDiagnostics.md) computed lazily, only once a
+// result is "completed" (re-running it on every live-poll tick would mean repeated O(samples) work
+// for no benefit -- during-run monitoring already covers the live case), and cached per result
+// object so scrubbing the timeline or reopening the card doesn't recompute it.
+let cachedFingerprintFindings = { result: null, findings: [] };
+
+function resolvedStabilityFindings() {
+    if (!activeResult) return [];
+    const duringRun = activeResult.stabilityFindings ?? [];
+    let postRun = [];
+    if (activeResult.lifecycle === 'completed') {
+        if (cachedFingerprintFindings.result !== activeResult) {
+            const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
+            cachedFingerprintFindings = {
+                result: activeResult,
+                findings: detectInstabilityFingerprint(activeResult, document_).map((finding) => ({
+                    nodeId: finding.nodeId, stateId: finding.stateId,
+                    code: finding.classicSawtoothFingerprint ? 'postRunSawtoothFingerprint' : 'postRunGrowthFingerprint',
+                    message: finding.classicSawtoothFingerprint
+                        ? 'This state shows the classic Explicit Euler instability signature -- growing, alternating sign every step -- across the completed run.'
+                        : 'This state grew substantially across the completed run, without ever settling.',
+                    globalTime: null
+                }))
+            };
+        }
+        postRun = cachedFingerprintFindings.findings;
+    }
+    return [...duringRun, ...postRun].sort((a, b) => (a.globalTime ?? Infinity) - (b.globalTime ?? Infinity));
+}
+
+function describeStabilityFinding(finding) {
+    // Node display names live on the Three.js object's own userData.definition.title (the same
+    // source navigateToValidationIssue's openNodeEditor(node.userData.definition) call already
+    // trusts), not on model.nodes[] directly -- state lookups (symbol) still use model.nodes[],
+    // which does carry real per-state data.
+    const node = model.nodes.find((candidate) => candidate.id === finding.nodeId);
+    const nodeTitle = nodeObjects.get(finding.nodeId)?.userData?.definition?.title;
+    const state = finding.stateId ? node?.states.find((candidate) => candidate.id === finding.stateId) : null;
+    const subject = state ? `${nodeTitle ?? 'Node'} · ${state.symbol}` : (nodeTitle ?? `Node ${finding.nodeId}`);
+    const when = Number.isFinite(finding.globalTime) ? `at ${formatResultTime(finding.globalTime)}` : 'across the run';
+    return { subject, when };
+}
+
+function renderStabilityFindings() {
+    const findings = resolvedStabilityFindings();
+    $('#stabilitySummaryButton').hidden = !findings.length;
+    $('#stabilitySummaryButton').classList.toggle('hasFindings', findings.length > 0);
+    $('#stabilityFindingsCount').textContent = findings.length ? String(findings.length) : '';
+    if (!findings.length) {
+        $('#stabilityFindingsCard').classList.add('hidden');
+        $('#stabilitySummaryButton').ariaExpanded = 'false';
+    }
+    $('#stabilityFindingsTitle').textContent = findings.length === 1 ? '1 finding' : `${findings.length} findings`;
+
+    const list = $('#stabilityFindingsList');
+    list.replaceChildren();
+    if (!findings.length) {
+        const empty = document.createElement('p');
+        empty.className = 'stabilityFindingsEmpty';
+        empty.textContent = 'No numerical stability findings for this result.';
+        list.appendChild(empty);
+    }
+    findings.forEach((finding) => {
+        const { subject, when } = describeStabilityFinding(finding);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'stabilityFinding';
+        button.dataset.nodeId = String(finding.nodeId);
+        button.innerHTML = `<i></i><span><strong>${escapeHtml(subject)}</strong><small>${escapeHtml(finding.message)} · ${escapeHtml(when)}</small></span>`;
+        button.addEventListener('click', () => navigateToStabilityFinding(finding));
+        list.appendChild(button);
+    });
+
+    const nodeIdsWithFindings = new Set(findings.map((finding) => finding.nodeId));
+    $$('.node-label-container').forEach((label) => {
+        label.classList.toggle('hasStabilityFinding', nodeIdsWithFindings.has(Number(label.dataset.node)));
+    });
+
+    const extent = Math.max(Number(activeResult?.targetTime) || 0, Number(activeResult?.availableResultTime) || 0,
+        activeResult?.samples.at(-1)?.time ?? 0, Number.EPSILON);
+    const timedFindings = findings.filter((finding) => Number.isFinite(finding.globalTime));
+    if (timedFindings.length) {
+        const marks = timedFindings.map((finding) => {
+            const percent = Math.min(100, Math.max(0, 100 * finding.globalTime / extent));
+            return `linear-gradient(to right, transparent calc(${percent}% - 1px), var(--orange) calc(${percent}% - 1px), var(--orange) calc(${percent}% + 1px), transparent calc(${percent}% + 1px))`;
+        });
+        $('#resultTimeline').style.setProperty('--stability-marks', marks.join(', '));
+    } else {
+        $('#resultTimeline').style.removeProperty('--stability-marks');
+    }
+}
+
+function navigateToStabilityFinding(finding) {
+    $('#stabilityFindingsCard').classList.remove('hidden');
+    $('#stabilitySummaryButton').ariaExpanded = 'true';
+    const node = nodeObjects.get(finding.nodeId);
+    if (node) {
+        selectNode(node);
+        openNodeEditor(node.userData.definition);
+    }
+    if (Number.isFinite(finding.globalTime) && activeResult?.samples.length) {
+        projectResultSample(nearestSampleIndex(activeResult.samples, finding.globalTime));
+    }
+}
+
+function openStabilityFindingsForNode(nodeId) {
+    $('#stabilityFindingsCard').classList.remove('hidden');
+    $('#stabilitySummaryButton').ariaExpanded = 'true';
+    $(`.stabilityFinding[data-node-id="${nodeId}"]`, $('#stabilityFindingsList'))?.scrollIntoView({ block: 'nearest' });
+}
+
+$('#stabilitySummaryButton').addEventListener('click', () => {
+    const opening = $('#stabilityFindingsCard').classList.contains('hidden');
+    $('#stabilityFindingsCard').classList.toggle('hidden', !opening);
+    $('#stabilitySummaryButton').ariaExpanded = String(opening);
+});
+$('#closeStabilityFindings').addEventListener('click', () => {
+    $('#stabilityFindingsCard').classList.add('hidden');
+    $('#stabilitySummaryButton').ariaExpanded = 'false';
+});
+
 function updateLiveResultControls() {
     const lifecycle = activeResult?.lifecycle;
     const live = simulationRunning && ['running', 'paused'].includes(lifecycle);
@@ -3905,6 +4034,7 @@ function updateLiveResultControls() {
         if ([...$('#simulationPacing').options].some((option) => option.value === value)) $('#simulationPacing').value = value;
     }
     renderExecutionSummary();
+    renderStabilityFindings();
 }
 
 $('#executionSummaryButton').addEventListener('click', () => {
@@ -4023,6 +4153,12 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
     $('#liveParameterPanel').hidden = true;
     $('#executionSummaryCard').classList.add('hidden');
     $('#executionSummaryButton').ariaExpanded = 'false';
+    $('#stabilityFindingsCard').classList.add('hidden');
+    $('#stabilitySummaryButton').ariaExpanded = 'false';
+    $('#stabilitySummaryButton').hidden = true;
+    $('#resultTimeline').style.removeProperty('--stability-marks');
+    $$('.node-label-container').forEach((label) => label.classList.remove('hasStabilityFinding'));
+    cachedFingerprintFindings = { result: null, findings: [] };
     setResultModeLocked(false);
     nodeResultPlot.clear();
     $('.nodeResultsPanel').classList.remove('hasResults');

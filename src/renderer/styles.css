@@ -450,6 +450,9 @@ input, select, textarea { user-select: text; }
 .disabledBadge { display: none; padding: 2px 5px; color: #e0a458; background: rgb(224 164 88 / 12%); border-radius: 3px; font-size: 7px; text-transform: uppercase; letter-spacing: .04em; }
 .node-label-container.disabled .objectLabel { border-style: dashed; opacity: .72; }
 .node-label-container.disabled .disabledBadge { display: inline-block; }
+.stabilityBadge { display: none; width: 15px; height: 15px; padding: 0; color: var(--orange); background: rgb(237 159 82 / 14%); border: 0; border-radius: 3px; font-size: 8px; line-height: 15px; text-align: center; cursor: pointer; }
+.stabilityBadge:hover { background: rgb(237 159 82 / 26%); }
+.node-label-container.hasStabilityFinding .stabilityBadge { display: inline-block; }
 .objectLabel dl { display: none; gap: 5px; margin: 9px 0 5px; padding-top: 7px; border-top: 1px solid #263a45; }
 .objectLabel dl div { display: flex; align-items: center; justify-content: space-between; }
 .objectLabel dt { color: #718692; font-size: 8px; }
@@ -794,7 +797,7 @@ input, select, textarea { user-select: text; }
 .resultTransport .closeResults:hover { color: #adede7; background: rgb(66 201 188 / 10%); }
 .resultTransport .closeResults:hover span { background: #9be7e0; }
 .resultTransport output { min-width: 38px; color: #8ca0aa; font-size: 7px; text-align: center; }
-.resultTransport input[type="range"] { min-width: 100px; flex: 1; background: linear-gradient(to right, rgb(66 201 188 / 38%) 0 var(--available-progress, 0%), #182832 var(--available-progress, 0%) 100%); accent-color: var(--accent); }
+.resultTransport input[type="range"] { min-width: 100px; flex: 1; background-image: var(--stability-marks, none), linear-gradient(to right, rgb(66 201 188 / 38%) 0 var(--available-progress, 0%), #182832 var(--available-progress, 0%) 100%); accent-color: var(--accent); }
 #resultExtent { min-width: 112px; white-space: nowrap; }
 #simulationProgress { min-width: 76px; white-space: nowrap; }
 .resultTransport select { height: 25px; padding: 0 4px; color: #8297a1; background: #101e27; border: 1px solid #2d414c; border-radius: 4px; font-size: 7px; }
@@ -809,6 +812,23 @@ input, select, textarea { user-select: text; }
 .executionSummaryCard dl { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; padding: 11px 12px 12px; font-size: 7px; user-select: text; }
 .executionSummaryCard dt { color: #718791; }
 .executionSummaryCard dd { margin: 0; color: #b9cbd0; text-align: right; }
+.stabilitySummaryButton i { width: 6px; height: 6px; margin-right: 1px; background: #465862; border-radius: 50%; }
+.stabilitySummaryButton.hasFindings i { background: var(--orange); box-shadow: 0 0 7px rgb(237 159 82 / 50%); }
+.stabilityFindingsCard { position: absolute; z-index: 13; right: 18px; bottom: 62px; width: 310px; max-height: min(420px, calc(100% - 150px)); padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.stabilityFindingsCard header { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 11px 12px 9px; background: rgb(14 25 34 / 98%); border-bottom: 1px solid #29404a; }
+.stabilityFindingsCard header small, .stabilityFindingsCard header strong { display: block; }
+.stabilityFindingsCard header small { color: #607782; font-size: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+.stabilityFindingsCard header strong { margin-top: 3px; color: #d0dfe3; font-size: 10px; }
+.stabilityFindingsCard header button { width: 22px; height: 22px; padding: 0; color: #70858f; background: transparent; border: 0; font-size: 13px; }
+.stabilityFindingsHint { margin: 0; padding: 9px 12px; color: #77909a; background: rgb(237 159 82 / 5%); border-bottom: 1px solid #263b45; font-size: 7px; line-height: 1.45; }
+#stabilityFindingsList { overflow: auto; }
+.stabilityFinding { display: grid; width: 100%; grid-template-columns: 8px 1fr; gap: 8px; padding: 10px 12px; color: #91a3ad; background: transparent; border: 0; border-bottom: 1px solid #23343e; text-align: left; }
+.stabilityFinding:hover { background: #182832; }
+.stabilityFinding i { width: 7px; height: 7px; margin-top: 2px; background: var(--orange); border-radius: 50%; }
+.stabilityFinding strong, .stabilityFinding small { display: block; user-select: text; }
+.stabilityFinding strong { color: #becdd3; font-size: 8px; line-height: 1.4; }
+.stabilityFinding small { margin-top: 3px; color: #5f747f; font-size: 7px; }
+.stabilityFindingsEmpty { margin: 0; padding: 16px 12px; color: #5f747f; font-size: 7px; text-align: center; }
 .viewCube { position: absolute; z-index: 9; bottom: 18px; left: 18px; width: 176px; height: 180px; background: rgb(9 18 25 / 75%); border: 1px solid #293f4a; border-radius: 16px; box-shadow: 0 10px 28px rgb(0 0 0 / 28%); backdrop-filter: blur(10px); }
 .viewCubeScene { position: absolute; z-index: 2; top: 28px; left: 40px; width: 96px; height: 96px; perspective: 260px; pointer-events: none; }
 .viewCubeObject { position: relative; top: 48px; left: 48px; width: 0; height: 0; transform-style: preserve-3d; }

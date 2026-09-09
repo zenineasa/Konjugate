@@ -202,16 +202,25 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const initialPacing = normalizePacing(configuration.pacing);
     const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
     await writeFile(inputPath, await encodeProjectFile(resolvedContent));
+    const resolvedDocument = JSON.parse(resolvedContent);
     // A cpp computational-node provider (an FMI import is always one; a hand-authored one could
     // be too) only ever runs in-process -- engine/src/providerRuntime.cpp deliberately gives it
     // no worker-process fallback, since providerWorker.cpp has no node-provider protocol for C++
     // at all. Falling back to the ordinary sharedMemoryWorker default for such a document would
     // fail the run outright, so its presence overrides the default tier (but never an executionMode
     // the caller/env/toolchain preference actually asked for -- see the precedence comment below).
-    const requiresInProcessNodeProvider = JSON.parse(resolvedContent).nodes?.some((node) => node.implementation?.kind === 'cpp') ?? false;
+    const requiresInProcessNodeProvider = resolvedDocument.nodes?.some((node) => node.implementation?.kind === 'cpp') ?? false;
     await writeFile(configurationPath, JSON.stringify({
         ...configuration,
         pacing: initialPacing,
+        // During-run phase of docs/proposals/numericalStabilityDiagnostics.md: every interactive
+        // run through this app monitors every node by default (Tier 1 is cheap by design
+        // specifically so this is affordable -- see that doc's cost-bounding discussion), unless
+        // the caller already set its own stabilityMonitoring (e.g. a test wanting a narrower or
+        // empty scope). This only applies to this JS-level entry point, not the engine's `run`
+        // CLI used directly (tests, scripted/batch use) -- those still default to unmonitored,
+        // exactly as engine/src/simulationRunner.cpp itself already does.
+        stabilityMonitoring: configuration.stabilityMonitoring ?? { nodeIds: (resolvedDocument.nodes ?? []).map((node) => node.id) },
         providers: {
             ...configuration.providers,
             // See ProviderExecutionMode in the engine. Precedence: an explicit per-run override

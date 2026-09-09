@@ -1,12 +1,15 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "modelValidator.hpp"
+#include "executionPlan.hpp"
+#include "stabilityAnalysis.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <functional>
 #include <regex>
 #include <cstdlib>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -205,7 +208,16 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     };
 
     std::set<std::string> runConfigurationIds;
+    // Populated when the active run configuration parses cleanly, for the stability-diagnostic
+    // pass near the end of this function -- the pre-run phase of
+    // docs/proposals/numericalStabilityDiagnostics.md needs a concrete step size to check against,
+    // and the active run configuration is the closest thing a static document has to "the step
+    // size this model will actually run at." Left empty (no check performed) when the document has
+    // no run configurations at all, or the active one fails to parse -- there is nothing honest to
+    // check against in either case.
+    std::optional<double> activeGlobalTimeStep;
     if (const auto configurations = document.get_child_optional("runConfigurations")) {
+        const auto activeId = value(document, "activeRunConfigurationId");
         for (const auto& configurationEntry : *configurations) {
             const auto& configuration = configurationEntry.second;
             const auto configurationId = value(configuration, "id");
@@ -218,6 +230,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) throw std::out_of_range("configuration");
                 const auto ratio = outputInterval / globalTimeStep;
                 if (outputInterval < globalTimeStep || std::abs(ratio - std::round(ratio)) > 1e-9) throw std::out_of_range("configuration");
+                if (configurationId == activeId) activeGlobalTimeStep = globalTimeStep;
             } catch (...) {
                 add(result, "runConfigurationInvalid", "error", "Numerical configuration values must be finite and positive; output interval must be an integer multiple of the global timestep.", "runConfiguration", configurationId, "numerics");
             }
@@ -702,6 +715,43 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         add(result, "setsValueNotSoleContributor", "error",
             "A source term or computational-node-provider output that sets its state's value directly must be the only contribution to that state.",
             "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
+    }
+    // Pre-run phase of docs/proposals/numericalStabilityDiagnostics.md: a local, linearized
+    // Explicit Euler stability check per node, against the active run configuration's step size.
+    // Only attempted once every structural check above has already run, and only when there is a
+    // concrete step size to check against (see activeGlobalTimeStep's own comment). Compiling the
+    // document here is new: nothing else in this function needs a compiled ExecutionPlan, only the
+    // raw ptree -- but assessNodeStability needs the same resolved bindings/parameters/dependency
+    // ordering compileExecutionPlan already produces, and reproducing that logic against the ptree
+    // directly would duplicate it rather than reuse it. A document that fails to compile for any
+    // reason (most already reported above as a distinct error, a few not) is caught and simply
+    // skipped here -- this pass is a heuristic addition, never the reason a document is invalid.
+    const auto validSoFar = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
+    if (activeGlobalTimeStep && validSoFar) {
+        try {
+            const auto plan = compileExecutionPlan(document);
+            for (const auto& node : plan.nodes) {
+                const auto assessment = assessNodeStability(node, plan.initialStates, *activeGlobalTimeStep);
+                if (!assessment) continue;
+                const auto nodeId = std::to_string(assessment->nodeId);
+                if (!assessment->stable) {
+                    std::ostringstream message;
+                    message << "This node's dynamics may be unstable at its current substep count (amplification factor "
+                            << assessment->maxAmplificationFactor << " > 1 per global step) -- consider raising this node's "
+                            << "numerics.substepsPerGlobalStep, converting a fast state to setsValue, or moving fast dynamics onto their own node.";
+                    add(result, "numericsPotentiallyUnstable", "warning", message.str(), "node", nodeId, "numerics");
+                } else if (assessment->stiffnessRatio && *assessment->stiffnessRatio > 1000) {
+                    std::ostringstream message;
+                    message << "This node is stable but stiff (fastest/slowest rate ratio " << *assessment->stiffnessRatio
+                            << ") -- one state's dynamics are much faster than another's on the same node, forcing a smaller "
+                            << "step than the slower dynamics alone would need.";
+                    add(result, "numericsStiffModel", "warning", message.str(), "node", nodeId, "numerics");
+                }
+            }
+        } catch (const std::exception&) {
+            // Some other, already-reported structural problem (or a genuinely uncompilable
+            // document this pass has no business diagnosing) -- nothing to add here.
+        }
     }
     result.valid = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
     return result;

@@ -79,12 +79,26 @@ message ResultCheckpoint {
     repeated NodeProviderCheckpoint provider_states = 6;
 }
 
+// docs/proposals/numericalStabilityDiagnostics.md's during-run phase: node_id/state_id are raw
+// entity ids, not names -- resolving them to something human-readable is a caller (UI) concern,
+// the same way ValidationIssueReport's entity_id is. state_id is 0 ("no state") for a Tier-2
+// finding, which is about a node's dynamics as a whole (its Jacobian couples every differential
+// state together), not any one state in isolation.
+message StabilityFindingReport {
+    uint64 node_id = 1;
+    uint64 state_id = 2;
+    string code = 3;
+    string message = 4;
+    double global_time = 5;
+}
+
 message ResultFile {
     uint32 result_version = 1;
     bytes metadata_json = 2;
     StateTable state_table = 3;
     reserved 4;
     repeated ResultCheckpoint checkpoints = 5;
+    repeated StabilityFindingReport stability_findings = 6;
 }
 
 message ResultBatchIndex {

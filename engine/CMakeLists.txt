@@ -136,7 +136,9 @@ add_executable(konjugateEngine
     src/cppToolchain.cpp
     src/fmiImport.cpp
     src/providerRuntime.cpp
+    src/duringRunStabilityMonitor.cpp
     src/simulationRunner.cpp
+    src/stabilityAnalysis.cpp
     src/taskExecutor.cpp
     src/validationReport.cpp
 )
@@ -254,11 +256,12 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
         src/modelValidator.cpp
+        src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
     )
     target_include_directories(relationshipProviderTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-    target_link_libraries(relationshipProviderTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(relationshipProviderTests PRIVATE Eigen3::Eigen protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
     add_test(NAME relationshipProviderTests COMMAND relationshipProviderTests)
     # The test binary resolves provider sources/SDK paths (e.g. "../tests/...", cppSdkPath "..")
     # relative to engine/tests, and its Python-provider cases need the SDK on PYTHONPATH; ctest's
@@ -289,11 +292,12 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
         src/modelValidator.cpp
+        src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
     )
     target_include_directories(nodeProviderRuntimeTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
-    target_link_libraries(nodeProviderRuntimeTests PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(nodeProviderRuntimeTests PRIVATE Eigen3::Eigen protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
     add_test(NAME nodeProviderRuntimeTests COMMAND nodeProviderRuntimeTests)
     # Same resolution reasoning as relationshipProviderTests above: this test's Python provider
     # case resolves PYTHONPATH relative to engine/tests, not ctest's default working directory.
@@ -301,6 +305,44 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
     )
+
+    # Focused unit coverage for assessNodeStability() (docs/proposals/numericalStabilityDiagnostics.md's
+    # pre-run phase) -- only needs compileExecutionPlan()/evaluateContributionTasks() and its own
+    # stabilityAnalysis.cpp, not the provider runtime relationshipProviderTests/nodeProviderRuntimeTests
+    # need, since assessNodeStability() only ever runs against equation-only nodes.
+    add_executable(stabilityAnalysisTests
+        tests/stabilityAnalysisTests.cpp
+        src/executionPlan.cpp
+        src/stabilityAnalysis.cpp
+    )
+    set_target_properties(stabilityAnalysisTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(stabilityAnalysisTests PRIVATE include ${BOOST_INCLUDE_DIR})
+    target_link_libraries(stabilityAnalysisTests PRIVATE Eigen3::Eigen)
+    add_test(NAME stabilityAnalysisTests COMMAND stabilityAnalysisTests)
+
+    # Focused unit coverage for DuringRunStabilityMonitor (docs/proposals/numericalStabilityDiagnostics.md's
+    # during-run phase) -- needs the same compileExecutionPlan()/assessNodeStability() dependencies
+    # as stabilityAnalysisTests above, plus its own duringRunStabilityMonitor.cpp.
+    add_executable(duringRunStabilityMonitorTests
+        tests/duringRunStabilityMonitorTests.cpp
+        src/executionPlan.cpp
+        src/stabilityAnalysis.cpp
+        src/duringRunStabilityMonitor.cpp
+    )
+    set_target_properties(duringRunStabilityMonitorTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(duringRunStabilityMonitorTests PRIVATE include ${BOOST_INCLUDE_DIR})
+    target_link_libraries(duringRunStabilityMonitorTests PRIVATE Eigen3::Eigen)
+    add_test(NAME duringRunStabilityMonitorTests COMMAND duringRunStabilityMonitorTests)
 
     add_executable(fmiGlueTests
         tests/fmiGlueTests.cpp
@@ -369,7 +411,9 @@ if(BUILD_TESTING)
         src/partitionRuntime.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
+        src/duringRunStabilityMonitor.cpp
         src/simulationRunner.cpp
+        src/stabilityAnalysis.cpp
         src/taskExecutor.cpp
         ${PROTOCOL_SOURCES}
         ${PROTOCOL_HEADERS}

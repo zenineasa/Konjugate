@@ -3,6 +3,7 @@
 #include "simulationRunner.hpp"
 #include "engineProtocol.pb.h"
 #include "dependencyGraph.hpp"
+#include "duringRunStabilityMonitor.hpp"
 #include "executionBackend.hpp"
 #include "executionPlan.hpp"
 #include "partitionPlan.hpp"
@@ -27,6 +28,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace konjugate {
@@ -479,6 +481,16 @@ void runSimulation(const boost::property_tree::ptree& document,
     std::vector<Sample> samples = {{startTime, states}};
     std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
     std::vector<Sample> pendingEventSamples;
+    // During-run phase of docs/proposals/numericalStabilityDiagnostics.md -- entirely opt-in
+    // (empty monitoredNodeIds, the default, makes observeGlobalStep() a no-op below) via the run
+    // configuration's own stabilityMonitoring.nodeIds, not a project/schema concept: this is about
+    // how THIS run is executed, not what the model is, matching pacing/providers' own placement.
+    std::unordered_set<EntityId> stabilityMonitoredNodeIds;
+    if (const auto stabilityMonitoring = configuration.get_child_optional("stabilityMonitoring.nodeIds")) {
+        for (const auto& entry : *stabilityMonitoring) stabilityMonitoredNodeIds.insert(entry.second.get_value<EntityId>());
+    }
+    DuringRunStabilityMonitor stabilityMonitor(executionPlan, stabilityMonitoredNodeIds, globalTimeStep);
+    std::vector<DuringRunStabilityFinding> stabilityFindings;
     if (eventStream) {
         protocol::EngineEvent event;
         event.set_protocol_version(1);
@@ -637,6 +649,20 @@ void runSimulation(const boost::property_tree::ptree& document,
         result.set_result_version(2);
         result.set_metadata_json(json.str());
         for (const auto stateId : stateIds) result.mutable_state_table()->add_states()->set_state_id(stateId);
+        // During-run phase of docs/proposals/numericalStabilityDiagnostics.md -- a real protobuf
+        // field on ResultFile, not a JSON string: doubles (globalTime, and any future numeric
+        // finding data) natively represent Infinity/NaN in protobuf, the same reason the one-shot
+        // report messages moved off hand-written JSON (see engineProtocol.proto's own comment on
+        // ValidationIssueReport and friends) -- a diverging amplification factor should never be
+        // able to produce output a JSON parser rejects outright.
+        for (const auto& finding : stabilityFindings) {
+            auto* report = result.add_stability_findings();
+            report->set_node_id(finding.nodeId);
+            report->set_state_id(finding.stateId);
+            report->set_code(finding.code);
+            report->set_message(finding.message);
+            report->set_global_time(finding.globalTime);
+        }
         if (completeSnapshot) {
             for (const auto& checkpoint : checkpoints) {
                 auto* encoded = result.add_checkpoints();
@@ -812,6 +838,11 @@ void runSimulation(const boost::property_tree::ptree& document,
         states = std::move(synchronizedStates);
         const auto elapsed = std::min(targetTime, startTime + static_cast<double>(step + 1) * globalTimeStep);
         currentTime = elapsed;
+        if (!stabilityMonitoredNodeIds.empty()) {
+            auto newFindings = stabilityMonitor.observeGlobalStep(states, currentTime);
+            stabilityFindings.insert(stabilityFindings.end(),
+                std::make_move_iterator(newFindings.begin()), std::make_move_iterator(newFindings.end()));
+        }
         while (pacing.mode != PacingMode::fastest) {
             const auto targetDuration = std::chrono::duration<double>(synchronizationStep / pacing.ratio);
             const auto spent = std::chrono::steady_clock::now() - wallStepStarted;

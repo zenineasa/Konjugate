@@ -884,6 +884,7 @@
             <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option></select>
             <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
             <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
+            <button id="stabilitySummaryButton" class="executionButton stabilitySummaryButton" type="button" aria-label="Show numerical stability findings" aria-expanded="false" hidden><i></i> Stability <small id="stabilityFindingsCount"></small></button>
             <button id="executionSummaryButton" class="executionButton" type="button" aria-label="Show execution summary" aria-expanded="false" hidden><span aria-hidden="true">⌁</span> <span id="executionSummaryBackend">Execution</span></button>
             <button id="saveResults" class="executionButton reviewControl" type="button" aria-label="Save project with simulation results"><span aria-hidden="true">↓</span> Save project</button>
             <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close and remove results"><span aria-hidden="true">×</span>Close and edit</button>
@@ -892,6 +893,11 @@
             <header><span><small>Execution summary</small><strong id="executionSummaryTitle">Automatic</strong></span><button id="closeExecutionSummary" type="button" aria-label="Close execution summary">×</button></header>
             <p id="executionSummaryReason"></p>
             <dl id="executionSummaryMetrics"></dl>
+        </section>
+        <section id="stabilityFindingsCard" class="contextCard stabilityFindingsCard hidden" aria-label="Numerical stability findings">
+            <header><span><small>Numerical stability</small><strong id="stabilityFindingsTitle">No findings</strong></span><button id="closeStabilityFindings" type="button" aria-label="Close stability findings">×</button></header>
+            <p class="stabilityFindingsHint">Cumulative for this result -- click a finding to jump to that time and node.</p>
+            <div id="stabilityFindingsList"></div>
         </section>
 
         <div class="canvasHelp">

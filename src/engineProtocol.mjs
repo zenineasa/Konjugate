@@ -225,10 +225,26 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
     let metadata = null;
     let stateIds = [];
     const checkpoints = [];
+    const stabilityFindings = [];
     for (const field of fields(buffer.subarray(8, headerEnd))) {
         if (field.number === 1 && field.wireType === 0) resultVersion = field.value;
         else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(field.value.toString('utf8'));
         else if (field.number === 3 && field.wireType === 2) stateIds = decodedStateTable(field.value);
+        else if (field.number === 6 && field.wireType === 2) {
+            // docs/proposals/numericalStabilityDiagnostics.md's during-run phase -- a real
+            // protobuf field (StabilityFindingReport), not JSON, for the same reason the one-shot
+            // report messages moved off hand-written JSON: doubles like globalTime natively
+            // survive Infinity/NaN in protobuf, where a hand-rolled JSON string would not.
+            const finding = { nodeId: 0, stateId: 0, code: '', message: '', globalTime: 0 };
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 0) finding.nodeId = item.value;
+                else if (item.number === 2 && item.wireType === 0) finding.stateId = item.value;
+                else if (item.number === 3 && item.wireType === 2) finding.code = item.value.toString('utf8');
+                else if (item.number === 4 && item.wireType === 2) finding.message = item.value.toString('utf8');
+                else if (item.number === 5 && item.wireType === 1) finding.globalTime = item.value.readDoubleLE();
+            }
+            stabilityFindings.push(finding);
+        }
         else if (field.number === 5 && field.wireType === 2) {
             const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 }, providerStates: [] };
             for (const item of fields(field.value)) {
@@ -324,6 +340,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
         ...metadata,
         sampleCount,
         samples,
+        stabilityFindings,
         checkpoints: checkpoints.map((checkpoint) => {
             if (checkpoint.values.length !== stateIds.length) throw new Error('A KJR checkpoint has an inconsistent state vector.');
             return {

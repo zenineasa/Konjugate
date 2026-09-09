@@ -3497,5 +3497,109 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `[...document.querySelectorAll('#termProviderBindings option')].some((option) => option.textContent === 'sourceGain')`), true);
     });
 
+    await run('numerical stability findings surface as a bottom-bar indicator, a findings panel, and a per-node badge', async () => {
+        // A fresh window, not the shared one: this test authors its own tiny, deliberately
+        // unstable model from scratch, which would otherwise disturb every later test that
+        // assumes the shared document's existing content (see "Results Analysis timeline seek"
+        // above for the same isolation reasoning).
+        const before = BrowserWindow.getAllWindows();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        let diagnosticWindow = null;
+        const openStartedAt = Date.now();
+        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
+            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
+            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(diagnosticWindow, 'A new project window did not open for the stability-UI diagnostic.');
+        await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
+
+        // One node, one state ("level"), one self-referencing growth term: d(level)/dt = level.
+        // Explicit Euler's own stability condition is |1 + stepSize·λ| <= 1 -- for λ = +1 and any
+        // stepSize > 0, that's |1 + stepSize| > 1 always, so this is unstable at every possible
+        // timestep, not just a finely-tuned one. Unlike the engine-level fixtures
+        // (tests/engine/duringRunStabilityMonitoring.mjs and friends), which deliberately sit just
+        // past a specific boundary to test the boundary itself, this test only needs "definitely,
+        // robustly unstable" -- so it doesn't need to match a particular rate against a particular
+        // run-configuration timestep at all. The state is named "level", not the shorter "x": a
+        // single-letter symbol wrapped in \mathrm{} (how insertSourceTermBinding() -- and every
+        // "click a reference chip" flow in this editor -- represents ANY inserted symbol) trips a
+        // MathLive/ComputeEngine parsing quirk specific to single-letter symbols ("Unknown symbol:
+        // x_upright", confirmed by hand while writing this test) that a multi-character symbol
+        // like "level" (or the existing suite's own "sourceBias"/"sourceGain") does not.
+        await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#newNodeName').value = 'Growth';
+            const values = { name: 'Level', symbol: 'level', value: '1', unit: '' };
+            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+            document.querySelector('#createNode').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#editAddSourceTerm').click()`);
+        await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
+        // A freshly created source term's math field defaults to the literal "0", not empty --
+        // inserting a state reference without clearing it first produces malformed LaTeX like
+        // "0\\mathrm{x}" (concatenated, not combined with an operator).
+        await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue(''); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'level').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The self-referencing growth equation did not become valid.');
+        await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+
+        // A known, explicit run configuration -- not load-bearing for instability itself (see
+        // above), just kept deterministic rather than depending on whatever default the app
+        // happens to launch new projects with.
+        await evaluate(diagnosticWindow, `document.querySelector('#runConfigurationButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not open.');
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#runConfigurationName').value = 'Stability UI check';
+            document.querySelector('#runGlobalTimeStep').value = '0.1';
+            document.querySelector('#runOutputInterval').value = '0.1';
+            document.querySelector('#applyRunConfiguration').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not close.');
+
+        await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
+        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await evaluate(diagnosticWindow, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
+        // Not just .resultMode b's textContent: that field's own default HTML already reads
+        // "Results" before any run has ever happened, so checking it alone can pass instantly
+        // without actually waiting for anything -- #resultTransport itself starts `hidden` and
+        // is only unhidden once a real result exists, which is the genuine signal.
+        await waitFor(diagnosticWindow, `!document.querySelector('#resultTransport').hidden && document.querySelector('.resultMode b').textContent === 'Results'`,
+            'Offline run did not complete.', 15000);
+
+        // Bottom-bar indicator: present, colored, and counting at least one finding -- during-run
+        // monitoring covers every node by default for an interactive run (engineAdapter.mjs's
+        // startEngineRun), and the post-run fingerprint check runs automatically once the result
+        // reaches "completed" (renderStabilityFindings(), src/renderer/renderer.mjs).
+        assert.equal(await evaluate(diagnosticWindow, `document.querySelector('#stabilitySummaryButton').hidden`), false);
+        assert.equal(await evaluate(diagnosticWindow, `document.querySelector('#stabilitySummaryButton').classList.contains('hasFindings')`), true);
+        const findingsCount = Number(await evaluate(diagnosticWindow, `document.querySelector('#stabilityFindingsCount').textContent`));
+        assert.ok(findingsCount > 0, `Expected at least one stability finding, got ${findingsCount}.`);
+
+        // Per-node badge: the "Growth" node's own label should be flagged.
+        assert.equal(await evaluate(diagnosticWindow, `document.querySelector('.node-label-container').classList.contains('hasStabilityFinding')`), true);
+
+        // Findings panel: opens on click, lists real, name-resolved entries -- not raw ids or an
+        // unresolved "undefined" (the exact bug this test would have caught: node display names
+        // live on nodeObjects.get(id)?.userData?.definition?.title, not model.nodes[].name).
+        await evaluate(diagnosticWindow, `document.querySelector('#stabilitySummaryButton').click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#stabilityFindingsCard').classList.contains('hidden')`, 'Stability findings card did not open.');
+        const listText = await evaluate(diagnosticWindow, `document.querySelector('#stabilityFindingsList').textContent`);
+        assert.match(listText, /Growth/, 'The findings list should show the node\'s real name.');
+        assert.doesNotMatch(listText, /undefined|NaN/, 'The findings list should never leak an unresolved value.');
+
+        // Clicking a finding selects the node and opens its editor -- the reciprocal of
+        // navigateToValidationIssue's own click-an-issue-to-jump-to-its-entity behavior.
+        await evaluate(diagnosticWindow, `document.querySelector('.stabilityFinding').click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Clicking a stability finding did not open the node editor.');
+        assert.equal(await evaluate(diagnosticWindow, `document.querySelector('#editNodeName').value`), 'Growth');
+
+        diagnosticWindow.close();
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

@@ -121,6 +121,7 @@ contextBridge.exposeInMainWorld('engine', {
     validate: (content) => ipcRenderer.invoke('engineValidate', content),
     infer: (csv, config) => ipcRenderer.invoke('engineInfer', csv, config),
     fit: (content, csv, config) => ipcRenderer.invoke('engineFit', content, csv, config),
+    checkSubstepConvergence: (content, runConfiguration, nodeIds) => ipcRenderer.invoke('engineCheckSubstepConvergence', content, runConfiguration, nodeIds),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),
     setPacing: (jobId, pacing) => ipcRenderer.invoke('engineSetPacing', jobId, pacing),

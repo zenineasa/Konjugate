@@ -31,7 +31,7 @@ import {
     unresolvedGroupSymbols
 } from '../edgeGroups.mjs';
 import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
-import { detectInstabilityFingerprint } from '../instabilityFingerprint.mjs';
+import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from '../instabilityFingerprint.mjs';
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import {
     CSS2DObject,
@@ -3884,6 +3884,13 @@ function renderExecutionSummary() {
 // for no benefit -- during-run monitoring already covers the live case), and cached per result
 // object so scrubbing the timeline or reopening the card doesn't recompute it.
 let cachedFingerprintFindings = { result: null, findings: [] };
+// "Check convergence" (docs/proposals/numericalStabilityDiagnostics.md's post-run phase) is
+// deliberately not automatic -- it costs real extra engine runs -- so this only tracks per-node
+// state a user explicitly asked for, keyed by nodeId: { status: 'idle'|'checking'|'done'|'error',
+// finding, error }. Reset whenever the active result itself changes (see
+// renderStabilityConvergenceSection), same lifecycle as cachedFingerprintFindings above.
+let convergenceCheckState = new Map();
+let convergenceCheckResultRef = null;
 
 function resolvedStabilityFindings() {
     if (!activeResult) return [];
@@ -3956,6 +3963,7 @@ function renderStabilityFindings() {
     $$('.node-label-container').forEach((label) => {
         label.classList.toggle('hasStabilityFinding', nodeIdsWithFindings.has(Number(label.dataset.node)));
     });
+    renderStabilityConvergenceSection(nodeIdsWithFindings);
 
     const extent = Math.max(Number(activeResult?.targetTime) || 0, Number(activeResult?.availableResultTime) || 0,
         activeResult?.samples.at(-1)?.time ?? 0, Number.EPSILON);
@@ -3969,6 +3977,99 @@ function renderStabilityFindings() {
     } else {
         $('#resultTimeline').style.removeProperty('--stability-marks');
     }
+}
+
+function renderStabilityConvergenceSection(nodeIdsWithFindings) {
+    if (convergenceCheckResultRef !== activeResult) {
+        convergenceCheckState = new Map();
+        convergenceCheckResultRef = activeResult;
+    }
+    $('#stabilityConvergenceSection').hidden = !nodeIdsWithFindings.size;
+    const rows = $('#stabilityConvergenceRows');
+    rows.replaceChildren();
+    [...nodeIdsWithFindings].forEach((nodeId) => {
+        const nodeTitle = nodeObjects.get(nodeId)?.userData?.definition?.title ?? `Node ${nodeId}`;
+        const state = convergenceCheckState.get(nodeId) ?? { status: 'idle' };
+        const row = document.createElement('div');
+        row.className = 'stabilityConvergenceRow';
+        const title = document.createElement('strong');
+        title.textContent = nodeTitle;
+        row.appendChild(title);
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'stabilityCheckConvergence';
+        button.textContent = state.status === 'checking' ? 'Checking…' : state.status === 'idle' ? 'Check convergence' : 'Re-check';
+        button.disabled = state.status === 'checking';
+        button.addEventListener('click', () => checkNodeConvergence(nodeId));
+        row.appendChild(button);
+
+        if (state.status === 'done' || state.status === 'error') {
+            const result = document.createElement('span');
+            result.className = 'stabilityConvergenceResult';
+            if (state.status === 'error') {
+                result.textContent = state.error;
+            } else if (state.finding.converged) {
+                result.classList.add('converged');
+                result.textContent = state.finding.recommendedSubsteps === state.finding.baseSubsteps
+                    ? `Converged already, at the current ${state.finding.baseSubsteps} substep${state.finding.baseSubsteps === 1 ? '' : 's'}.`
+                    : `Converged at ${state.finding.recommendedSubsteps} substeps (currently ${state.finding.baseSubsteps}).`;
+                if (state.finding.recommendedSubsteps !== state.finding.baseSubsteps) {
+                    const apply = document.createElement('button');
+                    apply.type = 'button';
+                    apply.className = 'stabilityApplyConvergenceFix';
+                    apply.textContent = `Apply: ${state.finding.recommendedSubsteps} substeps`;
+                    apply.addEventListener('click', () => applyConvergenceFix(nodeId, state.finding.recommendedSubsteps));
+                    row.appendChild(apply);
+                }
+            } else {
+                result.classList.add('notConverged');
+                result.textContent = `Did not converge within the search bound (tried up to ${state.finding.multiplierReached * state.finding.baseSubsteps} substeps).`;
+            }
+            row.appendChild(result);
+        }
+        rows.appendChild(row);
+    });
+}
+
+async function checkNodeConvergence(nodeId) {
+    if (!activeResult) return;
+    convergenceCheckState.set(nodeId, { status: 'checking' });
+    renderStabilityFindings();
+    const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
+    const runConfiguration = {
+        name: 'stabilityConvergenceCheck',
+        targetTime: activeResult.targetTime, globalTimeStep: activeResult.globalTimeStep, outputInterval: activeResult.outputInterval
+    };
+    try {
+        const response = await window.engine.checkSubstepConvergence(JSON.stringify(document_), runConfiguration, [nodeId]);
+        if (!response.available) throw new Error('The numerical engine is unavailable.');
+        const finding = response.findings.find((candidate) => candidate.nodeId === nodeId);
+        if (!finding) throw new Error('The engine did not return a result for this node.');
+        convergenceCheckState.set(nodeId, { status: 'done', finding });
+    } catch (error) {
+        convergenceCheckState.set(nodeId, { status: 'error', error: error.message });
+    }
+    if (activeResult === convergenceCheckResultRef) renderStabilityFindings();
+}
+
+async function applyConvergenceFix(nodeId, substeps) {
+    // Applying an operation mutates the live model, which the app keeps locked while a result is
+    // shown (see e.g. commitCausalInference's own `if (activeResult) return` guard) -- closing the
+    // result first is this action's own equivalent of that same rule, not a special case.
+    await discardResultPlayback();
+    const baseDocument = serializeProjectDocument();
+    let prepared;
+    try {
+        prepared = buildAssistantProposal(baseDocument, recommendedSubstepFixProposal(nodeId, substeps));
+    } catch (error) {
+        console.error('Applying the recommended substep count failed:', error);
+        return;
+    }
+    const before = baseDocument;
+    const after = prepared.document;
+    replaceModelContents(after);
+    recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
 }
 
 function navigateToStabilityFinding(finding) {

@@ -1,11 +1,11 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// The pure-arithmetic half of src/postRunStabilityDiagnostics.mjs's post-run phase, split into its
-// own dependency-free module specifically so it can be imported directly from the renderer
+// The pure, dependency-free half of src/postRunStabilityDiagnostics.mjs's post-run phase, split
+// into its own module specifically so it can be imported directly from the renderer
 // (contextIsolation: true, nodeIntegration: false -- no node: builtins available there), unlike
 // postRunStabilityDiagnostics.mjs itself, which pulls in node:fs/node:child_process for
-// checkSubstepConvergence()'s real engine re-runs. postRunStabilityDiagnostics.mjs re-exports this
-// function, so every existing import of it from there keeps working unchanged.
+// checkSubstepConvergence()'s real engine re-runs. postRunStabilityDiagnostics.mjs re-exports both
+// of these, so every existing import of them from there keeps working unchanged.
 
 function nodeContainingState(document, stateId) {
     return document.nodes.find((node) => node.states.some((state) => state.id === stateId));
@@ -67,4 +67,13 @@ export function detectInstabilityFingerprint(result, document, {
         });
     }
     return findings;
+}
+
+// The "auto-apply the fix" step deliberately reuses assistantOperations.mjs's existing
+// `updateNode` operation kind (already the mechanism the AI assistant and any future UI use to
+// change a node's substepsPerGlobalStep) rather than inventing a parallel mutation path -- pass
+// the result to applyAssistantProposal(document, proposal) for the same undo-tracked application
+// every other assistant-driven edit already gets, for free.
+export function recommendedSubstepFixProposal(nodeId, substeps) {
+    return { proposalVersion: 1, operations: [{ kind: 'updateNode', nodeRef: nodeId, substepsPerGlobalStep: substeps }] };
 }

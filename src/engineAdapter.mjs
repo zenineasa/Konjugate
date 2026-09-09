@@ -10,6 +10,12 @@ import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from 
 import { decodeFittingReport, decodeInferenceReport, decodeValidationReport } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
 import { resolveInstalledFmus } from './fmiResolver.mjs';
+// A deliberate circular import: postRunStabilityDiagnostics.mjs's own checkSubstepConvergence()
+// calls back into this module's runEngine() to drive its substep-doubling search. Safe here
+// because both sides only ever use the other's export from inside a function body, never at
+// module-top-level evaluation time, which is exactly the shape Node's ESM live-binding
+// resolution handles correctly.
+import { checkSubstepConvergence } from './postRunStabilityDiagnostics.mjs';
 
 function engineFileName() {
     return process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine';
@@ -92,6 +98,29 @@ export async function validateWithEngine(content, options) {
             throw new Error(execution.diagnostics || `The validation engine exited with code ${execution.code}.`);
         }
         return { available: true, report: decodeValidationReport(await readFile(reportPath)) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}
+
+// Post-run phase of docs/proposals/numericalStabilityDiagnostics.md's "Check convergence" action
+// -- deliberately NOT automatic (see that doc's post-run section): a real substep-doubling search
+// against the compiled engine, one to several extra runs per requested node, so this only ever
+// happens when a user explicitly asks for it from the stability findings panel, not on every
+// result. Thin IPC-boundary wrapper around checkSubstepConvergence() (postRunStabilityDiagnostics.mjs),
+// which cannot run in the renderer itself (it needs node:fs/node:child_process, unavailable under
+// contextIsolation) -- mirrors validateWithEngine's own resolve-plugins-then-temp-directory shape
+// immediately above.
+export async function checkSubstepConvergenceWithEngine(content, runConfiguration, nodeIds, options) {
+    const executable = await resolveEnginePath(options);
+    if (!executable) return { available: false };
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateConvergence-'));
+    try {
+        const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
+        const findings = await checkSubstepConvergence({
+            executable, document: JSON.parse(resolvedContent), runConfiguration, nodeIds, directory
+        });
+        return { available: true, findings };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

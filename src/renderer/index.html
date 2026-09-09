@@ -898,6 +898,10 @@
             <header><span><small>Numerical stability</small><strong id="stabilityFindingsTitle">No findings</strong></span><button id="closeStabilityFindings" type="button" aria-label="Close stability findings">×</button></header>
             <p class="stabilityFindingsHint">Cumulative for this result -- click a finding to jump to that time and node.</p>
             <div id="stabilityFindingsList"></div>
+            <div id="stabilityConvergenceSection" class="stabilityConvergenceSection" hidden>
+                <p class="stabilityConvergenceHint">Check whether a flagged node's result actually converged, not just avoided diverging -- this re-runs the model at higher substep counts, so it costs real extra time.</p>
+                <div id="stabilityConvergenceRows"></div>
+            </div>
         </section>
 
         <div class="canvasHelp">

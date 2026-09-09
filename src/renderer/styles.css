@@ -829,6 +829,18 @@ input, select, textarea { user-select: text; }
 .stabilityFinding strong { color: #becdd3; font-size: 8px; line-height: 1.4; }
 .stabilityFinding small { margin-top: 3px; color: #5f747f; font-size: 7px; }
 .stabilityFindingsEmpty { margin: 0; padding: 16px 12px; color: #5f747f; font-size: 7px; text-align: center; }
+.stabilityConvergenceSection { border-top: 1px solid #23343e; }
+.stabilityConvergenceHint { margin: 0; padding: 9px 12px; color: #77909a; background: rgb(66 201 188 / 5%); border-bottom: 1px solid #263b45; font-size: 7px; line-height: 1.45; }
+.stabilityConvergenceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid #23343e; }
+.stabilityConvergenceRow:last-child { border-bottom: 0; }
+.stabilityConvergenceRow > strong { flex: 1; min-width: 60px; color: #becdd3; font-size: 8px; font-weight: 650; }
+.stabilityCheckConvergence, .stabilityApplyConvergenceFix { padding: 4px 8px; color: #b9cbd0; background: #17262f; border: 1px solid #2d414c; border-radius: 4px; font-size: 7px; cursor: pointer; }
+.stabilityCheckConvergence:hover, .stabilityApplyConvergenceFix:hover { background: #1e313b; }
+.stabilityCheckConvergence:disabled { color: #5f747f; cursor: default; }
+.stabilityApplyConvergenceFix { color: #7cd9cc; border-color: #2f5850; }
+.stabilityConvergenceResult { flex-basis: 100%; color: #91a3ad; font-size: 7px; line-height: 1.4; }
+.stabilityConvergenceResult.converged { color: #7cd9cc; }
+.stabilityConvergenceResult.notConverged { color: var(--orange); }
 .viewCube { position: absolute; z-index: 9; bottom: 18px; left: 18px; width: 176px; height: 180px; background: rgb(9 18 25 / 75%); border: 1px solid #293f4a; border-radius: 16px; box-shadow: 0 10px 28px rgb(0 0 0 / 28%); backdrop-filter: blur(10px); }
 .viewCubeScene { position: absolute; z-index: 2; top: 28px; left: 40px; width: 96px; height: 96px; perspective: 260px; pointer-events: none; }
 .viewCubeObject { position: relative; top: 48px; left: 48px; width: 0; height: 0; transform-style: preserve-3d; }

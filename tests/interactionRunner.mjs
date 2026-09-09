@@ -3598,6 +3598,16 @@ export async function runInteractionTests(window) {
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Clicking a stability finding did not open the node editor.');
         assert.equal(await evaluate(diagnosticWindow, `document.querySelector('#editNodeName').value`), 'Growth');
 
+        // "Check convergence" -- explicit, not automatic (engineAdapter.mjs's checkSubstepConvergenceWithEngine
+        // is only ever invoked by this button): re-runs the model at doubled substep counts and
+        // reports whether it actually converged, not just stayed finite.
+        await evaluate(diagnosticWindow, `document.querySelector('#stabilitySummaryButton').click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#stabilityFindingsCard').classList.contains('hidden')`, 'Stability findings card did not reopen.');
+        await evaluate(diagnosticWindow, `document.querySelector('.stabilityCheckConvergence').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('.stabilityConvergenceResult')`, 'The convergence check never produced a result.', 30000);
+        const convergenceResultText = await evaluate(diagnosticWindow, `document.querySelector('.stabilityConvergenceResult').textContent`);
+        assert.doesNotMatch(convergenceResultText, /undefined|NaN/, 'The convergence result should never leak an unresolved value.');
+
         diagnosticWindow.close();
     });
 

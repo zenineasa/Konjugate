@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
@@ -1929,6 +1929,14 @@ ipcMain.handle('engineValidate', async (event, content) => {
         activeValidationOperations.delete(active);
     }
 });
+
+// Post-run phase's "Check convergence" action (docs/proposals/numericalStabilityDiagnostics.md)
+// -- unlike validate/infer/fit above, this isn't tracked in an active-operations set with its own
+// AbortController: checkSubstepConvergence() has no cancellation support internally (each of its
+// sequential engine re-runs completes before the next starts), so there is nothing a signal could
+// actually interrupt yet. Accepted for now as a real, not faked, limitation of this first version.
+ipcMain.handle('engineCheckSubstepConvergence', async (_event, content, runConfiguration, nodeIds) =>
+    checkSubstepConvergenceWithEngine(content, runConfiguration, nodeIds, await engineOptions()));
 
 ipcMain.handle('engineInfer', async (event, csvContent, config) => {
     const active = { owner: event.sender, controller: new AbortController(), completion: null };

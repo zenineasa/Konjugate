@@ -22,11 +22,11 @@ import { join } from 'node:path';
 import { runEngine } from './engineAdapter.mjs';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile } from './engineProtocol.mjs';
-import { detectInstabilityFingerprint } from './instabilityFingerprint.mjs';
+import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from './instabilityFingerprint.mjs';
 
-// Re-exported, not defined here: see instabilityFingerprint.mjs's own file header for why this
-// one function lives in its own dependency-free module (the renderer imports it directly).
-export { detectInstabilityFingerprint };
+// Re-exported, not defined here: see instabilityFingerprint.mjs's own file header for why these
+// live in their own dependency-free module (the renderer imports them directly).
+export { detectInstabilityFingerprint, recommendedSubstepFixProposal };
 
 async function runOnce(executable, document, runConfiguration, directory, label) {
     const inputPath = join(directory, `${label}.kjt`);
@@ -117,13 +117,4 @@ export async function checkSubstepConvergence({
         findings.push({ nodeId, baseSubsteps, converged, recommendedSubsteps, multiplierReached: multiplier, achievedRelativeDifference });
     }
     return findings;
-}
-
-// The "auto-apply the fix" step deliberately reuses assistantOperations.mjs's existing
-// `updateNode` operation kind (already the mechanism the AI assistant and any future UI use to
-// change a node's substepsPerGlobalStep) rather than inventing a parallel mutation path -- pass
-// the result to applyAssistantProposal(document, proposal) for the same undo-tracked application
-// every other assistant-driven edit already gets, for free.
-export function recommendedSubstepFixProposal(nodeId, substeps) {
-    return { proposalVersion: 1, operations: [{ kind: 'updateNode', nodeRef: nodeId, substepsPerGlobalStep: substeps }] };
 }

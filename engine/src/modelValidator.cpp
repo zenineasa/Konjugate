@@ -33,6 +33,52 @@ std::string value(const boost::property_tree::ptree& tree, const std::string& ke
     return tree.get<std::string>(key, "");
 }
 
+EntityId idValue(const boost::property_tree::ptree& tree, const std::string& key) {
+    return tree.get<EntityId>(key, 0);
+}
+
+// Resolves a ParameterAttribution (an opaque sourceId/parameterId pair from the compiled plan --
+// see stabilityAnalysis.hpp) back to a human-facing phrase, by searching the original document:
+// stabilityAnalysis.cpp never sees the document/ptree, only the compiled ExecutionPlan, so this
+// disambiguation (an edge's parameter vs. a source term's) and name lookup can only happen here.
+// Returns "" if the ids can't be resolved -- defensive only; should not happen for a
+// ParameterAttribution produced from this same document's own compiled plan, but a warning message
+// silently degrading is better than this pass throwing over it.
+std::string describeAttributedParameter(const boost::property_tree::ptree& document, const ParameterAttribution& attribution) {
+    if (const auto edges = document.get_child_optional("edges")) {
+        for (const auto& edgeEntry : *edges) {
+            if (idValue(edgeEntry.second, "id") != attribution.sourceId) continue;
+            if (const auto parameters = edgeEntry.second.get_child_optional("parameters")) {
+                for (const auto& parameterEntry : *parameters) {
+                    if (idValue(parameterEntry.second, "id") != attribution.parameterId) continue;
+                    const auto edgeName = value(edgeEntry.second, "name");
+                    std::ostringstream description;
+                    description << "the edge" << (edgeName.empty() ? "" : " \"" + edgeName + "\"") << "'s '" << value(parameterEntry.second, "name") << "' parameter";
+                    return description.str();
+                }
+            }
+            return {};
+        }
+    }
+    if (const auto nodes = document.get_child_optional("nodes")) {
+        for (const auto& nodeEntry : *nodes) {
+            const auto terms = nodeEntry.second.get_child_optional("sourceTerms");
+            if (!terms) continue;
+            for (const auto& termEntry : *terms) {
+                if (idValue(termEntry.second, "id") != attribution.sourceId) continue;
+                if (const auto parameters = termEntry.second.get_child_optional("parameters")) {
+                    for (const auto& parameterEntry : *parameters) {
+                        if (idValue(parameterEntry.second, "id") != attribution.parameterId) continue;
+                        return "this node's own '" + value(parameterEntry.second, "name") + "' source-term parameter";
+                    }
+                }
+                return {};
+            }
+        }
+    }
+    return {};
+}
+
 void validateProviderOutput(ValidationResult& result,
                             const boost::property_tree::ptree& implementation,
                             const std::unordered_map<std::string, std::set<std::string>>& stateIds,
@@ -737,7 +783,12 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (!assessment->stable) {
                     std::ostringstream message;
                     message << "This node's dynamics may be unstable at its current substep count (amplification factor "
-                            << assessment->maxAmplificationFactor << " > 1 per global step) -- consider raising this node's "
+                            << assessment->maxAmplificationFactor << " > 1 per global step)";
+                    if (assessment->dominantParameter) {
+                        const auto description = describeAttributedParameter(document, *assessment->dominantParameter);
+                        if (!description.empty()) message << " -- driven mainly by " << description;
+                    }
+                    message << " -- consider raising this node's "
                             << "numerics.substepsPerGlobalStep, converting a fast state to setsValue, or moving fast dynamics onto their own node.";
                     add(result, "numericsPotentiallyUnstable", "warning", message.str(), "node", nodeId, "numerics");
                 } else if (assessment->stiffnessRatio && *assessment->stiffnessRatio > 1000) {

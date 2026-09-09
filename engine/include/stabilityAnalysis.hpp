@@ -7,6 +7,18 @@
 
 namespace konjugate {
 
+// Identifies the parameter estimated to most strongly drive a node's dominant (highest-
+// amplification) eigenvalue mode -- see NodeStabilityAssessment::dominantParameter and
+// assessNodeStability's own comment for the full method. sourceId is an edge id or source-term
+// id, whichever owns this parameter -- disambiguating between the two, and resolving it to a
+// human-facing name/symbol, is left to the caller against the original document, since this
+// module never sees the document/ptree, only the already-compiled plan.
+struct ParameterAttribution {
+    EntityId sourceId = 0;
+    EntityId parameterId = 0;
+    double sensitivity = 0;
+};
+
 struct NodeStabilityAssessment {
     EntityId nodeId = 0;
     std::size_t substeps = 1;
@@ -23,6 +35,9 @@ struct NodeStabilityAssessment {
     // high ratio flags a node that's nominally stable but forces an inefficiently tiny step to
     // stay that way (see docs/proposals/numericalStabilityDiagnostics.md's pre-run section).
     std::optional<double> stiffnessRatio;
+    // Only set when `!stable`, and only when the dominant mode's own state actually has a
+    // candidate parameter to attribute to (see assessNodeStability's own comment).
+    std::optional<ParameterAttribution> dominantParameter;
 };
 
 // Pre-run (validate-time) phase of docs/proposals/numericalStabilityDiagnostics.md's three-phase
@@ -51,6 +66,21 @@ struct NodeStabilityAssessment {
 // actually compiling and spawning a real provider (ProviderRuntime) just to validate a document,
 // which is a much larger and riskier undertaking than this heuristic, local, equation-only check;
 // see docs/proposals/numericalStabilityDiagnostics.md for that scoping decision.
+//
+// When a node comes back unstable, one more finite-difference step attributes it to a specific
+// parameter, not just the node: the dominant eigenvalue's own eigenvector (now requested from
+// EigenSolver) says which single differential state the unstable mode is concentrated in --
+// whichever component has the largest magnitude. Every ContributionTask (ordinary or algebraic)
+// that writes to that one state is a candidate; each of its parameters is perturbed in turn (same
+// relative-epsilon rule as the state perturbations above) and the resulting change in that state's
+// own derivative is measured directly -- no new machinery, just more calls to the same
+// evaluateNodeDerivative already used to build the Jacobian. The parameter with the largest
+// resulting sensitivity is kept. This generalizes to non-linear relations for the same reason the
+// Jacobian itself already does: nothing here is symbolic or linear-only, it's a numerical
+// perturbation of whatever the node's real (possibly non-linear) equations actually compute --
+// but, like the Jacobian, it is only ever a LOCAL read at synchronizationSnapshot, so it should be
+// treated as "the parameter most responsible for the instability near this operating point," not
+// a global claim.
 std::optional<NodeStabilityAssessment> assessNodeStability(
     const NodeExecutionPlan& node,
     const StateValues& synchronizationSnapshot,

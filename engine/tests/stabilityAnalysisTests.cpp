@@ -314,6 +314,57 @@ void assessNodeStabilityHandlesANodeThatIsNotFirstInTheDocument() {
     require(assessment->dominantParameter.has_value(), "The edge's own rate parameter should be attributed.");
     require(assessment->dominantParameter->sourceId == 3, "Attribution should point at the edge (id 3).");
     require(assessment->dominantParameter->parameterId == 13, "Attribution should point at the edge's rate parameter (id 13).");
+    require(assessment->dominantStateId == 12, "The dominant state should be Target's own state (id 12).");
+    require(!assessment->unconditionallyUnstable, "A real negative eigenvalue always has a finite stabilizing step size.");
+    require(assessment->requiredSubsteps.has_value(), "requiredSubsteps expected");
+    // Jacobian entry is exactly -rate = -21 (real) -> stepSizeBound = -2*(-21)/21^2 = 2/21 ≈
+    // 0.095238 -> ceil(0.1 / 0.095238) = ceil(1.05) = 2, same as the single-node decay case below.
+    require(*assessment->requiredSubsteps == 2, "requiredSubsteps should match the hand-computed bound.");
+}
+
+void assessNodeStabilityComputesRequiredSubsteps() {
+    // Same fixture as assessNodeStabilityFlagsAnObviouslyUnstableDecay: a real eigenvalue of -21.
+    // stepSizeBound = -2*(-21)/21^2 = 2/21 ≈ 0.095238 -> ceil(0.1 / 0.095238) = ceil(1.05) = 2.
+    const auto plan = konjugate::compileExecutionPlan(decayProject(21, 1));
+    const auto assessment = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.1);
+    require(assessment.has_value(), "assessment expected");
+    require(!assessment->stable, "assessment should be unstable");
+    require(!assessment->unconditionallyUnstable, "A real negative eigenvalue always has a finite stabilizing step size.");
+    require(assessment->requiredSubsteps.has_value(), "requiredSubsteps expected");
+    require(*assessment->requiredSubsteps == 2, "requiredSubsteps should match the hand-computed bound.");
+}
+
+void assessNodeStabilityFlagsUnconditionalInstability() {
+    // dx/dt = +growthRate*x -- a positive real eigenvalue. Explicit Euler's amplification
+    // |1+h*growthRate| is >= 1 for every h > 0, so no substep count -- however large -- ever
+    // stabilizes this: a genuinely growing mode, not merely an under-resolved one.
+    const auto project = parseProject(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Growth",
+            "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 1}],
+            "sourceTerms": [{
+                "id": 21, "state": "x", "expression": "\\mathrm{growthRate} \\cdot x",
+                "parameters": [{"id": 22, "name": "Growth rate", "symbol": "growthRate", "value": 5, "mode": "constant"}],
+                "expressionModel": {
+                    "latex": "\\mathrm{growthRate} \\cdot x", "output": {"stateId": 11},
+                    "bindings": [
+                        {"kind": "state", "stateId": 11, "symbol": "x", "label": "x"},
+                        {"kind": "parameter", "parameterId": 22, "symbol": "growthRate", "label": "growthRate"}
+                    ],
+                    "mathJson": ["Multiply", "growthRate", "x"]
+                }
+            }],
+            "numerics": {"substepsPerGlobalStep": 1}
+        }],
+        "edges": []
+    })json");
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto assessment = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.1);
+    require(assessment.has_value(), "assessment expected");
+    require(!assessment->stable, "A positive real eigenvalue should always be flagged unstable.");
+    require(assessment->unconditionallyUnstable, "A positive real eigenvalue has no finite stabilizing step size.");
+    require(!assessment->requiredSubsteps.has_value(), "unconditionallyUnstable and requiredSubsteps are mutually exclusive.");
 }
 
 }
@@ -330,6 +381,8 @@ int main() {
         assessNodeStabilityAttributesTheFasterOfTwoRates();
         assessNodeStabilityOmitsAttributionWithNoCandidateParameters();
         assessNodeStabilityHandlesANodeThatIsNotFirstInTheDocument();
+        assessNodeStabilityComputesRequiredSubsteps();
+        assessNodeStabilityFlagsUnconditionalInstability();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "stabilityAnalysisTests failed: %s\n", error.what());
         return 1;

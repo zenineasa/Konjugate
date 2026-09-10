@@ -328,6 +328,7 @@
             <label class="runModeSwitch"><span><b><span id="runModeName">Offline</span> simulation</b><small id="runModeDescription">Run at maximum speed without wall-clock synchronization.</small></span><input id="runOnlineMode" type="checkbox" role="switch" aria-label="Use online simulation mode"></label>
             <label id="runPacingModeField" hidden><span>Online pacing</span><select id="runPacingMode"><option value="realTime">Real time</option><option value="limitedRatio">Custom rate</option></select></label>
             <label id="runPacingRatioField" hidden><span>Simulation seconds / wall second</span><input id="runPacingRatio" type="number" min="0.01" step="any" value="1" required></label>
+            <label class="runModeSwitch"><span><b>Stability monitoring</b><small>Watch for numerical instability while this run executes.</small></span><input id="runStabilityMonitoring" type="checkbox" role="switch" aria-label="Monitor numerical stability during this run" checked></label>
             <div class="passwordError" id="runLaunchError" role="alert"></div>
             <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
         </form>

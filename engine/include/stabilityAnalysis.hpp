@@ -38,6 +38,21 @@ struct NodeStabilityAssessment {
     // Only set when `!stable`, and only when the dominant mode's own state actually has a
     // candidate parameter to attribute to (see assessNodeStability's own comment).
     std::optional<ParameterAttribution> dominantParameter;
+    // Only set when `!stable`; the state the dominant (highest-amplification) mode is
+    // concentrated in -- the same state dominantParameter's search is scoped to, but recorded
+    // regardless of whether a candidate parameter was actually found for it.
+    EntityId dominantStateId = 0;
+    // The substeps-per-global-step count that would bring EVERY eigenvalue (not just the
+    // dominant one) within Explicit Euler's stability boundary -- std::nullopt when `stable`, or
+    // when `unconditionallyUnstable` (no finite substep count can fix it; see that field).
+    std::optional<std::size_t> requiredSubsteps;
+    // True when some eigenvalue has Re(λ) ≥ 0: Explicit Euler's amplification |1+h·λ| is then
+    // ≥ 1 for every step size h > 0, so no substep count -- however large -- stabilizes it. That
+    // makes this a genuinely growing mode, not merely an under-resolved one: either the physics
+    // is meant to be unstable (an inverted pendulum falling over), or a gain/feedback parameter
+    // is too aggressive -- a modeling/tuning question this diagnostic can flag but not answer.
+    // Mutually exclusive with requiredSubsteps by construction. Only meaningful when `!stable`.
+    bool unconditionallyUnstable = false;
 };
 
 // Pre-run (validate-time) phase of docs/proposals/numericalStabilityDiagnostics.md's three-phase
@@ -81,6 +96,15 @@ struct NodeStabilityAssessment {
 // but, like the Jacobian, it is only ever a LOCAL read at synchronizationSnapshot, so it should be
 // treated as "the parameter most responsible for the instability near this operating point," not
 // a global claim.
+//
+// The same eigenvalue loop that finds maxAmplificationFactor also, for an unstable node, works
+// out requiredSubsteps: solving Explicit Euler's stability condition |1 + h·λ| ≤ 1 for the step
+// size h gives h ≤ -2·Re(λ)/|λ|² for any eigenvalue with Re(λ) < 0 (the real-axis-only formula
+// `h ≤ 2/|λ|` is this expression's special case at Im(λ)=0). The TIGHTEST such bound across every
+// eigenvalue -- not just the dominant one -- is the node step size that stabilizes all of them at
+// once; dividing that into globalTimeStep and rounding up gives a concrete substep count to
+// recommend. When any eigenvalue instead has Re(λ) ≥ 0, that bound doesn't exist at all -- see
+// unconditionallyUnstable.
 std::optional<NodeStabilityAssessment> assessNodeStability(
     const NodeExecutionPlan& node,
     const StateValues& synchronizationSnapshot,

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <set>
 
 namespace konjugate {
@@ -107,6 +108,8 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
     double fastestNegativeRate = 0;
     std::size_t negativeRealPartCount = 0;
     Eigen::Index dominantIndex = 0;
+    bool hasNonNegativeRealPart = false;
+    double minStableNodeStepSize = std::numeric_limits<double>::infinity();
     for (Eigen::Index index = 0; index < solver.eigenvalues().size(); ++index) {
         const auto eigenvalue = solver.eigenvalues()(index);
         const auto amplificationReal = 1.0 + nodeStepSize * eigenvalue.real();
@@ -120,6 +123,12 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
             if (!negativeRealPartCount || rate < slowestNegativeRate) slowestNegativeRate = rate;
             if (!negativeRealPartCount || rate > fastestNegativeRate) fastestNegativeRate = rate;
             negativeRealPartCount += 1;
+            // Solving |1 + h·λ| ≤ 1 for h gives h ≤ -2·Re(λ)/|λ|² (std::norm(λ) is |λ|² without a
+            // sqrt) -- the largest node step size that keeps THIS eigenvalue's own mode stable.
+            // The tightest bound across every eigenvalue is what actually stabilizes the node.
+            minStableNodeStepSize = std::min(minStableNodeStepSize, -2 * eigenvalue.real() / std::norm(eigenvalue));
+        } else {
+            hasNonNegativeRealPart = true;
         }
     }
     // A small tolerance above the exact 1.0 boundary, not a real stability margin: the
@@ -130,6 +139,14 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
     assessment.stable = assessment.maxAmplificationFactor <= 1.0 + 1e-6;
     if (negativeRealPartCount >= 2 && slowestNegativeRate > 0) {
         assessment.stiffnessRatio = fastestNegativeRate / slowestNegativeRate;
+    }
+    if (!assessment.stable) {
+        // Mutually exclusive by construction: for Re(λ) ≥ 0, |1+h·λ| ≥ 1 for every h > 0, so no
+        // finite step size stabilizes that mode at all -- there is no bound to report.
+        assessment.unconditionallyUnstable = hasNonNegativeRealPart;
+        if (!hasNonNegativeRealPart) {
+            assessment.requiredSubsteps = static_cast<std::size_t>(std::ceil(globalTimeStep / minStableNodeStepSize));
+        }
     }
 
     // Attribution, not just detection (see this function's own doc comment): only worth the extra
@@ -153,6 +170,7 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
         }
         const auto dominantStateIndex = differentialLocalIndices[dominantLocalIndex];
         const auto dominantStateId = node.stateIds[dominantStateIndex];
+        assessment.dominantStateId = dominantStateId;
 
         const auto baselineDerivative = evaluateNodeDerivative(
             node, localStates, synchronizationSnapshot, parameterValues, algebraicParameterValues, 0.0, nodeStepSize);

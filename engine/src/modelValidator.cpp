@@ -24,9 +24,10 @@ const std::regex symbolPattern("^[a-z][A-Za-z0-9]*$");
 const std::regex providerKeyPattern("^[a-z][A-Za-z0-9]*$");
 // NOLINTEND(bugprone-throwing-static-initialization)
 
-void add(ValidationResult& result, std::string code, std::string severity, std::string message,
+ValidationIssue& add(ValidationResult& result, std::string code, std::string severity, std::string message,
          std::string kind = "model", std::string entityId = {}, std::string field = {}) {
-    result.issues.push_back({std::move(code), std::move(severity), std::move(message), {std::move(kind), std::move(entityId), std::move(field)}});
+    result.issues.push_back({std::move(code), std::move(severity), std::move(message), {std::move(kind), std::move(entityId), std::move(field)}, std::nullopt});
+    return result.issues.back();
 }
 
 std::string value(const boost::property_tree::ptree& tree, const std::string& key) {
@@ -37,14 +38,21 @@ EntityId idValue(const boost::property_tree::ptree& tree, const std::string& key
     return tree.get<EntityId>(key, 0);
 }
 
+struct ResolvedAttribution {
+    AttributedParameter location;
+    std::string phrase;
+};
+
 // Resolves a ParameterAttribution (an opaque sourceId/parameterId pair from the compiled plan --
-// see stabilityAnalysis.hpp) back to a human-facing phrase, by searching the original document:
-// stabilityAnalysis.cpp never sees the document/ptree, only the compiled ExecutionPlan, so this
-// disambiguation (an edge's parameter vs. a source term's) and name lookup can only happen here.
-// Returns "" if the ids can't be resolved -- defensive only; should not happen for a
-// ParameterAttribution produced from this same document's own compiled plan, but a warning message
-// silently degrading is better than this pass throwing over it.
-std::string describeAttributedParameter(const boost::property_tree::ptree& document, const ParameterAttribution& attribution) {
+// see stabilityAnalysis.hpp) back to both a human-facing phrase for the issue's own message text,
+// and a structured AttributedParameter for precise click-to-focus navigation (see
+// IssueAttributedParameterReport in protocol/engineProtocol.proto) -- one document search
+// produces both, rather than searching twice. stabilityAnalysis.cpp never sees the document/ptree,
+// so this disambiguation (an edge's parameter vs. a source term's) and name lookup can only happen
+// here. Returns std::nullopt if the ids can't be resolved -- defensive only; should not happen for
+// a ParameterAttribution produced from this same document's own compiled plan, but a warning
+// message silently degrading is better than this pass throwing over it.
+std::optional<ResolvedAttribution> resolveAttributedParameter(const boost::property_tree::ptree& document, const ParameterAttribution& attribution) {
     if (const auto edges = document.get_child_optional("edges")) {
         for (const auto& edgeEntry : *edges) {
             if (idValue(edgeEntry.second, "id") != attribution.sourceId) continue;
@@ -54,10 +62,13 @@ std::string describeAttributedParameter(const boost::property_tree::ptree& docum
                     const auto edgeName = value(edgeEntry.second, "name");
                     std::ostringstream description;
                     description << "the edge" << (edgeName.empty() ? "" : " \"" + edgeName + "\"") << "'s '" << value(parameterEntry.second, "name") << "' parameter";
-                    return description.str();
+                    return ResolvedAttribution{
+                        {"edge", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
+                        description.str()
+                    };
                 }
             }
-            return {};
+            return std::nullopt;
         }
     }
     if (const auto nodes = document.get_child_optional("nodes")) {
@@ -69,10 +80,29 @@ std::string describeAttributedParameter(const boost::property_tree::ptree& docum
                 if (const auto parameters = termEntry.second.get_child_optional("parameters")) {
                     for (const auto& parameterEntry : *parameters) {
                         if (idValue(parameterEntry.second, "id") != attribution.parameterId) continue;
-                        return "this node's own '" + value(parameterEntry.second, "name") + "' source-term parameter";
+                        return ResolvedAttribution{
+                            {"sourceTerm", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
+                            "this node's own '" + value(parameterEntry.second, "name") + "' source-term parameter"
+                        };
                     }
                 }
-                return {};
+                return std::nullopt;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// Same defensive-empty-string convention as resolveAttributedParameter above, and the same
+// reason: dominantStateId comes from the compiled plan, which never sees the document, so
+// resolving it to a human-facing symbol can only happen here.
+std::string stateSymbol(const boost::property_tree::ptree& document, EntityId stateId) {
+    if (const auto nodes = document.get_child_optional("nodes")) {
+        for (const auto& nodeEntry : *nodes) {
+            const auto states = nodeEntry.second.get_child_optional("states");
+            if (!states) continue;
+            for (const auto& stateEntry : *states) {
+                if (idValue(stateEntry.second, "id") == stateId) return value(stateEntry.second, "symbol");
             }
         }
     }
@@ -781,16 +811,26 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (!assessment) continue;
                 const auto nodeId = std::to_string(assessment->nodeId);
                 if (!assessment->stable) {
+                    const auto resolved = assessment->dominantParameter
+                        ? resolveAttributedParameter(document, *assessment->dominantParameter) : std::nullopt;
                     std::ostringstream message;
                     message << "This node's dynamics may be unstable at its current substep count (amplification factor "
                             << assessment->maxAmplificationFactor << " > 1 per global step)";
-                    if (assessment->dominantParameter) {
-                        const auto description = describeAttributedParameter(document, *assessment->dominantParameter);
-                        if (!description.empty()) message << " -- driven mainly by " << description;
+                    if (resolved) message << " -- driven mainly by " << resolved->phrase;
+                    const auto symbol = stateSymbol(document, assessment->dominantStateId);
+                    if (assessment->unconditionallyUnstable) {
+                        message << " -- no substep count can stabilize this with Explicit Euler ("
+                                << (symbol.empty() ? "its dominant state" : "'" + symbol + "'") << " has a genuinely growing mode) "
+                                << "-- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether "
+                                << "this dynamics is intentionally unstable before adjusting numerics.";
+                    } else {
+                        message << " -- consider raising this node's numerics.substepsPerGlobalStep to at least " << *assessment->requiredSubsteps;
+                        if (!symbol.empty()) message << " ('" << symbol << "' needs that many to stabilize)";
+                        message << ", converting " << (symbol.empty() ? "a fast state" : "'" + symbol + "'") << " to setsValue, or moving "
+                                << (symbol.empty() ? "fast dynamics" : "its dynamics") << " onto their own node.";
                     }
-                    message << " -- consider raising this node's "
-                            << "numerics.substepsPerGlobalStep, converting a fast state to setsValue, or moving fast dynamics onto their own node.";
-                    add(result, "numericsPotentiallyUnstable", "warning", message.str(), "node", nodeId, "numerics");
+                    auto& issue = add(result, "numericsPotentiallyUnstable", "warning", message.str(), "node", nodeId, "numerics");
+                    if (resolved) issue.attributedParameter = resolved->location;
                 } else if (assessment->stiffnessRatio && *assessment->stiffnessRatio > 1000) {
                     std::ostringstream message;
                     message << "This node is stable but stiff (fastest/slowest rate ratio " << *assessment->stiffnessRatio

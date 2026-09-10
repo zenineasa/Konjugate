@@ -3611,5 +3611,158 @@ export async function runInteractionTests(window) {
         diagnosticWindow.close();
     });
 
+    await run('clicking an attributed instability warning jumps straight to the offending parameter', async () => {
+        // Fresh window: authors its own tiny, deliberately unstable model tuned to
+        // decayRate*stepSize = 2.1, the same hand-verified shape as
+        // engine/tests/stabilityAnalysisTests.cpp's decayProject fixture -- unlike the "Growth"
+        // (dx/dt = level) fixture used elsewhere in this suite, this one has an actual parameter to
+        // attribute the instability to, so the pre-run validator's numericsPotentiallyUnstable
+        // warning is guaranteed to carry a resolved attributedParameter.
+        const before = BrowserWindow.getAllWindows();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        let diagnosticWindow = null;
+        const openStartedAt = Date.now();
+        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
+            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
+            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(diagnosticWindow, 'A new project window did not open for the attribution diagnostic.');
+        await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#newNodeName').value = 'Decay';
+            const values = { name: 'Level', symbol: 'level', value: '1', unit: '' };
+            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+            document.querySelector('#createNode').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Decay node editor did not open after creation.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#editAddSourceTerm').click()`);
+        await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#termAddParameter').click()`);
+        await evaluate(diagnosticWindow, `(() => {
+            const row = document.querySelector('#termParameters .editorParameterRow');
+            row.querySelector('[data-field="name"]').value = 'Decay rate';
+            row.querySelector('[data-field="symbol"]').value = 'decayRate';
+            row.querySelector('[data-field="value"]').value = '21';
+            row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        // dx/dt = -decayRate * level, matching decayProject(21, 1)'s own hand-verified math.
+        await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue('-\\\\mathrm{decayRate}\\\\cdot\\\\mathrm{level}'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The decay equation did not become valid.');
+        await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+
+        await evaluate(diagnosticWindow, `document.querySelector('#runConfigurationButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not open.');
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#runConfigurationName').value = 'Attribution check';
+            document.querySelector('#runGlobalTimeStep').value = '0.1';
+            document.querySelector('#runOutputInterval').value = '0.1';
+            document.querySelector('#applyRunConfiguration').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not close.');
+
+        await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Model validation did not settle.', 10000);
+        await evaluate(diagnosticWindow, `document.querySelector('#validationSummary').click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#validationPanel').hidden`, 'Validation panel did not open.');
+        await waitFor(diagnosticWindow, `document.querySelector('#validationIssues').textContent.includes('Decay rate')`,
+            'The unstable-node warning did not name the Decay rate parameter.', 10000);
+
+        const issueText = await evaluate(diagnosticWindow, `document.querySelector('.validationIssue').textContent`);
+        assert.match(issueText, /driven mainly by this node's own 'Decay rate' source-term parameter/,
+            'The warning should name the specific parameter, not just the node.');
+        assert.match(issueText, /raising this node's numerics\.substepsPerGlobalStep to at least 2/,
+            'The warning should include a concrete requiredSubsteps recommendation.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('.validationIssue').click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`,
+            'Clicking the attributed warning did not open the source-term editor.');
+        await waitFor(diagnosticWindow, `document.activeElement?.dataset.field === 'value' && document.activeElement?.closest('#termParameters')`,
+            "Clicking the attributed warning did not focus the specific parameter's value input.");
+        assert.equal(
+            await evaluate(diagnosticWindow, `document.activeElement.closest('.editorParameterRow').querySelector('[data-field="symbol"]').value`),
+            'decayRate', "The focused row should be decayRate's own row, not some other parameter.");
+
+        diagnosticWindow.close();
+    });
+
+    await run('the stability-monitoring toggle suppresses during-run findings without disabling the post-run check', async () => {
+        // Fresh window + the same "Growth" (dx/dt = level) fixture as the stability-findings test
+        // above -- deliberately reused since it is independently caught by BOTH systems (during-run
+        // monitoring's own Jacobian re-check, and the post-run fingerprint's growth detection over
+        // the completed trajectory): during-run findings always carry a real globalTime and their
+        // own C++-authored message text (duringRunStabilityMonitor.cpp); post-run findings always
+        // have globalTime: null and entirely different message text (resolvedStabilityFindings() in
+        // renderer.mjs). A model both systems would flag is exactly what proves the toggle
+        // suppresses the first without touching the second.
+        const before = BrowserWindow.getAllWindows();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        let diagnosticWindow = null;
+        const openStartedAt = Date.now();
+        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
+            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
+            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(diagnosticWindow, 'A new project window did not open for the monitoring-toggle diagnostic.');
+        await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#newNodeName').value = 'Growth';
+            const values = { name: 'Level', symbol: 'level', value: '1', unit: '' };
+            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+            document.querySelector('#createNode').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
+
+        await evaluate(diagnosticWindow, `document.querySelector('#editAddSourceTerm').click()`);
+        await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
+        await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue(''); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'level').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The self-referencing growth equation did not become valid.');
+        await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+
+        await evaluate(diagnosticWindow, `document.querySelector('#runConfigurationButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not open.');
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#runConfigurationName').value = 'Monitoring toggle check';
+            document.querySelector('#runGlobalTimeStep').value = '0.1';
+            document.querySelector('#runOutputInterval').value = '0.1';
+            document.querySelector('#applyRunConfiguration').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not close.');
+
+        await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
+        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await evaluate(diagnosticWindow, `(() => {
+            document.querySelector('#runTargetTime').value = '1';
+            document.querySelector('#runStabilityMonitoring').checked = false;
+            document.querySelector('#startRun').click();
+        })()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#resultTransport').hidden && document.querySelector('.resultMode b').textContent === 'Results'`,
+            'Offline run did not complete.', 15000);
+
+        // Findings panel still opens (the post-run fingerprint check is unconditional and
+        // independent of this toggle) -- but its content must carry none of during-run monitoring's
+        // own wording.
+        await evaluate(diagnosticWindow, `document.querySelector('#stabilitySummaryButton').click()`);
+        await waitFor(diagnosticWindow, `!document.querySelector('#stabilityFindingsCard').classList.contains('hidden')`, 'Stability findings card did not open.');
+        const listText = await evaluate(diagnosticWindow, `document.querySelector('#stabilityFindingsList').textContent`);
+        assert.doesNotMatch(listText, /re-check of its current dynamics|has grown for \d+ consecutive/,
+            'Unchecking stability monitoring should suppress during-run findings.');
+        assert.match(listText, /grew substantially across the completed run|classic Explicit Euler instability signature/,
+            'The post-run fingerprint check should still independently catch the same instability.');
+
+        diagnosticWindow.close();
+    });
+
     console.log(`Interaction tests passed: ${passed}`);
 }

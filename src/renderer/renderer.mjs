@@ -442,7 +442,8 @@ const liveParameterUpdateTimers = new Map();
 let runLaunchSettings = {
     targetTime: 1,
     online: false,
-    pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 }
+    pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 },
+    stabilityMonitoring: true
 };
 let pendingRestart = null;
 let activeResultSampleIndex = 0;
@@ -1862,6 +1863,7 @@ function renderSourceTermParameters(node, term) {
         const tuning = normalizedParameterTuning(parameter);
         const row = document.createElement('div');
         row.className = 'editorParameterRow';
+        row.dataset.parameterId = String(parameter.id);
         row.innerHTML = `
             <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(parameter.name)}"></label>
             <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(parameter.symbol)}"></label>
@@ -2242,6 +2244,7 @@ function renderEdgeEditor(definition) {
         const tuning = normalizedParameterTuning(parameter);
         const row = document.createElement('div');
         row.className = 'editorParameterRow';
+        row.dataset.parameterId = String(parameter.id);
         row.innerHTML = `
             <label class="parameterField"><span>Name</span><input data-field="name" value="${escapeHtml(parameter.name)}"></label>
             <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${escapeHtml(parameter.symbol)}"></label>
@@ -3547,6 +3550,30 @@ function updateModelStatus() {
 function navigateToValidationIssue(item) {
     $('#validationPanel').hidden = true;
     $('#validationSummary').ariaExpanded = 'false';
+    // A resolved attributed parameter (see resolveAttributedParameter in modelValidator.cpp) is a
+    // strictly more useful destination than the issue's own generic `location` -- jump straight to
+    // it instead, focusing the row's value input specifically rather than its first (Name) field.
+    if (item.attributedParameter?.kind === 'edge') {
+        const relationship = model.relationships.find((candidate) => candidate.id === Number(item.attributedParameter.ownerId));
+        if (relationship) {
+            openRelationshipEditor(relationship);
+            requestAnimationFrame(() => $(`#edgeEditorParameters [data-parameter-id="${item.attributedParameter.parameterId}"] input[data-field="value"]`)?.focus());
+            return;
+        }
+    } else if (item.attributedParameter?.kind === 'sourceTerm') {
+        const termId = Number(item.attributedParameter.ownerId);
+        const owningNode = [...nodeObjects.values()].find((candidate) => candidate.userData.definition.sourceTerms?.some((term) => term.id === termId));
+        const term = owningNode?.userData.definition.sourceTerms.find((candidate) => candidate.id === termId);
+        if (owningNode && term) {
+            // Opening the node editor first matches the real click path -- .sourceTermOpen's own
+            // handler is only ever reachable from within an already-open node editor.
+            selectNode(owningNode);
+            openNodeEditor(owningNode.userData.definition);
+            openSourceTermEditor(owningNode, term);
+            requestAnimationFrame(() => $(`#termParameters [data-parameter-id="${item.attributedParameter.parameterId}"] input[data-field="value"]`)?.focus());
+            return;
+        }
+    }
     if (item.location.kind === 'node') {
         const node = nodeObjects.get(Number(item.location.entityId));
         if (!node) return;
@@ -4430,6 +4457,7 @@ $('#continueRun').addEventListener('click', () => {
     $('#runOnlineMode').checked = runLaunchSettings.online;
     $('#runPacingMode').value = runLaunchSettings.pacing.mode === 'limitedRatio' ? 'limitedRatio' : 'realTime';
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
+    $('#runStabilityMonitoring').checked = runLaunchSettings.stabilityMonitoring;
     updateRunModeFields();
     $('#runLaunchDialog').showModal();
 });
@@ -4594,6 +4622,9 @@ async function startSimulation() {
             ...configuration,
             targetTime: runLaunchSettings.targetTime,
             pacing: runLaunchSettings.pacing,
+            // Checked (the default) omits the field so engineAdapter.mjs's own "monitor every
+            // node" default applies unchanged; unchecked explicitly disables it for this run.
+            ...(runLaunchSettings.stabilityMonitoring ? {} : { stabilityMonitoring: { nodeIds: [] } }),
             ...(pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
@@ -4621,6 +4652,7 @@ $('#runButton').addEventListener('click', () => {
     $('#runOnlineMode').checked = runLaunchSettings.online;
     $('#runPacingMode').value = runLaunchSettings.pacing.mode === 'limitedRatio' ? 'limitedRatio' : 'realTime';
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
+    $('#runStabilityMonitoring').checked = runLaunchSettings.stabilityMonitoring;
     updateRunModeFields();
     $('#runLaunchError').textContent = '';
     $('#runLaunchDialog').showModal();
@@ -4656,7 +4688,8 @@ $('#runLaunchDialog form').addEventListener('submit', (event) => {
     runLaunchSettings = {
         targetTime,
         online,
-        pacing: { mode: pacingMode, simulationSecondsPerWallSecond: pacingRatio }
+        pacing: { mode: pacingMode, simulationSecondsPerWallSecond: pacingRatio },
+        stabilityMonitoring: $('#runStabilityMonitoring').checked
     };
     $('#runLaunchDialog').close();
     startSimulation();

@@ -37,6 +37,12 @@ void writeValidationReport(const std::filesystem::path& path, const ValidationRe
         entry->mutable_location()->set_kind(item.location.kind);
         entry->mutable_location()->set_entity_id(item.location.entityId);
         entry->mutable_location()->set_field(item.location.field);
+        if (item.attributedParameter) {
+            auto* attributed = entry->mutable_attributed_parameter();
+            attributed->set_kind(item.attributedParameter->kind);
+            attributed->set_owner_id(item.attributedParameter->ownerId);
+            attributed->set_parameter_id(item.attributedParameter->parameterId);
+        }
     }
     atomicWrite(path, message.SerializeAsString());
 }

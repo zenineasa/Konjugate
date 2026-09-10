@@ -138,11 +138,24 @@ message IssueLocationReport {
     string field = 3;
 }
 
+// A precise "click straight to this parameter" navigation target, distinct from (and additional
+// to) ValidationIssueReport's own `location` -- an attribution-bearing issue is still fundamentally
+// about the node named by `location`, so `location` stays unchanged; this carries the separate,
+// more specific entity (an edge or a node's own source term) the attributed parameter actually
+// lives on. Only set when an issue's server-side check resolved a specific parameter -- see
+// engine/src/stabilityAnalysis.hpp's ParameterAttribution, the origin of this data.
+message IssueAttributedParameterReport {
+    string kind = 1;        // "edge" or "sourceTerm"
+    string owner_id = 2;    // the edge id or source-term id, as a string (matches entity_id's convention)
+    string parameter_id = 3;
+}
+
 message ValidationIssueReport {
     string code = 1;
     string severity = 2;
     string message = 3;
     IssueLocationReport location = 4;
+    IssueAttributedParameterReport attributed_parameter = 5;
 }
 
 message ValidationSummary {

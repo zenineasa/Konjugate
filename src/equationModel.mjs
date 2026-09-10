@@ -53,7 +53,7 @@ export function reconcileEquationBindings(existing = [], sourceNode, targetNode,
 }
 
 export function latexForBinding(binding) {
-    return `\\mathrm{${binding.symbol}}`;
+    return binding.symbol.length === 1 ? binding.symbol : `\\mathrm{${binding.symbol}}`;
 }
 
 function collectUnsupportedOperators(expression, unsupported = new Set()) {

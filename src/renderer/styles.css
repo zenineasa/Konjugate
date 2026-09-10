@@ -204,6 +204,7 @@ input, select, textarea { user-select: text; }
 .extensionsDangerButton { padding: 0 10px; height: 28px; color: #c17980; background: transparent; border: 1px solid #4a2e30; border-radius: 4px; font-size: 8px; }
 .extensionsDangerButton:hover { color: #e39197; background: rgb(193 121 128 / 10%); border-color: #6a3c3f; }
 .extensionsBadge.disabled { color: #c17980; background: rgb(193 121 128 / 8%); border-color: #4a2e30; margin-left: 4px; }
+#extensionsDetailEnabledBadge[hidden] { display: none; }
 .extensionsItem.disabledItem { opacity: .55; }
 
 .componentLibraryPanel {

@@ -5845,12 +5845,15 @@ function latexForFittedEdge(candidate, sourceStateSymbol, targetStateSymbol) {
 // prefixed synthesized symbols), and there's no intercept (see SelfTerm's doc comment in
 // causalInference.hpp for why: extending self-terms with their own intercept share would mean
 // propagating or fixing a pre-existing gap in how the discrete path already splits intercepts,
-// out of scope here). Still needs the same \mathrm{} wrapping latexForFittedEdge uses -- a bare
-// multi-letter LaTeX token like "componentTemperature" parses as implicit multiplication of
-// single-letter variables (c*o*m*p*o*n*e*n*t...) unless wrapped, regardless of whether the symbol
-// happens to be single- or multi-letter.
+// out of scope here). Needs the same \mathrm{} wrapping latexForFittedEdge uses for a multi-letter
+// symbol -- a bare multi-letter LaTeX token like "componentTemperature" parses as implicit
+// multiplication of single-letter variables (c*o*m*p*o*n*e*n*t...) unless wrapped -- but NOT for a
+// single-letter one: ComputeEngine's \mathrm{} handling parses \mathrm{k} to the symbol
+// "k_upright", not "k" (see latexForBinding in equationModel.mjs for the same reasoning), while a
+// bare single letter needs no wrapping and parses straight to itself.
 function latexForSelfTerm(selfTerm, targetStateSymbol) {
-    return signedTermLatex(selfTerm.rate, `\\mathrm{${targetStateSymbol}}`).replace(/^\+ /, '');
+    const symbol = targetStateSymbol.length === 1 ? targetStateSymbol : `\\mathrm{${targetStateSymbol}}`;
+    return signedTermLatex(selfTerm.rate, symbol).replace(/^\+ /, '');
 }
 
 async function commitCausalInference() {

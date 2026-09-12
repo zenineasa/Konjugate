@@ -20,14 +20,14 @@ Because `inProcess` gives up isolation entirely, it is meant to stay an explicit
 
 ## Choosing a mode
 
-Nothing in the application defaults to anything other than `sharedMemoryWorker`. A user can change it in **Provider Toolchains** (⚒ in the titlebar) under **Advanced: C++ provider execution mode**; selecting **In-process (fastest, experimental)** shows an inline warning about the isolation tradeoff. The setting is a machine-local preference stored alongside the compiler/interpreter overrides (`providerToolchainStore.mjs`), not a per-project setting.
+A user can change the default in **Provider Toolchains** (⚒ in the titlebar) under **Advanced: C++ provider execution mode**; selecting **In-process (fastest, experimental)** shows an inline warning about the isolation tradeoff. The setting is a machine-local preference stored alongside the compiler/interpreter overrides (`providerToolchainStore.mjs`), not a per-project setting.
 
 Precedence, from `engineAdapter.mjs`'s `startEngineRun()`:
 
 1. An explicit `configuration.providers.executionMode` (not set by anything in the app today, but available to callers/tests).
 2. The `KONJUGATE_PROVIDER_EXECUTION_MODE` environment variable — a developer's session-scoped override.
 3. The user's saved choice in the Provider Toolchains dialog.
-4. `sharedMemoryWorker`, the default.
+4. If the model has any `cpp`-kind computational-node provider, `inProcess` — the only mode a node-shaped provider supports at all (see `providerRuntime.cpp`'s "no worker-process fallback exists" note under "Build artifacts" below); otherwise `sharedMemoryWorker`.
 
 The engine itself reads a top-level `providers.executionMode` string in the run configuration JSON (`""`/absent, `"pipeWorker"`, `"sharedMemoryWorker"`, or `"inProcess"`; anything else is treated as absent) — this is the field every layer above ultimately writes into before invoking `konjugate run`.
 
@@ -39,7 +39,7 @@ The engine itself reads a top-level `providers.executionMode` string in the run 
 - `inProcess`, relationship-shaped: the source is paired with `providerInProcessShim.cpp` and compiled to a shared library (`provider.dylib`/`provider.so`/`provider.dll`) with `-shared -fPIC` (or MSVC `/LD`).
 - `inProcess`, computational-node-shaped (`cpp` node providers only run this way -- no worker-process fallback exists): the source is paired with `providerInProcessNodeShim.cpp` instead, driving a distinct ABI (`KonjugateInProcessNodeProviderV1`) with N named outputs and checkpoint/restore, rather than the relationship shim's single-output, stateless one. Each bound node instance gets its own freshly constructed `NodeProvider` object inside the shim, even when multiple nodes share one compiled artifact (identical source), so their state is never accidentally shared.
 
-Both glue files, plus the public SDK header, ship under `include/konjugate/`/`src/` in a packaged build (see the `install()` rules in `engine/CMakeLists.txt`) so `buildCppProvider()` can find them at the same layout in dev and packaged builds. `konjugateProviderWorker` and `konjugateProviderInProcessShim` are compile-check-only CMake targets — they catch a broken glue file during the ordinary build; the actual per-provider compile always happens at run time, outside CMake.
+All three glue files, plus the public SDK header, ship under `include/konjugate/`/`src/` in a packaged build (see the `install()` rules in `engine/CMakeLists.txt`) so `buildCppProvider()` can find them at the same layout in dev and packaged builds. `konjugateProviderWorker`, `konjugateProviderInProcessShim`, and `konjugateProviderInProcessNodeShim` are compile-check-only CMake targets — they catch a broken glue file during the ordinary build; the actual per-provider compile always happens at run time, outside CMake.
 
 ## The in-process C ABI
 

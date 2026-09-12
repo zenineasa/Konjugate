@@ -128,7 +128,7 @@ npm run setup
 npm run dev
 ```
 
-Setup uses a pinned `vcpkg` baseline for native dependencies (Zlib, OpenSSL, Boost.PropertyTree, METIS) and configures the C++ engine. MSVC builds automatically enable multi-processor parallel compilation (`/MP`); see [the development setup guide](docs/developmentSetup.md) for Windows build performance optimization tips.
+Setup uses a pinned `vcpkg` baseline for native dependencies (Boost.PropertyTree, Eigen3, METIS, NLopt, OpenSSL, Protobuf, Zlib) and configures the C++ engine. MSVC builds automatically enable multi-processor parallel compilation (`/MP`); see [the development setup guide](docs/developmentSetup.md) for Windows build performance optimization tips.
 
 ## Building
 

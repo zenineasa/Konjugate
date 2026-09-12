@@ -66,7 +66,7 @@
         "protobufjs-cli": "^2.7.0"
     },
     "engines": {
-        "node": ">=22.12.0"
+        "node": ">=24.19.0"
     },
     "dependencies": {
         "@codemirror/lang-cpp": "^6.0.3",

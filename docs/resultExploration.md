@@ -54,9 +54,10 @@ Later versions may add:
 - movement by one global synchronization step;
 - looped intervals;
 - intervention and branch markers;
-- solver warning and discontinuity markers;
 - a `Fork here` action;
 - synchronized branch comparison.
+
+"Solver warning ... markers" from this list, listed here as a later idea, has since shipped in this exact transport bar: a `#stabilitySummaryButton` badge with a finding count, a findings panel listing each one with click-to-navigate, and per-node warning badges on the canvas -- see [Numerical stability diagnostics](proposals/numericalStabilityDiagnostics.md) for the full design and `src/renderer/renderer.mjs`/`index.html` for the implementation.
 
 Scrubbing must be immediate. Node labels, canvas colors, plots, inspector values, and controller displays all follow the same cursor.
 

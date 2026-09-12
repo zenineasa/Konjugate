@@ -5,21 +5,28 @@
 The installed command will be `konjugate`; the development binary is `konjugateEngine`.
 
 ```text
+konjugate capabilities [--protobuf]
 konjugate inspect model.kjt --report report.json
 konjugate validate model.kjt --report validation.json
 konjugate run model.kjt --configuration runConfiguration.json --output simulationResult.bin
 konjugate infer series.csv --report inference.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1,2,3] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3] [--include-interaction-terms true]
+konjugate fit model.kjt measured.csv --report report.json [--backend nlopt-bobyqa] [--max-iterations 200]
 ```
 
 Reports are written atomically. Machine consumers should always provide `--report`; concise human output may be added later.
 
+`capabilities` reports what this build can do, without touching a project at all: METIS partitioner availability/version and the list of optimizer backend IDs `fit` will accept in this build. Plain `capabilities` prints one line of JSON to stdout (`{"metis":{"available":...,"version":"..."},"optimizerBackendIds":[...]}`); `capabilities --protobuf` writes a framed `EngineEvent` with a `capabilities` field instead, matching `run --event-stream protobuf`'s wire format. Both exit `0` unconditionally.
+
 `infer` is the one command that does not take a `.kjt` project: its input is a CSV of multivariate time-series data (a numeric, strictly increasing, evenly spaced time column, then one numeric column per variable) and its report is a candidate-edge list, not a project report. It has no knowledge of Konjugate node/state IDs — its output is keyed by CSV column name, and a caller resolves those to concrete nodes/states itself. See [Causal inference](causalInference.md) for the algorithm and [Project schema](projectSchema.md) for how a candidate becomes a real edge.
+
+`fit` calibrates a model's own `parameters[].tuning`-marked parameters against a measured CSV (same shape as `infer`'s input: a time column plus one column per variable), auto-mapping CSV columns to states by name. It requires the project to have at least one tunable parameter and at least one CSV column that maps to a state, and fails outright before optimizing if either is empty. `--backend` selects one of the optimizer backend IDs `capabilities` lists; `--max-iterations` bounds the optimizer's own iteration budget. Unlike every other command, `fit` distinguishes "ran to completion" from "found a good fit" -- see the exit-code table below.
 
 Exit codes:
 
 | Code | Meaning |
 | ---: | --- |
 | 0 | Command succeeded; validation found no errors |
+| 1 | `fit` ran to completion but did not converge |
 | 2 | Validation completed and found blocking errors |
 | 3 | Input, container, or payload is invalid |
 | 4 | Encryption requires credentials or an unsupported feature |

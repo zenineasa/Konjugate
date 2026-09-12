@@ -13,9 +13,9 @@ All integer fields are unsigned and big-endian. Limits are part of the format co
 | 10 | variable | JSON header |
 | following | variable | Encoded payload |
 
-The decoded payload is a UTF-8 project document. The maximum decoded size is 1 GiB.
+The decoded payload holds a UTF-8 project document, and optionally a second, raw (uncompressed) binary blob concatenated immediately after it -- the embedded simulation result a project was saved with (see [Embedded binary result storage](resultFileFormat.md)). The header always records both section lengths, `modelPayloadLength` and `resultPayloadLength` (the latter `0` when a project has no embedded result), so a reader can split the decoded payload into its two sections without re-parsing either one. The maximum decoded size (both sections combined) is 1 GiB.
 
-For gzip-only files, the header is `{"compression":"gzip"}` and the payload is gzip data.
+For gzip-only files, the header is `{"compression":"gzip","modelPayloadLength":<n>,"resultPayloadLength":<n>}` and the payload is gzip data for the model section followed by `resultPayloadLength` raw bytes for the result section, if any.
 
 For encrypted files, gzip is applied before encryption. The header additionally contains:
 

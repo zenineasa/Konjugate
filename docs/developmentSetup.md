@@ -20,7 +20,7 @@ npm run setup
 npm run dev
 ```
 
-`npm run setup` downloads vcpkg into the ignored `.tools/` directory, checks out the revision recorded by `vcpkg.json`, installs Zlib, OpenSSL, Boost.PropertyTree and METIS then configures `out/engine`. It does not install an operating-system compiler or SDK.
+`npm run setup` downloads vcpkg into the ignored `.tools/` directory, checks out the revision recorded by `vcpkg.json`, installs every dependency `vcpkg.json` lists (currently Boost.PropertyTree, Eigen3, METIS, NLopt, OpenSSL, Protobuf and Zlib) then configures `out/engine`. It does not install an operating-system compiler or SDK.
 
 Later development sessions normally require only `npm run dev`. Run setup again after `vcpkg.json`, the vcpkg baseline or native build configuration changes.
 

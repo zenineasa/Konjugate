@@ -1,10 +1,14 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
-// Builds the experimental web engine (docs/proposals/webEdition.md) via the "web" CMake preset --
-// entirely separate from scripts/buildEngine.mjs's own desktop build, and never run as part of it.
+// Builds the experimental web engine (docs/proposals/webEdition.md) via the "web" CMake preset (or
+// "web-threads", the pthread-enabled phase-6 variant -- pass "threads" as the first CLI argument,
+// e.g. `node scripts/buildWebEngine.mjs threads`, matching npm run build:web:threads) -- entirely
+// separate from scripts/buildEngine.mjs's own desktop build, and never run as part of it.
 
 import { join } from 'node:path';
 import { emsdkDirectory, ensurePython310OrNewerOnPath, pathExists, rootDirectory, run, vcpkgDirectory } from './developmentEnvironment.mjs';
+
+const preset = process.argv[2] === 'threads' ? 'web-threads' : 'web';
 
 if (!await pathExists(join(vcpkgDirectory, 'scripts', 'buildsystems', 'vcpkg.cmake'))) {
     throw new Error('The development dependencies are not configured. Run npm run setup first.');
@@ -21,7 +25,8 @@ process.env.EMSDK = emsdkDirectory;
 const emscriptenRoot = join(emsdkDirectory, 'upstream', 'emscripten');
 process.env.PATH = `${emsdkDirectory}${process.platform === 'win32' ? ';' : ':'}${emscriptenRoot}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`;
 
-await run('cmake', ['--preset', 'web'], { cwd: join(rootDirectory, 'engine') });
-await run('cmake', ['--build', '--preset', 'web'], { cwd: join(rootDirectory, 'engine') });
+await run('cmake', ['--preset', preset], { cwd: join(rootDirectory, 'engine') });
+await run('cmake', ['--build', '--preset', preset], { cwd: join(rootDirectory, 'engine') });
 
-console.log('Web engine built at out/engineWeb/konjugateEngine.js (+ .wasm).');
+const outputDirectory = preset === 'web-threads' ? 'out/engineWebThreads' : 'out/engineWeb';
+console.log(`Web engine built at ${outputDirectory}/konjugateEngine.js (+ .wasm).`);

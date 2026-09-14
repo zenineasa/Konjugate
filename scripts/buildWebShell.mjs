@@ -4,6 +4,12 @@
 // statically servable copy of the desktop renderer running against src/renderer/webShims/*
 // instead of src/preload.mjs's Electron IPC bridge. Requires npm run build:web to have already
 // produced out/engineWeb/. See docs/developmentSetup.md's "Web build (experimental)" section.
+//
+// Pass "threads" as the first CLI argument (matching npm run build:webShell:threads) to instead
+// assemble the phase-6 pthread-enabled variant from out/engineWebThreads/ into out/webShellThreads/
+// -- everything else about the shell is identical; only which prebuilt engine gets embedded
+// differs. Requires npm run build:web:threads first, and (unlike the default shell) needs
+// scripts/serveWebShell.mjs's COOP/COEP headers to actually run (SharedArrayBuffer).
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -11,12 +17,13 @@ import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 
+const threads = process.argv[2] === 'threads';
 const srcDirectory = join(rootDirectory, 'src');
-const outputDirectory = join(rootDirectory, 'out', 'webShell');
-const engineWebDirectory = join(rootDirectory, 'out', 'engineWeb');
+const outputDirectory = join(rootDirectory, 'out', threads ? 'webShellThreads' : 'webShell');
+const engineWebDirectory = join(rootDirectory, 'out', threads ? 'engineWebThreads' : 'engineWeb');
 
 if (!await pathExists(join(engineWebDirectory, 'konjugateEngine.js'))) {
-    throw new Error('The web engine is not built. Run npm run build:web first.');
+    throw new Error(`The web engine is not built. Run npm run build:web${threads ? ':threads' : ''} first.`);
 }
 
 await rm(outputDirectory, { recursive: true, force: true });

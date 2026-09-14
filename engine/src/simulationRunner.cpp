@@ -348,6 +348,21 @@ void runSimulation(const boost::property_tree::ptree& document,
         executionSettings.estimatedOperationsPerSynchronization, executionSettings.automaticParallelThreshold,
         partitionPlan.selected.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
     executionSettings.backend = backendDecision.backend;
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    // The default web build (docs/proposals/webEdition.md's "web" preset) has no pthread
+    // support at all -- TaskExecutor/PartitionRuntime constructing real std::threads there
+    // aborts the whole WASM instance rather than throwing a catchable C++ exception. Only the
+    // separate "web-threads" preset (-pthread, a different vcpkg triplet) defines
+    // __EMSCRIPTEN_PTHREADS__. Same fail-loud-on-explicit/quietly-downgrade-on-automatic
+    // convention as the node-provider/partitioned case just below.
+    if (executionSettings.backend == ExecutionBackend::threadPool || executionSettings.backend == ExecutionBackend::partitioned) {
+        if (executionSettings.requestedBackend != ExecutionBackend::automatic) {
+            throw std::runtime_error("The threadPool and partitioned execution backends require the pthread-enabled web build "
+                "(see docs/proposals/webEdition.md's \"web-threads\" preset); this build has no thread support.");
+        }
+        executionSettings.backend = ExecutionBackend::serial;
+    }
+#endif
     // Computational-node providers work through the partitioned backend "for free" -- it calls
     // the same evaluateContributionTasks() as serial/threadPool -- but are untested there this
     // release (see docs/pluginDevelopment.md). An explicit request fails loudly; an automatic

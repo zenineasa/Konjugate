@@ -29,6 +29,13 @@ protobuf_generate_cpp(PROVIDER_PROTOCOL_SOURCES PROVIDER_PROTOCOL_HEADERS "${CMA
 
 option(KONJUGATE_ENABLE_METIS "Enable METIS graph partitioning when the library is available" ON)
 option(KONJUGATE_REQUIRE_METIS "Fail configuration when METIS is unavailable" OFF)
+# Only meaningful under the "web-threads" CMake preset (docs/proposals/webEdition.md, phase 6) --
+# adds -pthread so the threadPool/partitioned execution backends' real std::threads work under
+# Emscripten. Deliberately a separate preset/output from the default "web" build rather than a
+# flag flip on it: every wasm32 vcpkg dependency needs rebuilding under a pthread-compatible
+# triplet (see vcpkgOverlays/triplets/wasm32-emscripten-threads.cmake), and COOP/COEP response
+# headers (required for SharedArrayBuffer) aren't something every host can serve.
+option(KONJUGATE_WEB_THREADS "Build with Emscripten pthread support (web-threads preset only)" OFF)
 if(KONJUGATE_REQUIRE_METIS AND NOT KONJUGATE_ENABLE_METIS)
     message(FATAL_ERROR "KONJUGATE_REQUIRE_METIS cannot be enabled when KONJUGATE_ENABLE_METIS is disabled")
 endif()
@@ -519,4 +526,26 @@ if(EMSCRIPTEN)
         -sEXPORTED_RUNTIME_METHODS=FS,callMain
         -sINVOKE_RUN=0
     )
+    if(KONJUGATE_WEB_THREADS)
+        # -pthread is codegen-affecting (shared-memory atomics), not just a link flag, like
+        # -fexceptions above -- must be a compile option too, and every linked dependency (see
+        # the wasm32-emscripten-threads overlay triplet) has to agree, or wasm-ld hard-errors on
+        # a shared-memory/atomics feature mismatch between object files.
+        target_compile_options(konjugateEngine PRIVATE -pthread)
+        target_link_options(konjugateEngine PRIVATE
+            -pthread
+            # pthread_create() can't synchronously spin up a Web Worker from the browser's main
+            # thread, so Emscripten pre-warms a pool of ready Workers instead; size it to the
+            # runtime's actual core count rather than a fixed guess.
+            -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency
+            # A pthread build's linear memory is a growable SharedArrayBuffer, which (unlike
+            # ordinary growable memory) needs its ceiling reserved up front -- caught directly by
+            # testing: threadPool aborted with a real OOM (not a crash) at the default 16MB
+            # INITIAL_MEMORY the instant it needed per-thread stacks/TLS. 1GB is comfortably above
+            # anything this codebase's own models need today; revisit if a much larger model ever
+            # needs more.
+            -sALLOW_MEMORY_GROWTH=1
+            -sMAXIMUM_MEMORY=1GB
+        )
+    endif()
 endif()

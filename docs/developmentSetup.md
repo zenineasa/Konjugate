@@ -67,6 +67,14 @@ npm run serve:webShell
 
 Assembles `out/webShell/` -- the phase-3 "minimal shell" (see [Konjugate Web](proposals/webEdition.md)): the real desktop renderer (`src/renderer/renderer.mjs`, unmodified) served as a static site against `src/renderer/webShims/*` instead of `src/preload.mjs`'s Electron IPC bridge, using the `build:web` output above. `scripts/buildWebShell.mjs` requires `out/engineWeb/` to already exist. `scripts/serveWebShell.mjs` then serves that directory over local HTTP (`http://localhost:4173/` by default, `PORT` to override) -- also a reasonable stand-in for what a static host serves. `make buildWebShell`/`make serveWebShell` run the same scripts from the Makefile.
 
+```bash
+npm run build:web:threads
+npm run build:webShell:threads
+npm run serve:webShell:threads
+```
+
+The phase-6 pthread-enabled variant, entirely separate from everything above: a second CMake preset (`web-threads`) and vcpkg triplet (`vcpkgOverlays/triplets/wasm32-emscripten-threads.cmake` -- a real, tracked overlay, unlike the plain `wasm32-emscripten` triplet, which ships with vcpkg itself and lives in the gitignored `.tools/vcpkg`) build `konjugateEngine` with `-pthread`, producing `out/engineWebThreads/` and, via the same shell-assembly script, `out/webShellThreads/`. This is what makes the `threadPool`/`partitioned` execution backends (see [Parallel execution](parallelExecution.md)) actually work in a browser instead of aborting. `serveWebShell.mjs` always sends `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` response headers (harmless for the default build, required here for `SharedArrayBuffer` to exist at all). The default `web`/`webShell` build clamps an explicit `threadPool`/`partitioned` request to a clear error and quietly downgrades an automatic selection to `serial` instead of aborting (`engine/src/simulationRunner.cpp`, `#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)`) -- use the threads variant to actually exercise parallel execution.
+
 ## Verification
 
 Run the JavaScript and native suites with:

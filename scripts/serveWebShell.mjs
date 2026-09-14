@@ -2,15 +2,24 @@
 
 // Serves out/webShell/ over local HTTP -- for testing, and as a stand-in for what a static host
 // (e.g. GitHub Pages) would serve. See docs/proposals/webEdition.md, phase 3.
+//
+// Pass "threads" as the first CLI argument (matching npm run serve:webShell -- run with `node
+// scripts/serveWebShell.mjs threads`) to serve out/webShellThreads/ instead. Always sends
+// Cross-Origin-Opener-Policy/Cross-Origin-Embedder-Policy response headers: harmless for the
+// default build, but required for SharedArrayBuffer to exist at all (phase 6's threadPool/
+// partitioned execution backends) -- GitHub Pages cannot send these, which is exactly why phase
+// 6's own hosting note recommends a COOP/COEP-capable host over a service-worker shim for that
+// variant specifically. This script is a local stand-in either way, not a deployment.
 
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 
-const rootDir = join(rootDirectory, 'out', 'webShell');
+const threads = process.argv[2] === 'threads';
+const rootDir = join(rootDirectory, 'out', threads ? 'webShellThreads' : 'webShell');
 if (!await pathExists(join(rootDir, 'renderer', 'index.html'))) {
-    throw new Error('The web shell is not built. Run npm run build:webShell first.');
+    throw new Error(`The web shell is not built. Run npm run build:webShell${threads ? ':threads' : ''} first.`);
 }
 
 const mimeTypes = {
@@ -48,7 +57,11 @@ const server = createServer(async (request, response) => {
         const info = await stat(resolved).catch(() => null);
         const filePath = info?.isDirectory() ? join(resolved, 'index.html') : resolved;
         const body = await readFile(filePath);
-        response.writeHead(200, { 'Content-Type': mimeTypes[extname(filePath)] ?? 'application/octet-stream' });
+        response.writeHead(200, {
+            'Content-Type': mimeTypes[extname(filePath)] ?? 'application/octet-stream',
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Embedder-Policy': 'require-corp'
+        });
         response.end(body);
     } catch {
         response.writeHead(404).end('Not found');

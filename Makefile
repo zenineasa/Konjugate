@@ -214,11 +214,20 @@ setupWeb: installDependencies
 buildWeb: setupWeb
 	node scripts/buildWebEngine.mjs
 
+buildWebThreads: setupWeb
+	node scripts/buildWebEngine.mjs threads
+
 buildWebShell: buildWeb
 	node scripts/buildWebShell.mjs
 
+buildWebShellThreads: buildWebThreads
+	node scripts/buildWebShell.mjs threads
+
 serveWebShell:
 	node scripts/serveWebShell.mjs
+
+serveWebShellThreads:
+	node scripts/serveWebShell.mjs threads
 
 packageApp:
 ifeq ($(hostPlatform),darwin)

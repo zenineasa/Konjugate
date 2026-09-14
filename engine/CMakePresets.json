@@ -37,7 +37,20 @@
             "cacheVariables": {
                 "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/../.tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
                 "VCPKG_TARGET_TRIPLET": "wasm32-emscripten",
-                "BUILD_TESTING": "OFF"
+                "BUILD_TESTING": "OFF",
+                "KONJUGATE_ENABLE_METIS": "ON",
+                "KONJUGATE_REQUIRE_METIS": "ON"
+            }
+        },
+        {
+            "name": "web-threads",
+            "displayName": "Konjugate experimental pthread-enabled web build (docs/proposals/webEdition.md, phase 6)",
+            "inherits": "web",
+            "binaryDir": "${sourceDir}/../out/engineWebThreads",
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "wasm32-emscripten-threads",
+                "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/../vcpkgOverlays/triplets",
+                "KONJUGATE_WEB_THREADS": "ON"
             }
         },
         {
@@ -72,6 +85,11 @@
         {
             "name": "web",
             "configurePreset": "web",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "web-threads",
+            "configurePreset": "web-threads",
             "configuration": "RelWithDebInfo"
         },
         {

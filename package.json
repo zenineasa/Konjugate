@@ -28,6 +28,10 @@
     ],
     "scripts": {
         "setup": "node scripts/setupDevelopment.mjs",
+        "setup:web": "node scripts/setupWebBuild.mjs",
+        "build:web": "node scripts/buildWebEngine.mjs",
+        "build:webShell": "node scripts/buildWebShell.mjs",
+        "serve:webShell": "node scripts/serveWebShell.mjs",
         "test": "node --test",
         "test:interaction": "npm run build:engine && node scripts/runInteractionTests.mjs",
         "generate:example-thumbnails": "npm run build:engine && node scripts/generateExampleThumbnails.mjs",

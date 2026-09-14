@@ -937,3 +937,31 @@ input, select, textarea { user-select: text; }
         width: 254px;
     }
 }
+
+/* Web edition only (docs/proposals/webEdition.md, phase 3) -- [data-web-edition] is set on
+   <html> only by scripts/buildWebShell.mjs's transform of index.html, so this never applies to
+   the desktop app. */
+.webEditionBanner {
+    display: none;
+}
+[data-web-edition] .webEditionBanner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: var(--orange);
+    color: var(--surface);
+    font-size: 12px;
+}
+.webEditionBanner span {
+    flex: 1;
+}
+.webEditionBanner button {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+}

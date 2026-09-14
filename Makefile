@@ -205,6 +205,21 @@ engine: installDependencies
 	node scripts/setupDevelopment.mjs
 	node scripts/buildEngine.mjs --install
 
+# Experimental web build (docs/proposals/webEdition.md) -- entirely separate from the desktop
+# `engine` target above and never a dependency of it, since ordinary desktop development has no
+# use for a WASM toolchain.
+setupWeb: installDependencies
+	node scripts/setupWebBuild.mjs
+
+buildWeb: setupWeb
+	node scripts/buildWebEngine.mjs
+
+buildWebShell: buildWeb
+	node scripts/buildWebShell.mjs
+
+serveWebShell:
+	node scripts/serveWebShell.mjs
+
 packageApp:
 ifeq ($(hostPlatform),darwin)
 	@$(MAKE) packageMacos

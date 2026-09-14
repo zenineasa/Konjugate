@@ -81,9 +81,13 @@ test('rejects unsupported versions and oversized frames', () => {
 });
 
 test('encodes ordered framed engine commands without JSON conversion', () => {
-    assert.equal(encodeEngineCommand(1, { type: 'setRunState', state: 'paused' }).toString('hex'),
+    // encodeEngineCommand() returns a plain Uint8Array (see engineProtocol.mjs's own header
+    // comment for why: it must work with no Buffer global at all, e.g. in a real browser tab) --
+    // wrapping the result in Buffer.from() here is just this Node-only test's own convenience for
+    // hex-string inspection, not something the module itself relies on.
+    assert.equal(Buffer.from(encodeEngineCommand(1, { type: 'setRunState', state: 'paused' })).toString('hex'),
         '000000080801100122020802');
-    const parameter = encodeEngineCommand(2, { type: 'setParameterValue', parameterId: 11, value: 2 });
+    const parameter = Buffer.from(encodeEngineCommand(2, { type: 'setParameterValue', parameterId: 11, value: 2 }));
     assert.equal(parameter.readUInt32BE(0), parameter.length - 4);
     assert.equal(parameter.subarray(4).toString('hex'), '080110022a0b080b110000000000000040');
     assert.throws(() => encodeEngineCommand(0, { type: 'setRunState', state: 'running' }), /sequences/);

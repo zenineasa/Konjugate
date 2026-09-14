@@ -130,6 +130,8 @@ npm run dev
 
 Setup uses a pinned `vcpkg` baseline for native dependencies (Boost.PropertyTree, Eigen3, METIS, NLopt, OpenSSL, Protobuf, Zlib) and configures the C++ engine. MSVC builds automatically enable multi-processor parallel compilation (`/MP`); see [the development setup guide](docs/developmentSetup.md) for Windows build performance optimization tips.
 
+An experimental browser build (see [Konjugate Web](docs/proposals/webEdition.md)) is a separate, opt-in toolchain: `npm run setup:web` (or `make setupWeb`) installs a pinned Emscripten SDK, independently of everything above.
+
 ## Building
 
 Run the complete host-platform build with:

@@ -141,6 +141,7 @@ add_executable(konjugateEngine
     src/stabilityAnalysis.cpp
     src/taskExecutor.cpp
     src/validationReport.cpp
+    src/wasmPosixStubs.cpp
 )
 set_target_properties(konjugateEngine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -479,4 +480,43 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(causalInferenceTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
         target_compile_options(parameterFittingTests PRIVATE -Wno-nullability-extension -Wno-gcc-compat)
     endif()
+endif()
+
+# Experimental web build (docs/proposals/webEdition.md), targeted via the "web" CMake preset.
+# EMSCRIPTEN is set by Emscripten's own toolchain file, which every Emscripten build already
+# chainloads regardless of preset -- this only ever applies there, never to a native build.
+if(EMSCRIPTEN)
+    # Emscripten disables C++ exceptions by default; this codebase genuinely relies on them as
+    # control flow in several places (e.g. executionPlan.cpp's compileExpression: try parsing a
+    # literal number, catch means it's a symbol instead), so this isn't optional -- without it,
+    # a caught exception calls abort() instead of unwinding to its handler.
+    target_compile_options(konjugateEngine PRIVATE -fexceptions)
+    target_link_options(konjugateEngine PRIVATE
+        -fexceptions
+        # Emscripten's default stack (64KB) is far smaller than a native thread's and overflows
+        # immediately on this codebase's recursive JSON/expression parsing. 8MB comfortably
+        # covers it with headroom; revisit if a deeply nested model ever needs more.
+        -sSTACK_SIZE=8388608
+        # Cheap insurance for a still-experimental build: turns a silent wrong answer or a bare
+        # "Aborted(undefined)" into an actual diagnostic (this is exactly what surfaced the stack
+        # overflow above during development). Reasonable to drop later for an optimized build.
+        -sASSERTIONS=1
+        # Wraps the output as a reusable ES module factory (createKonjugateEngine()) instead of an
+        # auto-running script -- the shape a browser embedding (or a Node caller, for that matter)
+        # actually needs: instantiate once, then drive it explicitly via the exported FS (write a
+        # .kjt into the virtual filesystem, read a report/result back out) and callMain (invoke
+        # main() with an argv array on demand) runtime methods, exactly mirroring the real CLI
+        # contract (docs/engineCli.md) without a single engine-side source change. INVOKE_RUN=0
+        # stops main() from running automatically on instantiation, since there is no argv yet at
+        # that point. Deliberately NOT using -sNODERAWFS (real host filesystem passthrough under
+        # Node) even though that's simpler to smoke-test from a terminal: it only works under
+        # Node, so relying on it here would leave the actual browser target unverified. Verified
+        # working identically both under plain Node and in a real Chromium renderer (Electron)
+        # using this exact FS/callMain pattern.
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sEXPORT_NAME=createKonjugateEngine
+        -sEXPORTED_RUNTIME_METHODS=FS,callMain
+        -sINVOKE_RUN=0
+    )
 endif()

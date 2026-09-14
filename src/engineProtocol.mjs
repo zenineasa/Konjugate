@@ -1,5 +1,73 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+// Deliberately Buffer-free (Uint8Array/DataView/TextDecoder only), unlike a first pass at this
+// file that leaned on Node's Buffer global throughout. That worked for years because every real
+// caller happened to hand this Buffer instances (Node's own fs/child_process APIs, or Electron's
+// renderer, which polyfills a minimal Buffer global even under contextIsolation) -- but Buffer
+// does not exist in a real browser tab at all, which is exactly the environment
+// docs/proposals/webEdition.md's src/webEngineAdapter.mjs needs this module to work in, and where
+// this was actually caught (decodeResultFile crashing on a plain Uint8Array from a WASM module's
+// virtual filesystem, no Buffer in sight). Every function below now accepts and returns plain
+// Uint8Array, which Buffer instances already satisfy (Buffer extends Uint8Array), so nothing about
+// the existing Node-side callers changes.
+
+function concatBytes(arrays) {
+    const length = arrays.reduce((total, array) => total + array.length, 0);
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const array of arrays) {
+        result.set(array, offset);
+        offset += array.length;
+    }
+    return result;
+}
+
+function equalBytes(a, b) {
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) if (a[index] !== b[index]) return false;
+    return true;
+}
+
+// bytes/offset rather than an instance method (Buffer's own readDoubleLE/readUInt32BE shape) since
+// plain Uint8Array has no such methods -- DataView needs bytes.buffer plus bytes' OWN byteOffset
+// (not 0) since bytes may itself be a subarray view into a larger underlying ArrayBuffer.
+function readDoubleLE(bytes, offset = 0) {
+    return new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getFloat64(0, true);
+}
+
+function writeDoubleLE(bytes, offset, value) {
+    new DataView(bytes.buffer, bytes.byteOffset + offset, 8).setFloat64(0, value, true);
+}
+
+function readUInt32BE(bytes, offset = 0) {
+    return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+}
+
+function writeUInt32BE(bytes, offset, value) {
+    new DataView(bytes.buffer, bytes.byteOffset + offset, 4).setUint32(0, value, false);
+}
+
+function decodeUtf8(bytes) {
+    return new TextDecoder('utf-8').decode(bytes);
+}
+
+const base64Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+// providerStates' payload is deliberately base64 (see decodeResultHeaderPayload's own comment
+// below for why) -- btoa() only accepts a string, not raw bytes, so this encodes directly instead.
+function encodeBase64(bytes) {
+    let result = '';
+    for (let index = 0; index < bytes.length; index += 3) {
+        const byte0 = bytes[index];
+        const byte1 = index + 1 < bytes.length ? bytes[index + 1] : undefined;
+        const byte2 = index + 2 < bytes.length ? bytes[index + 2] : undefined;
+        result += base64Alphabet[byte0 >> 2];
+        result += base64Alphabet[((byte0 & 0x03) << 4) | (byte1 === undefined ? 0 : byte1 >> 4)];
+        result += byte1 === undefined ? '=' : base64Alphabet[((byte1 & 0x0f) << 2) | (byte2 === undefined ? 0 : byte2 >> 6)];
+        result += byte2 === undefined ? '=' : base64Alphabet[byte2 & 0x3f];
+    }
+    return result;
+}
+
 function readVarint(buffer, offset) {
     let value = 0;
     let shift = 0;
@@ -20,21 +88,21 @@ function encodeVarint(value) {
         value = Math.floor(value / 128);
         bytes.push(byte | (value ? 0x80 : 0));
     } while (value);
-    return Buffer.from(bytes);
+    return new Uint8Array(bytes);
 }
 
 function encodedField(number, wireType, payload) {
-    return Buffer.concat([encodeVarint(number * 8 + wireType), payload]);
+    return concatBytes([encodeVarint(number * 8 + wireType), payload]);
 }
 
 function encodedMessageField(number, payload) {
-    return encodedField(number, 2, Buffer.concat([encodeVarint(payload.length), payload]));
+    return encodedField(number, 2, concatBytes([encodeVarint(payload.length), payload]));
 }
 
 function encodedDoubleField(number, value) {
     if (!Number.isFinite(value)) throw new Error('A Protobuf double must be finite.');
-    const payload = Buffer.allocUnsafe(8);
-    payload.writeDoubleLE(value);
+    const payload = new Uint8Array(8);
+    writeDoubleLE(payload, 0, value);
     return encodedField(number, 1, payload);
 }
 
@@ -48,7 +116,7 @@ export function encodeEngineCommand(sequence, command) {
         if (!mode) throw new Error('Unsupported simulation pacing mode.');
         const ratio = command.pacing.mode === 'realTime' ? 1 : Number(command.pacing.simulationSecondsPerWallSecond ?? 1);
         if (!(ratio > 0) || !Number.isFinite(ratio)) throw new Error('Simulation pacing requires a finite positive ratio.');
-        payload = Buffer.concat([
+        payload = concatBytes([
             encodedField(1, 0, encodeVarint(mode)),
             encodedDoubleField(2, ratio)
         ]);
@@ -63,7 +131,7 @@ export function encodeEngineCommand(sequence, command) {
         if (!Number.isSafeInteger(command.parameterId) || command.parameterId <= 0) {
             throw new Error('A live parameter requires a positive safe integer identifier.');
         }
-        payload = Buffer.concat([
+        payload = concatBytes([
             encodedField(1, 0, encodeVarint(command.parameterId)),
             encodedDoubleField(2, Number(command.value))
         ]);
@@ -71,15 +139,15 @@ export function encodeEngineCommand(sequence, command) {
     } else {
         throw new Error('Unsupported engine command.');
     }
-    const message = Buffer.concat([
+    const message = concatBytes([
         encodedField(1, 0, encodeVarint(1)),
         encodedField(2, 0, encodeVarint(sequence)),
         encodedMessageField(payloadField, payload)
     ]);
     if (message.length > 1024 * 1024) throw new Error('The engine command frame is too large.');
-    const frame = Buffer.allocUnsafe(message.length + 4);
-    frame.writeUInt32BE(message.length);
-    message.copy(frame, 4);
+    const frame = new Uint8Array(message.length + 4);
+    writeUInt32BE(frame, 0, message.length);
+    frame.set(message, 4);
     return frame;
 }
 
@@ -119,7 +187,7 @@ function fields(buffer) {
 function packedDoubles(buffer) {
     if (buffer.length % 8) throw new Error('A packed double field has an invalid length.');
     const values = [];
-    for (let offset = 0; offset < buffer.length; offset += 8) values.push(buffer.readDoubleLE(offset));
+    for (let offset = 0; offset < buffer.length; offset += 8) values.push(readDoubleLE(buffer, offset));
     return values;
 }
 
@@ -151,8 +219,8 @@ export function decodeResultIndexPayload(buffer) {
         else if (field.number === 3 && field.wireType === 2) {
             const entry = { startTime: 0, endTime: 0, offset: 0, length: 0, sampleCount: 0 };
             for (const item of fields(field.value)) {
-                if (item.number === 1 && item.wireType === 1) entry.startTime = item.value.readDoubleLE();
-                else if (item.number === 2 && item.wireType === 1) entry.endTime = item.value.readDoubleLE();
+                if (item.number === 1 && item.wireType === 1) entry.startTime = readDoubleLE(item.value);
+                else if (item.number === 2 && item.wireType === 1) entry.endTime = readDoubleLE(item.value);
                 else if (item.number === 3 && item.wireType === 0) entry.offset = item.value;
                 else if (item.number === 4 && item.wireType === 0) entry.length = item.value;
                 else if (item.number === 5 && item.wireType === 0) entry.sampleCount = item.value;
@@ -167,18 +235,18 @@ export function decodeResultHeaderPayload(buffer) {
     const header = { resultVersion: 0, metadata: null, stateIds: [], checkpoints: [] };
     for (const field of fields(buffer)) {
         if (field.number === 1 && field.wireType === 0) header.resultVersion = field.value;
-        else if (field.number === 2 && field.wireType === 2) header.metadata = JSON.parse(field.value.toString('utf8'));
+        else if (field.number === 2 && field.wireType === 2) header.metadata = JSON.parse(decodeUtf8(field.value));
         else if (field.number === 3 && field.wireType === 2) header.stateIds = decodedStateTable(field.value);
         else if (field.number === 5 && field.wireType === 2) {
             const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 }, providerStates: [] };
             for (const item of fields(field.value)) {
-                if (item.number === 1 && item.wireType === 2) checkpoint.uuid = item.value.toString('utf8');
-                else if (item.number === 2 && item.wireType === 1) checkpoint.time = item.value.readDoubleLE();
+                if (item.number === 1 && item.wireType === 2) checkpoint.uuid = decodeUtf8(item.value);
+                else if (item.number === 2 && item.wireType === 1) checkpoint.time = readDoubleLE(item.value);
                 else if (item.number === 3 && item.wireType === 2) checkpoint.values = checkpoint.values.concat(packedDoubles(item.value));
-                else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = item.value.toString('utf8');
+                else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = decodeUtf8(item.value);
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
                 else if (item.number === 6 && item.wireType === 2) {
-                    // Base64, not a raw Buffer: this shape is meant to be reused verbatim as a
+                    // Base64, not a raw byte array: this shape is meant to be reused verbatim as a
                     // startCheckpoint.providerStates entry on restart (mirroring how a decoded
                     // checkpoint's `values` already matches startCheckpoint.states' shape), and
                     // a restart configuration is plain JSON with no native bytes type.
@@ -186,7 +254,7 @@ export function decodeResultHeaderPayload(buffer) {
                     let payload = '';
                     for (const providerItem of fields(item.value)) {
                         if (providerItem.number === 1 && providerItem.wireType === 0) nodeId = providerItem.value;
-                        else if (providerItem.number === 2 && providerItem.wireType === 2) payload = Buffer.from(providerItem.value).toString('base64');
+                        else if (providerItem.number === 2 && providerItem.wireType === 2) payload = encodeBase64(providerItem.value);
                     }
                     checkpoint.providerStates.push({ nodeId, payload });
                 }
@@ -212,13 +280,13 @@ export function decodeSampleBatchPayload(buffer, stateIds) {
 }
 
 export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infinity, maximumSamples = Infinity, nearestTime = null } = {}) {
-    if (buffer.length < 16 || !buffer.subarray(0, 4).equals(Buffer.from([0x4b, 0x4a, 0x52, 0x02]))) {
+    if (buffer.length < 16 || !equalBytes(buffer.subarray(0, 4), new Uint8Array([0x4b, 0x4a, 0x52, 0x02]))) {
         throw new Error('Unsupported KJR result format.');
     }
-    if (!buffer.subarray(-4).equals(Buffer.from('KJIX'))) throw new Error('The KJR result index footer is missing.');
-    const headerLength = buffer.readUInt32BE(4);
+    if (!equalBytes(buffer.subarray(-4), new TextEncoder().encode('KJIX'))) throw new Error('The KJR result index footer is missing.');
+    const headerLength = readUInt32BE(buffer, 4);
     const headerEnd = 8 + headerLength;
-    const indexLength = buffer.readUInt32BE(buffer.length - 8);
+    const indexLength = readUInt32BE(buffer, buffer.length - 8);
     const indexStart = buffer.length - 8 - indexLength;
     if (headerEnd > indexStart) throw new Error('The KJR result section lengths are invalid.');
     let resultVersion = 0;
@@ -228,7 +296,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
     const stabilityFindings = [];
     for (const field of fields(buffer.subarray(8, headerEnd))) {
         if (field.number === 1 && field.wireType === 0) resultVersion = field.value;
-        else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(field.value.toString('utf8'));
+        else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(decodeUtf8(field.value));
         else if (field.number === 3 && field.wireType === 2) stateIds = decodedStateTable(field.value);
         else if (field.number === 6 && field.wireType === 2) {
             // docs/proposals/numericalStabilityDiagnostics.md's during-run phase -- a real
@@ -239,22 +307,22 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
             for (const item of fields(field.value)) {
                 if (item.number === 1 && item.wireType === 0) finding.nodeId = item.value;
                 else if (item.number === 2 && item.wireType === 0) finding.stateId = item.value;
-                else if (item.number === 3 && item.wireType === 2) finding.code = item.value.toString('utf8');
-                else if (item.number === 4 && item.wireType === 2) finding.message = item.value.toString('utf8');
-                else if (item.number === 5 && item.wireType === 1) finding.globalTime = item.value.readDoubleLE();
+                else if (item.number === 3 && item.wireType === 2) finding.code = decodeUtf8(item.value);
+                else if (item.number === 4 && item.wireType === 2) finding.message = decodeUtf8(item.value);
+                else if (item.number === 5 && item.wireType === 1) finding.globalTime = readDoubleLE(item.value);
             }
             stabilityFindings.push(finding);
         }
         else if (field.number === 5 && field.wireType === 2) {
             const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 }, providerStates: [] };
             for (const item of fields(field.value)) {
-                if (item.number === 1 && item.wireType === 2) checkpoint.uuid = item.value.toString('utf8');
-                else if (item.number === 2 && item.wireType === 1) checkpoint.time = item.value.readDoubleLE();
+                if (item.number === 1 && item.wireType === 2) checkpoint.uuid = decodeUtf8(item.value);
+                else if (item.number === 2 && item.wireType === 1) checkpoint.time = readDoubleLE(item.value);
                 else if (item.number === 3 && item.wireType === 2) checkpoint.values = checkpoint.values.concat(packedDoubles(item.value));
-                else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = item.value.toString('utf8');
+                else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = decodeUtf8(item.value);
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
                 else if (item.number === 6 && item.wireType === 2) {
-                    // Base64, not a raw Buffer: this shape is meant to be reused verbatim as a
+                    // Base64, not a raw byte array: this shape is meant to be reused verbatim as a
                     // startCheckpoint.providerStates entry on restart (mirroring how a decoded
                     // checkpoint's `values` already matches startCheckpoint.states' shape), and
                     // a restart configuration is plain JSON with no native bytes type.
@@ -262,7 +330,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
                     let payload = '';
                     for (const providerItem of fields(item.value)) {
                         if (providerItem.number === 1 && providerItem.wireType === 0) nodeId = providerItem.value;
-                        else if (providerItem.number === 2 && providerItem.wireType === 2) payload = Buffer.from(providerItem.value).toString('base64');
+                        else if (providerItem.number === 2 && providerItem.wireType === 2) payload = encodeBase64(providerItem.value);
                     }
                     checkpoint.providerStates.push({ nodeId, payload });
                 }
@@ -279,8 +347,8 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
         else if (field.number === 3 && field.wireType === 2) {
             const entry = { startTime: 0, endTime: 0, offset: 0, length: 0, sampleCount: 0 };
             for (const item of fields(field.value)) {
-                if (item.number === 1 && item.wireType === 1) entry.startTime = item.value.readDoubleLE();
-                else if (item.number === 2 && item.wireType === 1) entry.endTime = item.value.readDoubleLE();
+                if (item.number === 1 && item.wireType === 1) entry.startTime = readDoubleLE(item.value);
+                else if (item.number === 2 && item.wireType === 1) entry.endTime = readDoubleLE(item.value);
                 else if (item.number === 3 && item.wireType === 0) entry.offset = item.value;
                 else if (item.number === 4 && item.wireType === 0) entry.length = item.value;
                 else if (item.number === 5 && item.wireType === 0) entry.sampleCount = item.value;
@@ -294,7 +362,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
     let expectedOffset = headerEnd;
     for (const entry of batches) {
         if (entry.offset !== expectedOffset || entry.offset + 4 + entry.length > indexStart ||
-            buffer.readUInt32BE(entry.offset) !== entry.length) throw new Error('The KJR result batch index is invalid.');
+            readUInt32BE(buffer, entry.offset) !== entry.length) throw new Error('The KJR result batch index is invalid.');
         expectedOffset = entry.offset + 4 + entry.length;
     }
     if (expectedOffset !== indexStart || batches.reduce((total, entry) => total + entry.sampleCount, 0) !== sampleCount) {
@@ -362,7 +430,7 @@ export function decodeEngineEvent(buffer) {
             const capabilities = { metisAvailable: false, metisVersion: '' };
             for (const item of fields(field.value)) {
                 if (item.number === 1 && item.wireType === 0) capabilities.metisAvailable = Boolean(item.value);
-                else if (item.number === 2 && item.wireType === 2) capabilities.metisVersion = item.value.toString('utf8');
+                else if (item.number === 2 && item.wireType === 2) capabilities.metisVersion = decodeUtf8(item.value);
             }
             event.capabilities = capabilities;
         } else if (field.number === 3 && field.wireType === 2) {
@@ -376,7 +444,7 @@ export function decodeEngineEvent(buffer) {
 }
 
 export class FramedEngineEventDecoder {
-    #header = Buffer.alloc(4);
+    #header = new Uint8Array(4);
     #headerOffset = 0;
     #payload = null;
     #payloadOffset = 0;
@@ -387,17 +455,17 @@ export class FramedEngineEventDecoder {
         while (offset < chunk.length) {
             if (!this.#payload) {
                 const headerBytes = Math.min(4 - this.#headerOffset, chunk.length - offset);
-                chunk.copy(this.#header, this.#headerOffset, offset, offset + headerBytes);
+                this.#header.set(chunk.subarray(offset, offset + headerBytes), this.#headerOffset);
                 this.#headerOffset += headerBytes;
                 offset += headerBytes;
                 if (this.#headerOffset < 4) break;
-                const length = this.#header.readUInt32BE(0);
+                const length = readUInt32BE(this.#header, 0);
                 if (length > 64 * 1024 * 1024) throw new Error('The engine protocol frame is too large.');
-                this.#payload = Buffer.allocUnsafe(length);
+                this.#payload = new Uint8Array(length);
                 this.#payloadOffset = 0;
             }
             const payloadBytes = Math.min(this.#payload.length - this.#payloadOffset, chunk.length - offset);
-            chunk.copy(this.#payload, this.#payloadOffset, offset, offset + payloadBytes);
+            this.#payload.set(chunk.subarray(offset, offset + payloadBytes), this.#payloadOffset);
             this.#payloadOffset += payloadBytes;
             offset += payloadBytes;
             if (this.#payloadOffset === this.#payload.length) {

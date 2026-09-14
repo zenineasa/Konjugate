@@ -32,6 +32,41 @@ Native C++ compilation on Windows can take longer than on macOS/Linux due to def
 - **Antivirus Exclusions:** Exclude the project's `out/` and `.tools/` directories from real-time antivirus / Windows Defender scanning to avoid I/O bottlenecks during `.obj` and `.pdb` writes.
 - **Developer Shell:** Always run Node and CMake commands from a Visual Studio Developer PowerShell or Command Prompt.
 
+## Web build (experimental)
+
+See [Konjugate Web](proposals/webEdition.md) for the design and current scope. This is a separate, opt-in toolchain -- it installs nothing the normal desktop build above needs, and the normal desktop setup never touches it.
+
+```bash
+npm run setup:web
+```
+
+This installs the Emscripten SDK (a pinned version, matching `vcpkg.json`'s own pinned-baseline convention) into the ignored `.tools/emsdk` directory via `scripts/setupWebBuild.mjs`. It requires `cmake`, `git` and `python3` on `PATH` in addition to the platform prerequisites above. `make setupWeb` runs the same script from the Makefile.
+
+```bash
+npm run build:web
+```
+
+Builds the engine (the real, complete `konjugateEngine` target -- no source changes needed) via the `web` CMake preset (`engine/CMakePresets.json`), producing `out/engineWeb/konjugateEngine.js`/`.wasm` -- an ES module exporting a `createKonjugateEngine()` factory (`-sMODULARIZE=1 -sEXPORT_ES6=1`), not an auto-running script. `make buildWeb` runs `setupWeb` first, then this.
+
+Same `validate`/`run`/etc. CLI contract as the desktop engine (see [Engine CLI contract](engineCli.md)), just driven explicitly instead of via `process.argv`: instantiate the module, write input files into its exported virtual filesystem (`Module.FS`), invoke a command with an argv array (`Module.callMain([...])`), then read output files back out the same way. Verified to produce byte-for-byte identical output to the desktop CLI, both under plain Node and in a real Chromium renderer (Electron) -- not just Node, since a real browser has no filesystem passthrough to lean on:
+
+```js
+import createKonjugateEngine from './out/engineWeb/konjugateEngine.js';
+
+const Module = await createKonjugateEngine();
+Module.FS.writeFile('/model.kjt', modelBytes);           // Uint8Array
+Module.FS.writeFile('/runConfig.json', configBytes);
+Module.callMain(['run', '/model.kjt', '--configuration', '/runConfig.json', '--output', '/result.bin']);
+const resultBytes = Module.FS.readFile('/result.bin');   // decode with src/engineProtocol.mjs, same as the desktop result
+```
+
+```bash
+npm run build:webShell
+npm run serve:webShell
+```
+
+Assembles `out/webShell/` -- the phase-3 "minimal shell" (see [Konjugate Web](proposals/webEdition.md)): the real desktop renderer (`src/renderer/renderer.mjs`, unmodified) served as a static site against `src/renderer/webShims/*` instead of `src/preload.mjs`'s Electron IPC bridge, using the `build:web` output above. `scripts/buildWebShell.mjs` requires `out/engineWeb/` to already exist. `scripts/serveWebShell.mjs` then serves that directory over local HTTP (`http://localhost:4173/` by default, `PORT` to override) -- also a reasonable stand-in for what a static host serves. `make buildWebShell`/`make serveWebShell` run the same scripts from the Makefile.
+
 ## Verification
 
 Run the JavaScript and native suites with:

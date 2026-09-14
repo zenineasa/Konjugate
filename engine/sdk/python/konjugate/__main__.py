@@ -325,6 +325,95 @@ def _load_provider_class(module_path):
     raise RuntimeError(f"No RelationshipProvider or NodeProvider subclass found in {module_path}")
 
 
+class ProviderProtocolError(RuntimeError):
+    """A handler's way of reporting a non-fatal-to-the-process, wire-reportable failure.
+
+    Kept distinct from a bare RuntimeError so _run_worker knows to encode it as a
+    ProviderFailure response (and, per the existing per-kind behavior, sometimes exit) rather
+    than letting it propagate as an uncaught crash -- mirrors the several `return 1`-after-
+    _write_framed(..._encode_provider_failure...) sites this function used to inline itself.
+    """
+
+    def __init__(self, code, message, fatal=True):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.fatal = fatal
+
+
+# ── Shared per-message handlers ──────────────────────────────────────────────
+#
+# Extracted from _run_worker (below) so both the native stdin/stdout pipe loop AND the web
+# edition's Pyodide bridge (konjugate/_webBridge.py) can call the exact same dispatch logic --
+# these operate on already-decoded Python values, with zero knowledge of the wire format or of
+# stdin/stdout, so neither caller has to duplicate instance-binding/lookup behavior.
+
+
+def handle_initialize(provider, description, instance_bindings, instances):
+    key_map = {inp.key: i for i, inp in enumerate(description.inputs)}
+    initialized_ids = []
+    for instance_id, input_keys in instances:
+        key_indexes = []
+        for key in input_keys:
+            if key not in key_map:
+                raise ProviderProtocolError("unknownInputKey", f"Instance binding references unknown input key: {key}")
+            key_indexes.append(key_map[key])
+        instance_bindings[instance_id] = (input_keys, key_indexes)
+        provider.initialize(type("InitializationContext", (), {"instance_id": instance_id})())
+        initialized_ids.append(instance_id)
+    return initialized_ids
+
+
+def _ordered_inputs(description, binding, raw_inputs):
+    input_keys, key_indexes = binding
+    input_count = len(description.inputs)
+    ordered_values = [0.0] * input_count
+    for index, key_index in enumerate(key_indexes):
+        if index < len(raw_inputs):
+            ordered_values[key_index] = raw_inputs[index]
+    return {description.inputs[i].key: ordered_values[i] for i in range(input_count)}
+
+
+def handle_evaluate_batch(provider, description, instance_bindings, initialized, sequence, simulation_time, step_size, evaluations):
+    if not initialized:
+        raise ProviderProtocolError("notInitialized", "Evaluation received before initialization.")
+    contributions = []
+    for instance_id, raw_inputs in evaluations:
+        binding = instance_bindings.get(instance_id)
+        if binding is None:
+            raise ProviderProtocolError("unknownInstance", "Evaluation references an uninitialized instance.")
+        inputs = InputView(_ordered_inputs(description, binding, raw_inputs))
+        output = OutputCollector()
+        provider.evaluate(EvaluationContext(simulation_time, step_size), inputs, output)
+        contributions.append((instance_id, output.gradient))
+    return contributions
+
+
+def handle_node_evaluate(provider, description, instance_bindings, simulation_time, step_size, evaluations):
+    contributions = []
+    for instance_id, raw_inputs in evaluations:
+        binding = instance_bindings.get(instance_id)
+        if binding is None:
+            raise RuntimeError("Evaluation references an uninitialized instance.")
+        inputs = InputView(_ordered_inputs(description, binding, raw_inputs))
+        outputs = NodeOutputCollector()
+        provider.evaluate(EvaluationContext(simulation_time, step_size), inputs, outputs)
+        contributions.append((instance_id, dict(outputs.gradients)))
+    return contributions
+
+
+def handle_checkpoint(provider, instance_bindings, instance_id):
+    if instance_id not in instance_bindings:
+        raise RuntimeError("Checkpoint references an uninitialized instance.")
+    return provider.checkpoint()
+
+
+def handle_restore(provider, instance_bindings, instance_id, payload):
+    if instance_id not in instance_bindings:
+        raise RuntimeError("Restore references an uninitialized instance.")
+    provider.restore(payload)
+
+
 def _run_worker(provider, stdin_stream, stdout_stream):
     node_provider = isinstance(provider, NodeProvider)
     description = provider.describe()
@@ -356,26 +445,11 @@ def _run_worker(provider, stdin_stream, stdout_stream):
                 _write_framed(stdout_stream, _encode_handshake_response(description))
 
         elif kind == "initialize":
-            instances = data
-            initialized_ids = []
-            for instance_id, input_keys in instances:
-                key_map = {inp.key: i for i, inp in enumerate(description.inputs)}
-                key_indexes = []
-                for key in input_keys:
-                    if key not in key_map:
-                        _write_framed(
-                            stdout_stream,
-                            _encode_provider_failure(
-                                0, "unknownInputKey",
-                                f"Instance binding references unknown input key: {key}",
-                                True,
-                            ),
-                        )
-                        return 1
-                    key_indexes.append(key_map[key])
-                instance_bindings[instance_id] = (input_keys, key_indexes)
-                provider.initialize(type("InitializationContext", (), {"instance_id": instance_id})())
-                initialized_ids.append(instance_id)
+            try:
+                initialized_ids = handle_initialize(provider, description, instance_bindings, data)
+            except ProviderProtocolError as error:
+                _write_framed(stdout_stream, _encode_provider_failure(0, error.code, error.message, error.fatal))
+                return 1
             initialized = True
             _write_framed(stdout_stream, _encode_initialize_response(initialized_ids))
 
@@ -384,78 +458,30 @@ def _run_worker(provider, stdin_stream, stdout_stream):
                 _write_framed(stdout_stream, _encode_provider_failure(data[0], "wrongProviderKind", "This provider is not a computational-node provider.", True))
                 return 1
             sequence, simulation_time, step_size, evaluations = data
-            contributions = []
-            for instance_id, raw_inputs in evaluations:
-                binding = instance_bindings.get(instance_id)
-                if binding is None: raise RuntimeError("Evaluation references an uninitialized instance.")
-                input_keys, key_indexes = binding
-                ordered_values = [0.0] * len(description.inputs)
-                for index, key_index in enumerate(key_indexes):
-                    if index < len(raw_inputs): ordered_values[key_index] = raw_inputs[index]
-                inputs = InputView({description.inputs[index].key: ordered_values[index] for index in range(len(description.inputs))})
-                outputs = NodeOutputCollector()
-                provider.evaluate(EvaluationContext(simulation_time, step_size), inputs, outputs)
-                contributions.append((instance_id, dict(outputs.gradients)))
+            contributions = handle_node_evaluate(provider, description, instance_bindings, simulation_time, step_size, evaluations)
             _write_framed(stdout_stream, _encode_node_evaluate_response(sequence, contributions))
 
         elif kind == "checkpoint":
             if not node_provider: raise RuntimeError("Checkpoint requested from a relationship provider.")
             instance_id = data
-            if instance_id not in instance_bindings: raise RuntimeError("Checkpoint references an uninitialized instance.")
-            _write_framed(stdout_stream, _encode_checkpoint_response(instance_id, provider.checkpoint()))
+            _write_framed(stdout_stream, _encode_checkpoint_response(instance_id, handle_checkpoint(provider, instance_bindings, instance_id)))
 
         elif kind == "restore":
             if not node_provider: raise RuntimeError("Restore requested from a relationship provider.")
             instance_id, payload = data
-            if instance_id not in instance_bindings: raise RuntimeError("Restore references an uninitialized instance.")
-            provider.restore(payload)
+            handle_restore(provider, instance_bindings, instance_id, payload)
             _write_framed(stdout_stream, _encode_restore_response(instance_id))
 
         elif kind == "evaluateBatch":
             if node_provider:
                 _write_framed(stdout_stream, _encode_provider_failure(data[0], "wrongProviderKind", "This provider is a computational-node provider.", True))
                 return 1
-            if not initialized:
-                sequence = data[0]
-                _write_framed(
-                    stdout_stream,
-                    _encode_provider_failure(
-                        sequence, "notInitialized",
-                        "Evaluation received before initialization.",
-                        True,
-                    ),
-                )
-                return 1
             sequence, simulation_time, step_size, evaluations = data
-            contributions = []
-            for instance_id, raw_inputs in evaluations:
-                binding = instance_bindings.get(instance_id)
-                if binding is None:
-                    _write_framed(
-                        stdout_stream,
-                        _encode_provider_failure(
-                            sequence, "unknownInstance",
-                            "Evaluation references an uninitialized instance.",
-                            True,
-                        ),
-                    )
-                    return 1
-                input_keys, key_indexes = binding
-                input_count = len(description.inputs)
-                ordered_values = [0.0] * input_count
-                for i, key_index in enumerate(key_indexes):
-                    if i < len(raw_inputs):
-                        ordered_values[key_index] = raw_inputs[i]
-                input_dict = {
-                    description.inputs[i].key: ordered_values[i] for i in range(input_count)
-                }
-                output = OutputCollector()
-                provider.evaluate(
-                    EvaluationContext(simulation_time, step_size),
-                    InputView(input_dict),
-                    output,
-                )
-                contributions.append((instance_id, output.gradient))
+            try:
+                contributions = handle_evaluate_batch(provider, description, instance_bindings, initialized, sequence, simulation_time, step_size, evaluations)
+            except ProviderProtocolError as error:
+                _write_framed(stdout_stream, _encode_provider_failure(sequence, error.code, error.message, error.fatal))
+                return 1
             _write_framed(
                 stdout_stream,
                 _encode_evaluate_batch_response(sequence, contributions),

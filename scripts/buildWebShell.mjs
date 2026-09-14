@@ -155,8 +155,17 @@ await writeFile(join(outputDirectory, 'assets', 'componentLibrary', 'webManifest
 await mkdir(join(outputDirectory, 'docs'), { recursive: true });
 await cp(join(rootDirectory, 'docs', 'causalInferenceInteractionHelp.md'), join(outputDirectory, 'docs', 'causalInferenceInteractionHelp.md'));
 
+// Python provider SDK (docs/proposals/webEdition.md, phase 4) -- fetched at runtime by
+// src/webPythonProviderBridge.mjs and written into Pyodide's own virtual FS. Only the SDK
+// package itself ships; nothing here depends on the native engine/sdk/python/ layout beyond it.
+await cp(
+    join(rootDirectory, 'engine', 'sdk', 'python', 'konjugate'),
+    join(outputDirectory, 'pythonProviderSdk', 'konjugate'),
+    { recursive: true, filter: (source) => !source.endsWith('__pycache__') }
+);
+
 const vendoredPackages = [
-    'three', 'mathlive', join('@cortex-js', 'compute-engine'), 'occt-import-js', 'plotly.js-dist-min', 'protobufjs'
+    'three', 'mathlive', join('@cortex-js', 'compute-engine'), 'occt-import-js', 'plotly.js-dist-min', 'protobufjs', 'pyodide'
 ];
 for (const packageName of vendoredPackages) {
     await cp(join(rootDirectory, 'node_modules', packageName), join(outputDirectory, 'node_modules', packageName), { recursive: true });

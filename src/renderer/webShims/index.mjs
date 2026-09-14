@@ -9,9 +9,10 @@
 
 import engine from './engine.mjs';
 import projectFiles, { setPendingDroppedFile } from './projectFiles.mjs';
+import providerEditor from './providerEditor.mjs';
 import {
     addons, aiProviders, applicationInfo, componentLibrary, diagnostics, extensions,
-    modelClipboard, providerEditor, providerToolchains, shapeLibrary, uiZoom, windowControls
+    modelClipboard, providerToolchains, shapeLibrary, uiZoom, windowControls
 } from './misc.mjs';
 
 window.engine = engine;
@@ -49,7 +50,7 @@ document.addEventListener('drop', async (event) => {
 const banner = document.createElement('div');
 banner.className = 'webEditionBanner';
 banner.innerHTML = '<span>Web edition: batch-only Run (no live progress or mid-run control), ' +
-    'encrypted projects, programmable C++/Python providers, FMU import/export, add-ons, and ' +
+    'encrypted projects, programmable C++ providers, FMU import/export, add-ons, and ' +
     "AI-assisted authoring aren't available here yet.</span>" +
     '<button type="button" aria-label="Dismiss">×</button>';
 banner.querySelector('button').addEventListener('click', () => banner.remove());

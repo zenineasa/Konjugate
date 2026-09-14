@@ -1,15 +1,17 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// Every window.* global except engine (engine.mjs) and projectFiles (projectFiles.mjs) for the
-// web shell (docs/proposals/webEdition.md, phase 3). Bundled-content lists (shapeLibrary,
-// componentLibrary) are served as static files -- the componentLibrary one is generated at build
-// time by scripts/buildWebShell.mjs, mirroring src/main.mjs's discoverComponentLibrary() for the
-// bundled portion only, since assembling it requires a directory scan a browser can't do itself;
-// shapeLibrary's is fetched straight from the existing assets/shapes/manifest.json and normalized
-// the same way src/main.mjs's shapeLibraryManifest() does. Package installation, programmable
-// providers, add-ons, and AI-provider credential storage are honestly unavailable -- see
-// webEdition.md's "Two genuinely different classes of missing native code" and its Electron-shell
-// section for why each of these has no browser equivalent yet.
+// Every window.* global except engine (engine.mjs), projectFiles (projectFiles.mjs), and
+// providerEditor (providerEditor.mjs) for the web shell (docs/proposals/webEdition.md). Bundled-
+// content lists (shapeLibrary, componentLibrary) are served as static files -- the
+// componentLibrary one is generated at build time by scripts/buildWebShell.mjs, mirroring
+// src/main.mjs's discoverComponentLibrary() for the bundled portion only, since assembling it
+// requires a directory scan a browser can't do itself; shapeLibrary's is fetched straight from
+// the existing assets/shapes/manifest.json and normalized the same way src/main.mjs's
+// shapeLibraryManifest() does. Package installation, C++ providers, add-ons, and AI-provider
+// credential storage are honestly unavailable -- see webEdition.md's "Two genuinely different
+// classes of missing native code" and its Electron-shell section for why each of these has no
+// browser equivalent yet. Python providers (phase 4) are real -- see providerToolchains below and
+// providerEditor.mjs.
 
 import { version } from './buildInfo.mjs';
 
@@ -90,16 +92,16 @@ export const extensions = {
     setEnabled: async () => ({ available: false })
 };
 
-export const providerEditor = {
-    openWindow: async () => ({ available: false }),
-    onApplied: () => {},
-    reportApplied: () => {}
-};
+// providerEditor lives in its own file (providerEditor.mjs) -- it needs a real <dialog>, unlike
+// everything else here.
 
+// Python's toolchain is Pyodide, bundled with the app -- there's no interpreter path to locate,
+// override, or browse to (see docs/proposals/webEdition.md, phase 4). C++'s toolchain UI stays
+// honestly unavailable (phase 5's concern: a WASM-hosted C++ compiler, not attempted yet).
 export const providerToolchains = {
-    get: async () => ({ available: false }),
+    get: async (kind) => kind === 'python' ? { available: true, path: 'Pyodide (bundled)', detectedPath: 'Pyodide (bundled)' } : { available: false },
     set: async () => ({ available: false }),
-    test: async () => ({ available: false }),
+    test: async (kind) => kind === 'python' ? { available: true } : { available: false },
     browse: async () => ({ available: false }),
     executionMode: {
         get: async () => ({ available: false }),

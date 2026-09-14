@@ -39,6 +39,35 @@
 import { decodeResultFile } from './engineProtocol.mjs';
 import { encodeProjectContent } from './browserProjectCodec.mjs';
 
+// Python providers (docs/proposals/webEdition.md, phase 4) need a Pyodide interpreter loaded and
+// wired up as Module.evaluatePythonProviderBridge before callMain(['run'/'fit', ...]) runs -- see
+// engine/src/providerRuntime.cpp's WasmPyodideProviderBackend for the C++ side of this contract.
+// validate() never executes providers, and infer() has no model document at all (it derives a
+// model FROM a CSV, taking no `content` argument), so neither can reach a provider -- both are
+// excluded here on purpose. Pyodide (~15MB) is real, avoidable cost for the (likely common) case
+// of a model with no Python providers at all -- webPythonProviderBridge.mjs is only imported, and
+// Pyodide only loaded, when a python-kind implementation actually appears in the document.
+function hasPythonProviderImplementation(content) {
+    let document;
+    try {
+        document = JSON.parse(content);
+    } catch {
+        return false; // an invalid document surfaces its own parse error from the engine itself
+    }
+    const implementations = [
+        ...(document.nodes ?? []).map((node) => node.implementation),
+        ...(document.nodes ?? []).flatMap((node) => (node.sourceTerms ?? []).map((term) => term.implementation)),
+        ...(document.edges ?? []).map((edge) => edge.implementation)
+    ];
+    return implementations.some((implementation) => implementation?.kind === 'python');
+}
+
+async function ensurePythonProvidersReady(Module, content) {
+    if (!hasPythonProviderImplementation(content)) return;
+    const { installPythonProviderBridge } = await import('./webPythonProviderBridge.mjs');
+    await installPythonProviderBridge(Module);
+}
+
 let modulePromise = null;
 let stdoutBuffer = [];
 
@@ -171,6 +200,7 @@ export async function inferWithWebEngine(engineModuleUrl, csvContent, config) {
 export async function fitWithWebEngine(engineModuleUrl, content, csvContent, config) {
     const report = await runOneShot(engineModuleUrl, {
         setup: async (Module, directory) => {
+            await ensurePythonProvidersReady(Module, content);
             const inputPath = `${directory}/input.kjt`;
             const csvPath = `${directory}/measured.csv`;
             const reportPath = `${directory}/fitting.bin`;
@@ -198,6 +228,7 @@ export async function fitWithWebEngine(engineModuleUrl, content, csvContent, con
 export async function runWithWebEngine(engineModuleUrl, content, configuration) {
     const result = await runOneShot(engineModuleUrl, {
         setup: async (Module, directory) => {
+            await ensurePythonProvidersReady(Module, content);
             const inputPath = `${directory}/input.kjt`;
             const configurationPath = `${directory}/runConfiguration.json`;
             const outputPath = `${directory}/result.bin`;

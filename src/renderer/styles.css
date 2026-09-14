@@ -965,3 +965,45 @@ input, select, textarea { user-select: text; }
     cursor: pointer;
     padding: 2px 4px;
 }
+
+/* Minimal in-page provider editor (docs/proposals/webEdition.md, phase 4) -- only ever created
+   by src/renderer/webShims/providerEditor.mjs, never referenced by the desktop app. */
+.webProviderEditorDialog {
+    width: min(640px, 90vw);
+    background: var(--surface);
+    color: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+.webProviderEditorDialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+.webProviderEditorDialog h2 {
+    margin: 0 0 12px;
+    font-size: 14px;
+}
+.webProviderEditorDialog textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--raised);
+    color: #fff;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    padding: 8px;
+    resize: vertical;
+}
+.webProviderEditorStatus {
+    min-height: 1.2em;
+    font-size: 12px;
+    color: var(--muted);
+}
+.webProviderEditorDialog menu {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 12px 0 0;
+    padding: 0;
+}

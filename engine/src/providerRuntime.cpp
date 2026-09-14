@@ -6,6 +6,12 @@
 #include "konjugate/providerSharedMemoryChannel.hpp"
 #include "konjugate/providerInProcessAbi.hpp"
 
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/property_tree/ptree.hpp>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1168,6 +1174,248 @@ private:
     std::mutex mutex_;
 };
 
+#ifdef __EMSCRIPTEN__
+extern "C" {
+// Synchronous call into JS: Module.evaluatePythonProviderBridge (src/webPythonProviderBridge.mjs)
+// dispatches to a Pyodide-backed interpreter and returns before this call returns, since Pyodide
+// code execution (once loaded) is itself synchronous from JS's point of view. The returned
+// buffer is malloc'd on the JS side (via _malloc/stringToUTF8) and must be freed by the caller.
+EM_JS(char*, wasmDispatchPythonProviderRequest, (const char* requestJson), {
+    const request = UTF8ToString(requestJson);
+    let responseJson;
+    try {
+        if (typeof Module.evaluatePythonProviderBridge !== 'function') {
+            throw new Error('The Python provider bridge is not available in this build.');
+        }
+        responseJson = Module.evaluatePythonProviderBridge(request);
+    } catch (error) {
+        responseJson = JSON.stringify({
+            ok: false, code: 'bridgeFailure',
+            message: (error && error.message) ? String(error.message) : String(error),
+            fatal: true
+        });
+    }
+    const length = lengthBytesUTF8(responseJson) + 1;
+    const buffer = _malloc(length);
+    stringToUTF8(responseJson, buffer, length);
+    return buffer;
+});
+}
+
+// The web edition's Python-provider transport (docs/proposals/webEdition.md, phase 4): there is
+// no OS process to fork into inside a browser tab, so this calls directly into a Pyodide-backed
+// interpreter running in the same JS context as the engine, via the synchronous EM_JS call
+// above, instead of PipeProviderBackend's fork+pipe+protobuf transport. The wire shape here is
+// plain JSON (not protobuf) -- see engine/sdk/python/konjugate/_webBridge.py for the other side
+// of this exact contract; it reuses __main__.py's own per-message handlers unchanged, so
+// behavior matches the native pipe transport exactly, just without the process/framing overhead.
+// C++ providers are entirely unaffected: createProviderBackend only ever routes non-cppProvider
+// (i.e. python) tasks here.
+//
+// boost::property_tree's JSON writer quotes every leaf value as a string (it has no numeric
+// type of its own) -- _webBridge.py tolerates that on its end (see its _int/_float helpers)
+// rather than this class hand-rolling a numeric-aware JSON writer.
+class WasmPyodideProviderBackend final : public ProviderBackend {
+public:
+    WasmPyodideProviderBackend(std::string processKey, std::string providerSource)
+        : processKey_(std::move(processKey)) {
+        boost::property_tree::ptree request;
+        request.put("kind", "create");
+        request.put("processKey", processKey_);
+        request.put("source", providerSource);
+        dispatch(request);
+    }
+
+    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
+        boost::property_tree::ptree keys;
+        for (const auto& binding : bindings) {
+            boost::property_tree::ptree key;
+            key.put_value(binding.symbol);
+            keys.push_back({"", key});
+        }
+        boost::property_tree::ptree instance;
+        instance.put("instanceId", instanceId);
+        instance.add_child("inputKeys", keys);
+        pendingInstances_.push_back({"", instance});
+    }
+
+    void sendInitialization() override {
+        boost::property_tree::ptree request;
+        request.put("kind", "initialize");
+        request.put("processKey", processKey_);
+        request.add_child("instances", pendingInstances_);
+        dispatch(request);
+        pendingInstances_.clear();
+    }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t sequence, double simulationTime, double stepSize,
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) override {
+        boost::property_tree::ptree request;
+        request.put("kind", "evaluateBatch");
+        request.put("processKey", processKey_);
+        request.put("sequence", sequence);
+        request.put("simulationTime", simulationTime);
+        request.put("stepSize", stepSize);
+        request.add_child("evaluations", encodeEvaluations(evaluations));
+        const auto response = dispatch(request);
+        std::vector<std::pair<std::uint64_t, double>> results;
+        for (const auto& [key, item] : response.get_child("contributions")) {
+            static_cast<void>(key);
+            results.emplace_back(item.get<std::uint64_t>("instanceId"), item.get<double>("value"));
+        }
+        return results;
+    }
+
+    std::vector<std::pair<std::string, double>> evaluateNode(
+        std::uint64_t instanceId, double simulationTime, double stepSize, std::span<const double> inputs) override {
+        boost::property_tree::ptree request;
+        request.put("kind", "evaluateNode");
+        request.put("processKey", processKey_);
+        request.put("sequence", 0);
+        request.put("simulationTime", simulationTime);
+        request.put("stepSize", stepSize);
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>> evaluations{{instanceId, inputs}};
+        request.add_child("evaluations", encodeEvaluations(evaluations));
+        const auto response = dispatch(request);
+        std::vector<std::pair<std::string, double>> outputs;
+        for (const auto& [key, contribution] : response.get_child("contributions")) {
+            static_cast<void>(key);
+            for (const auto& [outputKey, outputValue] : contribution.get_child("outputs")) {
+                outputs.emplace_back(outputKey, outputValue.get_value<double>());
+            }
+        }
+        return outputs;
+    }
+
+    std::vector<std::byte> requestCheckpoint(std::uint64_t instanceId) override {
+        boost::property_tree::ptree request;
+        request.put("kind", "checkpoint");
+        request.put("processKey", processKey_);
+        request.put("instanceId", instanceId);
+        const auto response = dispatch(request);
+        return decodeBase64(response.get<std::string>("payloadBase64"));
+    }
+
+    void requestRestore(std::uint64_t instanceId, std::span<const std::byte> payload) override {
+        boost::property_tree::ptree request;
+        request.put("kind", "restore");
+        request.put("processKey", processKey_);
+        request.put("instanceId", instanceId);
+        request.put("payloadBase64", encodeBase64(payload));
+        dispatch(request);
+    }
+
+    void shutdown() noexcept override {
+        try {
+            boost::property_tree::ptree request;
+            request.put("kind", "shutdown");
+            request.put("processKey", processKey_);
+            dispatch(request);
+        } catch (const std::exception& error) {
+            std::cerr << "Failed to shut down web Python provider '" << processKey_ << "': " << error.what() << '\n';
+        }
+    }
+
+private:
+    static boost::property_tree::ptree encodeEvaluations(
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) {
+        boost::property_tree::ptree array;
+        for (const auto& [instanceId, inputs] : evaluations) {
+            boost::property_tree::ptree values;
+            for (double value : inputs) {
+                boost::property_tree::ptree item;
+                item.put_value(value);
+                values.push_back({"", item});
+            }
+            boost::property_tree::ptree entry;
+            entry.put("instanceId", instanceId);
+            entry.add_child("inputs", values);
+            array.push_back({"", entry});
+        }
+        return array;
+    }
+
+    static std::string encodeBase64(std::span<const std::byte> payload) {
+        static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string result;
+        result.reserve(((payload.size() + 2) / 3) * 4);
+        std::size_t index = 0;
+        while (index + 3 <= payload.size()) {
+            const auto b0 = static_cast<unsigned>(payload[index]);
+            const auto b1 = static_cast<unsigned>(payload[index + 1]);
+            const auto b2 = static_cast<unsigned>(payload[index + 2]);
+            result += table[b0 >> 2];
+            result += table[((b0 & 0x03) << 4) | (b1 >> 4)];
+            result += table[((b1 & 0x0f) << 2) | (b2 >> 6)];
+            result += table[b2 & 0x3f];
+            index += 3;
+        }
+        const auto remaining = payload.size() - index;
+        if (remaining == 1) {
+            const auto b0 = static_cast<unsigned>(payload[index]);
+            result += table[b0 >> 2];
+            result += table[(b0 & 0x03) << 4];
+            result += "==";
+        } else if (remaining == 2) {
+            const auto b0 = static_cast<unsigned>(payload[index]);
+            const auto b1 = static_cast<unsigned>(payload[index + 1]);
+            result += table[b0 >> 2];
+            result += table[((b0 & 0x03) << 4) | (b1 >> 4)];
+            result += table[(b1 & 0x0f) << 2];
+            result += "=";
+        }
+        return result;
+    }
+
+    static std::vector<std::byte> decodeBase64(const std::string& encoded) {
+        static const auto table = [] {
+            std::array<int, 256> map{};
+            map.fill(-1);
+            const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            for (int index = 0; index < 64; ++index) map[static_cast<unsigned char>(alphabet[index])] = index;
+            return map;
+        }();
+        std::vector<std::byte> result;
+        result.reserve((encoded.size() / 4) * 3);
+        int buffer = 0;
+        int bits = 0;
+        for (char character : encoded) {
+            if (character == '=') break;
+            const auto value = table[static_cast<unsigned char>(character)];
+            if (value < 0) continue;
+            buffer = (buffer << 6) | value;
+            bits += 6;
+            if (bits >= 8) {
+                bits -= 8;
+                result.push_back(static_cast<std::byte>((buffer >> bits) & 0xff));
+            }
+        }
+        return result;
+    }
+
+    boost::property_tree::ptree dispatch(const boost::property_tree::ptree& request) {
+        std::ostringstream requestStream;
+        boost::property_tree::write_json(requestStream, request, false);
+        char* responsePointer = wasmDispatchPythonProviderRequest(requestStream.str().c_str());
+        const std::string responseJson(responsePointer);
+        std::free(responsePointer);
+
+        boost::property_tree::ptree response;
+        std::istringstream responseStream(responseJson);
+        boost::property_tree::read_json(responseStream, response);
+        if (!response.get<bool>("ok", false)) {
+            throw std::runtime_error("Web Python provider '" + processKey_ + "' failed: " +
+                response.get<std::string>("message", "unknown error"));
+        }
+        return response;
+    }
+
+    std::string processKey_;
+    boost::property_tree::ptree pendingInstances_;
+};
+#endif
+
 namespace {
 
 // Each tier is only attempted for cppProvider tasks in its matching (or a higher) execution
@@ -1215,6 +1463,16 @@ std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, C
         }
 #endif
     }
+#ifdef __EMSCRIPTEN__
+    // A browser tab has no OS process to fork/exec a real python3 interpreter into (see
+    // WasmPyodideProviderBackend's own comment above) -- python-kind tasks (relationship- or
+    // node-shaped alike, matching PipeProviderBackend's own scope below) route to the Pyodide
+    // bridge instead, passing providerSource directly rather than writing it to a file: there is
+    // no separate process that needs a real path argument here.
+    if (implementation != ContributionImplementation::cppProvider) {
+        return std::make_unique<WasmPyodideProviderBackend>(key, providerSource);
+    }
+#endif
     const auto launchPath = implementation == ContributionImplementation::cppProvider
         ? buildCppProvider(providerSource, config, CppProviderArtifactKind::executable)
         : preparePythonProviderSource(providerSource, config);

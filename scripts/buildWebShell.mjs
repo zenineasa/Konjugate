@@ -79,6 +79,10 @@ html = html.replace('<html lang="en">', '<html lang="en" data-web-edition>');
 html = html.replace(
     '<script src="../../node_modules/occt-import-js/dist/occt-import-js.js"></script>',
     '<script src="../../node_modules/protobufjs/dist/minimal/protobuf.min.js"></script>\n' +
+    // scrypt-js's own top-level file is already a UMD bundle (window.scrypt = ... when loaded as
+    // a classic script, no module wrapper needed) -- see src/browserProjectCodec.mjs's header
+    // comment for why this is the encrypted-project KDF instead of Web Crypto's native PBKDF2.
+    '    <script src="../../node_modules/scrypt-js/scrypt.js"></script>\n' +
     '    <script src="../../node_modules/occt-import-js/dist/occt-import-js.js"></script>'
 );
 html = html.replace(
@@ -164,7 +168,7 @@ await cp(
 );
 
 const vendoredPackages = [
-    'three', 'mathlive', join('@cortex-js', 'compute-engine'), 'occt-import-js', 'plotly.js-dist-min', 'protobufjs', 'pyodide'
+    'three', 'mathlive', join('@cortex-js', 'compute-engine'), 'occt-import-js', 'plotly.js-dist-min', 'protobufjs', 'pyodide', 'scrypt-js'
 ];
 for (const packageName of vendoredPackages) {
     await cp(join(rootDirectory, 'node_modules', packageName), join(outputDirectory, 'node_modules', packageName), { recursive: true });

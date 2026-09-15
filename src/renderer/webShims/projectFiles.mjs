@@ -1,16 +1,17 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// window.projectFiles for the web shell (docs/proposals/webEdition.md, phase 3). Load/save
-// covers unencrypted .kjt only, via the File System Access API where available (falls back to
-// an <input type=file> picker for opening and a download-blob for saving where it isn't --
-// Firefox and Safari at time of writing). Examples are served as static files, listed via a
+// window.projectFiles for the web shell (docs/proposals/webEdition.md). Load/save (including
+// encrypted .kjt, via browserProjectCodec.mjs's scrypt-based KDF -- the same one desktop uses,
+// so files move between editions) go through the File System Access API where available (falls
+// back to an <input type=file> picker for opening and a download-blob for saving where it isn't
+// -- Firefox and Safari at time of writing). Examples are served as static files, listed via a
 // manifest scripts/buildWebShell.mjs generates at build time (mirroring what
 // src/main.mjs's projectListExamples handler computes at request time, since a browser has no
 // directory-listing capability of its own). Package/FMU/toolchain-dependent operations
 // (exportFmu, mergeFmus) are honestly unavailable, matching webEdition.md's existing stance.
 
 import { decodeResultFile } from '../../engineProtocol.mjs';
-import { BrowserProjectFileError, decodeProjectContent, encodeProjectContent } from '../../browserProjectCodec.mjs';
+import { BrowserProjectFileError, decodeProjectContent, encodeProjectContent, inspectProjectContent } from '../../browserProjectCodec.mjs';
 import { rendererResultProjection } from '../../resultSession.mjs';
 import { registerCompletedResult } from '../../webEngineLiveShim.mjs';
 
@@ -38,9 +39,19 @@ export function setPendingDroppedFile(bytes, fileName) {
 
 let handleCounter = 0;
 const fileHandles = new Map(); // synthetic path id -> FileSystemFileHandle, so a second Save doesn't re-prompt
+// synthetic path id -> { bytes, fileName, handle } for an encrypted file whose password hasn't
+// been supplied yet -- unlock() below re-decodes from here, mirroring src/main.mjs's own
+// pendingEncryptedPaths Set (there, keyed by a real filesystem path to re-read; here, by a
+// synthetic id since there's no path to re-read from in a browser).
+const pendingEncryptedFiles = new Map();
 
-async function fileFromBytes(bytes, fileName, handle = null) {
-    const decoded = await decodeProjectContent(bytes);
+async function fileFromBytes(bytes, fileName, handle = null, password = null) {
+    if (!password && inspectProjectContent(bytes).encrypted) {
+        const path = String(++handleCounter);
+        pendingEncryptedFiles.set(path, { bytes, fileName, handle });
+        return { path, fileName, encrypted: true, requiresPassword: true };
+    }
+    const decoded = await decodeProjectContent(bytes, { password });
     const path = handle ? String(++handleCounter) : null;
     if (handle) fileHandles.set(path, handle);
     let embeddedResult = null;
@@ -50,7 +61,7 @@ async function fileFromBytes(bytes, fileName, handle = null) {
         registerCompletedResult(jobId, result);
         embeddedResult = { sessionId: jobId, result: rendererResultProjection(result) };
     }
-    return { path, fileName, encrypted: false, content: decoded.content, embeddedResult };
+    return { path, fileName, encrypted: Boolean(password), content: decoded.content, embeddedResult };
 }
 
 async function open() {
@@ -89,19 +100,19 @@ async function open() {
     });
 }
 
-async function unlock() {
-    // open() never returns requiresPassword: true (an encrypted file fails there directly with a
-    // clear, catchable error instead) -- this exists only for interface completeness.
-    throw new BrowserProjectFileError('Encrypted projects are not supported in the web edition yet.', 'UNSUPPORTED_ENCRYPTION');
+async function unlock(path, password) {
+    const pending = pendingEncryptedFiles.get(path);
+    if (!pending) throw new BrowserProjectFileError('Select the encrypted project again.', 'INVALID_STATE');
+    pendingEncryptedFiles.delete(path);
+    return fileFromBytes(pending.bytes, pending.fileName, pending.handle, password);
 }
 
 async function save(path, content, suggestedFilename, password, resultSessionId) {
-    if (password) throw new Error("Encrypted saving isn't supported in the web edition yet.");
     if (resultSessionId) {
         throw new Error("Saving simulation results with the project isn't supported in the web edition yet " +
             '-- export results as CSV separately, or save the model only.');
     }
-    const bytes = await encodeProjectContent(content);
+    const bytes = await encodeProjectContent(content, { password });
     if (isFsaSupported()) {
         let handle = path ? fileHandles.get(path) : null;
         if (!handle) {
@@ -120,11 +131,11 @@ async function save(path, content, suggestedFilename, password, resultSessionId)
         await writable.close();
         const resolvedPath = path && fileHandles.get(path) === handle ? path : String(++handleCounter);
         fileHandles.set(resolvedPath, handle);
-        return { path: resolvedPath, fileName: handle.name, encrypted: false, includesResults: false };
+        return { path: resolvedPath, fileName: handle.name, encrypted: Boolean(password), includesResults: false };
     }
     const fileName = suggestedFilename || 'untitled.kjt';
     downloadBlob(bytes, fileName, 'application/octet-stream');
-    return { path: null, fileName, encrypted: false, includesResults: false };
+    return { path: null, fileName, encrypted: Boolean(password), includesResults: false };
 }
 
 async function listExamples() {

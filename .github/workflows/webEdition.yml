@@ -1,0 +1,54 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
+name: Web edition build
+
+# Manual only, matching crossPlatform.yml's own "automatic CI is paused during early-alpha
+# development" convention -- this shouldn't run on every push either. Produces a downloadable
+# build artifact plus a Pages-ready package for inspection; deliberately stops one step short of
+# an actual deployment. See docs/proposals/webEdition.md's deployment section and
+# docs/developmentSetup.md for the concrete remaining steps to go live.
+on:
+    workflow_dispatch:
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        env:
+            VCPKG_DISABLE_METRICS: 1
+            # Caches vcpkg's built dependency binaries in GitHub's own Actions cache instead of
+            # rebuilding all of them (including the wasm32-emscripten triplet's own set) from
+            # source on every run -- see crossPlatform.yml/release.yml for the same.
+            VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24.19.0
+                  cache: npm
+            - name: Export GitHub Actions cache environment variables
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+                      core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            - run: npm ci
+            - run: npm run setup:web
+            - run: npm run build:web
+            - run: npm run build:webShell
+            - name: Upload the built shell for inspection
+              uses: actions/upload-artifact@v4
+              with:
+                  name: webShell
+                  path: out/webShell
+                  if-no-files-found: error
+            # Packages the exact same output in the shape actions/deploy-pages@v4 expects --
+            # deliberately NOT followed by a deploy-pages step, a `github-pages` environment, or
+            # the `pages: write`/`id-token: write` permissions that step needs. Those three
+            # additions, plus enabling GitHub Pages with "GitHub Actions" as the source under the
+            # repository's Settings > Pages, are the entire remaining distance to a live
+            # deployment -- this job stops here on purpose, not because anything is missing or
+            # broken.
+            - name: Package as a Pages-deployable artifact (not deployed)
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: out/webShell

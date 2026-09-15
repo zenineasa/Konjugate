@@ -38,21 +38,37 @@ function ensurePyodideLoaded() {
 }
 
 // Exposed so the provider editor's "Validate" button can run a syntax check without needing a
-// WASM engine instance at all -- see webShims/providerEditor.mjs.
+// WASM engine instance at all -- see webShims/providerEditor.mjs. Returns the same
+// { valid, diagnostics: [{ line, column, severity, message }] } shape src/main.mjs's own
+// validatePythonSource (the desktop provider editor's syntax check, run via a real python3
+// subprocess) returns -- not the same underlying mechanism (there is no subprocess/stdin here,
+// just a direct Pyodide call), but the same shape, so neither this editor nor a future richer
+// one needs its own diagnostic format.
 export async function runPythonSyntaxCheck(source) {
     const pyodide = await ensurePyodideLoaded();
     // Keeps the user's source out of any shared/global Pyodide namespace -- passed as a local via
     // globals rather than interpolated into the code string (avoids any quoting/escaping hazard).
     const scope = pyodide.toPy({ source });
     try {
-        pyodide.runPython('import ast\nast.parse(source)', { globals: scope });
-        return { valid: true };
+        const result = pyodide.runPython(
+            'import ast\n' +
+            'try:\n' +
+            '    ast.parse(source)\n' +
+            '    _konjugate_syntax_error = None\n' +
+            'except SyntaxError as error:\n' +
+            '    _konjugate_syntax_error = {"line": error.lineno or 1, "column": error.offset or 1, "message": error.msg}\n' +
+            '_konjugate_syntax_error',
+            { globals: scope }
+        );
+        const errorInfo = result?.toJs ? result.toJs({ dict_converter: Object.fromEntries }) : result;
+        result?.destroy?.();
+        if (!errorInfo) return { valid: true, diagnostics: [] };
+        return { valid: false, diagnostics: [{ line: errorInfo.line, column: errorInfo.column, severity: 'error', message: errorInfo.message }] };
     } catch (error) {
-        // Pyodide's PythonError.message is the whole Python traceback (useful in a devtools
-        // console, not in a one-line status message) -- the actual "SyntaxError: ..." is always
-        // its last non-empty line, so surface just that rather than the full traceback text.
+        // A genuinely unexpected failure -- not the user's own SyntaxError, which is caught
+        // above -- still reported as a diagnostic rather than thrown out of Validate.
         const lines = String(error.message ?? error).trim().split('\n');
-        return { valid: false, message: lines.at(-1) };
+        return { valid: false, diagnostics: [{ line: 1, column: 1, severity: 'error', message: lines.at(-1) }] };
     } finally {
         scope.destroy();
     }

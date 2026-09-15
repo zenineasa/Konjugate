@@ -53,7 +53,10 @@ function ensureDialog() {
         statusElement.textContent = 'Checking…';
         try {
             const result = await runPythonSyntaxCheck(textarea.value);
-            statusElement.textContent = result.valid ? 'No syntax errors found.' : `Syntax error: ${result.message}`;
+            const diagnostic = result.diagnostics[0];
+            statusElement.textContent = result.valid
+                ? 'No syntax errors found.'
+                : `Line ${diagnostic.line}, column ${diagnostic.column}: ${diagnostic.message}`;
         } catch (error) {
             statusElement.textContent = `Could not check syntax: ${error.message}`;
         }

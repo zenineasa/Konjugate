@@ -38,6 +38,9 @@ import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLo
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, packageKey, uninstallPackage } from './packageArchive.mjs';
 import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
+import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
+import { validateComponentTemplate } from './componentTemplate.mjs';
+import { normalizeShapeLibraryEntry } from './shapeLibraryCatalog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -309,7 +312,7 @@ async function openGuideWindow(projectWindow, payload) {
 
 async function openExampleGuide(projectWindow, id) {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
-    const guideName = id.replace(/\.kjt$/, '.md');
+    const guideName = `${exampleIdFromFileName(id)}.md`;
     const markdown = await readFile(join(examplesDir, guideName), 'utf8');
     return openGuideWindow(projectWindow, {
         id,
@@ -852,11 +855,6 @@ async function exampleFiles() {
     return (await readdir(examplesDir)).filter((name) => name.endsWith('.kjt'));
 }
 
-function exampleLabel(fileName) {
-    const stem = fileName.replace(/\.kjt$/, '');
-    return `${stem.charAt(0).toUpperCase()}${stem.slice(1)}`.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-}
-
 let examplesManifestCache = null;
 async function examplesManifest() {
     if (!examplesManifestCache) {
@@ -866,26 +864,13 @@ async function examplesManifest() {
     return examplesManifestCache;
 }
 
-// The guide's own "## Overview" paragraph doubles as the explorer card's description, rather
-// than duplicating it by hand in the manifest -- every example guide already opens with exactly
-// this structure (see docs/examples restructuring), so it stays in sync with the guide for free.
-async function exampleDescription(stem) {
-    const markdown = await readFile(join(examplesDir, `${stem}.md`), 'utf8').catch(() => '');
-    const match = markdown.match(/## Overview\r?\n\r?\n([\s\S]+?)(?=\r?\n##\s|\r?\n*$)/);
-    return match ? match[1].trim() : '';
-}
-
 ipcMain.handle('projectListExamples', async () => {
     const manifest = await examplesManifest();
     return Promise.all((await exampleFiles()).map(async (fileName) => {
-        const stem = fileName.replace(/\.kjt$/, '');
+        const stem = exampleIdFromFileName(fileName);
         const thumbnailPath = join(examplesDir, `${stem}.png`);
         return {
-            id: fileName,
-            label: exampleLabel(fileName),
-            suggestedFilename: fileName,
-            domains: manifest.get(stem)?.domains ?? [],
-            description: await exampleDescription(stem),
+            ...await exampleCatalogEntry(examplesDir, fileName, manifest),
             thumbnailUrl: existsSync(thumbnailPath) ? pathToFileURL(thumbnailPath).href : null
         };
     }));
@@ -916,17 +901,7 @@ const shapeFormatPattern = /\.(stl|step|stp)$/i;
 // something that's supposed to "just show up" the moment a file is saved into userShapesDir.
 async function shapeLibraryManifest() {
     const bundled = (JSON.parse(await readFile(join(shapesDir, 'manifest.json'), 'utf8')).shapes)
-        .map((shape) => {
-            const domains = Array.isArray(shape.domains)
-                ? shape.domains
-                : (shape.domain ? [shape.domain] : []);
-            return {
-                ...shape,
-                domains,
-                domain: domains[0] ?? 'general',
-                source: 'bundled'
-            };
-        });
+        .map(normalizeShapeLibraryEntry);
     const uploadedEntries = await readdir(userShapesDir, { withFileTypes: true }).catch(() => []);
     const uploaded = uploadedEntries
         .filter((entry) => entry.isFile() && shapeFormatPattern.test(entry.name))
@@ -962,56 +937,6 @@ ipcMain.handle('shapeLibrarySaveUpload', async (_event, { fileName, data }) => {
     await writeFile(join(userShapesDir, candidateName), Buffer.from(data));
     return { id: `userUploaded/${candidateName}` };
 });
-
-const componentTemplateIdPattern = /^[a-zA-Z][\w-]*$/;
-
-// Validates a bundled or user-saved node/edge template. Deliberately hand-rolled like
-// validateAddonManifest rather than a schema library -- the shape is small and stable.
-function validateComponentTemplate(template) {
-    if (!template || (template.kind !== 'node' && template.kind !== 'edge')) throw new Error('A template must have kind "node" or "edge".');
-    if (!componentTemplateIdPattern.test(template.id ?? '')) throw new Error('A template needs a valid id.');
-    if (!template.name) throw new Error('A template needs a name.');
-    const domains = template.domains ?? [];
-    if (!Array.isArray(domains) || !domains.length || !domains.every((domain) => typeof domain === 'string' && domain)) {
-        throw new Error('A template needs a non-empty domains array.');
-    }
-    if (template.kind === 'node') {
-        if (!Array.isArray(template.states) || !template.states.length) throw new Error('A node template needs at least one state.');
-        const stateSymbols = new Set();
-        template.states.forEach((state) => {
-            if (!componentTemplateIdPattern.test(state.symbol ?? '') || !state.label) throw new Error('A node template state needs a label and symbol.');
-            stateSymbols.add(state.symbol);
-        });
-        (template.sourceTerms ?? []).forEach((term) => {
-            if (!stateSymbols.has(term.state) || !term.expression) throw new Error('A node template source term needs a state matching one of its own states and an expression.');
-        });
-    } else {
-        // A port is usually one expected state symbol per role, but an edge whose equation
-        // couples more than one state on the same side (e.g. a motor's current and angular
-        // velocity, both referenced from the same "target" role) needs to declare more than one.
-        const validPort = (port) => port !== undefined && (Array.isArray(port) ? port.length : true) &&
-            [port].flat().every((symbol) => componentTemplateIdPattern.test(symbol ?? ''));
-        if (!template.ports || !validPort(template.ports.source) || !validPort(template.ports.target)) {
-            throw new Error('An edge template needs source and target port symbols.');
-        }
-        if (!template.latex) throw new Error('An edge template needs a latex expression.');
-        (template.parameters ?? []).forEach((parameter) => {
-            if (!componentTemplateIdPattern.test(parameter.symbol ?? '') || !parameter.name) throw new Error('An edge template parameter needs a name and symbol.');
-        });
-        // Required, not just validated-if-present: the builder's own "no explicit output yet"
-        // default is the target's first state, but that default is unreliable once an edge template
-        // arms a chained two-endpoint pick (refreshStateReferences briefly runs source-only, which
-        // leaves an implicit selection that then survives once the target is picked too) -- so a
-        // template can never safely rely on it and must always say which state it means to update.
-        if (!template.output || !['source', 'target'].includes(template.output.role) || !componentTemplateIdPattern.test(template.output.state ?? '')) {
-            throw new Error('An edge template needs an output naming a role ("source" or "target") and a state symbol.');
-        }
-        if (template.bidirectional !== undefined && typeof template.bidirectional !== 'boolean') {
-            throw new Error('An edge template\'s bidirectional flag must be a boolean.');
-        }
-    }
-    return structuredClone(template);
-}
 
 const componentLibraryRegistry = new Map();
 

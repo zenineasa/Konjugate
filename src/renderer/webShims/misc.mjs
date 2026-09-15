@@ -14,6 +14,7 @@
 // providerEditor.mjs.
 
 import { version } from './buildInfo.mjs';
+import { normalizeShapeLibraryEntry } from '../../shapeLibraryCatalog.mjs';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -60,10 +61,7 @@ async function shapeLibraryManifest() {
     const response = await fetch(new URL('../../assets/shapes/manifest.json', import.meta.url));
     if (!response.ok) return [];
     const parsed = await response.json();
-    return parsed.shapes.map((shape) => {
-        const domains = Array.isArray(shape.domains) ? shape.domains : (shape.domain ? [shape.domain] : []);
-        return { ...shape, domains, domain: domains[0] ?? 'general', source: 'bundled' };
-    });
+    return parsed.shapes.map(normalizeShapeLibraryEntry);
 }
 export const shapeLibrary = {
     list: () => shapeLibraryManifest(),

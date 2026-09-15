@@ -16,6 +16,8 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
+import { exampleCatalogEntry, exampleIdFromFileName } from '../src/exampleCatalog.mjs';
+import { validateComponentTemplate } from '../src/componentTemplate.mjs';
 
 const threads = process.argv[2] === 'threads';
 const srcDirectory = join(rootDirectory, 'src');
@@ -115,29 +117,17 @@ await cp(join(engineWebDirectory, 'konjugateEngine.wasm'), join(outputDirectory,
 await cp(join(rootDirectory, 'assets'), join(outputDirectory, 'assets'), { recursive: true });
 
 // Examples: copy the raw files, then generate the directory listing a browser can't produce
-// itself -- mirrors src/main.mjs's projectListExamples handler, for the bundled case.
+// itself -- mirrors src/main.mjs's projectListExamples handler, for the bundled case (shares its
+// label/description logic via src/exampleCatalog.mjs rather than re-deriving it).
 const examplesDirectory = join(rootDirectory, 'examples');
 await cp(examplesDirectory, join(outputDirectory, 'examples'), { recursive: true });
 const exampleFiles = (await readdir(examplesDirectory)).filter((name) => name.endsWith('.kjt'));
 const examplesManifest = new Map(JSON.parse(await readFile(join(examplesDirectory, 'manifest.json'), 'utf8'))
     .examples.map((entry) => [entry.id, entry]));
-function exampleLabel(fileName) {
-    const stem = fileName.replace(/\.kjt$/, '');
-    return `${stem.charAt(0).toUpperCase()}${stem.slice(1)}`.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-}
-async function exampleDescription(stem) {
-    const markdown = await readFile(join(examplesDirectory, `${stem}.md`), 'utf8').catch(() => '');
-    const match = markdown.match(/## Overview\r?\n\r?\n([\s\S]+?)(?=\r?\n##\s|\r?\n*$)/);
-    return match ? match[1].trim() : '';
-}
 const exampleEntries = await Promise.all(exampleFiles.map(async (fileName) => {
-    const stem = fileName.replace(/\.kjt$/, '');
+    const stem = exampleIdFromFileName(fileName);
     return {
-        id: fileName,
-        label: exampleLabel(fileName),
-        suggestedFilename: fileName,
-        domains: examplesManifest.get(stem)?.domains ?? [],
-        description: await exampleDescription(stem),
+        ...await exampleCatalogEntry(examplesDirectory, fileName, examplesManifest),
         thumbnailUrl: existsSync(join(examplesDirectory, `${stem}.png`)) ? `${stem}.png` : null
     };
 }));
@@ -146,13 +136,15 @@ await writeFile(join(outputDirectory, 'examples', 'webManifest.json'), JSON.stri
 // Component library: same directory-listing problem as examples, for the bundled templates only
 // (src/main.mjs's discoverComponentLibrary() also merges in a userData directory and installed
 // plugins -- both dropped here, same as webShims/misc.mjs's componentLibrary.list() already
-// documents).
+// documents). Validated the same way desktop validates every bundled/installed template
+// (src/componentTemplate.mjs), so a malformed bundled template is skipped here too instead of
+// shipping into the web build unvalidated.
 const componentLibraryDirectory = join(rootDirectory, 'assets', 'componentLibrary');
 const componentEntries = [];
 for (const name of await readdir(componentLibraryDirectory)) {
     if (!name.endsWith('.json')) continue;
     try {
-        componentEntries.push(JSON.parse(await readFile(join(componentLibraryDirectory, name), 'utf8')));
+        componentEntries.push(validateComponentTemplate(JSON.parse(await readFile(join(componentLibraryDirectory, name), 'utf8'))));
     } catch (error) {
         console.warn(`Skipping component template ${name}: ${error.message}`);
     }

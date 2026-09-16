@@ -2,12 +2,23 @@
 
 name: Web edition build
 
-# Manual only, matching crossPlatform.yml's own "automatic CI is paused during early-alpha
-# development" convention -- this shouldn't run on every push either. Produces a downloadable
-# build artifact plus a Pages-ready package for inspection; deliberately stops one step short of
-# an actual deployment. See docs/proposals/webEdition.md's deployment section and
-# docs/developmentSetup.md for the concrete remaining steps to go live.
+# A version-tag push (release.yml's own "version change" trigger for the desktop build/release)
+# now also deploys the web edition -- matching that file's own build-vs-publish split exactly: a
+# manual workflow_dispatch run still only builds and uploads artifacts for inspection (the `deploy`
+# job below is gated on `startsWith(github.ref, 'refs/tags/v')`, same condition release.yml's own
+# `release` job uses), so nothing publishes without an actual version tag. This deploys the
+# default, non-threads `web`/`webShell` build only, per docs/proposals/webEdition.md's own hosting
+# decision -- GitHub Pages for that variant, a COOP/COEP-capable host (Netlify/Cloudflare Pages)
+# for the pthread-enabled `web-threads`/`webShellThreads` variant specifically, since GitHub Pages
+# cannot send the response headers SharedArrayBuffer needs. That second host is real, separate
+# infrastructure (its own account/credentials) not set up here.
+#
+# One remaining manual step this file cannot do on its own: GitHub Pages must be enabled under
+# this repository's Settings > Pages, with "GitHub Actions" selected as the source. The `deploy`
+# job below will fail with a clear permissions/environment error until that's done once.
 on:
+    push:
+        tags: ['v*']
     workflow_dispatch:
 
 jobs:
@@ -41,14 +52,25 @@ jobs:
                   name: webShell
                   path: out/webShell
                   if-no-files-found: error
-            # Packages the exact same output in the shape actions/deploy-pages@v4 expects --
-            # deliberately NOT followed by a deploy-pages step, a `github-pages` environment, or
-            # the `pages: write`/`id-token: write` permissions that step needs. Those three
-            # additions, plus enabling GitHub Pages with "GitHub Actions" as the source under the
-            # repository's Settings > Pages, are the entire remaining distance to a live
-            # deployment -- this job stops here on purpose, not because anything is missing or
-            # broken.
-            - name: Package as a Pages-deployable artifact (not deployed)
+            # Packages the exact same output in the shape actions/deploy-pages@v4 expects.
+            - name: Package as a Pages-deployable artifact
               uses: actions/upload-pages-artifact@v3
               with:
                   path: out/webShell
+
+    deploy:
+        needs: build
+        # Manual (workflow_dispatch) runs only build and upload artifacts for inspection -- only
+        # an actual version-tag push deploys, matching release.yml's own `release` job condition.
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        permissions:
+            pages: write
+            id-token: write
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - name: Deploy to GitHub Pages
+              id: deployment
+              uses: actions/deploy-pages@v4

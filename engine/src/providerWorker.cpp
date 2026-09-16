@@ -7,11 +7,21 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
+// <iostream>/<thread>/the rest of this block are only needed by main()'s native pipe-transport
+// loop below (std::cin/std::cout) and the POSIX shared-memory fast path it can start
+// (KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY) -- both already excluded entirely for a WASI
+// target (see that macro's own definition below, and main()'s #ifndef __wasi__ guard), so none of
+// this needs to be included there either. This is not just tidiness: <iostream> in particular was
+// confirmed, directly, to make an otherwise-fast web-edition provider compile (see
+// src/webCppProviderBridge.mjs) take 10+ minutes (sometimes appearing to hang outright) through
+// @wasmer/sdk's in-browser clang -- a cost this file has no reason to pay when targeting __wasi__,
+// since it never uses any of what these headers provide there.
+#ifndef __wasi__
+#include <iostream>
 #if defined(_WIN32) || defined(_MSC_VER)
 #include <fcntl.h>
 #include <io.h>
@@ -22,6 +32,7 @@
 #include <semaphore.h>
 #include <sys/mman.h>
 #include <thread>
+#endif
 #endif
 
 // The shared-memory fast path (shm_open/mmap/sem_open/a real std::thread) is POSIX-only to begin
@@ -302,6 +313,12 @@ std::string encodeProviderFailure(std::uint64_t sequence, const std::string& cod
 }
 
 // ── Framed I/O ──────────────────────────────────────────────────────────────
+// Native pipe-transport only (main()'s own runLoop, below): the __wasi__-gated exports path
+// (also below) never touches std::cin/std::cout at all, exchanging already-framed-elsewhere byte
+// buffers directly through its exported functions instead -- so this whole section, and the
+// <iostream> it needs, is excluded there too. See providerWorker.cpp's own top-of-file comment on
+// why this exclusion is not just tidiness.
+#ifndef __wasi__
 
 void writeFramed(const std::string& message) {
     const auto size = static_cast<std::uint32_t>(message.size());
@@ -332,6 +349,7 @@ bool readFramedMessage(IncomingMessage& message) {
     message = decodeEngineToProvider(payload);
     return true;
 }
+#endif // __wasi__
 
 // ── Instance binding map ────────────────────────────────────────────────────
 

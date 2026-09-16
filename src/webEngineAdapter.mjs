@@ -62,10 +62,47 @@ function hasPythonProviderImplementation(content) {
     return implementations.some((implementation) => implementation?.kind === 'python');
 }
 
-async function ensurePythonProvidersReady(Module, content) {
+export async function ensurePythonProvidersReady(Module, content) {
     if (!hasPythonProviderImplementation(content)) return;
     const { installPythonProviderBridge } = await import('./webPythonProviderBridge.mjs');
     await installPythonProviderBridge(Module);
+}
+
+// Mirrors hasPythonProviderImplementation() above exactly, just for 'cpp' -- kept local rather
+// than imported from webCppProviderBridge.mjs for the same reason that function is local rather
+// than exported from webPythonProviderBridge.mjs: this check needs to run before deciding whether
+// to import that module at all.
+function hasCppProviderImplementation(content) {
+    let document;
+    try {
+        document = JSON.parse(content);
+    } catch {
+        return false;
+    }
+    const implementations = [
+        ...(document.nodes ?? []).map((node) => node.implementation),
+        ...(document.nodes ?? []).flatMap((node) => (node.sourceTerms ?? []).map((term) => term.implementation)),
+        ...(document.edges ?? []).map((edge) => edge.implementation)
+    ];
+    return implementations.some((implementation) => implementation?.kind === 'cpp');
+}
+
+// C++ providers (docs/proposals/webEdition.md, phase 5) need every distinct C++ provider source
+// the document references precompiled (the one genuinely async step -- see
+// webCppProviderBridge.mjs's own header comment) and Module.registerCppProviderBridge/
+// dispatchCppProviderBridge installed before callMain(['run'/'fit', ...]) runs -- see
+// engine/src/providerRuntime.cpp's WasmCppProviderBackend for the C++ side of this contract.
+// Only meaningful on a web-threads build (COOP/COEP; SharedArrayBuffer): @wasmer/sdk's browser
+// runtime requires cross-origin isolation the same way the pthread-enabled build already does --
+// on the default build this simply never finds a C++ provider actually able to run (providerRuntime
+// falls through to a clear "not supported" failure there instead), so there is nothing to gate here
+// on the build variant specifically. This import is lazy for the same reason
+// ensurePythonProvidersReady()'s is -- a model with no C++ provider at all should never pay for
+// @wasmer/sdk or a clang fetch.
+export async function ensureCppProvidersReady(Module, content) {
+    if (!hasCppProviderImplementation(content)) return;
+    const { ensureCppProvidersReady: ensureReady } = await import('./webCppProviderBridge.mjs');
+    await ensureReady(Module, content);
 }
 
 let modulePromise = null;
@@ -201,6 +238,7 @@ export async function fitWithWebEngine(engineModuleUrl, content, csvContent, con
     const report = await runOneShot(engineModuleUrl, {
         setup: async (Module, directory) => {
             await ensurePythonProvidersReady(Module, content);
+            await ensureCppProvidersReady(Module, content);
             const inputPath = `${directory}/input.kjt`;
             const csvPath = `${directory}/measured.csv`;
             const reportPath = `${directory}/fitting.bin`;
@@ -229,6 +267,7 @@ export async function runWithWebEngine(engineModuleUrl, content, configuration) 
     const result = await runOneShot(engineModuleUrl, {
         setup: async (Module, directory) => {
             await ensurePythonProvidersReady(Module, content);
+            await ensureCppProvidersReady(Module, content);
             const inputPath = `${directory}/input.kjt`;
             const configurationPath = `${directory}/runConfiguration.json`;
             const outputPath = `${directory}/result.bin`;

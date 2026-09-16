@@ -12,6 +12,7 @@
 // boundary that doesn't exist in this single-page design.
 
 import { runPythonSyntaxCheck } from '../../webPythonProviderBridge.mjs';
+import { threads } from './buildInfo.mjs';
 
 let dialog = null;
 let titleElement = null;
@@ -46,13 +47,18 @@ function ensureDialog() {
         appliedListeners.forEach((listener) => listener({ source }));
     });
     dialog.querySelector('[data-action="validate"]').addEventListener('click', async () => {
-        if (dialog.dataset.kind !== 'python') {
-            statusElement.textContent = 'Only Python providers can be checked in the web edition.';
+        const kind = dialog.dataset.kind;
+        if (kind !== 'python' && !(kind === 'cpp' && threads)) {
+            statusElement.textContent = kind === 'cpp'
+                ? 'C++ providers can only be checked in the pthread-enabled web build.'
+                : 'Only Python and C++ providers can be checked in the web edition.';
             return;
         }
         statusElement.textContent = 'Checking…';
         try {
-            const result = await runPythonSyntaxCheck(textarea.value);
+            const result = kind === 'python'
+                ? await runPythonSyntaxCheck(textarea.value)
+                : await (await import('../../webCppProviderBridge.mjs')).runCppSyntaxCheck(textarea.value);
             const diagnostic = result.diagnostics[0];
             statusElement.textContent = result.valid
                 ? 'No syntax errors found.'

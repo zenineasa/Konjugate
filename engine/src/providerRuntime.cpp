@@ -1414,6 +1414,199 @@ private:
     std::string processKey_;
     boost::property_tree::ptree pendingInstances_;
 };
+
+extern "C" {
+// Plain synchronous calls into JS, exactly like wasmDispatchPythonProviderRequest above -- unlike
+// that first attempt at this (an earlier revision of this file tried to spawn the compiled
+// provider as a live Wasmer-hosted OS process, which needs a genuinely async bridge since
+// @wasmer/sdk's process stdin/stdout are real Promise-based Streams), the web edition's C++
+// provider (see src/webCppProviderBridge.mjs) is instead a WASI-exports build of the SAME
+// engine/src/providerWorker.cpp glue file PipeProviderBackend spawns natively (see that file's
+// own __wasi__-gated section), instantiated directly via WebAssembly.instantiate() and called
+// through its exported functions -- there is no process, no Stream, and therefore no async
+// boundary left at evaluation time: compiling that module (the only genuinely async step, since
+// it needs a real clang fetched from Wasmer's registry) happens entirely ahead of callMain(), in
+// webEngineAdapter.mjs's ensureCppProvidersReady(); everything below runs after that, fully
+// synchronously.
+//
+// A JS-side bridge failure (an unknown processKey, an exception constructing/calling the
+// instance) is signaled by returning a null pointer / *outResponseLength == 0, deliberately not
+// by throwing across the EM_JS boundary (matching wasmDispatchPythonProviderRequest's own
+// defensive style, which returns a JSON {ok:false} value rather than relying on a thrown JS
+// error surviving the crossing into a C++ exception) -- zero bytes never occurs for a real
+// protocol response (every dispatchMessage() response wraps at least a field tag), so it is an
+// unambiguous sentinel here.
+EM_JS(unsigned char*, wasmDispatchCppProviderRequest,
+      (const char* processKey, const unsigned char* requestBytes, int requestLength, int* outResponseLength), {
+    const key = UTF8ToString(processKey);
+    const request = HEAPU8.slice(requestBytes, requestBytes + requestLength);
+    let response;
+    try {
+        if (typeof Module.dispatchCppProviderBridge !== 'function') {
+            throw new Error('This web build has no C++ provider bridge installed.');
+        }
+        response = Module.dispatchCppProviderBridge(key, request);
+    } catch (error) {
+        console.error(`Web C++ provider '${key}' bridge failure:`, error);
+        response = null;
+    }
+    if (!response || response.length === 0) {
+        HEAP32[outResponseLength >> 2] = 0;
+        return 0;
+    }
+    const buffer = _malloc(response.length);
+    HEAPU8.set(response, buffer);
+    HEAP32[outResponseLength >> 2] = response.length;
+    return buffer;
+});
+
+// The one-time counterpart to wasmDispatchCppProviderRequest above: hands the provider's raw C++
+// source text to the JS bridge, which compiles (if not already cached for this exact source) and
+// instantiates it, then calls its konjugateProviderCreate() export -- see
+// engine/src/providerWorker.cpp's __wasi__-gated section and src/webCppProviderBridge.mjs. Also
+// signals failure via a null return rather than a thrown JS error, for the same reason as above.
+EM_JS(char*, wasmRegisterCppProvider, (const char* processKey, const char* sourceUtf8), {
+    const key = UTF8ToString(processKey);
+    const source = UTF8ToString(sourceUtf8);
+    let errorMessage = null;
+    try {
+        if (typeof Module.registerCppProviderBridge !== 'function') {
+            throw new Error('This web build has no C++ provider bridge installed.');
+        }
+        Module.registerCppProviderBridge(key, source);
+    } catch (error) {
+        errorMessage = String(error?.message ?? error);
+    }
+    if (errorMessage === null) return 0;
+    const length = lengthBytesUTF8(errorMessage) + 1;
+    const buffer = _malloc(length);
+    stringToUTF8(errorMessage, buffer, length);
+    return buffer;
+});
+}
+
+// The web edition's C++-provider transport (docs/proposals/webEdition.md, phase 5): a copy of
+// engine/src/providerWorker.cpp -- the SAME glue file PipeProviderBackend spawns natively -- is
+// compiled to a WASI-exports build (see that file's own __wasi__-gated section) and instantiated
+// directly via WebAssembly.instantiate() instead (see src/webCppProviderBridge.mjs), speaking the
+// exact same framed-protobuf wire format ProviderControlChannel builds above; only the transport
+// differs (a direct synchronous export call instead of a pipe fd), not the protocol -- so this
+// class's message-building intentionally mirrors ProviderControlChannel's/PipeProviderBackend's
+// own methods field-for-field.
+//
+// createProviderBackend only ever routes relationship-shaped (isNodeShaped == false) cppProvider
+// tasks here: node-shaped C++ providers have no worker-process protocol support even natively
+// (see createProviderBackend's own comment on WasmPyodideProviderBackend above) and fail clearly
+// instead, matching that existing native limitation rather than inventing new behavior for the
+// web build.
+class WasmCppProviderBackend final : public ProviderBackend {
+public:
+    WasmCppProviderBackend(std::string processKey, const std::string& providerSource)
+        : processKey_(std::move(processKey)) {
+        // Registers this process's source with the JS bridge (compiles it once, on demand, and
+        // instantiates the resulting WASI-exports module -- see
+        // src/webCppProviderBridge.mjs) before anything else talks to it.
+        char* errorPointer = wasmRegisterCppProvider(processKey_.c_str(), providerSource.c_str());
+        if (errorPointer) {
+            const std::string message(errorPointer);
+            std::free(errorPointer);
+            throw std::runtime_error("Failed to prepare web C++ provider '" + processKey_ + "': " + message);
+        }
+
+        EngineToProvider handshake;
+        auto* h = handshake.mutable_handshake();
+        h->set_protocol_version(1);
+        h->set_provider_api_version(1);
+        const auto resp = dispatch(handshake);
+        if (!resp.has_handshake()) {
+            throw std::runtime_error("Unexpected response to handshake from web C++ provider '" + processKey_ + "'");
+        }
+    }
+
+    void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
+        auto* inst = initializeReq_.add_instances();
+        inst->set_instance_id(instanceId);
+        for (const auto& binding : bindings) inst->add_input_keys(binding.symbol);
+    }
+
+    void sendInitialization() override {
+        if (initializeReq_.instances_size() == 0) return;
+        EngineToProvider msg;
+        *msg.mutable_initialize() = initializeReq_;
+        const auto resp = dispatch(msg);
+        if (!resp.has_initialize()) {
+            throw std::runtime_error("Unexpected response to initialization from web C++ provider '" + processKey_ + "'");
+        }
+    }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t sequence, double simulationTime, double stepSize,
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) override {
+        // Mirrors PipeProviderBackend::evaluateBatch's own locking: multiple relationship
+        // instances sharing this process may be evaluated from different execution-plan threads
+        // in the same synchronization step, and the bridge round trip is not reentrant.
+        std::lock_guard<std::mutex> lock(mutex_);
+        EngineToProvider msg;
+        auto* batch = msg.mutable_evaluate_batch();
+        batch->set_sequence(sequence);
+        batch->set_simulation_time(simulationTime);
+        batch->set_step_size(stepSize);
+        for (const auto& [instId, inputs] : evaluations) {
+            auto* eval = batch->add_evaluations();
+            eval->set_instance_id(instId);
+            for (const auto val : inputs) eval->add_inputs(val);
+        }
+        const auto resp = dispatch(msg);
+        if (!resp.has_evaluate_batch()) {
+            throw std::runtime_error("Unexpected response to evaluateBatch from web C++ provider '" + processKey_ + "'");
+        }
+        std::vector<std::pair<std::uint64_t, double>> results;
+        for (const auto& contrib : resp.evaluate_batch().contributions()) {
+            results.emplace_back(contrib.instance_id(), contrib.value());
+        }
+        return results;
+    }
+
+    void shutdown() noexcept override {
+        try {
+            std::lock_guard<std::mutex> lock(mutex_);
+            EngineToProvider msg;
+            msg.mutable_shutdown();
+            dispatch(msg);
+        } catch (const std::exception& error) {
+            std::cerr << "Failed to shut down web C++ provider '" << processKey_ << "': " << error.what() << '\n';
+        }
+    }
+
+private:
+    ProviderToEngine dispatch(const EngineToProvider& request) {
+        std::string payload;
+        if (!request.SerializeToString(&payload)) {
+            throw std::runtime_error("Failed to serialize a message for web C++ provider '" + processKey_ + "'");
+        }
+        int responseLength = 0;
+        unsigned char* responsePointer = wasmDispatchCppProviderRequest(
+            processKey_.c_str(), reinterpret_cast<const unsigned char*>(payload.data()),
+            static_cast<int>(payload.size()), &responseLength);
+        if (!responsePointer || responseLength == 0) {
+            throw std::runtime_error("The web C++ provider bridge failed for '" + processKey_ + "' (see the browser console).");
+        }
+        ProviderToEngine response;
+        const bool parsed = response.ParseFromArray(responsePointer, responseLength);
+        std::free(responsePointer);
+        if (!parsed) {
+            throw std::runtime_error("Failed to parse a response from web C++ provider '" + processKey_ + "'");
+        }
+        if (response.has_failure()) {
+            throw std::runtime_error("Web C++ provider '" + processKey_ + "' failed: " + std::string(response.failure().message()));
+        }
+        return response;
+    }
+
+    std::string processKey_;
+    InitializeRequest initializeReq_;
+    std::mutex mutex_;
+};
 #endif
 
 namespace {
@@ -1472,6 +1665,17 @@ std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, C
     if (implementation != ContributionImplementation::cppProvider) {
         return std::make_unique<WasmPyodideProviderBackend>(key, providerSource);
     }
+    // Relationship-shaped C++ providers route to the WASM/Wasmer bridge (see
+    // WasmCppProviderBackend above); node-shaped ones have no worker-process protocol support
+    // even natively (see this function's own header comment) and fail clearly here too, rather
+    // than falling through into the native buildCppProvider()/PipeProviderBackend path below,
+    // which cannot work in a browser (no host compiler, no fork/exec).
+    if (!isNodeShaped) {
+        return std::make_unique<WasmCppProviderBackend>(key, providerSource);
+    }
+    throw std::runtime_error(
+        "C++ computational-node provider '" + key + "' is not supported in the web edition "
+        "(no worker-process protocol for node-shaped C++ providers, even natively).");
 #endif
     const auto launchPath = implementation == ContributionImplementation::cppProvider
         ? buildCppProvider(providerSource, config, CppProviderArtifactKind::executable)

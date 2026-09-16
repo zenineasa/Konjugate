@@ -30,6 +30,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 namespace konjugate {
 namespace {
@@ -174,13 +177,142 @@ Pacing pacingFromTree(const boost::property_tree::ptree& tree, const Pacing& fal
     return pacing;
 }
 
+// A pacing wait, used below both for the paused-state poll and the real-time/limited-ratio
+// per-step throttle. On every platform except the web build this is a plain
+// std::this_thread::sleep_for(), a real, ordinary blocking call. Under Emscripten's pthread
+// support specifically, that call was confirmed (directly, via a real live run in a real browser)
+// to hang indefinitely for any non-negligible duration: the thread that instantiates a
+// MODULARIZE'd module -- a dedicated Worker for every caller in this codebase (src/
+// webEngineLiveRunWorker.mjs et al.), never the page's own thread -- is still treated by
+// Emscripten's pthread support as ITS OWN distinct "main runtime thread", a role that does not
+// support genuine blocking the way an ordinary pthread worker does. -sPROXY_TO_PTHREAD=1 is
+// Emscripten's textbook fix for exactly this class of problem (it moves callMain() itself onto a
+// real, dedicated proxy pthread where blocking works normally) -- also confirmed directly, and
+// also confirmed to regress ordinary Module.FS-based batch runs/validate (they started failing
+// with ErrnoError: No such file or directory) at the same time, an unacceptable tradeoff for a
+// real-time-pacing-only problem, so it is not used. A plain busy-wait against a monotonic clock
+// sidesteps the whole question: it needs no blocking primitive at all, so it behaves identically
+// regardless of which thread runs it, at the cost of spinning one core for the wait's duration:
+// each individual call is capped at a few tens of milliseconds, which is the whole cost for the
+// real-time/limited-ratio per-step throttle (bounded by the run's own length), but the
+// paused-state poll calls this repeatedly for as long as a web-edition run stays paused, meaning
+// this Worker's core stays pegged at 100% for the entire pause, not just each 40ms slice of it --
+// a real, known, accepted cost on the web build specifically, not a correctness problem (nothing
+// elsewhere on the page is affected; pausing a run natively is unaffected, since this branch never
+// compiles in there).
+void pacingWait(std::chrono::milliseconds duration) {
+#ifdef __EMSCRIPTEN__
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (std::chrono::steady_clock::now() < deadline) {}
+#else
+    std::this_thread::sleep_for(duration);
+#endif
+}
+
+// Validates and pushes one already-length-delimited command frame's payload into inbox, tracking
+// previousSequence the same way across calls a caller must maintain -- shared by both the
+// native-shaped, thread-plus-blocking-stream reader below and the web build's own polling reader
+// (see pollEmscriptenControlBytes()), which differ only in how the raw framed bytes arrive, not in
+// how a frame's payload is validated or queued.
+void handleControlCommandPayload(const char* payload, std::size_t size, ControlInbox& inbox, std::uint64_t& previousSequence) {
+    protocol::EngineCommand command;
+    if (!command.ParseFromArray(payload, static_cast<int>(size)) ||
+        command.protocol_version() != 1 || !command.sequence() || command.sequence() <= previousSequence ||
+        command.payload_case() == protocol::EngineCommand::PAYLOAD_NOT_SET) {
+        std::lock_guard lock(inbox.mutex);
+        inbox.error = "The engine received an invalid, unsupported or out-of-order command.";
+        return;
+    }
+    previousSequence = command.sequence();
+    std::lock_guard lock(inbox.mutex);
+    inbox.commands.push_back(std::move(command));
+}
+
+#ifdef __EMSCRIPTEN__
+extern "C" {
+// Synchronously drains and returns whatever command bytes are currently queued (possibly zero) in
+// the live-run job's SharedArrayBuffer-backed ring buffer -- see src/webEngineStdinBuffer.mjs's
+// drainStdinBytes() and src/webEngineLiveRunWorker.mjs, which writes this Worker's stdinRing
+// reference into Module.controlStreamRing before callMain() runs. Never blocks: unlike the
+// native pipe transport's dedicated reader thread, this is called from
+// pollEmscriptenControlBytes() below, itself called from the SAME thread running the whole
+// simulation loop (see that function's own header comment for why), so it must return
+// immediately with whatever is available, exactly like every other per-step check in that loop.
+EM_JS(unsigned char*, wasmDrainControlBytes, (int* outLen), {
+    if (typeof Module.drainControlStreamBytes !== 'function') {
+        HEAP32[outLen >> 2] = 0;
+        return 0;
+    }
+    const bytes = Module.drainControlStreamBytes();
+    if (!bytes || bytes.length === 0) {
+        HEAP32[outLen >> 2] = 0;
+        return 0;
+    }
+    const buffer = _malloc(bytes.length);
+    HEAPU8.set(bytes, buffer);
+    HEAP32[outLen >> 2] = bytes.length;
+    return buffer;
+});
+}
+
+// The web build's control-stream reader: docs/proposals/webEdition.md's live-run design initially
+// reused the native pipe transport's own std::cin/startControlReader() thread unchanged (matching
+// this file's own "no engine changes needed" original plan), on the theory that a real std::thread
+// under Emscripten's pthread support becomes a genuine separate Worker whose blocking stdin read
+// would work exactly like a native blocking pipe read. Confirmed FALSE by direct testing in a real
+// browser: Module.stdin was never invoked at all, and pause/setPacing/setParameterValue commands
+// were silently dropped (no error -- the reader thread's own read() call is itself proxied back to
+// whichever thread owns Emscripten's FS/TTY state, normally the thread that instantiated the
+// module -- but that thread is THIS thread, permanently busy running the very simulation loop the
+// proxied call would need to interrupt to be serviced, so it can never actually complete).
+// -sPROXY_TO_PTHREAD=1 (Emscripten's textbook fix for "my code needs to block on what would
+// otherwise be the main thread") was also tried and also confirmed broken, differently: it made
+// ordinary Module.FS-based batch runs/validate fail outright. A synchronous EM_JS poll sidesteps
+// the whole question the same way emitEngineEvent (engine/src/main.cpp) already does for the
+// output direction: no blocking primitive, no separate thread, no thread-ownership question --
+// just a plain, non-blocking, same-thread call, made from inside the main loop's own existing
+// per-step refreshRunControl() poll (already gated on the same ~10ms cadence a real read would
+// have imposed a syscall's worth of overhead for anyway).
+struct EmscriptenControlBuffer {
+    std::string pending;
+    std::uint64_t previousSequence = 0;
+};
+
+void pollEmscriptenControlBytes(ControlInbox& inbox, EmscriptenControlBuffer& buffer) {
+    int length = 0;
+    unsigned char* bytes = wasmDrainControlBytes(&length);
+    if (bytes && length > 0) {
+        buffer.pending.append(reinterpret_cast<const char*>(bytes), static_cast<std::size_t>(length));
+        std::free(bytes);
+    }
+    while (buffer.pending.size() >= 4) {
+        const auto& header = buffer.pending;
+        const auto size = (static_cast<std::uint32_t>(static_cast<unsigned char>(header[0])) << 24) |
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(header[1])) << 16) |
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(header[2])) << 8) |
+             static_cast<std::uint32_t>(static_cast<unsigned char>(header[3]));
+        if (!size || size > 1024 * 1024) {
+            std::lock_guard lock(inbox.mutex);
+            inbox.error = "The engine command frame has an invalid size.";
+            return;
+        }
+        if (buffer.pending.size() < 4 + static_cast<std::size_t>(size)) return; // wait for the rest of this frame
+        handleControlCommandPayload(buffer.pending.data() + 4, size, inbox, buffer.previousSequence);
+        buffer.pending.erase(0, 4 + size);
+    }
+}
+#endif
+
 // stream must outlive the whole process -- see runSimulation()'s doc comment in
 // simulationRunner.hpp. The thread below is deliberately detached rather than joined: joining it
 // would mean blocking runSimulation()'s return on stream->read() reaching EOF or an error, which
 // for the real caller (stdin, piped from a parent process) may never happen on a clean, one-shot
 // successful run if the parent never closes its write end -- exactly the deadlock main.cpp's own
 // std::_Exit() comment works around on the shutdown side. Detaching is the reason stream's
-// lifetime requirement is "the whole process" rather than "until runSimulation() returns".
+// lifetime requirement is "the whole process" rather than "until runSimulation() returns". Never
+// actually used on the web build (see pollEmscriptenControlBytes() above for why), so it is
+// excluded there entirely rather than left as unreachable dead code.
+#ifndef __EMSCRIPTEN__
 std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
     auto inbox = std::make_shared<ControlInbox>();
     if (!stream) return inbox;
@@ -211,21 +343,12 @@ std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
                 inbox->error = "The engine command stream ended inside a frame payload.";
                 return;
             }
-            protocol::EngineCommand command;
-            if (!command.ParseFromArray(payload.data(), static_cast<int>(payload.size())) ||
-                command.protocol_version() != 1 || !command.sequence() || command.sequence() <= previousSequence ||
-                command.payload_case() == protocol::EngineCommand::PAYLOAD_NOT_SET) {
-                std::lock_guard lock(inbox->mutex);
-                inbox->error = "The engine received an invalid, unsupported or out-of-order command.";
-                return;
-            }
-            previousSequence = command.sequence();
-            std::lock_guard lock(inbox->mutex);
-            inbox->commands.push_back(std::move(command));
+            handleControlCommandPayload(payload.data(), payload.size(), *inbox, previousSequence);
         }
     }).detach();
     return inbox;
 }
+#endif
 
 RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunControl current) {
     std::vector<protocol::EngineCommand> commands;
@@ -296,7 +419,17 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto outputRatio = outputInterval / globalTimeStep;
     auto pacing = pacingFromTree(configuration);
     RunControl runControl{pacing, RunState::running, {}};
+#ifdef __EMSCRIPTEN__
+    // See pollEmscriptenControlBytes()'s own header comment for why the web build never spawns
+    // startControlReader()'s thread at all here (not just why it wouldn't work): a thread that can
+    // never make progress would otherwise permanently occupy one of a finite number of pthread
+    // pool slots for the rest of the run, competing with slots parallel execution may need.
+    static_cast<void>(controlStream); // never read on the web build -- see pollEmscriptenControlBytes() above
+    const auto controlInbox = std::make_shared<ControlInbox>();
+    EmscriptenControlBuffer emscriptenControlBuffer;
+#else
     const auto controlInbox = startControlReader(controlStream);
+#endif
     if (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
         !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
         throw std::runtime_error("A run requires a finite positive targetTime and numerical timestep values.");
@@ -749,6 +882,9 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto refreshRunControl = [&](bool force = false) {
         const auto now = std::chrono::steady_clock::now();
         if (force || now - lastControlReadAt >= std::chrono::milliseconds(10)) {
+#ifdef __EMSCRIPTEN__
+            pollEmscriptenControlBytes(*controlInbox, emscriptenControlBuffer);
+#endif
             runControl = drainRunControl(controlInbox, std::move(runControl));
             lastControlReadAt = now;
         }
@@ -761,7 +897,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             captureBoundary();
             writeResult("paused", currentTime);
             while (runControl.executionState == RunState::paused) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                pacingWait(std::chrono::milliseconds(40));
                 refreshRunControl(true);
             }
             pacing = runControl.pacing;
@@ -863,7 +999,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             const auto spent = std::chrono::steady_clock::now() - wallStepStarted;
             if (spent >= targetDuration) break;
             const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(targetDuration - spent);
-            std::this_thread::sleep_for(std::min(remaining, std::chrono::milliseconds(20)));
+            pacingWait(std::min(remaining, std::chrono::milliseconds(20)));
             refreshRunControl(true);
             pacing = runControl.pacing;
             if (runControl.executionState != RunState::running) break;

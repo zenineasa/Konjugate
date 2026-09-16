@@ -24,6 +24,19 @@
 #include <thread>
 #endif
 
+// The shared-memory fast path (shm_open/mmap/sem_open/a real std::thread) is POSIX-only to begin
+// with, and additionally unavailable when this file is compiled for a WASI target -- the web
+// edition's C++ providers (docs/proposals/webEdition.md) compile this same file client-side via
+// a WASI-targeting clang (see src/webCppProviderBridge.mjs), which never sets the
+// KONJUGATE_PROVIDER_SHM/KONJUGATE_PROVIDER_REQ_SEM/KONJUGATE_PROVIDER_RESP_SEM environment
+// variables this path needs anyway (only SharedMemoryProviderBackend, a native-only transport,
+// sets them) -- __wasi__ is the standard predefine clang sets for --target=wasm32-wasi.
+#if defined(_WIN32) || defined(__wasi__)
+#define KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY 0
+#else
+#define KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY 1
+#endif
+
 namespace {
 
 // ── Minimal protobuf wire-format helpers ────────────────────────────────────
@@ -340,7 +353,7 @@ void buildInstanceBinding(const ProviderInstance& instance,
     instanceBindings[instance.instanceId] = std::move(binding);
 }
 
-#ifndef _WIN32
+#if KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY
 struct SharedMemoryWorkerChannel {
     konjugate::provider::sharedmem::Channel* channel = nullptr;
     sem_t* requestSemaphore = SEM_FAILED;
@@ -447,8 +460,103 @@ void stopSharedMemoryEvalThread(std::thread& evalThread, std::atomic<bool>& stop
 }
 #endif
 
+// ── Shared message dispatch ─────────────────────────────────────────────────
+//
+// Constructs the provider via the user's own createRelationshipProvider() factory (the same
+// extern function both the executable and web-edition-exports build link against), reporting any
+// failure through the same encodeProviderFailure() shape either transport otherwise uses for
+// protocol-level failures -- so a factory bug looks the same over both.
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> tryCreateProvider(std::string& failureResponse) {
+    try {
+        auto provider = createRelationshipProvider();
+        if (!provider) {
+            failureResponse = encodeProviderFailure(0, "factoryFailed", "createRelationshipProvider returned null.", true);
+            return nullptr;
+        }
+        return provider;
+    } catch (const std::exception& error) {
+        failureResponse = encodeProviderFailure(0, "factoryFailed", error.what(), true);
+        return nullptr;
+    }
+}
+
+struct DispatchResult {
+    std::string responseBytes; // unframed: the same payload writeFramed() would send, before its own 4-byte length prefix
+    bool stop = false;         // whether the CALLER (main()'s own read loop; meaningless to the WASI-exports path below,
+                                // which has no "process" to stop -- see its own header comment) should stop reading further messages
+    int exitCode = 0;
+};
+
+// The single per-message handler both main()'s native pipe-transport read loop AND the web
+// edition's WASI-exports transport (docs/proposals/webEdition.md, phase 5; see the __wasi__-gated
+// section below) call -- the exact same protocol logic either way, differing only in how a
+// message's bytes arrive (a framed pipe read vs. an exported function's byte-buffer argument) and
+// leave (a framed pipe write vs. an exported function's byte-buffer return). Shared-memory
+// eval-thread bookkeeping (KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY) is deliberately NOT here:
+// it is native-pipe-transport-specific (never reachable when compiled for __wasi__ at all, since
+// that macro is unconditionally 0 there), so it stays in main()'s own wrapper around this call.
+DispatchResult dispatchMessage(const IncomingMessage& message, konjugate::sdk::v1::RelationshipProvider& provider,
+                               const konjugate::sdk::v1::RelationshipDescription& description, bool& initialized) {
+    switch (message.kind) {
+        case MessageKind::handshake: {
+            if (message.handshake.protocolVersion != 1 || message.handshake.providerApiVersion != 1) {
+                return {encodeProviderFailure(0, "versionMismatch",
+                    "This provider supports protocol version 1 and API version 1.", true), true, 1};
+            }
+            return {encodeHandshakeResponse(description), false, 0};
+        }
+        case MessageKind::initialize: {
+            std::vector<std::uint64_t> initializedIds;
+            for (const auto& instance : message.initialize.instances) {
+                buildInstanceBinding(instance, description);
+                provider.initialize({instance.instanceId});
+                initializedIds.push_back(instance.instanceId);
+            }
+            initialized = true;
+            return {encodeInitializeResponse(initializedIds), false, 0};
+        }
+        case MessageKind::evaluateBatch: {
+            if (!initialized) {
+                return {encodeProviderFailure(message.evaluateBatch.sequence, "notInitialized",
+                    "Evaluation received before initialization.", true), true, 1};
+            }
+            const auto& batch = message.evaluateBatch;
+            std::vector<std::pair<std::uint64_t, double>> contributions;
+            for (const auto& evaluation : batch.evaluations) {
+                const auto it = instanceBindings.find(evaluation.instanceId);
+                if (it == instanceBindings.end()) {
+                    return {encodeProviderFailure(batch.sequence, "unknownInstance",
+                        "Evaluation references an uninitialized instance.", true), true, 1};
+                }
+                const auto& binding = it->second;
+                std::vector<double> orderedValues(description.inputs.size(), 0);
+                for (std::size_t index = 0; index < binding.keyIndexes.size() && index < evaluation.inputs.size(); ++index) {
+                    orderedValues[binding.keyIndexes[index]] = evaluation.inputs[index];
+                }
+                std::vector<std::string_view> keys;
+                keys.reserve(description.inputs.size());
+                for (const auto& input : description.inputs) keys.push_back(input.key);
+                konjugate::sdk::v1::OutputCollector output;
+                provider.evaluate({batch.simulationTime, batch.stepSize, {orderedValues, keys}}, output);
+                contributions.emplace_back(evaluation.instanceId, output.gradient());
+            }
+            return {encodeEvaluateBatchResponse(batch.sequence, contributions), false, 0};
+        }
+        case MessageKind::shutdown: {
+            provider.shutdown();
+            return {encodeShutdownResponse(), true, 0};
+        }
+    }
+    throw std::logic_error("Unreachable provider message kind in dispatchMessage().");
+}
+
 } // anonymous namespace
 
+// This whole function is excluded for a WASI-exports build (see the __wasi__-gated section
+// below instead): there is no real OS process/pipe for it to run over there, and the web
+// edition's transport calls dispatchMessage() directly through exported functions instead of
+// via this stdin/stdout read loop.
+#ifndef __wasi__
 // The only code before the try/catch below is the Windows _setmode() calls, a non-throwing CRT
 // function (returns int, no exception path); every other statement in this function is already
 // covered by a try/catch (see below).
@@ -457,22 +565,23 @@ int main() { // NOLINT(bugprone-exception-escape)
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
+    std::string factoryFailure;
     std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> provider;
     try {
         // basic_ios::exceptions() can itself throw if the stream is already in one of the
-        // newly-enabled exception states, so it shares this try/catch rather than running
-        // unprotected before it -- narrow in practice, but the point of this worker's own
-        // uniform failure path (encodeProviderFailure() over the framed protocol, not a bare
-        // crash) is exactly to cover cases like this.
+        // newly-enabled exception states, so it happens before tryCreateProvider() rather than
+        // being folded into it -- narrow in practice, but the point of this worker's own uniform
+        // failure path (encodeProviderFailure() over the framed protocol, not a bare crash) is
+        // exactly to cover cases like this.
         std::cin.exceptions(std::ios::badbit);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
-        provider = createRelationshipProvider();
     } catch (const std::exception& error) {
         writeFramed(encodeProviderFailure(0, "factoryFailed", error.what(), true));
         return 1;
     }
+    provider = tryCreateProvider(factoryFailure);
     if (!provider) {
-        writeFramed(encodeProviderFailure(0, "factoryFailed", "createRelationshipProvider returned null.", true));
+        writeFramed(factoryFailure);
         return 1;
     }
 
@@ -480,7 +589,7 @@ int main() { // NOLINT(bugprone-exception-escape)
     bool initialized = false;
     bool shutdownReceived = false;
 
-#ifndef _WIN32
+#if KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY
     std::optional<SharedMemoryWorkerChannel> sharedMemory;
     try {
         sharedMemory = openSharedMemoryWorkerChannel();
@@ -492,97 +601,123 @@ int main() { // NOLINT(bugprone-exception-escape)
     std::atomic<bool> stopRequested{false};
 #endif
 
+    // Shared-memory eval-thread bookkeeping around each message is native-pipe-transport-specific
+    // (see dispatchMessage()'s own header comment) -- the per-message protocol logic itself,
+    // including provider->shutdown(), lives there and is reused unchanged by the web edition's
+    // WASI-exports transport below.
     auto runLoop = [&]() {
         IncomingMessage message;
         while (readFramedMessage(message)) {
-            switch (message.kind) {
-                case MessageKind::handshake: {
-                    if (message.handshake.protocolVersion != 1 || message.handshake.providerApiVersion != 1) {
-                        writeFramed(encodeProviderFailure(0, "versionMismatch",
-                            "This provider supports protocol version 1 and API version 1.", true));
-                        return 1;
-                    }
-                    writeFramed(encodeHandshakeResponse(description));
-                    break;
-                }
-                case MessageKind::initialize: {
-                    std::vector<std::uint64_t> initializedIds;
-                    for (const auto& instance : message.initialize.instances) {
-                        buildInstanceBinding(instance, description);
-                        provider->initialize({instance.instanceId});
-                        initializedIds.push_back(instance.instanceId);
-                    }
-                    initialized = true;
-#ifndef _WIN32
-                    if (sharedMemory && !evalThread.joinable()) {
-                        evalThread = std::thread(runSharedMemoryEvalLoop, std::ref(*provider), std::cref(description),
-                            sharedMemory->channel, sharedMemory->requestSemaphore, sharedMemory->responseSemaphore,
-                            std::ref(stopRequested));
-                    }
-#endif
-                    writeFramed(encodeInitializeResponse(initializedIds));
-                    break;
-                }
-                case MessageKind::evaluateBatch: {
-                    if (!initialized) {
-                        writeFramed(encodeProviderFailure(message.evaluateBatch.sequence, "notInitialized",
-                            "Evaluation received before initialization.", true));
-                        return 1;
-                    }
-                    const auto& batch = message.evaluateBatch;
-                    std::vector<std::pair<std::uint64_t, double>> contributions;
-                    for (const auto& evaluation : batch.evaluations) {
-                        const auto it = instanceBindings.find(evaluation.instanceId);
-                        if (it == instanceBindings.end()) {
-                            writeFramed(encodeProviderFailure(batch.sequence, "unknownInstance",
-                                "Evaluation references an uninitialized instance.", true));
-                            return 1;
-                        }
-                        const auto& binding = it->second;
-                        std::vector<double> orderedValues(description.inputs.size(), 0);
-                        for (std::size_t index = 0; index < binding.keyIndexes.size() && index < evaluation.inputs.size(); ++index) {
-                            orderedValues[binding.keyIndexes[index]] = evaluation.inputs[index];
-                        }
-                        std::vector<std::string_view> keys;
-                        keys.reserve(description.inputs.size());
-                        for (const auto& input : description.inputs) keys.push_back(input.key);
-                        konjugate::sdk::v1::OutputCollector output;
-                        provider->evaluate(
-                            {batch.simulationTime, batch.stepSize, {orderedValues, keys}},
-                            output);
-                        contributions.emplace_back(evaluation.instanceId, output.gradient());
-                    }
-                    writeFramed(encodeEvaluateBatchResponse(batch.sequence, contributions));
-                    break;
-                }
-                case MessageKind::shutdown: {
-                    shutdownReceived = true;
-#ifndef _WIN32
-                    stopSharedMemoryEvalThread(evalThread, stopRequested,
-                        sharedMemory ? sharedMemory->requestSemaphore : nullptr);
-#endif
-                    provider->shutdown();
-                    writeFramed(encodeShutdownResponse());
-                    return 0;
-                }
+            auto result = dispatchMessage(message, *provider, description, initialized);
+#if KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY
+            if (message.kind == MessageKind::initialize && sharedMemory && !evalThread.joinable()) {
+                evalThread = std::thread(runSharedMemoryEvalLoop, std::ref(*provider), std::cref(description),
+                    sharedMemory->channel, sharedMemory->requestSemaphore, sharedMemory->responseSemaphore,
+                    std::ref(stopRequested));
             }
+#endif
+            if (message.kind == MessageKind::shutdown) {
+                shutdownReceived = true;
+#if KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY
+                stopSharedMemoryEvalThread(evalThread, stopRequested, sharedMemory ? sharedMemory->requestSemaphore : nullptr);
+#endif
+            }
+            writeFramed(result.responseBytes);
+            if (result.stop) return result.exitCode;
         }
         return 0;
     };
 
     try {
         const auto result = runLoop();
-#ifndef _WIN32
+#if KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY
         stopSharedMemoryEvalThread(evalThread, stopRequested, sharedMemory ? sharedMemory->requestSemaphore : nullptr);
 #endif
         if (!shutdownReceived) provider->shutdown();
         return result;
     } catch (const std::exception& error) {
         writeFramed(encodeProviderFailure(0, "workerFailure", error.what(), true));
-#ifndef _WIN32
+#if KONJUGATE_PROVIDER_WORKER_HAS_SHARED_MEMORY
         stopSharedMemoryEvalThread(evalThread, stopRequested, sharedMemory ? sharedMemory->requestSemaphore : nullptr);
 #endif
         try { provider->shutdown(); } catch (...) {} // NOLINT(bugprone-empty-catch)
         return 1;
     }
 }
+#else // __wasi__
+
+// The web edition's C++-provider transport (docs/proposals/webEdition.md, phase 5): a browser
+// has no OS process/pipe to run main()'s read loop over (and, separately, no supported way to
+// spawn a compiled WASM module as a live Wasmer-hosted process from raw bytes at all -- confirmed
+// against the current @wasmer/sdk, see src/webCppProviderBridge.mjs's own header comment), so
+// this build exports plain functions instead: src/webCppProviderBridge.mjs instantiates this
+// compiled module directly via WebAssembly.instantiate() (synchronous once the module itself is
+// compiled) and calls these exports synchronously from the engine's own EM_JS provider-bridge
+// call (engine/src/providerRuntime.cpp's WasmCppProviderBackend) -- there is no async boundary
+// left to cross at evaluation time, unlike a real spawned process's Promise-based stdin/stdout.
+//
+// konjugateProviderDispatch() below reuses dispatchMessage() -- the exact same protocol logic
+// main()'s pipe loop uses -- unchanged; only the transport differs (an exported function's
+// byte-buffer argument/return instead of a framed pipe read/write). This state is intentionally
+// file-scope, not per-call: one compiled/instantiated WASM module here plays the same role as one
+// spawned OS process natively, living for the whole run, not per request.
+namespace {
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> wasmProvider;
+konjugate::sdk::v1::RelationshipDescription wasmDescription;
+bool wasmInitialized = false;
+
+uint8_t* returnBytes(const std::string& bytes, int* outLen) {
+    auto* buffer = static_cast<uint8_t*>(std::malloc(bytes.size()));
+    if (buffer) std::memcpy(buffer, bytes.data(), bytes.size());
+    *outLen = static_cast<int>(bytes.size());
+    return buffer;
+}
+} // anonymous namespace
+
+extern "C" {
+
+// Constructs the provider (the same createRelationshipProvider() factory the native pipe
+// transport uses) and computes its description -- main()'s own pre-loop setup, called once by
+// webCppProviderBridge.mjs right after instantiation, before any konjugateProviderDispatch()
+// call. Returns an encoded Failure (see tryCreateProvider()) on error, or an empty buffer
+// (*outLen == 0) on success -- there is no protocol response for this step, since it has no
+// pipe-transport equivalent message (the pipe transport's process spawn itself plays this role
+// there); the caller (webCppProviderBridge.mjs) should still send an explicit handshake message
+// through konjugateProviderDispatch() afterward, exactly like the pipe transport's first message,
+// to reach the same negotiated/ready state either way.
+__attribute__((export_name("konjugateProviderCreate")))
+uint8_t* konjugateProviderCreate(int* outLen) {
+    std::string failure;
+    wasmProvider = tryCreateProvider(failure);
+    if (!wasmProvider) return returnBytes(failure, outLen);
+    try {
+        wasmDescription = wasmProvider->describe();
+    } catch (const std::exception& error) {
+        wasmProvider.reset();
+        return returnBytes(encodeProviderFailure(0, "factoryFailed", error.what(), true), outLen);
+    }
+    return returnBytes({}, outLen);
+}
+
+// Handles one EngineToProvider message's already-decoded-from-the-outer-frame bytes (i.e. exactly
+// the payload a native pipe write's 4-byte length header would have introduced, without that
+// header itself -- webCppProviderBridge.mjs never adds pipe framing at all, so there is none to
+// strip here either) via the shared dispatchMessage(), and returns the encoded ProviderToEngine
+// response bytes. Must not be called before konjugateProviderCreate() has succeeded.
+__attribute__((export_name("konjugateProviderDispatch")))
+uint8_t* konjugateProviderDispatch(const uint8_t* requestBytes, int requestLen, int* outLen) {
+    if (!wasmProvider) {
+        return returnBytes(encodeProviderFailure(0, "notInitialized", "konjugateProviderCreate() has not succeeded.", true), outLen);
+    }
+    try {
+        const std::string payload(reinterpret_cast<const char*>(requestBytes), static_cast<std::size_t>(requestLen));
+        const auto message = decodeEngineToProvider(payload);
+        const auto result = dispatchMessage(message, *wasmProvider, wasmDescription, wasmInitialized);
+        return returnBytes(result.responseBytes, outLen);
+    } catch (const std::exception& error) {
+        return returnBytes(encodeProviderFailure(0, "workerFailure", error.what(), true), outLen);
+    }
+}
+
+}
+#endif // __wasi__

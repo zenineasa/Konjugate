@@ -525,6 +525,15 @@ if(EMSCRIPTEN)
         -sEXPORT_NAME=createKonjugateEngine
         -sEXPORTED_RUNTIME_METHODS=FS,callMain
         -sINVOKE_RUN=0
+        # Without this, Emscripten can tree-shake the stdin/stdout TTY device registration that a
+        # caller-supplied Module.stdin actually needs at runtime -- confirmed directly: the
+        # web-threads live-run path (src/webEngineLiveRunWorker.mjs) passes a real, working
+        # Module.stdin (its own callback is never even invoked without this flag, confirmed via
+        # instrumentation), and simulationRunner.cpp's startControlReader() (fed by that stdin)
+        # never receives a single byte as a result -- pause/resume/live pacing/parameter commands
+        # are silently ignored rather than erroring, since drainRunControl() simply sees an
+        # eternally-empty inbox, not a failure.
+        -sFORCE_FILESYSTEM=1
     )
     if(KONJUGATE_WEB_THREADS)
         # -pthread is codegen-affecting (shared-memory atomics), not just a link flag, like

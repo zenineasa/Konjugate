@@ -13,7 +13,7 @@
 // browser equivalent yet. Python providers (phase 4) are real -- see providerToolchains below and
 // providerEditor.mjs.
 
-import { version } from './buildInfo.mjs';
+import { threads, version } from './buildInfo.mjs';
 import { normalizeShapeLibraryEntry } from '../../shapeLibraryCatalog.mjs';
 
 const minimumUiZoom = 0.75;
@@ -94,12 +94,24 @@ export const extensions = {
 // everything else here.
 
 // Python's toolchain is Pyodide, bundled with the app -- there's no interpreter path to locate,
-// override, or browse to (see docs/proposals/webEdition.md, phase 4). C++'s toolchain UI stays
-// honestly unavailable (phase 5's concern: a WASM-hosted C++ compiler, not attempted yet).
+// override, or browse to (see docs/proposals/webEdition.md, phase 4). C++'s toolchain is clang,
+// fetched on demand from Wasmer's registry (see src/webCppProviderBridge.mjs) -- real, but only
+// on the pthread-enabled "threads" build: @wasmer/sdk's browser runtime needs SharedArrayBuffer/
+// cross-origin isolation the same way the threads build's own parallel execution does, which the
+// default shell is not served with. The default shell's providerToolchains.get('cpp') stays
+// honestly unavailable rather than claim a toolchain it cannot actually reach.
 export const providerToolchains = {
-    get: async (kind) => kind === 'python' ? { available: true, path: 'Pyodide (bundled)', detectedPath: 'Pyodide (bundled)' } : { available: false },
+    get: async (kind) => {
+        if (kind === 'python') return { available: true, path: 'Pyodide (bundled)', detectedPath: 'Pyodide (bundled)' };
+        if (kind === 'cpp' && threads) return { available: true, path: 'clang 16 (via Wasmer, fetched on demand)', detectedPath: 'clang 16 (via Wasmer, fetched on demand)' };
+        return { available: false };
+    },
     set: async () => ({ available: false }),
-    test: async (kind) => kind === 'python' ? { available: true } : { available: false },
+    test: async (kind) => {
+        if (kind === 'python') return { available: true };
+        if (kind === 'cpp' && threads) return { available: true };
+        return { available: false };
+    },
     browse: async () => ({ available: false }),
     executionMode: {
         get: async () => ({ available: false }),

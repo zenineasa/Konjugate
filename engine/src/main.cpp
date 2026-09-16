@@ -20,12 +20,73 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <vector>
 #if defined(_WIN32) || defined(_MSC_VER)
 #include <fcntl.h>
 #include <io.h>
 #endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 namespace {
+
+#ifdef __EMSCRIPTEN__
+extern "C" {
+// Hands one complete framed live-run event's raw bytes to JS -- see
+// src/webEngineLiveRunWorker.mjs, which forwards them (postMessage) to the page's main thread for
+// FramedEngineEventDecoder (src/engineProtocol.mjs) to parse into a real onUpdate() call.
+// Emscripten's own Module.print is text-only (splits on embedded newlines, assumes valid UTF-8)
+// and would corrupt this binary, length-framed protobuf stream -- exactly why the web build's
+// live-run event stream bypasses std::cout entirely, mirroring
+// WasmPyodideProviderBackend's already-proven EM_JS-call-mid-blocking-execution pattern
+// (engine/src/providerRuntime.cpp), just one-way here (no return value needed).
+EM_JS(void, wasmEmitEngineEvent, (const unsigned char* bytes, int length), {
+    if (typeof Module.emitEngineEvent === 'function') {
+        Module.emitEngineEvent(HEAPU8.slice(bytes, bytes + length));
+    }
+});
+}
+
+// A std::streambuf that accumulates bytes across writeFramedEvent()'s (simulationRunner.cpp) two
+// writes per event -- a 4-byte length header, then the serialized payload -- and hands the whole
+// accumulated buffer to JS in one call exactly when that function's own explicit flush() reaches
+// sync() below, giving the JS side natural per-event framing without needing to parse the length
+// header itself. runSimulation() (simulationRunner.cpp) only ever writes through the
+// std::ostream* it is given, with no assumption that it is std::cout specifically, so plugging
+// this in at the call site below needs no changes there.
+class EmJsEventStreamBuf final : public std::streambuf {
+protected:
+    std::streamsize xsputn(const char* data, std::streamsize count) override {
+        buffer_.insert(buffer_.end(), data, data + count);
+        return count;
+    }
+    int overflow(int character) override {
+        if (character == traits_type::eof()) return traits_type::eof();
+        buffer_.push_back(static_cast<char>(character));
+        return traits_type::not_eof(character);
+    }
+    int sync() override {
+        if (!buffer_.empty()) {
+            wasmEmitEngineEvent(reinterpret_cast<const unsigned char*>(buffer_.data()), static_cast<int>(buffer_.size()));
+            buffer_.clear();
+        }
+        return 0;
+    }
+
+private:
+    std::vector<char> buffer_;
+};
+
+class EmJsEventStream final : public std::ostream {
+public:
+    EmJsEventStream() : std::ostream(&buf_) {}
+
+private:
+    EmJsEventStreamBuf buf_;
+};
+#endif
+
 void writeFramedMessage(std::ostream& output, const google::protobuf::MessageLite& message) {
     const auto size = message.ByteSizeLong();
     if (size > 0xffffffffu) throw std::runtime_error("The protocol message is too large.");
@@ -276,8 +337,14 @@ int main(int argc, char** argv) {
             throw std::runtime_error("The requested engine control protocol is unsupported.");
         }
         const auto protobufControls = controlStream == "protobuf";
+#ifdef __EMSCRIPTEN__
+        EmJsEventStream emJsEventStream;
+        konjugate::runSimulation(document, configuration, outputPath, protobufControls ? &std::cin : nullptr,
+            protobufEvents ? &emJsEventStream : nullptr);
+#else
         konjugate::runSimulation(document, configuration, outputPath, protobufControls ? &std::cin : nullptr,
             protobufEvents ? &std::cout : nullptr);
+#endif
         std::_Exit(0);
     } catch (const konjugate::ContainerError& error) {
         std::cerr << error.code << ": " << error.what() << '\n';

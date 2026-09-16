@@ -80,6 +80,7 @@
         "@codemirror/lang-python": "^6.2.1",
         "@codemirror/lint": "^6.9.7",
         "@cortex-js/compute-engine": "^0.99.0",
+        "@wasmer/sdk": "^0.13.0",
         "codemirror": "^6.0.2",
         "fast-xml-parser": "^4.5.7",
         "fflate": "0.8.3",

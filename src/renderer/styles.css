@@ -952,9 +952,19 @@ input, select, textarea { user-select: text; }
     background: var(--orange);
     color: var(--surface);
     font-size: 12px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 60;
 }
 .webEditionBanner span {
     flex: 1;
+}
+.webEditionBanner a {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
 }
 .webEditionBanner button {
     background: none;

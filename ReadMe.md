@@ -97,6 +97,10 @@ It works in two stages: a lagged partial-correlation pass cheaply screens which 
 
 This project is currently in the early stages of development.
 
+## Try It in Your Browser
+
+Want a quick look before installing anything? <!-- TODO: link once docs/proposals/webEdition.md's deployment step is done --> a free, in-browser trial of Konjugate needs no install. It's a lightweight preview, not the full app — Run is batch-only there (no live progress or mid-run control), and programmable C++ providers, FMU import/export, add-ons, and AI-assisted authoring aren't available yet. For the full experience, **[download the desktop app](https://github.com/zenineasa/Konjugate/releases/latest)** above.
+
 ## Installing a Release Build
 
 Konjugate isn't code-signed yet — an active choice while the project is in alpha, not an accident — so your OS may show a security warning the first time you open a downloaded release. This doesn't mean the download is corrupted.

@@ -1,15 +1,25 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import assert from 'node:assert/strict';
-import { app, BrowserWindow, dialog } from 'electron';
-import { readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
 import { unzipSync } from 'fflate';
 
+// These 10 primitives, and every scenario below, operate on a "handle" -- a driver-produced
+// object wrapping either a live Electron BrowserWindow (tests/drivers/electronWindowDriver.mjs)
+// or a Playwright Page (tests/drivers/playwrightWebDriver.mjs) -- rather than a raw BrowserWindow
+// directly, so the exact same scenario definitions run against both the desktop app and the web
+// edition in a real browser. A handle exposes: evaluate(expression), mouseMove/mouseDown/mouseUp
+// (point, opts?), click/rightClick(point, opts?), keyDown/keyUp(keyCode), onConsoleMessage
+// (listener) -> unsubscribe, title(), close(), isDestroyed(), parent(). The driver itself (not a
+// per-handle concern) additionally exposes: kind, mainHandle, allHandles(), waitForNewHandle(...),
+// captureExport(trigger, opts?), simulateOsFileOpen(path), capabilities (a set of booleans a
+// scenario checks to decide whether to skip itself -- see run()'s own skip option below), and
+// dispose(). See either driver file's header comment for the full contract and why each method
+// is shaped the way it is.
+
 async function evaluate(window, expression) {
-    return window.webContents.executeJavaScript(expression, true);
+    return window.evaluate(expression);
 }
 
 // A renderer-side exception thrown synchronously inside a DOM event listener (e.g. from a
@@ -20,12 +30,11 @@ async function evaluate(window, expression) {
 // This captures renderer console output around a task so callers can assert nothing was logged.
 async function captureConsoleMessages(window, task) {
     const messages = [];
-    const listener = (event) => messages.push(event.message);
-    window.webContents.on('console-message', listener);
+    const unsubscribe = window.onConsoleMessage((message) => messages.push(message));
     try {
         await task();
     } finally {
-        window.webContents.off('console-message', listener);
+        unsubscribe();
     }
     return messages;
 }
@@ -81,9 +90,9 @@ async function clickElement(window, expression, modifiers = []) {
         const bounds = element.getBoundingClientRect();
         return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
     })()`);
-    window.webContents.sendInputEvent({ type: 'mouseMove', ...point, modifiers });
-    window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1, modifiers });
-    window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1, modifiers });
+    await window.mouseMove(point, { modifiers });
+    await window.mouseDown(point, { button: 'left', clickCount: 1, modifiers });
+    await window.mouseUp(point, { button: 'left', clickCount: 1, modifiers });
 }
 
 // Re-resolves the element's screen position on every call rather than caching one set of
@@ -96,9 +105,9 @@ async function rightClickElement(window, expression) {
         const bounds = element.getBoundingClientRect();
         return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
     })()`);
-    window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
-    window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'right', clickCount: 1 });
-    window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'right', clickCount: 1 });
+    await window.mouseMove(point);
+    await window.mouseDown(point, { button: 'right', clickCount: 1 });
+    await window.mouseUp(point, { button: 'right', clickCount: 1 });
 }
 
 // A CSS2D overlay (a node/edge label) always wins DOM hit-testing over the WebGL canvas
@@ -168,12 +177,19 @@ async function retryGesture(window, perform, checkExpression, times = 5, settleM
     return false;
 }
 
-export async function runInteractionTests(window) {
-    let passed = 0;
-    const run = async (name, task) => {
+export async function runInteractionTests(driver) {
+    const window = driver.mainHandle;
+    let passedCount = 0;
+    let skippedCount = 0;
+    const run = async (name, task, { skip } = {}) => {
+        if (skip) {
+            console.log(`○ ${name} (skipped: ${skip})`);
+            skippedCount += 1;
+            return;
+        }
         try {
             await task();
-            passed += 1;
+            passedCount += 1;
             console.log(`✓ ${name}`);
         } catch (error) {
             error.message = `${name}: ${error.message}`;
@@ -201,13 +217,11 @@ export async function runInteractionTests(window) {
     });
 
     await run('example selection opens its companion guide', async () => {
-        const initialStartedAt = Date.now();
-        let guideWindow = null;
-        while (Date.now() - initialStartedAt < 5000 && !guideWindow) {
-            guideWindow = BrowserWindow.getAllWindows().find((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide'));
-            if (!guideWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(guideWindow, 'Example guide window did not open.');
+        // No "before" snapshot here, deliberately: loadExample()'s own click handler (the
+        // previous scenario) may already have opened the guide window as a side effect before
+        // this scenario even starts, so this must find ANY window matching the title, not one
+        // that's merely new relative to a snapshot taken at this scenario's own start.
+        const guideWindow = await driver.waitForNewHandle([], { titleIncludes: 'Example Guide' });
         await waitFor(guideWindow, `document.querySelector('#guideTitle').textContent.includes('Thermal Management')`, 'Example guide content did not render.');
         assert.match(await evaluate(guideWindow, `document.querySelector('#content').textContent`), /enclosed-air volume/i);
         assert.doesNotMatch(await evaluate(guideWindow, `document.querySelector('#content').textContent`), /Copyright/);
@@ -216,14 +230,21 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(guideWindow, `[...document.querySelectorAll('.equation [style]')].every((element) => element.style.length > 0)`), true);
         assert.equal(await evaluate(guideWindow, `document.querySelector('.equation').scrollWidth <= document.querySelector('.equation').clientWidth`), true);
         assert.equal(await evaluate(window, `document.querySelector('#exampleGuideButton').hidden`), false);
-        guideWindow.close();
+        await guideWindow.close();
         await waitFor(window, `!document.querySelector('#exampleGuideButton').hidden`, 'Example guide reopen control disappeared.');
+        const beforeReopen = driver.allHandles();
         await evaluate(window, `document.querySelector('#exampleGuideButton').click()`);
-        const startedAt = Date.now();
-        while (Date.now() - startedAt < 5000 && !BrowserWindow.getAllWindows().some((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide'))) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(BrowserWindow.getAllWindows().some((candidate) => candidate !== window && candidate.getTitle().includes('Example Guide')), 'Example guide did not reopen.');
+        await driver.waitForNewHandle(beforeReopen, { titleIncludes: 'Example Guide' });
+    }, {
+        // A real, previously-unknown web-edition gap, not a driver/test issue -- confirmed by
+        // reading src/renderer/webShims/projectFiles.mjs's openExampleGuide(), not assumed:
+        // it does `window.open(rawMarkdownFileUrl, '_blank')`, opening the unrendered .md file
+        // directly rather than a guide page with the #guideTitle/#content/MathLive-rendered-
+        // equations structure this scenario (and the desktop guide window) actually has. The
+        // window.open() mechanism itself is real and portable (confirmed separately -- this
+        // scenario's own waitForNewHandle call reliably finds the opened tab), so this is gated
+        // on a missing renderer, not a missing capability category.
+        skip: !driver.capabilities.renderedExampleGuide && "the web edition's Example Guide opens the raw .md file directly, not a rendered guide page (see docs/proposals/webEdition.md)"
     });
 
     await run('export simulation code writes a standalone C++ or Python program', async () => {
@@ -233,26 +254,18 @@ export async function runInteractionTests(window) {
             ['python', 'serial', 'py', 'def run('],
             ['python', 'mpi', 'py', 'from mpi4py import MPI']
         ]) {
-            const exportPath = join(tmpdir(), `konjugate-interaction-code-export-${language}-${parallelism}-${Date.now()}.${extension}`);
-            const originalShowSaveDialog = dialog.showSaveDialog;
-            dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
-            let exportedSource = null;
-            try {
-                assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false);
-                await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
-                await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
-                await evaluate(window, `document.querySelector('#exportCodeLanguage').value = '${language}'`);
-                await evaluate(window, `document.querySelector('#exportCodeLanguage').dispatchEvent(new Event('change'))`);
-                assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelismOpenmp').disabled`), language === 'python',
-                    'OpenMP/std::thread options should only be disabled for a Python export.');
-                await evaluate(window, `document.querySelector('#exportCodeParallelism').value = '${parallelism}'`);
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false);
+            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
+            await evaluate(window, `document.querySelector('#exportCodeLanguage').value = '${language}'`);
+            await evaluate(window, `document.querySelector('#exportCodeLanguage').dispatchEvent(new Event('change'))`);
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelismOpenmp').disabled`), language === 'python',
+                'OpenMP/std::thread options should only be disabled for a Python export.');
+            await evaluate(window, `document.querySelector('#exportCodeParallelism').value = '${parallelism}'`);
+            const { bytes } = await driver.captureExport(async () => {
                 await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
-                for (let attempt = 0; attempt < 100 && exportedSource === null; attempt += 1) {
-                    try { exportedSource = await readFile(exportPath, 'utf8'); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
-                }
-            } finally {
-                dialog.showSaveDialog = originalShowSaveDialog;
-            }
+            }, { extension });
+            const exportedSource = bytes.toString('utf8');
             assert.ok(exportedSource, `Export (${language}/${parallelism}) did not write a file.`);
             assert.match(exportedSource, /time \(s\)/);
             assert.ok(exportedSource.includes(expectedFragment), `Exported (${language}/${parallelism}) source is missing an expected "${expectedFragment}" fragment.`);
@@ -261,26 +274,17 @@ export async function runInteractionTests(window) {
     });
 
     await run('export simulation code as an FMU produces a real, valid FMI 2.0 Co-Simulation package', async () => {
-        const exportPath = join(tmpdir(), `konjugate-interaction-fmu-export-${Date.now()}.fmu`);
-        const originalShowSaveDialog = dialog.showSaveDialog;
-        dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
-        let exportedBuffer = null;
-        try {
-            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
-            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
-            await evaluate(window, `document.querySelector('#exportCodeFormat').value = 'fmu'`);
-            await evaluate(window, `document.querySelector('#exportCodeFormat').dispatchEvent(new Event('change'))`);
-            assert.equal(await evaluate(window, `document.querySelector('#exportCodeLanguagePython').disabled`), true,
-                'Python should be unavailable once FMU format is selected.');
-            assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelism').closest('label').hidden`), true,
-                'The Execution row has no meaning for an FMU export and should be hidden.');
+        await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+        await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
+        await evaluate(window, `document.querySelector('#exportCodeFormat').value = 'fmu'`);
+        await evaluate(window, `document.querySelector('#exportCodeFormat').dispatchEvent(new Event('change'))`);
+        assert.equal(await evaluate(window, `document.querySelector('#exportCodeLanguagePython').disabled`), true,
+            'Python should be unavailable once FMU format is selected.');
+        assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelism').closest('label').hidden`), true,
+            'The Execution row has no meaning for an FMU export and should be hidden.');
+        const { bytes: exportedBuffer } = await driver.captureExport(async () => {
             await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
-            for (let attempt = 0; attempt < 400 && exportedBuffer === null; attempt += 1) {
-                try { exportedBuffer = await readFile(exportPath); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
-            }
-        } finally {
-            dialog.showSaveDialog = originalShowSaveDialog;
-        }
+        }, { extension: 'fmu', maxAttempts: 400 });
         assert.ok(exportedBuffer, 'FMU export did not write a file.');
         const entries = unzipSync(exportedBuffer);
         assert.ok(entries['modelDescription.xml'], 'The .fmu is missing modelDescription.xml.');
@@ -290,18 +294,12 @@ export async function runInteractionTests(window) {
         const binaryEntry = Object.keys(entries).find((name) => name.startsWith('binaries/') && name !== 'binaries/');
         assert.ok(binaryEntry, 'The .fmu is missing a compiled binaries/<platform>/ shared library.');
         assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false, 'Export dialog should close after a successful export.');
-    });
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
 
     await run('a second project window opens independently and does not affect the first', async () => {
-        const before = BrowserWindow.getAllWindows();
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);
-        let second = null;
-        const openStartedAt = Date.now();
-        while (Date.now() - openStartedAt < 5000 && !second) {
-            second = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
-            if (!second) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(second, 'A new project window did not open.');
+        const second = await driver.waitForNewHandle(before);
         await waitFor(second, `document.querySelector('.documentTitle')`, 'Second window did not finish loading.');
 
         // Independence: the new window starts blank regardless of what's loaded in the first
@@ -309,13 +307,14 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(second, `document.querySelectorAll('.node-label-container').length`), 0);
 
         // An auxiliary window (Welcome) opened from each project window stays scoped to its own
-        // parent -- win.getParentWindow() is a free, exact check since auxiliaryWindowPresentation
+        // parent -- handle.parent() is a free, exact check since auxiliaryWindowPresentation
         // already sets `parent:` on every auxiliary window.
         const findWelcomeWindowFor = async (parent) => {
             const startedAt = Date.now();
             while (Date.now() - startedAt < 5000) {
-                const found = BrowserWindow.getAllWindows().find((candidate) => candidate.getParentWindow() === parent && candidate.getTitle().includes('Welcome'));
-                if (found) return found;
+                for (const candidate of driver.allHandles()) {
+                    if (await candidate.parent() === parent && (await candidate.title()).includes('Welcome')) return candidate;
+                }
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
             throw new Error('Welcome window did not open for its project window.');
@@ -325,17 +324,17 @@ export async function runInteractionTests(window) {
         const welcomeFromFirst = await findWelcomeWindowFor(window);
         const welcomeFromSecond = await findWelcomeWindowFor(second);
         assert.notEqual(welcomeFromFirst, welcomeFromSecond, 'Each project window should get its own Welcome window.');
-        welcomeFromFirst.close();
+        await welcomeFromFirst.close();
         await new Promise((resolve) => setTimeout(resolve, 200));
-        assert.ok(!welcomeFromSecond.isDestroyed(), "Closing window A's Welcome window must not affect window B's.");
-        welcomeFromSecond.close();
+        assert.ok(!(await welcomeFromSecond.isDestroyed()), "Closing window A's Welcome window must not affect window B's.");
+        await welcomeFromSecond.close();
 
         // Closing a project window must not quit the app or affect the other window.
-        second.close();
+        await second.close();
         await new Promise((resolve) => setTimeout(resolve, 200));
-        assert.ok(!window.isDestroyed(), 'Closing the second window destroyed the first.');
+        assert.ok(!(await window.isDestroyed()), 'Closing the second window destroyed the first.');
         assert.equal(await evaluate(window, `1 + 1`), 2, 'The first window is no longer responsive after the second closed.');
-    });
+    }, { skip: !driver.capabilities.multiWindow && 'multi-window and per-window Welcome-window scoping have no web-edition equivalent' });
 
     await run('an OS-initiated file open reuses an already-open window on the same file, otherwise opens a new one', async () => {
         // Simulates exactly what a real double-click (or a relaunch's second-instance argv, on
@@ -343,38 +342,27 @@ export async function runInteractionTests(window) {
         // automation needed, since main.mjs never distinguishes a real 'open-file' from this one.
         const examplePath = join(process.cwd(), 'examples', 'pumpSuctionHydraulics.kjt');
 
-        const beforeFirstOpen = BrowserWindow.getAllWindows();
-        app.emit('open-file', { preventDefault() {} }, examplePath);
-        let opened = null;
-        const openStartedAt = Date.now();
-        while (Date.now() - openStartedAt < 5000 && !opened) {
-            opened = BrowserWindow.getAllWindows().find((candidate) => !beforeFirstOpen.includes(candidate));
-            if (!opened) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(opened, 'An OS-initiated open of a valid .kjt file did not open a new window.');
+        const beforeFirstOpen = driver.allHandles();
+        await driver.simulateOsFileOpen(examplePath);
+        const opened = await driver.waitForNewHandle(beforeFirstOpen);
         await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The OS-opened file did not load into the new window.');
         assert.equal(await evaluate(opened, `document.querySelector('.documentTitle').textContent`), 'pumpSuctionHydraulics');
         // Give the new window's pathChanged push time to reach main before re-opening the same path.
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        const beforeSecondOpen = BrowserWindow.getAllWindows();
-        app.emit('open-file', { preventDefault() {} }, examplePath);
+        const beforeSecondOpen = driver.allHandles();
+        await driver.simulateOsFileOpen(examplePath);
         await new Promise((resolve) => setTimeout(resolve, 300));
-        assert.deepEqual(BrowserWindow.getAllWindows(), beforeSecondOpen, 'Opening the same file again should focus the existing window, not open a duplicate.');
-        opened.close();
+        assert.deepEqual(driver.allHandles(), beforeSecondOpen, 'Opening the same file again should focus the existing window, not open a duplicate.');
+        await opened.close();
 
-        const beforeBadOpen = BrowserWindow.getAllWindows();
-        app.emit('open-file', { preventDefault() {} }, join(process.cwd(), 'examples', 'doesNotExist.kjt'));
-        let failedWindow = null;
-        const badOpenStartedAt = Date.now();
-        while (Date.now() - badOpenStartedAt < 5000 && !failedWindow) {
-            failedWindow = BrowserWindow.getAllWindows().find((candidate) => !beforeBadOpen.includes(candidate));
-            if (!failedWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
+        const beforeBadOpen = driver.allHandles();
+        await driver.simulateOsFileOpen(join(process.cwd(), 'examples', 'doesNotExist.kjt'));
+        const failedWindow = await driver.waitForNewHandle(beforeBadOpen);
         assert.ok(failedWindow, 'An OS-initiated open of a missing file did not open a window at all.');
         await waitFor(failedWindow, `document.querySelector('#statusText').textContent.startsWith('Load failed')`, 'A missing file did not surface a load-failed status instead of crashing.');
-        failedWindow.close();
-    });
+        await failedWindow.close();
+    }, { skip: !driver.capabilities.osFileOpen && 'OS-initiated file open has no web-edition equivalent' });
 
     await run('validation summary reports and displays a valid model', async () => {
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'C++ validation report did not reach the UI.');
@@ -430,7 +418,7 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && !document.querySelector('#assistantPanel').hidden`), true);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').value`), 'Battery module');
         await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#nodeEditor [data-close-card]').click(); document.querySelector('#closeAssistantPanel').click()`);
-    });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
 
     await run('local assistant can disable and enable a node and a relationship', async () => {
         const nodeLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy'))`;
@@ -462,7 +450,7 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await waitFor(window, `![...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Electrical losses'))?.textContent.includes('Disabled')`, 'Undo did not restore the assistant-applied edge disable.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
-    });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
 
     await run('local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click()`);
@@ -511,7 +499,7 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn').length`), 2, 'Applying should update the existing turn, not add a new one.');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
-    });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
 
     await run('dismissing a clarification and starting a new conversation both clear it without submitting', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click()`);
@@ -547,7 +535,7 @@ export async function runInteractionTests(window) {
         // implementation asked for confirmation here).
         await evaluate(window, `document.querySelector('#newAssistantConversation').click()`);
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
-    });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
 
     await run('model configurations expose all provider adapters without renderer credential access', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
@@ -569,7 +557,7 @@ export async function runInteractionTests(window) {
         await evaluate(window, `window.confirm = () => true; document.querySelector('#deleteAssistantConfiguration').click()`);
         await waitFor(window, `document.querySelectorAll('#assistantConfiguration option').length === 1`, 'Deleted configuration remained available.');
         await evaluate(window, `document.querySelector('#cancelAssistantConfiguration').click(); document.querySelector('#closeAssistantPanel').click()`);
-    });
+    }, { skip: !driver.capabilities.aiProviderCredentials && 'the credential-vault/provider-adapter architecture (window.aiProviders) has no web-edition equivalent' });
 
     await run('run configuration and node substeps are editable', async () => {
         await evaluate(window, `document.querySelector('#runConfigurationButton').click()`);
@@ -629,7 +617,15 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#providerExecutionMode').value = ''`);
         await evaluate(window, `document.querySelector('#providerToolchainsSave').click()`);
         await waitFor(window, `!document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not close after resetting.');
-    });
+    }, { skip: !driver.capabilities.providerExecutionModeSelector && 'sharedMemoryWorker/inProcess execution-mode selection has no web-edition equivalent' });
+
+    // Shared across the three run() calls the "Run..."/"Results Analysis..."/"closing results..."
+    // scenarios below split into (see docs/proposals/webEdition.md and this file's own driver
+    // header comment): the Results Analysis add-on window has no web-edition equivalent, but the
+    // main window must always end each of these three scenarios in the same state regardless of
+    // whether the add-on portion actually ran, so scenario #16 (multi-selection...) always starts
+    // clean. analysisHandle stays null when the add-on scenario is skipped.
+    let analysisHandle = null;
 
     await run('Run invokes the C++ simulation and displays state results', async () => {
         assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
@@ -686,18 +682,19 @@ export async function runInteractionTests(window) {
         assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').data.length`) > 0);
         assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').layout.shapes.length`) > 0);
         assert.equal(await evaluate(window, `document.querySelector('#openResultsAnalysis')`), null);
+    });
+
+    await run('Results Analysis add-on inspects and exports a completed run', async () => {
+        // The toolstrip command itself, not just the ability to click it, is desktop-only: the web
+        // shim's window.addons.listToolstripContributions() always returns [] (confirmed by
+        // reading src/renderer/webShims/misc.mjs directly), so no add-on toolstrip button ever
+        // renders on the web edition regardless of which add-ons a real desktop install has.
         await waitFor(window, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]:not([hidden])'))`, 'Manifest-declared add-on toolstrip command did not appear.');
         assert.equal(await evaluate(window, `document.querySelector('#addonToolstripSeparator').hidden`), false);
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]').click()`);
-        const analysisWindow = await (async () => {
-            const startedAt = Date.now();
-            while (Date.now() - startedAt < 5000) {
-                const candidate = BrowserWindow.getAllWindows().find((item) => item !== window && !item.isDestroyed());
-                if (candidate) return candidate;
-                await new Promise((resolve) => setTimeout(resolve, 50));
-            }
-            throw new Error('Results Analysis add-on window did not open.');
-        })();
+        analysisHandle = await driver.waitForNewHandle(before);
+        const analysisWindow = analysisHandle;
         await waitFor(analysisWindow, `Boolean(document.querySelector('.konjugateAddonTitlebar'))`, 'Host titlebar was not added to the add-on window.');
         assert.equal(await evaluate(analysisWindow, `document.querySelector('.konjugateAddonIdentity b').textContent`), 'Results Analysis');
         assert.equal(await evaluate(analysisWindow, `document.querySelectorAll('.konjugateAddonWindowControls button').length`), 3);
@@ -765,24 +762,19 @@ export async function runInteractionTests(window) {
         await waitFor(analysisWindow, `document.querySelector('#analysisPlot').layout.shapes[0].x0 !== ${JSON.stringify(cursorXBefore)}`,
             'Time series cursor line did not move when seeking on a completed run.', 3000);
 
-        const exportPath = join(tmpdir(), `konjugate-interaction-export-${Date.now()}.csv`);
-        const originalShowSaveDialog = dialog.showSaveDialog;
-        dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
-        let exportedCsv = null;
-        try {
-            assert.equal(await evaluate(analysisWindow, `document.querySelector('#exportCsv').disabled`), false);
+        assert.equal(await evaluate(analysisWindow, `document.querySelector('#exportCsv').disabled`), false);
+        const { bytes } = await driver.captureExport(async () => {
             await evaluate(analysisWindow, `document.querySelector('#exportCsv').click()`);
-            for (let attempt = 0; attempt < 100 && exportedCsv === null; attempt += 1) {
-                try { exportedCsv = await readFile(exportPath, 'utf8'); } catch { await new Promise((resolve) => setTimeout(resolve, 25)); }
-            }
-        } finally {
-            dialog.showSaveDialog = originalShowSaveDialog;
-        }
+        }, { extension: 'csv' });
+        const exportedCsv = bytes.toString('utf8');
         assert.ok(exportedCsv, 'Export data (CSV) did not write a file.');
         assert.match(exportedCsv, /^time \(s\)/);
 
         await evaluate(analysisWindow, `(() => { const timeline = document.querySelector('#timeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         await waitFor(window, `document.querySelector('#resultCurrentTime').value === '0 s'`, 'Visualizer seek did not synchronize to the project window.');
+    }, { skip: !driver.capabilities.addons && 'the Results Analysis add-on has no web-edition equivalent' });
+
+    await run('closing results clears the main window and any add-on it opened', async () => {
         await evaluate(window, `document.querySelector('[data-node-tab="model"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled`), true);
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeName'); input.value = 'Changed during results'; input.dispatchEvent(new Event('change', { bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
@@ -791,10 +783,12 @@ export async function runInteractionTests(window) {
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
         assert.match(await evaluate(window, `document.querySelector('#closeResultsMessage').textContent`), /save the project with simulation results.*removed from this session/i);
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
-        for (let attempt = 0; attempt < 100 && !analysisWindow.isDestroyed(); attempt += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 25));
+        if (analysisHandle) {
+            for (let attempt = 0; attempt < 100 && !(await analysisHandle.isDestroyed()); attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            assert.equal(await analysisHandle.isDestroyed(), true);
         }
-        assert.equal(analysisWindow.isDestroyed(), true);
         assert.equal(await evaluate(window, `document.querySelector('#resultTransport').hidden`), true);
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), false);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || document.querySelector('#nodeModelActions').hidden`), false);
@@ -823,8 +817,8 @@ export async function runInteractionTests(window) {
         await clickElement(window, `document.querySelector('.bundleLabel')`, ['shift']);
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
         const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1, modifiers: ['shift'] });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1, modifiers: ['shift'] });
+        await window.mouseDown(emptyPoint, { button: 'left', clickCount: 1, modifiers: ['shift'] });
+        await window.mouseUp(emptyPoint, { button: 'left', clickCount: 1, modifiers: ['shift'] });
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
         assert.equal(await evaluate(window, `document.querySelector('#copySelection').disabled`), false);
         await evaluate(window, `document.querySelector('#copySelection').click()`);
@@ -888,10 +882,10 @@ export async function runInteractionTests(window) {
                 end: { x: Math.round(Math.max(battery.right, air.right) + 20), y: Math.round(Math.max(battery.bottom, air.bottom) + 100) }
             };
         })()`);
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...bounds.start });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...bounds.start, button: 'left', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...bounds.end });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...bounds.end, button: 'left', clickCount: 1 });
+        await window.mouseMove(bounds.start);
+        await window.mouseDown(bounds.start, { button: 'left', clickCount: 1 });
+        await window.mouseMove(bounds.end);
+        await window.mouseUp(bounds.end, { button: 'left', clickCount: 1 });
         await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Rectangle selection did not select the two enclosed nodes.');
         const selected = await evaluate(window, `[...document.querySelectorAll('.node-label-container.selected')].map((label) => label.textContent)`);
         assert.ok(selected.some((label) => label.includes('Battery module')));
@@ -1082,15 +1076,10 @@ export async function runInteractionTests(window) {
             select.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
         const validCpp = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        const beforeEditorOpen = driver.allHandles();
         await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
 
-        const startedAt = Date.now();
-        let editorWindow = null;
-        while (Date.now() - startedAt < 5000 && !editorWindow) {
-            editorWindow = BrowserWindow.getAllWindows().find((candidate) => candidate !== window && candidate.getTitle().includes('Provider source'));
-            if (!editorWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(editorWindow, 'The provider editor window did not open.');
+        const editorWindow = await driver.waitForNewHandle(beforeEditorOpen, { titleIncludes: 'Provider source' });
         await waitFor(editorWindow, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the provider editor window.');
         assert.equal(await evaluate(editorWindow, `document.querySelector('#editorKindLabel').textContent`), 'C++');
 
@@ -1103,11 +1092,11 @@ export async function runInteractionTests(window) {
             const r = line.getBoundingClientRect();
             return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
         })()`);
-        editorWindow.webContents.sendInputEvent({ type: 'mouseMove', ...codeWordPoint });
-        editorWindow.webContents.sendInputEvent({ type: 'mouseDown', ...codeWordPoint, button: 'left', clickCount: 1 });
-        editorWindow.webContents.sendInputEvent({ type: 'mouseUp', ...codeWordPoint, button: 'left', clickCount: 1 });
-        editorWindow.webContents.sendInputEvent({ type: 'mouseDown', ...codeWordPoint, button: 'left', clickCount: 2 });
-        editorWindow.webContents.sendInputEvent({ type: 'mouseUp', ...codeWordPoint, button: 'left', clickCount: 2 });
+        await editorWindow.mouseMove(codeWordPoint);
+        await editorWindow.mouseDown(codeWordPoint, { button: 'left', clickCount: 1 });
+        await editorWindow.mouseUp(codeWordPoint, { button: 'left', clickCount: 1 });
+        await editorWindow.mouseDown(codeWordPoint, { button: 'left', clickCount: 2 });
+        await editorWindow.mouseUp(codeWordPoint, { button: 'left', clickCount: 2 });
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.ok(await evaluate(editorWindow, `window.getSelection().toString().length`) > 0,
             'Double-clicking CodeMirror content did not select a word -- user-select: none on the window body may have leaked into the editor.');
@@ -1139,11 +1128,14 @@ export async function runInteractionTests(window) {
 
         await evaluate(editorWindow, `document.querySelector('#close').click()`);
         await new Promise((resolve) => setTimeout(resolve, 200));
-        assert.ok(!BrowserWindow.getAllWindows().includes(editorWindow), 'The provider editor window did not close.');
+        assert.ok(!driver.allHandles().includes(editorWindow), 'The provider editor window did not close.');
+    }, { skip: !driver.capabilities.addons && 'the provider source editor window has no web-edition equivalent' });
 
-        // Switch back to Equation so the following equation-editor tests see their expected state.
+    await run('relationship editor returns to equation mode after a provider-editor session', async () => {
+        // Switch back to Equation so the following equation-editor tests see their expected state,
+        // whether or not the provider-editor scenario above actually ran (see its own skip reason).
         await evaluate(window, `(() => {
-            const select = ${kindSelect};
+            const select = document.querySelector('#editEdgeImplementationKind');
             select.value = 'equation';
             select.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
@@ -1213,8 +1205,8 @@ export async function runInteractionTests(window) {
             field.focus();
             field.executeCommand('selectAll');
         })()`);
-        window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' });
-        window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' });
+        await window.keyDown('Backspace');
+        await window.keyUp('Backspace');
         await waitFor(window, `document.querySelector('#editEdgeMathField').value !== ${JSON.stringify(equationBefore)}`, 'Backspace did not edit the equation.');
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
         await evaluate(window, `(() => {
@@ -1563,43 +1555,43 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), Number(totalNodes.match(/\d+/)[0]));
 
         const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...emptyPoint });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1 });
+        await window.mouseMove(emptyPoint);
+        await window.mouseDown(emptyPoint, { button: 'left', clickCount: 1 });
+        await window.mouseUp(emptyPoint, { button: 'left', clickCount: 1 });
         await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 0`, 'Clicking blank canvas did not clear the select-all selection.');
 
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...emptyPoint });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'right', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'right', clickCount: 1 });
+        await window.mouseMove(emptyPoint);
+        await window.mouseDown(emptyPoint, { button: 'right', clickCount: 1 });
+        await window.mouseUp(emptyPoint, { button: 'right', clickCount: 1 });
         await waitFor(window, `!document.querySelector('#addPalette').classList.contains('hidden')`, 'Right-clicking blank canvas did not open the add palette.');
         await evaluate(window, `document.querySelector('[data-action="select-all"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#addPalette').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), Number(totalNodes.match(/\d+/)[0]));
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...emptyPoint });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...emptyPoint, button: 'left', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...emptyPoint, button: 'left', clickCount: 1 });
+        await window.mouseMove(emptyPoint);
+        await window.mouseDown(emptyPoint, { button: 'left', clickCount: 1 });
+        await window.mouseUp(emptyPoint, { button: 'left', clickCount: 1 });
     });
 
     await run('right-click-drag pans without opening a context menu, but a stationary right-click still does', async () => {
         const start = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + bounds.width * 0.7), y: Math.round(bounds.top + 40) }; })()`);
         const end = { x: start.x + 60, y: start.y + 40 };
 
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...start });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'right', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...end });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...end, button: 'right', clickCount: 1 });
+        await window.mouseMove(start);
+        await window.mouseDown(start, { button: 'right', clickCount: 1 });
+        await window.mouseMove(end);
+        await window.mouseUp(end, { button: 'right', clickCount: 1 });
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.equal(await evaluate(window, `document.querySelector('#addPalette').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#nodeContextMenu').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#edgeContextMenu').classList.contains('hidden')`), true);
 
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...start });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'right', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...start, button: 'right', clickCount: 1 });
+        await window.mouseMove(start);
+        await window.mouseDown(start, { button: 'right', clickCount: 1 });
+        await window.mouseUp(start, { button: 'right', clickCount: 1 });
         await waitFor(window, `!document.querySelector('#addPalette').classList.contains('hidden')`, 'A stationary right-click did not open the add palette.');
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...start });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'left', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...start, button: 'left', clickCount: 1 });
+        await window.mouseMove(start);
+        await window.mouseDown(start, { button: 'left', clickCount: 1 });
+        await window.mouseUp(start, { button: 'left', clickCount: 1 });
     });
 
     await run('node creation closes its dialog and supports undo and redo', async () => {
@@ -1858,9 +1850,9 @@ export async function runInteractionTests(window) {
 
         const point = await evaluate(window, `window.__relationshipScreenPoint('Second relationship')`);
         assert.ok(point, 'Could not locate the new relationship on screen.');
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+        await window.mouseMove(point);
+        await window.mouseDown(point, { button: 'left', clickCount: 1 });
+        await window.mouseUp(point, { button: 'left', clickCount: 1 });
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the relationship did not open the edge editor.');
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Second relationship');
 
@@ -1898,19 +1890,19 @@ export async function runInteractionTests(window) {
     };
 
     const pressAndHold = async (point) => {
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
-        window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+        await window.mouseMove(point);
+        await window.mouseDown(point, { button: 'left', clickCount: 1 });
         await new Promise((resolve) => setTimeout(resolve, 600));
-        window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+        await window.mouseUp(point, { button: 'left', clickCount: 1 });
     };
 
     const deleteWaypointTestEdge = async (name) => {
         const cleanedUp = await retryGesture(window, async () => {
             const cleanupPoint = await evaluate(window, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...cleanupPoint });
-            window.webContents.sendInputEvent({ type: 'mouseDown', ...cleanupPoint, button: 'left', clickCount: 1 });
+            await window.mouseMove(cleanupPoint);
+            await window.mouseDown(cleanupPoint, { button: 'left', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseUp', ...cleanupPoint, button: 'left', clickCount: 1 });
+            await window.mouseUp(cleanupPoint, { button: 'left', clickCount: 1 });
         }, `!document.querySelector('#edgeEditor').classList.contains('hidden')`);
         assert.ok(cleanedUp, 'Clicking the edge did not reopen the edge editor for cleanup after 5 attempts.');
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), name);
@@ -1947,10 +1939,10 @@ export async function runInteractionTests(window) {
 
         const added = await retryGesture(window, async () => {
             const linePoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...linePoint });
-            window.webContents.sendInputEvent({ type: 'mouseDown', ...linePoint, button: 'right', clickCount: 1 });
+            await window.mouseMove(linePoint);
+            await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseUp', ...linePoint, button: 'right', clickCount: 1 });
+            await window.mouseUp(linePoint, { button: 'right', clickCount: 1 });
         }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
         assert.ok(added, 'Right-clicking the edge line did not open its context menu after 5 attempts.');
         assert.equal(await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').hidden`), false, 'Add-waypoint action was not offered for a click on the edge line.');
@@ -1981,14 +1973,14 @@ export async function runInteractionTests(window) {
             if (!currentHandlePoint) return;
             const dragTo = { x: currentHandlePoint.x + 15, y: currentHandlePoint.y - 12 };
             const midDrag = { x: Math.round((currentHandlePoint.x + dragTo.x) / 2), y: Math.round((currentHandlePoint.y + dragTo.y) / 2) };
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...currentHandlePoint });
-            window.webContents.sendInputEvent({ type: 'mouseDown', ...currentHandlePoint, button: 'left', clickCount: 1 });
+            await window.mouseMove(currentHandlePoint);
+            await window.mouseDown(currentHandlePoint, { button: 'left', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...midDrag });
+            await window.mouseMove(midDrag);
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...dragTo });
+            await window.mouseMove(dragTo);
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseUp', ...dragTo, button: 'left', clickCount: 1 });
+            await window.mouseUp(dragTo, { button: 'left', clickCount: 1 });
         }, `JSON.stringify(window.__relationshipWaypoints('Waypoint drag test edge')[0]) !== ${JSON.stringify(initialWaypointJson)}`);
         assert.ok(dragged, 'Dragging the waypoint handle did not move it after 5 attempts.');
         const draggedWaypoint = (await evaluate(window, `window.__relationshipWaypoints('Waypoint drag test edge')`))[0];
@@ -2007,10 +1999,10 @@ export async function runInteractionTests(window) {
 
         const added = await retryGesture(window, async () => {
             const linePoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint add-remove test edge', 0.75)`);
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...linePoint });
-            window.webContents.sendInputEvent({ type: 'mouseDown', ...linePoint, button: 'right', clickCount: 1 });
+            await window.mouseMove(linePoint);
+            await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseUp', ...linePoint, button: 'right', clickCount: 1 });
+            await window.mouseUp(linePoint, { button: 'right', clickCount: 1 });
         }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
         assert.ok(added, 'Right-clicking the edge line did not open its context menu after 5 attempts.');
         assert.equal(await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').hidden`), false, 'Add-waypoint action was not offered for a click on the edge line.');
@@ -2023,10 +2015,10 @@ export async function runInteractionTests(window) {
         const removed = await retryGesture(window, async () => {
             const handlePoint = await findCanvasPoint(window, await evaluate(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`));
             if (!handlePoint) return;
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...handlePoint });
-            window.webContents.sendInputEvent({ type: 'mouseDown', ...handlePoint, button: 'right', clickCount: 1 });
+            await window.mouseMove(handlePoint);
+            await window.mouseDown(handlePoint, { button: 'right', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
-            window.webContents.sendInputEvent({ type: 'mouseUp', ...handlePoint, button: 'right', clickCount: 1 });
+            await window.mouseUp(handlePoint, { button: 'right', clickCount: 1 });
         }, `!document.querySelector('#waypointContextMenu').classList.contains('hidden')`);
         assert.ok(removed, 'Right-clicking the waypoint handle did not open its context menu after 5 attempts.');
         await evaluate(window, `document.querySelector('#waypointContextRemove').click()`);
@@ -2071,11 +2063,11 @@ export async function runInteractionTests(window) {
         const point = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
         const dragTo = { x: point.x + 50, y: point.y + 30 };
         const cameraTargetExpression = `document.querySelector('#viewCube').dataset.cameraTarget`;
-        const drag = () => {
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
-            window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
-            window.webContents.sendInputEvent({ type: 'mouseMove', ...dragTo });
-            window.webContents.sendInputEvent({ type: 'mouseUp', ...dragTo, button: 'left', clickCount: 1 });
+        const drag = async () => {
+            await window.mouseMove(point);
+            await window.mouseDown(point, { button: 'left', clickCount: 1 });
+            await window.mouseMove(dragTo);
+            await window.mouseUp(dragTo, { button: 'left', clickCount: 1 });
         };
         const readTarget = async () => (await evaluate(window, cameraTargetExpression)).split(',').map(Number);
         // OrbitControls' damping (dampingFactor 0.07) eases a pan's momentum into the target
@@ -2094,7 +2086,7 @@ export async function runInteractionTests(window) {
         await waitForStableRect(window, cameraTargetExpression, '2D lock camera snap did not settle.');
 
         const targetBeforeLockedDrag = await readTarget();
-        drag();
+        await drag();
         await waitFor(window, `${cameraTargetExpression} !== ${JSON.stringify(targetBeforeLockedDrag.map((v) => v.toFixed(4)).join(','))}`, 'A left-drag while 2D-locked did not pan the camera.');
         await new Promise((resolve) => setTimeout(resolve, 3000));
         assert.ok(!targetsClose(targetBeforeLockedDrag, await readTarget()), 'A left-drag while 2D-locked did not pan the camera by a meaningful amount.');
@@ -2104,7 +2096,7 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.cubeCorner')].every((corner) => !corner.disabled)`), true, 'Isometric corner buttons should re-enable once unlocked.');
 
         const targetBeforeUnlockedDrag = await readTarget();
-        drag();
+        await drag();
         await new Promise((resolve) => setTimeout(resolve, 3000));
         assert.ok(targetsClose(targetBeforeUnlockedDrag, await readTarget()), 'An unlocked left-drag should rotate around a fixed target, not pan it.');
     });
@@ -2312,6 +2304,12 @@ export async function runInteractionTests(window) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
     });
 
+    // Shared with the two run() calls below (see the analogous analysisHandle comment above scenario
+    // #15's split for why): the Pose Visualizer add-on has no web-edition equivalent, but the
+    // simulation run it inspects, and the cleanup afterward, are both main-window/portable and must
+    // always happen so the next scenario starts from a clean canvas either way.
+    let firstBodyId = null;
+
     await run('Pose Visualizer add-on auto-detects and renders a 6-DOF free body node', async () => {
         const idsBeforeBodies = new Set(await evaluate(window, `window.__debugTransform.allNodeIds()`));
         await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
@@ -2328,7 +2326,7 @@ export async function runInteractionTests(window) {
         // colors & transforms" toggle has a real, non-identity transform to verify downstream.
         const bodyIds = (await evaluate(window, `window.__debugTransform.allNodeIds()`)).filter((id) => !idsBeforeBodies.has(id));
         assert.equal(bodyIds.length, 2, 'Expected exactly two new free body nodes.');
-        const [firstBodyId] = bodyIds;
+        [firstBodyId] = bodyIds;
         const selectFirstBody = `document.querySelector('.node-label-container[data-node="${firstBodyId}"] .objectLabel').click()`;
         await evaluate(window, selectFirstBody);
         await evaluate(window, `document.querySelector('[data-tool="rotate"]').click()`);
@@ -2363,19 +2361,15 @@ export async function runInteractionTests(window) {
         await evaluate(window, `document.querySelector('#runButton').click()`);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
         await waitFor(window, `document.querySelector('.resultMode b').textContent === 'Results'`, 'Offline run did not complete.', 15000);
+    });
 
+    await run('Pose Visualizer add-on inspects a completed run with two free bodies', async () => {
+        // The toolstrip command itself, not just the ability to click it, is desktop-only -- see
+        // the identical note on the Results Analysis add-on's own split above.
         await waitFor(window, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.poseVisualizer"][data-command-id="openPoseVisualizer"]:not([hidden])'))`, 'Pose Visualizer toolstrip command did not appear.');
-        const windowIdsBeforeOpen = new Set(BrowserWindow.getAllWindows().map((item) => item.id));
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('.addonTool[data-addon-id="konjugate.poseVisualizer"][data-command-id="openPoseVisualizer"]').click()`);
-        const poseWindow = await (async () => {
-            const startedAt = Date.now();
-            while (Date.now() - startedAt < 5000) {
-                const candidate = BrowserWindow.getAllWindows().find((item) => !windowIdsBeforeOpen.has(item.id) && !item.isDestroyed());
-                if (candidate) return candidate;
-                await new Promise((resolve) => setTimeout(resolve, 50));
-            }
-            throw new Error('Pose Visualizer add-on window did not open.');
-        })();
+        const poseWindow = await driver.waitForNewHandle(before);
 
         const consoleMessages = await captureConsoleMessages(poseWindow, async () => {
             await waitFor(poseWindow, `Boolean(document.querySelector('.konjugateAddonTitlebar'))`, 'Host titlebar was not added to the Pose Visualizer window.');
@@ -2429,12 +2423,14 @@ export async function runInteractionTests(window) {
         });
         assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
 
-        poseWindow.close();
-        for (let attempt = 0; attempt < 100 && !poseWindow.isDestroyed(); attempt += 1) {
+        await poseWindow.close();
+        for (let attempt = 0; attempt < 100 && !(await poseWindow.isDestroyed()); attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 25));
         }
-        assert.equal(poseWindow.isDestroyed(), true);
+        assert.equal(await poseWindow.isDestroyed(), true);
+    }, { skip: !driver.capabilities.addons && 'the Pose Visualizer add-on has no web-edition equivalent' });
 
+    await run('closing results and removing the free-body nodes cleans up the pose scenario', async () => {
         await evaluate(window, `document.querySelector('#closeResults').click()`);
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
@@ -2859,9 +2855,9 @@ export async function runInteractionTests(window) {
         const openedGroupMenu = await retryGesture(window,
             async () => {
                 const point = await findUnoccludedPoint(window, bundleLabel('Group test A'));
-                window.webContents.sendInputEvent({ type: 'mouseMove', ...point });
-                window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'right', clickCount: 1 });
-                window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'right', clickCount: 1 });
+                await window.mouseMove(point);
+                await window.mouseDown(point, { button: 'right', clickCount: 1 });
+                await window.mouseUp(point, { button: 'right', clickCount: 1 });
             },
             `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
         assert.ok(openedGroupMenu, 'Right-clicking a mesh edge did not open its context menu after 5 attempts.');
@@ -3369,15 +3365,9 @@ export async function runInteractionTests(window) {
     });
 
     await run('Results Analysis timeline seek only redraws the scatter trail once the run is completed, not while running or paused', async () => {
-        const before = BrowserWindow.getAllWindows();
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);
-        let diagnosticWindow = null;
-        const openStartedAt = Date.now();
-        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
-            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
-            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(diagnosticWindow, 'A new project window did not open for the timeline-drag diagnostic.');
+        const diagnosticWindow = await driver.waitForNewHandle(before);
         await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
 
         await evaluate(diagnosticWindow, `document.querySelector('#exampleButton').click()`);
@@ -3409,15 +3399,7 @@ export async function runInteractionTests(window) {
 
         await waitFor(diagnosticWindow, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]:not([hidden])'))`, 'Analysis toolstrip command did not appear during a live run.');
         await evaluate(diagnosticWindow, `document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]').click()`);
-        const analysisWindow = await (async () => {
-            const startedAt = Date.now();
-            while (Date.now() - startedAt < 5000) {
-                const candidate = BrowserWindow.getAllWindows().find((item) => item !== diagnosticWindow && !before.includes(item) && !item.isDestroyed());
-                if (candidate) return candidate;
-                await new Promise((resolve) => setTimeout(resolve, 50));
-            }
-            throw new Error('Results Analysis add-on window did not open during a live run.');
-        })();
+        const analysisWindow = await driver.waitForNewHandle([...before, diagnosticWindow]);
         await waitFor(analysisWindow, `document.querySelectorAll('.signalOption').length > 0`, 'Results Analysis did not load signals during a live run.', 5000);
         await evaluate(analysisWindow, `(() => {
             const options = (id) => [...document.querySelector(id).options].map((option) => option.value);
@@ -3438,10 +3420,10 @@ export async function runInteractionTests(window) {
             const rect = await evaluate(analysisWindow, `(() => { const r = document.querySelector('#timeline').getBoundingClientRect(); return { left: r.left, top: r.top + r.height / 2, width: r.width }; })()`);
             const start = { x: Math.round(rect.left + 4), y: Math.round(rect.top) };
             const end = { x: Math.round(rect.left + rect.width * fraction), y: Math.round(rect.top) };
-            analysisWindow.webContents.sendInputEvent({ type: 'mouseMove', ...start });
-            analysisWindow.webContents.sendInputEvent({ type: 'mouseDown', ...start, button: 'left', clickCount: 1 });
-            analysisWindow.webContents.sendInputEvent({ type: 'mouseMove', ...end });
-            analysisWindow.webContents.sendInputEvent({ type: 'mouseUp', ...end, button: 'left', clickCount: 1 });
+            await analysisWindow.mouseMove(start);
+            await analysisWindow.mouseDown(start, { button: 'left', clickCount: 1 });
+            await analysisWindow.mouseMove(end);
+            await analysisWindow.mouseUp(end, { button: 'left', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 400));
         };
 
@@ -3472,11 +3454,11 @@ export async function runInteractionTests(window) {
         assert.ok(lateTraceLength > earlyTraceLength,
             `Expected the revealed scatter trail to grow as the Analysis timeline is dragged forward once the run has completed (near t=0: ${earlyTraceLength} points, near the end: ${lateTraceLength} points).`);
 
-        diagnosticWindow.close();
-        for (let attempt = 0; attempt < 100 && !diagnosticWindow.isDestroyed(); attempt += 1) {
+        await diagnosticWindow.close();
+        for (let attempt = 0; attempt < 100 && !(await diagnosticWindow.isDestroyed()); attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 25));
         }
-    });
+    }, { skip: !driver.capabilities.multiWindow && 'duplicates coverage #5/#15 already provide on the web driver; the addon-specific redraw-gating behavior itself has no web-edition equivalent' });
 
     await run('source terms expose parameters to equations and programmable bindings', async () => {
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
@@ -3502,15 +3484,9 @@ export async function runInteractionTests(window) {
         // unstable model from scratch, which would otherwise disturb every later test that
         // assumes the shared document's existing content (see "Results Analysis timeline seek"
         // above for the same isolation reasoning).
-        const before = BrowserWindow.getAllWindows();
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);
-        let diagnosticWindow = null;
-        const openStartedAt = Date.now();
-        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
-            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
-            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(diagnosticWindow, 'A new project window did not open for the stability-UI diagnostic.');
+        const diagnosticWindow = await driver.waitForNewHandle(before);
         await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
 
         // One node, one state ("level"), one self-referencing growth term: d(level)/dt = level.
@@ -3608,8 +3584,8 @@ export async function runInteractionTests(window) {
         const convergenceResultText = await evaluate(diagnosticWindow, `document.querySelector('.stabilityConvergenceResult').textContent`);
         assert.doesNotMatch(convergenceResultText, /undefined|NaN/, 'The convergence result should never leak an unresolved value.');
 
-        diagnosticWindow.close();
-    });
+        await diagnosticWindow.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated diagnostic window; no web-edition equivalent' });
 
     await run('clicking an attributed instability warning jumps straight to the offending parameter', async () => {
         // Fresh window: authors its own tiny, deliberately unstable model tuned to
@@ -3618,15 +3594,9 @@ export async function runInteractionTests(window) {
         // (dx/dt = level) fixture used elsewhere in this suite, this one has an actual parameter to
         // attribute the instability to, so the pre-run validator's numericsPotentiallyUnstable
         // warning is guaranteed to carry a resolved attributedParameter.
-        const before = BrowserWindow.getAllWindows();
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);
-        let diagnosticWindow = null;
-        const openStartedAt = Date.now();
-        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
-            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
-            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(diagnosticWindow, 'A new project window did not open for the attribution diagnostic.');
+        const diagnosticWindow = await driver.waitForNewHandle(before);
         await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
 
         await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
@@ -3688,8 +3658,8 @@ export async function runInteractionTests(window) {
             await evaluate(diagnosticWindow, `document.activeElement.closest('.editorParameterRow').querySelector('[data-field="symbol"]').value`),
             'decayRate', "The focused row should be decayRate's own row, not some other parameter.");
 
-        diagnosticWindow.close();
-    });
+        await diagnosticWindow.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated diagnostic window; no web-edition equivalent' });
 
     await run('the stability-monitoring toggle suppresses during-run findings without disabling the post-run check', async () => {
         // Fresh window + the same "Growth" (dx/dt = level) fixture as the stability-findings test
@@ -3700,15 +3670,9 @@ export async function runInteractionTests(window) {
         // have globalTime: null and entirely different message text (resolvedStabilityFindings() in
         // renderer.mjs). A model both systems would flag is exactly what proves the toggle
         // suppresses the first without touching the second.
-        const before = BrowserWindow.getAllWindows();
+        const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);
-        let diagnosticWindow = null;
-        const openStartedAt = Date.now();
-        while (Date.now() - openStartedAt < 5000 && !diagnosticWindow) {
-            diagnosticWindow = BrowserWindow.getAllWindows().find((candidate) => !before.includes(candidate));
-            if (!diagnosticWindow) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        assert.ok(diagnosticWindow, 'A new project window did not open for the monitoring-toggle diagnostic.');
+        const diagnosticWindow = await driver.waitForNewHandle(before);
         await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
 
         await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
@@ -3761,8 +3725,8 @@ export async function runInteractionTests(window) {
         assert.match(listText, /grew substantially across the completed run|classic Explicit Euler instability signature/,
             'The post-run fingerprint check should still independently catch the same instability.');
 
-        diagnosticWindow.close();
-    });
+        await diagnosticWindow.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated diagnostic window; no web-edition equivalent' });
 
-    console.log(`Interaction tests passed: ${passed}`);
+    console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

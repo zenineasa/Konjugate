@@ -28,6 +28,7 @@ const ignoredTopLevelDirectories = new Set([
 const packagedTestFiles = new Set([
     'tests/interactionRunner.mjs',
     'tests/fixtures/thermalSystemCsv.mjs',
+    'tests/drivers/electronWindowDriver.mjs',
 ]);
 const packagedTestAncestorDirectories = new Set(
     [...packagedTestFiles].flatMap((file) => {

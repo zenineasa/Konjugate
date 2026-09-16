@@ -37,6 +37,7 @@
         "serve:webShell:threads": "node scripts/serveWebShell.mjs threads",
         "test": "node --test",
         "test:interaction": "npm run build:engine && node scripts/runInteractionTests.mjs",
+        "test:interaction:web": "npm run build:web:threads && npm run build:webShell:threads && node scripts/runWebInteractionTests.mjs",
         "generate:example-thumbnails": "npm run build:engine && node scripts/generateExampleThumbnails.mjs",
         "generate:welcome-assets": "node scripts/generateWelcomeAssets.mjs",
         "test:all": "npm test && npm run test:interaction",
@@ -70,6 +71,7 @@
     "devDependencies": {
         "@electron/packager": "^20.0.4",
         "electron": "^43.2.0",
+        "playwright": "^1.63.0",
         "protobufjs-cli": "^2.7.0"
     },
     "engines": {

@@ -2038,7 +2038,8 @@ app.whenReady().then(async () => {
         firstWindow.webContents.once('did-finish-load', async () => {
             try {
                 const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
-                await runInteractionTests(firstWindow);
+                const { createElectronDriver } = await import('../tests/drivers/electronWindowDriver.mjs');
+                await runInteractionTests(createElectronDriver(firstWindow));
                 app.exit(0);
             } catch (error) {
                 console.error(error);

@@ -34,13 +34,13 @@ Native C++ compilation on Windows can take longer than on macOS/Linux due to def
 
 ## Web build (experimental)
 
-See [Konjugate Web](proposals/webEdition.md) for the design and current scope. This is a separate, opt-in toolchain -- it installs nothing the normal desktop build above needs, and the normal desktop setup never touches it.
+See [Konjugate Web](proposals/webEdition.md) for the design and current scope. This is a separate, opt-in toolchain the normal desktop setup never touches -- but it is not fully independent in the other direction: the web CMake presets pull the same portable C++ dependencies (Eigen, Boost.PropertyTree, METIS, ...) through vcpkg that the native desktop preset does, just cross-compiled, so `npm run setup:web` also bootstraps vcpkg (shared with `npm run setup` above via `scripts/developmentEnvironment.mjs`'s `ensureVcpkgBootstrapped()`) if it isn't already. Running `npm run setup` first is not required -- `setup:web` alone is enough for a truly fresh checkout.
 
 ```bash
 npm run setup:web
 ```
 
-This installs the Emscripten SDK (a pinned version, matching `vcpkg.json`'s own pinned-baseline convention) into the ignored `.tools/emsdk` directory via `scripts/setupWebBuild.mjs`. It requires `cmake`, `git` and `python3` on `PATH` in addition to the platform prerequisites above. `make setupWeb` runs the same script from the Makefile.
+This installs the Emscripten SDK (a pinned version, matching `vcpkg.json`'s own pinned-baseline convention) into the ignored `.tools/emsdk` directory, and vcpkg into `.tools/vcpkg` if not already present, via `scripts/setupWebBuild.mjs`. It requires `cmake`, `git` and `python3` on `PATH` in addition to the platform prerequisites above. `make setupWeb` runs the same script from the Makefile.
 
 ```bash
 npm run build:web

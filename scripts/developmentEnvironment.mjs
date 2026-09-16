@@ -1,7 +1,7 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
 import { execFileSync, spawn } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -116,4 +116,57 @@ export async function pathExists(path) {
 
 export function executablePath(name) {
     return join(vcpkgDirectory, process.platform === 'win32' ? `${name}.exe` : name);
+}
+
+// Shared by both scripts/setupDevelopment.mjs (desktop) and scripts/setupWebBuild.mjs (web) --
+// the wasm32-emscripten/web-threads CMake presets pull the exact same portable C++ dependencies
+// (Eigen, Boost.PropertyTree, METIS, ...) through vcpkg that the native desktop preset does, just
+// cross-compiled, so a web-only setup needs vcpkg bootstrapped too. This was missing from the web
+// path entirely until a real CI run of a version-tag-triggered web-edition deploy surfaced it --
+// `npm run build:web` on a runner that had only ever run `npm run setup:web` failed with exactly
+// the "development dependencies are not configured" error this function exists to prevent; every
+// local machine that happened to work already had vcpkg from an earlier desktop `npm run setup`.
+// Deliberately excludes setupDevelopment.mjs's own native-compiler check and
+// `cmake --preset development` configure step -- neither has anything to do with vcpkg itself,
+// and the web build needs neither a native C++ compiler nor the desktop CMake preset configured.
+export async function ensureVcpkgBootstrapped() {
+    let isPartialClone = false;
+    if (await pathExists(join(vcpkgDirectory, '.git'))) {
+        try {
+            await run('git', ['config', '--get', 'remote.origin.promisor'], { cwd: vcpkgDirectory, stdio: 'ignore' });
+            isPartialClone = true;
+        } catch {
+            isPartialClone = false;
+        }
+    }
+    if (isPartialClone) {
+        console.log('Re-cloning vcpkg fully to avoid Windows network subprocess issues...');
+        await rm(vcpkgDirectory, { recursive: true, force: true });
+    }
+
+    if (!await pathExists(join(vcpkgDirectory, '.git'))) {
+        await mkdir(join(rootDirectory, '.tools'), { recursive: true });
+        await run('git', [
+            'clone', '--no-checkout',
+            'https://github.com/microsoft/vcpkg.git', vcpkgDirectory
+        ]);
+    }
+
+    let hasPinnedCommit = true;
+    try {
+        await run('git', ['cat-file', '-e', `${vcpkgCommit}^{commit}`], { cwd: vcpkgDirectory, stdio: 'ignore' });
+    } catch {
+        hasPinnedCommit = false;
+    }
+    if (!hasPinnedCommit) {
+        await run('git', ['fetch', '--depth', '1', 'origin', vcpkgCommit], { cwd: vcpkgDirectory });
+    }
+    await run('git', ['checkout', '--detach', vcpkgCommit], { cwd: vcpkgDirectory });
+
+    if (!await pathExists(executablePath('vcpkg'))) {
+        const bootstrap = process.platform === 'win32' ? 'bootstrap-vcpkg.bat' : './bootstrap-vcpkg.sh';
+        const shell = process.platform === 'win32' ? 'cmd.exe' : bootstrap;
+        const args = process.platform === 'win32' ? ['/d', '/s', '/c', bootstrap, '-disableMetrics'] : ['-disableMetrics'];
+        await run(shell, args, { cwd: vcpkgDirectory });
+    }
 }

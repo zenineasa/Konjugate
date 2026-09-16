@@ -1,15 +1,11 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
-import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
     commandExists,
-    executablePath,
-    pathExists,
+    ensureVcpkgBootstrapped,
     rootDirectory,
-    run,
-    vcpkgCommit,
-    vcpkgDirectory
+    run
 } from './developmentEnvironment.mjs';
 
 for (const command of ['cmake', 'git']) {
@@ -26,45 +22,7 @@ if (!await commandExists(compilerCommand)) {
     throw new Error(`A C++20 compiler is required. ${hint}`);
 }
 
-let isPartialClone = false;
-if (await pathExists(join(vcpkgDirectory, '.git'))) {
-    try {
-        await run('git', ['config', '--get', 'remote.origin.promisor'], { cwd: vcpkgDirectory, stdio: 'ignore' });
-        isPartialClone = true;
-    } catch {
-        isPartialClone = false;
-    }
-}
-if (isPartialClone) {
-    console.log('Re-cloning vcpkg fully to avoid Windows network subprocess issues...');
-    await rm(vcpkgDirectory, { recursive: true, force: true });
-}
-
-if (!await pathExists(join(vcpkgDirectory, '.git'))) {
-    await mkdir(join(rootDirectory, '.tools'), { recursive: true });
-    await run('git', [
-        'clone', '--no-checkout',
-        'https://github.com/microsoft/vcpkg.git', vcpkgDirectory
-    ]);
-}
-
-let hasPinnedCommit = true;
-try {
-    await run('git', ['cat-file', '-e', `${vcpkgCommit}^{commit}`], { cwd: vcpkgDirectory, stdio: 'ignore' });
-} catch {
-    hasPinnedCommit = false;
-}
-if (!hasPinnedCommit) {
-    await run('git', ['fetch', '--depth', '1', 'origin', vcpkgCommit], { cwd: vcpkgDirectory });
-}
-await run('git', ['checkout', '--detach', vcpkgCommit], { cwd: vcpkgDirectory });
-
-if (!await pathExists(executablePath('vcpkg'))) {
-    const bootstrap = process.platform === 'win32' ? 'bootstrap-vcpkg.bat' : './bootstrap-vcpkg.sh';
-    const shell = process.platform === 'win32' ? 'cmd.exe' : bootstrap;
-    const args = process.platform === 'win32' ? ['/d', '/s', '/c', bootstrap, '-disableMetrics'] : ['-disableMetrics'];
-    await run(shell, args, { cwd: vcpkgDirectory });
-}
+await ensureVcpkgBootstrapped();
 
 await run('cmake', ['--preset', 'development'], { cwd: join(rootDirectory, 'engine') });
 await run(process.execPath, [join(rootDirectory, 'scripts', 'generateReportProtocol.mjs')]);

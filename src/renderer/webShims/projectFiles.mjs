@@ -139,9 +139,14 @@ async function save(path, content, suggestedFilename, password, resultSessionId)
 }
 
 async function listExamples() {
-    const response = await fetch(new URL('../../examples/webManifest.json', import.meta.url));
+    const manifestUrl = new URL('../../examples/webManifest.json', import.meta.url);
+    const response = await fetch(manifestUrl);
     if (!response.ok) return [];
-    return response.json();
+    const examples = await response.json();
+    return examples.map((example) => ({
+        ...example,
+        thumbnailUrl: example.thumbnailUrl ? new URL(example.thumbnailUrl, manifestUrl).href : null
+    }));
 }
 
 async function loadExample(id) {

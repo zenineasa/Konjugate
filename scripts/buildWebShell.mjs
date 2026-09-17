@@ -139,6 +139,19 @@ if (threads) {
 }
 await writeFile(join(outputDirectory, 'renderer', 'index.html'), html);
 
+// A real, previously-hit failure otherwise: index.html lives at renderer/index.html, not at this
+// directory's own root, and scripts/serveWebShell.mjs's own comment above explains why -- its
+// relative asset paths assume being served from there. Locally that script papers over it with a
+// real HTTP 302 on "/". A bare static host (GitHub Pages included) has no such redirect and just
+// 404s at the root, which is exactly what happened the first time this got deployed there. Ship a
+// root index.html that redirects client-side instead, so the root URL works on any static host.
+await writeFile(join(outputDirectory, 'index.html'),
+    '<!doctype html>\n' +
+    '<html lang="en"><head><meta charset="utf-8">\n' +
+    '<meta http-equiv="refresh" content="0; url=renderer/index.html">\n' +
+    '<script>location.replace(\'renderer/index.html\');</script>\n' +
+    '</head><body></body></html>\n');
+
 await mkdir(join(outputDirectory, 'engine'), { recursive: true });
 await cp(join(engineWebDirectory, 'konjugateEngine.js'), join(outputDirectory, 'engine', 'konjugateEngine.js'));
 await cp(join(engineWebDirectory, 'konjugateEngine.wasm'), join(outputDirectory, 'engine', 'konjugateEngine.wasm'));

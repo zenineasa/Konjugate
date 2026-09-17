@@ -1,16 +1,25 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
 // Installs the Emscripten SDK used only by the experimental web build (see
-// docs/proposals/webEdition.md), and bootstraps vcpkg alongside it -- the web CMake presets pull
-// the same portable C++ dependencies (Eigen, Boost.PropertyTree, METIS, ...) through vcpkg that
-// the native desktop preset does, just cross-compiled for wasm32-emscripten, so this is NOT
-// "entirely separate from scripts/setupDevelopment.mjs's own vcpkg-based setup" the way an
-// earlier version of this comment claimed -- that was true for the *native compiler and desktop
-// CMake preset* (still not needed here, and still not run here), but not for vcpkg itself, which
-// this script shares via developmentEnvironment.mjs's ensureVcpkgBootstrapped(). Confirmed the
-// hard way: a CI runner that had only ever run this script (not scripts/setupDevelopment.mjs)
-// failed npm run build:web with "development dependencies are not configured" -- every local
-// machine that happened to work already had vcpkg from an earlier desktop `npm run setup`.
+// docs/proposals/webEdition.md), and prepares the two things scripts/setupDevelopment.mjs's own
+// desktop setup provides that the web build turns out to need too -- this is NOT "entirely
+// separate from setupDevelopment.mjs's own setup" the way an earlier version of this comment
+// claimed, on either count:
+//   - vcpkg, bootstrapped here via developmentEnvironment.mjs's shared ensureVcpkgBootstrapped():
+//     the web CMake presets pull the same portable C++ dependencies (Eigen, Boost.PropertyTree,
+//     METIS, ...) through vcpkg that the native desktop preset does, just cross-compiled for
+//     wasm32-emscripten.
+//   - src/generated/reportMessages.mjs, generated here via generateReportProtocol.mjs: gitignored
+//     JS-side protobuf bindings scripts/buildWebShell.mjs's own import-graph walk pulls in
+//     transitively (through src/reportProtocol.mjs), with no connection to vcpkg/emsdk at all --
+//     pure protobufjs-cli codegen from the committed protocol/engineProtocol.proto.
+// Both gaps were found the same way: a real CI run of a version-tag-triggered web-edition deploy
+// -- the first tag push after wiring that deploy up at all -- failing on a runner that had only
+// ever run this script, not setupDevelopment.mjs. Every local machine that happened to work
+// already had both from an earlier desktop `npm run setup`. Deliberately still excludes
+// setupDevelopment.mjs's native-compiler check and `cmake --preset development` configure step --
+// neither has anything to do with either gap, and the web build needs neither.
+//
 // Mirrors setupDevelopment.mjs's own clone-if-missing/checkout-a-pinned-version/install shape for
 // emsdk specifically, for the same reason that script does it that way for vcpkg: reproducibility
 // across machines and CI, not whatever "latest" happens to be today.
@@ -35,6 +44,7 @@ for (const command of ['cmake', 'git', 'python3']) {
 }
 ensurePython310OrNewerOnPath();
 await ensureVcpkgBootstrapped();
+await run(process.execPath, [join(rootDirectory, 'scripts', 'generateReportProtocol.mjs')]);
 
 if (!await pathExists(join(emsdkDirectory, '.git'))) {
     await mkdir(join(rootDirectory, '.tools'), { recursive: true });

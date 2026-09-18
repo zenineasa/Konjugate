@@ -74,6 +74,24 @@ The same plugin can contribute a reusable component template:
 
 After installation, the template appears in the existing Component Library. Placement uses the normal model-creation path, so validation, undo/redo and simulation semantics are identical to a bundled component. A plugin can now extend the modeling vocabulary as well as the numerical runtime.
 
+A plugin can also contribute a ready-made example model, which appears in the Examples dialog beside the bundled ones:
+
+```json
+{
+    "kind": "example",
+    "exampleId": "buildingHeatLoss",
+    "apiVersion": 1,
+    "name": "Building heat loss",
+    "domains": ["thermal"],
+    "description": "A heated room losing heat through its walls.",
+    "entry": "examples/buildingHeatLoss.kjt",
+    "guide": "examples/buildingHeatLoss.md",
+    "thumbnail": "examples/buildingHeatLoss.png"
+}
+```
+
+`exampleId`, `name` and an `entry` ending in `.kjt` are required; `guide` (Markdown, opened in the example guide window) and `thumbnail` are optional, and every path must stay inside the package. It loads as an unsaved copy behind the usual unsaved-work confirmation. An example whose files are missing or escape the package, or whose id matches a bundled example, is skipped with a warning, and a disabled plugin's examples are not listed. See [Launcher add-ons](proposals/launcherAddons.md) for how examples fit a larger plan for package starting points.
+
 Generate the example package from the repository root with:
 
 ```bash

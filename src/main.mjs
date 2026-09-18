@@ -4,9 +4,9 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, sh
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
@@ -311,6 +311,12 @@ async function openGuideWindow(projectWindow, payload) {
 }
 
 async function openExampleGuide(projectWindow, id) {
+    const pluginExample = (await discoverPluginExamples()).get(id);
+    if (pluginExample) {
+        // A plugin example's guide is optional: without one there is simply nothing to open.
+        if (!pluginExample.guide) return false;
+        return openGuideWindow(projectWindow, { id, title: pluginExample.name, markdown: await readFile(pluginExample.guide, 'utf8'), kind: 'example' });
+    }
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     const guideName = `${exampleIdFromFileName(id)}.md`;
     const markdown = await readFile(join(examplesDir, guideName), 'utf8');
@@ -889,9 +895,60 @@ async function examplesManifest() {
     return examplesManifestCache;
 }
 
+// Example models a plugin contributes ("kind": "example" in its plugin.json), keyed by the same
+// "<id>.kjt" file-name id the bundled examples use so the Examples dialog needs no special case.
+// Re-scanned on each request, like the component library, and a disabled plugin's are skipped. A
+// contribution whose files escape its plugin directory, are missing, or collide with a bundled
+// example's id is skipped with a warning rather than failing the whole list.
+async function discoverPluginExamples() {
+    const found = new Map();
+    const bundled = new Set(await exampleFiles());
+    const pluginRoot = join(app.getPath('userData'), 'packages', 'plugins');
+    const disabledKeys = await extensionStateStore.list();
+    const insidePlugin = (directory, relativePath) => {
+        const resolvedPath = resolve(directory, relativePath);
+        return resolvedPath.startsWith(`${resolve(directory)}${sep}`) ? resolvedPath : null;
+    };
+    for (const pluginIdEntry of await readdir(pluginRoot, { withFileTypes: true }).catch(() => [])) {
+        if (!pluginIdEntry.isDirectory()) continue;
+        for (const versionEntry of await readdir(join(pluginRoot, pluginIdEntry.name), { withFileTypes: true }).catch(() => [])) {
+            if (!versionEntry.isDirectory()) continue;
+            const pluginDirectory = join(pluginRoot, pluginIdEntry.name, versionEntry.name);
+            try {
+                const manifest = JSON.parse(await readFile(join(pluginDirectory, 'plugin.json'), 'utf8'));
+                if (disabledKeys.includes(packageKey('plugin', manifest.pluginId, manifest.version))) continue;
+                for (const contribution of (manifest.contributes ?? []).filter((item) => item.kind === 'example')) {
+                    try {
+                        const id = `${contribution.exampleId}.kjt`;
+                        if (bundled.has(id) || found.has(id)) throw new Error(`Duplicate example ID: ${contribution.exampleId}.`);
+                        const entry = insidePlugin(pluginDirectory, contribution.entry);
+                        const guide = contribution.guide ? insidePlugin(pluginDirectory, contribution.guide) : null;
+                        const thumbnail = contribution.thumbnail ? insidePlugin(pluginDirectory, contribution.thumbnail) : null;
+                        if (!entry || !entry.endsWith('.kjt') || (contribution.guide && !guide) || (contribution.thumbnail && !thumbnail)) {
+                            throw new Error('An example file lies outside its plugin directory.');
+                        }
+                        await access(entry);
+                        found.set(id, {
+                            id, entry, guide, name: contribution.name, domains: contribution.domains ?? [],
+                            description: contribution.description ?? '',
+                            thumbnailUrl: thumbnail && existsSync(thumbnail) ? pathToFileURL(thumbnail).href : null,
+                            source: { pluginId: manifest.pluginId, pluginVersion: manifest.version }
+                        });
+                    } catch (error) {
+                        console.warn(`Skipping example ${contribution.exampleId} from ${pluginIdEntry.name}/${versionEntry.name}: ${error.message}`);
+                    }
+                }
+            } catch (error) {
+                console.warn(`Skipping plugin examples from ${pluginIdEntry.name}/${versionEntry.name}: ${error.message}`);
+            }
+        }
+    }
+    return found;
+}
+
 ipcMain.handle('projectListExamples', async () => {
     const manifest = await examplesManifest();
-    return Promise.all((await exampleFiles()).map(async (fileName) => {
+    const bundledEntries = await Promise.all((await exampleFiles()).map(async (fileName) => {
         const stem = exampleIdFromFileName(fileName);
         const thumbnailPath = join(examplesDir, `${stem}.png`);
         return {
@@ -899,9 +956,16 @@ ipcMain.handle('projectListExamples', async () => {
             thumbnailUrl: existsSync(thumbnailPath) ? pathToFileURL(thumbnailPath).href : null
         };
     }));
+    const pluginEntries = [...(await discoverPluginExamples()).values()].map((example) => ({
+        id: example.id, label: example.name, suggestedFilename: example.id, domains: example.domains,
+        description: example.description, thumbnailUrl: example.thumbnailUrl, source: example.source
+    }));
+    return [...bundledEntries, ...pluginEntries];
 });
 
 ipcMain.handle('projectLoadExample', async (_event, id) => {
+    const pluginExample = (await discoverPluginExamples()).get(id);
+    if (pluginExample) return { ...await decodeProjectForRenderer(await readFile(pluginExample.entry)), suggestedFilename: id };
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     return { ...await decodeProjectForRenderer(await readFile(join(examplesDir, id))), suggestedFilename: id };
 });

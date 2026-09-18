@@ -128,6 +128,15 @@ export function inspectPackageArchive(archive, { extension = null } = {}) {
         for (const contribution of contributionManifest.contributes) {
             if (contribution.kind === 'component') {
                 if (!contribution.componentId || contribution.apiVersion !== 1) throw new PackageArchiveError('The plugin contains an invalid component contribution.', 'INVALID_MANIFEST');
+            } else if (contribution.kind === 'example') {
+                if (!/^[a-zA-Z][\w-]*$/.test(contribution.exampleId ?? '') || contribution.apiVersion !== 1 || !contribution.name || !String(contribution.entry ?? '').endsWith('.kjt')) {
+                    throw new PackageArchiveError('The plugin contains an invalid example contribution.', 'INVALID_MANIFEST');
+                }
+                for (const optional of ['guide', 'thumbnail']) {
+                    if (contribution[optional] === undefined) continue;
+                    safeArchivePath(contribution[optional]);
+                    if (!files[contribution[optional]]) throw new PackageArchiveError(`The plugin example ${optional} is missing: ${contribution[optional]}.`, 'MISSING_ENTRY');
+                }
             } else {
                 if (!contribution.providerId || contribution.apiVersion !== 1 || !['cpp', 'python'].includes(contribution.runtime)) {
                     throw new PackageArchiveError('The plugin contains an unsupported provider contribution.', 'INVALID_MANIFEST');

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
 import { unzipSync } from 'fflate';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { encodeProjectFile } from '../src/projectFile.mjs';
 
@@ -3927,6 +3927,48 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(bundleWindow, `document.querySelector('#componentLibraryHint').textContent`), /Select 3 nodes first/);
         await bundleWindow.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; no web-edition equivalent' });
+
+    await run('a plugin-contributed example appears in the Examples dialog and loads as an unsaved copy', async () => {
+        // The suite runs with an isolated userData directory (KONJUGATE_INTERACTION_USER_DATA), which is
+        // where installed packages live, so a plugin written there is discovered exactly like an installed one.
+        const pluginDirectory = join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages', 'plugins', 'example.exampleShowcase', '0.1.0');
+        await mkdir(join(pluginDirectory, 'examples'), { recursive: true });
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' },
+            nodes: [{ id: 1, name: 'Plugin tank', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Level', symbol: 'level', initialValue: 1 }] }],
+            edges: []
+        };
+        await writeFile(join(pluginDirectory, 'examples', 'pluginTank.kjt'), await encodeProjectFile(JSON.stringify(project)));
+        await writeFile(join(pluginDirectory, 'examples', 'pluginTank.md'), '# Plugin tank\n\n## Overview\n\nA single tank shipped by a plugin.\n');
+        await writeFile(join(pluginDirectory, 'plugin.json'), JSON.stringify({
+            pluginId: 'example.exampleShowcase', name: 'Example Showcase', version: '0.1.0', apiVersion: 1, permissions: [],
+            contributes: [
+                { kind: 'example', apiVersion: 1, exampleId: 'pluginTank', name: 'Plugin tank', domains: ['showcase'], description: 'A single tank shipped by a plugin.', entry: 'examples/pluginTank.kjt', guide: 'examples/pluginTank.md' },
+                { kind: 'example', apiVersion: 1, exampleId: 'escapes', name: 'Escapes its plugin', entry: '../escapes.kjt' },
+                { kind: 'example', apiVersion: 1, exampleId: 'thermalManagement', name: 'Collides with a bundled example', entry: 'examples/pluginTank.kjt' }
+            ]
+        }));
+
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        const exampleWindow = await driver.waitForNewHandle(before);
+        await waitFor(exampleWindow, `document.querySelector('.documentTitle')`, 'The example window did not finish loading.');
+        await evaluate(exampleWindow, `document.querySelector('#exampleButton').click()`);
+        await waitFor(exampleWindow, `document.querySelector('#examplesExplorerDialog').open`, 'Examples explorer did not open.');
+        const labels = `[...document.querySelectorAll('.examplesExplorerItem b')].map((item) => item.textContent)`;
+        await waitFor(exampleWindow, `${labels}.includes('Plugin tank')`, 'The plugin example did not appear in the Examples dialog.');
+        const listed = await evaluate(exampleWindow, labels);
+        assert.ok(!listed.includes('Escapes its plugin'), 'An example whose file escapes its plugin directory must be skipped.');
+        assert.equal(listed.filter((label) => label === 'Thermal Management').length, 1, 'An example colliding with a bundled id must be skipped.');
+
+        await evaluate(exampleWindow, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Plugin tank').click()`);
+        await waitFor(exampleWindow, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Plugin tank'`, 'Selecting the plugin example did not populate the preview.');
+        await evaluate(exampleWindow, `document.querySelector('#examplesExplorerLoad').click()`);
+        await waitFor(exampleWindow, `document.querySelector('.documentTitle').textContent === 'pluginTank'`, 'The plugin example did not load.');
+        assert.equal(await evaluate(exampleWindow, `document.querySelectorAll('.node-label-container').length`), 1);
+        assert.match(await evaluate(exampleWindow, `document.querySelector('#statusText').textContent`), /unsaved copy/i);
+        await exampleWindow.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; a plugin directory is written to the desktop userData' });
 
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

@@ -228,3 +228,32 @@ test('uninstalling a package that is not installed throws NOT_INSTALLED', async 
 });
 
 assert.equal(validateAddonManifest(addonManifest).addonId, 'example.helloWorld');
+
+function pluginWithExample(example, files = {}) {
+    return createPackageArchive({
+        packageManifest: packageManifest('plugin'),
+        contributionManifest: {
+            pluginId: 'example.helloProvider', name: 'Hello Provider', version: '0.1.0', apiVersion: 1,
+            contributes: [{ kind: 'example', apiVersion: 1, exampleId: 'buildingHeatLoss', name: 'Building heat loss', entry: 'examples/buildingHeatLoss.kjt', ...example }],
+            permissions: []
+        },
+        files: { 'examples/buildingHeatLoss.kjt': 'model', ...files }
+    });
+}
+
+test('a plugin can contribute an example model, with an optional guide and thumbnail', () => {
+    const archive = pluginWithExample({ guide: 'examples/buildingHeatLoss.md', thumbnail: 'examples/buildingHeatLoss.png', domains: ['thermal'] },
+        { 'examples/buildingHeatLoss.md': '# Guide', 'examples/buildingHeatLoss.png': 'png' });
+    assert.equal(inspectPackageArchive(archive, { extension: '.kjp' }).contributionManifest.contributes[0].kind, 'example');
+    assert.doesNotThrow(() => inspectPackageArchive(pluginWithExample({}), { extension: '.kjp' }));
+});
+
+test('an invalid example contribution is rejected', () => {
+    const rejects = (example, files, pattern) => assert.throws(() => inspectPackageArchive(pluginWithExample(example, files), { extension: '.kjp' }), pattern);
+    rejects({ exampleId: '1bad id' }, {}, /invalid example/);
+    rejects({ name: undefined }, {}, /invalid example/);
+    rejects({ entry: 'examples/buildingHeatLoss.txt' }, { 'examples/buildingHeatLoss.txt': 'x' }, /invalid example/);
+    rejects({ entry: 'examples/missing.kjt' }, {}, /entry is missing/);
+    rejects({ guide: 'examples/missing.md' }, {}, /guide is missing/);
+    rejects({ thumbnail: '../escape.png' }, {}, /Unsafe|unsafe|missing/);
+});

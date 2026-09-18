@@ -730,6 +730,9 @@ export async function runInteractionTests(driver) {
         const analysisWindow = analysisHandle;
         await waitFor(analysisWindow, `Boolean(document.querySelector('.konjugateAddonTitlebar'))`, 'Host titlebar was not added to the add-on window.');
         assert.equal(await evaluate(analysisWindow, `document.querySelector('.konjugateAddonIdentity b').textContent`), 'Results Analysis');
+        // Every add-on window carries Konjugate's own logo in its host titlebar, not a stand-in letter.
+        await waitFor(analysisWindow, `Boolean(document.querySelector('.konjugateAddonIdentity > img'))`, 'The add-on titlebar did not get Konjugate\'s logo.');
+        assert.match(await evaluate(analysisWindow, `document.querySelector('.konjugateAddonIdentity > img').src`), /^data:image\/svg\+xml;base64,/);
         assert.equal(await evaluate(analysisWindow, `document.querySelectorAll('.konjugateAddonWindowControls button').length`), 3);
         await waitFor(analysisWindow, `getComputedStyle(document.querySelector('.konjugateAddonTitlebar')).position === 'fixed'`, 'Host titlebar styles did not load.');
         await waitFor(analysisWindow, `document.querySelectorAll('.signalOption').length > 0 && document.querySelector('.plotWorkspace').classList.contains('hasSignals')`, 'Results Analysis did not load signals.', 5000);

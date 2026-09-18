@@ -167,7 +167,7 @@ export async function runScenarioBranches({ content, config, scenario, intervent
 
 export function registerLauncherHandlers(deps) {
     const {
-        ipcMain, dialog, BrowserWindow, app, screen, currentDir, projectWindows, projectWindowState, installCustomWindowState,
+        ipcMain, dialog, BrowserWindow, app, screen, currentDir, iconPath, projectWindows, projectWindowState, installCustomWindowState,
         auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry
     } = deps;
     const workspaces = new Map();
@@ -225,6 +225,7 @@ export function registerLauncherHandlers(deps) {
             minHeight: 620,
             ...auxiliaryWindowPresentation(projectWindow),
             title: addon.manifest.name,
+            icon: iconPath,
             frame: false,
             backgroundColor: '#0b1620',
             webPreferences: {
@@ -435,7 +436,7 @@ export function registerLauncherHandlers(deps) {
         const existing = state.launcherPages.get(pageId);
         if (existing && !existing.isDestroyed()) { existing.show(); existing.focus(); return {}; }
         const window = new BrowserWindow({
-            width: 860, height: 760, title: page.label, backgroundColor: '#f5f3ee', autoHideMenuBar: true,
+            width: 860, height: 760, title: page.label, icon: iconPath, backgroundColor: '#f5f3ee', autoHideMenuBar: true,
             webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
         });
         window.setMenu(null);

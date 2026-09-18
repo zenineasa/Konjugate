@@ -113,6 +113,9 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
+// Konjugate's own icon, used by every window (the project window and each auxiliary and add-on window) so none
+// falls back to the default Electron icon in a taskbar or window switcher.
+const appIconPath = join(currentDir, '..', 'assets', 'icons', 'app.png');
 const pendingEncryptedPaths = new Set();
 // Every open project window, plus one state record per window replacing what used to be a
 // single set of module-level globals -- each project window gets its own aux windows (example
@@ -203,7 +206,7 @@ function createProjectWindow(pendingFileOpen) {
         frame: false,
         backgroundColor: '#08111f',
         title: 'Konjugate',
-        icon: join(currentDir, '..', 'assets', 'icons', 'app.png'),
+        icon: appIconPath,
         webPreferences: {
             preload: join(currentDir, 'preload.mjs'),
             contextIsolation: true,
@@ -282,6 +285,7 @@ async function openGuideWindow(projectWindow, payload) {
     const state = projectWindowState.get(projectWindow);
     if (!state.exampleGuideWindow || state.exampleGuideWindow.isDestroyed()) {
         const createdWindow = new BrowserWindow({
+        icon: appIconPath,
             ...auxiliaryWindowBounds(projectWindow, 720, 760, state.exampleGuideBounds, screen),
             ...auxiliaryWindowPresentation(projectWindow),
             minWidth: 480,
@@ -392,6 +396,7 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
     state.providerEditorOwner = ownerWebContents;
     if (!state.providerEditorWindow || state.providerEditorWindow.isDestroyed()) {
         const createdWindow = new BrowserWindow({
+        icon: appIconPath,
             ...auxiliaryWindowBounds(projectWindow, 820, 640, state.providerEditorBounds, screen),
             ...auxiliaryWindowPresentation(projectWindow),
             minWidth: 480,
@@ -660,6 +665,7 @@ async function openResultsVisualizer(projectWindow, { addonDirectory, manifest }
         return;
     }
     const createdWindow = new BrowserWindow({
+        icon: appIconPath,
         ...auxiliaryWindowBounds(projectWindow, 1080, 720, null, screen),
         minWidth: 720,
         minHeight: 480,
@@ -792,6 +798,14 @@ ipcMain.handle('visualizerReadSeries', (event, { signalIds, options }) => {
     const state = projectWindow && projectWindowState.get(projectWindow);
     if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.read')) return [];
     return readSignalSeries(state.visualizerSession, signalIds, options);
+});
+
+// The logo shown in the host titlebar of every add-on window. Sent as a data URI because an add-on page's
+// own Content Security Policy only allows images from its own package and data: URIs.
+let addonTitlebarIconCache = null;
+ipcMain.handle('addonTitlebarIcon', async () => {
+    addonTitlebarIconCache ??= `data:image/svg+xml;base64,${(await readFile(join(currentDir, '..', 'assets', 'icon.svg'))).toString('base64')}`;
+    return addonTitlebarIconCache;
 });
 
 ipcMain.handle('visualizerTitlebarStylesheet', (event) => {
@@ -1826,7 +1840,7 @@ const engineOptions = async () => {
 };
 
 const launcherHost = registerLauncherHandlers({
-    ipcMain, dialog, BrowserWindow, app, screen, currentDir, projectWindows, projectWindowState, installCustomWindowState,
+    ipcMain, dialog, BrowserWindow, app, screen, currentDir, iconPath: appIconPath, projectWindows, projectWindowState, installCustomWindowState,
     auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry
 });
 

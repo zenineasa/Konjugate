@@ -9,6 +9,13 @@ async function installAddonTitlebar() {
     titlebar.className = 'konjugateAddonTitlebar';
     titlebar.innerHTML = '<div class="konjugateAddonIdentity"><span aria-hidden="true">K</span><strong>Konjugate</strong><i></i><b></b></div><div class="konjugateAddonWindowControls"><button type="button" data-window-action="minimize" aria-label="Minimize">−</button><button type="button" data-window-action="maximize" aria-label="Maximize"><span>□</span></button><button class="close" type="button" data-window-action="close" aria-label="Close">×</button></div>';
     titlebar.querySelector('.konjugateAddonIdentity b').textContent = document.title || 'Add-on';
+    // Konjugate's own logo, not a stand-in letter, so an add-on window reads as part of the application.
+    ipcRenderer.invoke('addonTitlebarIcon').then((source) => {
+        const image = document.createElement('img');
+        image.alt = '';
+        image.src = source;
+        titlebar.querySelector('.konjugateAddonIdentity > span').replaceWith(image);
+    }).catch(() => {});
     document.body.prepend(titlebar);
     const stylesheet = document.createElement('link');
     stylesheet.rel = 'stylesheet';

@@ -11,6 +11,7 @@ body { padding-top: 38px; }
     display: grid; width: 18px; height: 18px; color: #7be2d8; background: #102733;
     border: 1px solid #244653; border-radius: 4px; place-items: center; font-size: 10px; font-weight: 750;
 }
+.konjugateAddonIdentity > img { width: 20px; height: 20px; border-radius: 5px; }
 .konjugateAddonIdentity strong { font-size: 12px; }
 .konjugateAddonIdentity i { width: 1px; height: 15px; margin: 0 3px; background: #263944; }
 .konjugateAddonIdentity b { overflow: hidden; color: #82949f; font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }

@@ -71,15 +71,32 @@ export function inspectProjectFile(buffer) {
     return { format: 'kjt', encrypted: Boolean(flags & encryptedFlag), version };
 }
 
-export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null } = {}) {
+// resultBranches (an array of {buffer, branchUuid, parentBranchUuid, forkTime, label}) saves an
+// entire branch tree instead of the single active result `result` saves -- mutually exclusive
+// with `result`; pass at most one. A single-branch save (bare `result`, or `resultBranches` with
+// exactly one entry and no branch metadata) still writes the plain `resultPayloadLength` field
+// alone, so a file saved this way is byte-for-byte the same shape a build that predates branching
+// would produce and can still open in one. Once a save actually carries two or more branches (or
+// one branch tagged with real UUIDs), `resultSections` is the only way to recover them, and an
+// older build attempting to open it will cleanly fail with CORRUPT_PAYLOAD (its resultPayloadLength
+// arithmetic can't add up against every branch's concatenated bytes) rather than silently losing
+// or corrupting data -- deliberately not mirrored into a redundant legacy single-result section,
+// which would double the file's size on every multi-branch save just to support opening a
+// multi-branch file in a build that predates the concept entirely.
+export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null, resultBranches = null } = {}) {
     const compressed = await gzipAsync(Buffer.from(content, 'utf8'), { level: 9 });
-    const resultBytes = result ? (Buffer.isBuffer(result) ? result : Buffer.from(result)) : Buffer.alloc(0);
+    const branches = (resultBranches ?? (result ? [{ buffer: result }] : []))
+        .map((branch) => ({ ...branch, buffer: Buffer.isBuffer(branch.buffer) ? branch.buffer : Buffer.from(branch.buffer) }));
+    const isLegacyShape = branches.length <= 1 && !branches.some((branch) => branch.branchUuid);
     let flags = gzipFlag;
-    let payload = Buffer.concat([compressed, resultBytes]);
+    let payload = Buffer.concat([compressed, ...branches.map((branch) => branch.buffer)]);
     const metadata = {
         compression: 'gzip',
         modelPayloadLength: compressed.length,
-        resultPayloadLength: resultBytes.length
+        resultPayloadLength: isLegacyShape ? (branches[0]?.buffer.length ?? 0) : 0,
+        ...(isLegacyShape ? {} : {
+            resultSections: branches.map(({ buffer, ...branchMetadata }) => ({ length: buffer.length, ...branchMetadata }))
+        })
     };
 
     if (password) {
@@ -131,17 +148,35 @@ export async function decodeProjectBundle(buffer, { password = null } = {}) {
     }
     const modelPayloadLength = metadata.modelPayloadLength === undefined
         ? plaintext.length : Number(metadata.modelPayloadLength);
-    const resultPayloadLength = metadata.resultPayloadLength === undefined
-        ? 0 : Number(metadata.resultPayloadLength);
+    // A pre-branching file (or a single-branch save from this build, which writes the identical
+    // shape -- see encodeProjectFile) has no resultSections at all; a multi-branch save has one
+    // entry per branch and an unused (zero) resultPayloadLength -- see this function's own doc
+    // comment for why the two are never both populated.
+    const sections = Array.isArray(metadata.resultSections) && metadata.resultSections.length
+        ? metadata.resultSections
+        : (metadata.resultPayloadLength ? [{ length: metadata.resultPayloadLength }] : []);
+    const sectionLengths = sections.map((section) => Number(section.length));
+    const totalResultLength = sectionLengths.reduce((total, length) => total + length, 0);
     if (!Number.isSafeInteger(modelPayloadLength) || modelPayloadLength <= 0 ||
-        !Number.isSafeInteger(resultPayloadLength) || resultPayloadLength < 0 ||
-        modelPayloadLength + resultPayloadLength !== plaintext.length) {
+        sectionLengths.some((length) => !Number.isSafeInteger(length) || length < 0) ||
+        modelPayloadLength + totalResultLength !== plaintext.length) {
         throw new ProjectFileError('The project payload sections are damaged.', 'CORRUPT_PAYLOAD');
     }
     try {
+        const content = (await gunzipAsync(plaintext.subarray(0, modelPayloadLength), { maxOutputLength })).toString('utf8');
+        let offset = modelPayloadLength;
+        const resultBranches = sections.map((section, index) => {
+            const length = sectionLengths[index];
+            const buffer = length ? Buffer.from(plaintext.subarray(offset, offset + length)) : null;
+            offset += length;
+            return { ...section, buffer };
+        }).filter((branch) => branch.buffer);
         return {
-            content: (await gunzipAsync(plaintext.subarray(0, modelPayloadLength), { maxOutputLength })).toString('utf8'),
-            result: resultPayloadLength ? Buffer.from(plaintext.subarray(modelPayloadLength)) : null
+            content,
+            // result stays the first (in a legacy/single-branch file, the only) branch's buffer,
+            // so every existing caller reading .result alone keeps working unchanged.
+            result: resultBranches[0]?.buffer ?? null,
+            resultBranches: resultBranches.length ? resultBranches : null
         };
     } catch {
         throw new ProjectFileError('The project payload is damaged.', 'CORRUPT_PAYLOAD');

@@ -76,6 +76,75 @@ void evaluationSeparatesLocalSnapshotAndLiveParameterInputs() {
         "Evaluation did not respect local state, synchronization snapshot and live parameter boundaries.");
 }
 
+void parameterScheduleEvaluatesEachModeAndSupersedesEarlierSchedules() {
+    using konjugate::ParameterSchedule;
+    using konjugate::evaluateParameterSchedule;
+
+    ParameterSchedule step;
+    step.mode = ParameterSchedule::Mode::step;
+    step.targetValue = 42;
+    require(evaluateParameterSchedule(step, 0) == 42 && evaluateParameterSchedule(step, 1000) == 42,
+        "A step schedule must hold its target value regardless of simulation time.");
+
+    ParameterSchedule ramp;
+    ramp.mode = ParameterSchedule::Mode::ramp;
+    ramp.startTime = 2;
+    ramp.duration = 4;
+    ramp.baseValue = 0;
+    ramp.targetValue = 8;
+    require(evaluateParameterSchedule(ramp, 1) == 0, "A ramp must hold its base value before startTime.");
+    require(std::abs(evaluateParameterSchedule(ramp, 2) - 0) < 1e-12, "A ramp must begin exactly at baseValue.");
+    require(std::abs(evaluateParameterSchedule(ramp, 4) - 4) < 1e-12, "A ramp must be halfway through its transition at its midpoint.");
+    require(std::abs(evaluateParameterSchedule(ramp, 6) - 8) < 1e-12, "A ramp must reach targetValue exactly at startTime + duration.");
+    require(evaluateParameterSchedule(ramp, 100) == 8, "A ramp must hold its target value after the transition completes.");
+
+    ParameterSchedule pulse;
+    pulse.mode = ParameterSchedule::Mode::pulse;
+    pulse.startTime = 5;
+    pulse.duration = 2;
+    pulse.baseValue = 1;
+    pulse.targetValue = 9;
+    require(evaluateParameterSchedule(pulse, 4) == 1, "A pulse must read as its base value before startTime.");
+    require(evaluateParameterSchedule(pulse, 5) == 9, "A pulse must read as its target value starting exactly at startTime.");
+    require(evaluateParameterSchedule(pulse, 6.9) == 9, "A pulse must still read as its target value just before it ends.");
+    require(evaluateParameterSchedule(pulse, 7) == 1, "A pulse must return to its base value exactly at startTime + duration.");
+
+    ParameterSchedule piecewise;
+    piecewise.mode = ParameterSchedule::Mode::piecewise;
+    piecewise.baseValue = -1;
+    piecewise.samples = {{0, 0}, {2, 10}, {4, 10}, {6, 0}};
+    require(evaluateParameterSchedule(piecewise, -5) == 0, "Piecewise must edge-hold the first sample before its range.");
+    require(std::abs(evaluateParameterSchedule(piecewise, 1) - 5) < 1e-12, "Piecewise must linearly interpolate between samples.");
+    require(evaluateParameterSchedule(piecewise, 3) == 10, "Piecewise must hold a flat segment between two equal-valued samples.");
+    require(evaluateParameterSchedule(piecewise, 100) == 0, "Piecewise must edge-hold the last sample past its range.");
+
+    // A later intervention (startTime 10) layered onto an earlier one (startTime 0) for the same
+    // parameter must take over the instant it begins, and the earlier one must still govern
+    // before that -- resolveParameterValues' "latest schedule that has already started" rule.
+    konjugate::NodeExecutionPlan node;
+    konjugate::ContributionTask task;
+    task.parameters = {{7, 0, true}};
+    node.contributions.push_back(task);
+    const konjugate::EntityValues noOverrides;
+    ParameterSchedule earlier;
+    earlier.parameterId = 7;
+    earlier.mode = ParameterSchedule::Mode::step;
+    earlier.startTime = 0;
+    earlier.targetValue = 100;
+    ParameterSchedule later;
+    later.parameterId = 7;
+    later.mode = ParameterSchedule::Mode::step;
+    later.startTime = 10;
+    later.targetValue = 200;
+    const std::vector<ParameterSchedule> schedules = {earlier, later};
+    require(konjugate::resolveParameterValues(node, noOverrides, schedules, 5).front().front() == 100,
+        "Before the later schedule starts, the earlier one must still govern.");
+    require(konjugate::resolveParameterValues(node, noOverrides, schedules, 10).front().front() == 200,
+        "The later schedule must take over the instant it starts.");
+    require(konjugate::resolveParameterValues(node, noOverrides, {}, 999).front().front() == 0,
+        "With no active schedules at all, resolution must fall through to the compiled constant unchanged.");
+}
+
 konjugate::ContributionTask literalAlgebraicTask(konjugate::EntityId outputStateId, std::size_t outputStateIndex, double literal) {
     konjugate::ContributionTask task;
     task.outputStateId = outputStateId;
@@ -470,6 +539,7 @@ int main() {
     try {
         deterministicReductionUsesTaskSequence();
         evaluationSeparatesLocalSnapshotAndLiveParameterInputs();
+        parameterScheduleEvaluatesEachModeAndSupersedesEarlierSchedules();
         applyAlgebraicTasksSnapsMismatchedStateToTargetImmediately();
         applyAlgebraicTasksResolveDependencyOrderWithinOnePass();
         applyAlgebraicTasksRejectsANonFiniteResult();

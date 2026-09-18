@@ -318,8 +318,16 @@ assert.ok(performance.now() - liveStartedAt >= 450);
 assert.ok(liveUpdates.some((result) => result.lifecycle === 'running' && result.samples.length > 1));
 assert.equal(liveResult.lifecycle, 'completed');
 assert.equal(liveResult.availableResultTime, 0.5);
-assert.ok(liveResult.samples.length > liveResult.checkpoints.length);
-assert.deepEqual(liveResult.checkpoints.map((checkpoint) => checkpoint.time), [0, 0.5]);
+// A checkpoint is now captured at every output boundary (not just the run's start and end), so
+// every displayed sample is forkable -- see simulationRunner.cpp's captureBoundary()/main-loop
+// comment. Both vectors are seeded with one entry at startTime and then grow in lockstep, one
+// checkpoint per sample, so the two lengths (and time sequences) now match exactly.
+assert.equal(liveResult.checkpoints.length, liveResult.samples.length);
+const expectedCheckpointTimes = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
+liveResult.checkpoints.forEach((checkpoint, index) => {
+    assert.ok(Math.abs(checkpoint.time - expectedCheckpointTimes[index]) < 1e-9,
+        `Expected checkpoint ${index} near ${expectedCheckpointTimes[index]}, got ${checkpoint.time}.`);
+});
 const mostCompleteLiveUpdate = liveUpdates.filter((result) => result.lifecycle === 'running')
     .toSorted((left, right) => right.samples.length - left.samples.length)[0];
 assert.ok(mostCompleteLiveUpdate.samples.length > 1, 'The live Protobuf stream must deliver multiple samples.');
@@ -365,6 +373,34 @@ await controlledRun.setExecutionState('running');
 const controlledResult = await controlledRun.completion;
 assert.equal(controlledResult.lifecycle, 'completed');
 assert.equal(controlledResult.pacing.mode, 'fastest');
+
+// Proves the full wire path for a recorded, timestamped intervention (docs/resultExploration.md's
+// "Parameter interventions") -- JS encodeEngineCommand -> C++ drainRunControl ->
+// RunControl.activeSchedules -> resolveParameterValues -- not just the schedule-evaluation math
+// itself, which engine/tests/executionPlanTests.cpp already checks precisely in isolation.
+const scheduledUpdates = [];
+const scheduledProject = JSON.parse(example);
+const scheduledParameter = scheduledProject.edges[0].parameters[0];
+scheduledParameter.mode = 'live';
+const scheduledRun = await startEngineRun(JSON.stringify(scheduledProject), {
+    name: 'Scheduled adapter', targetTime: 0.4, globalTimeStep: 0.01, outputInterval: 0.05,
+    pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
+}, {
+    ...engineOptions
+}, { onUpdate: (result) => scheduledUpdates.push(result) });
+assert.deepEqual(await scheduledRun.scheduleParameterValue(scheduledParameter.id, {
+    mode: 'ramp', startTime: 0.1, duration: 0.1, targetValue: Number(scheduledParameter.value) * 3
+}), {
+    parameterId: scheduledParameter.id, mode: 'ramp', startTime: 0.1, duration: 0.1, targetValue: Number(scheduledParameter.value) * 3
+});
+await assert.rejects(() => scheduledRun.scheduleParameterValue(scheduledParameter.id, { mode: 'exponential' }),
+    /Unsupported parameter schedule mode/);
+await assert.rejects(() => scheduledRun.scheduleParameterValue(scheduledParameter.id, { mode: 'piecewise', samples: [{ time: 0, value: 1 }] }),
+    /at least two samples/);
+await assert.rejects(() => scheduledRun.scheduleParameterValue('not-live', { mode: 'step', targetValue: 1 }),
+    /not available for live control/);
+const scheduledResult = await scheduledRun.completion;
+assert.equal(scheduledResult.lifecycle, 'completed');
 
 let resolveStoppedProgress;
 const stoppedProgress = new Promise((resolve) => { resolveStoppedProgress = resolve; });

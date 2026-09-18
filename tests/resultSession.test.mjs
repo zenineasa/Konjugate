@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { downsampleSamples, nearestResultSample, rendererResultProjection, resultSignalSeries, suggestedPlaybackRate } from '../src/resultSession.mjs';
+import { checkpointIndex, downsampleSamples, nearestResultSample, rendererResultProjection, resultSignalSeries, suggestedPlaybackRate } from '../src/resultSession.mjs';
 
 function samples(count) {
     return Array.from({ length: count }, (_value, index) => ({
@@ -54,6 +54,17 @@ test('suggests bounded playback rates from explicit duration bands', () => {
     assert.equal(suggestedPlaybackRate(1800), 5);
     assert.equal(suggestedPlaybackRate(1801), 10);
     assert.equal(suggestedPlaybackRate(10000), 10);
+});
+
+test('projects a full checkpoint list down to uuid and time for forkable-time lookups', () => {
+    const result = {
+        checkpoints: [
+            { uuid: 'a', time: 0, states: [{ stateId: 1, value: 0 }], providerStates: [] },
+            { uuid: 'b', time: 0.25, states: [{ stateId: 1, value: 1 }], providerStates: [] }
+        ]
+    };
+    assert.deepEqual(checkpointIndex(result), [{ uuid: 'a', time: 0 }, { uuid: 'b', time: 0.25 }]);
+    assert.deepEqual(checkpointIndex({}), []);
 });
 
 test('selects exact retained samples around a playback time', () => {

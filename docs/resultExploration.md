@@ -151,6 +151,8 @@ A fork begins from an engine checkpoint at a global synchronization boundary. A 
 
 Result output samples already occur at global synchronization boundaries. A sample becomes forkable only when the result carries the complete checkpoint information required by the engine. Display values rounded for labels are never used to resume execution.
 
+**Status.** The engine now captures a checkpoint (state vector plus opaque per-provider payloads) at every output boundary, not only at the run's start and end, so every displayed sample is forkable -- see `simulationRunner.cpp`'s main loop. Random-generator state needs no new engine machinery: `NodeProvider::checkpoint()`/`restore()` are already fully opaque and provider-owned, so a stochastic provider (an SDE driven by a seeded PRNG, for instance) gets bit-for-bit reproducibility for free by serializing its PRNG's internal state into those bytes -- proven by a dedicated regression test in `engine/tests/nodeProviderRuntimeTests.cpp`. Active run configuration, pending intervention events, and parent run/branch UUIDs are not yet part of the checkpoint payload; the current implementation reconstructs them at the application layer (the launching run configuration, and the branch's own bookkeeping) rather than embedding them in the engine's checkpoint itself.
+
 ## Parameter interventions
 
 Live changes should be recorded as events rather than transient UI mutations. An intervention identifies its time, parameter UUID, value, and transition mode. Possible modes include:

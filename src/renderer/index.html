@@ -864,14 +864,33 @@
             <header><div><strong>Live controls</strong><small>Applied at the next synchronization step</small></div><button id="closeLiveParameterPanel" type="button" aria-label="Close live controls">×</button></header>
             <div id="liveParameterRows"></div>
         </section>
+        <section id="forkParameterPanel" class="liveParameterPanel" aria-label="Fork parameter overrides" hidden>
+            <header><div><strong>Fork here</strong><small id="forkParameterDescription">Optionally change a parameter for the new branch</small></div><button id="closeForkParameterPanel" type="button" aria-label="Cancel fork">×</button></header>
+            <div id="forkParameterRows"></div>
+            <footer><button id="confirmForkParameters" class="doneButton" type="button">Continue</button></footer>
+        </section>
+        <section id="branchesPanel" class="liveParameterPanel branchesPanel" aria-label="Branch tree and comparison" hidden>
+            <header><div><strong>Branch tree</strong><small>Click a branch to view it · check others to compare</small></div><button id="closeBranchesPanel" type="button" aria-label="Close branch tree">×</button></header>
+            <div id="branchTree"></div>
+        </section>
         <section id="resultTransport" class="resultTransport" aria-label="Simulation status and results" hidden>
             <span class="resultMode"><b>Results</b><small>Model locked</small></span>
+            <!-- Deliberately NOT .reviewControl: that class is blanket-unhidden by
+                 updateLiveResultControls' `$$('.reviewControl').forEach(c => c.hidden = live)`
+                 whenever not live, which would override renderBranchSwitcher's own
+                 branch-count-based hidden state. Visibility here is governed solely by whether
+                 more than one branch exists, in both live and non-live modes -- kept visible
+                 (with individual items disabled, not hidden) during a live run so branch context
+                 isn't lost, matching each chip/tree-button's own `disabled = simulationRunning`. -->
+            <div id="branchChips" class="branchChips" aria-label="Result branches" hidden></div>
+            <button id="branchesMoreButton" class="executionButton" type="button" aria-label="Open branch tree and comparison" aria-expanded="false" hidden><span aria-hidden="true">⑃</span></button>
             <div id="simulationExecutionControls" class="transportGroup" hidden>
                 <button id="simulationPauseResume" class="executionButton" type="button" aria-label="Pause simulation"><span aria-hidden="true">❚❚</span> Pause</button>
                 <button id="simulationStop" class="executionButton" type="button" aria-label="Stop simulation"><span aria-hidden="true">■</span> Stop</button>
             </div>
             <output id="simulationProgress" class="liveControl" hidden>0 / 0 s</output>
             <button id="continueRun" type="button" hidden>Continue</button>
+            <button id="forkHereButton" class="executionButton reviewControl" type="button" aria-label="Fork a new branch from the current time" hidden><span aria-hidden="true">⑂</span> Fork here</button>
             <div id="resultPlaybackControls" class="transportGroup">
                 <button id="resultStart" type="button" aria-label="First result sample">|◀</button>
                 <button id="resultPrevious" type="button" aria-label="Previous result sample">◀</button>

@@ -26,7 +26,7 @@ import { createAIConfigurationStore, createElectronCredentialVault } from './aiC
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
-import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
+import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries, checkpointIndex } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
 import { findAvailableUpdate } from './updateCheck.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
@@ -476,35 +476,60 @@ async function closeCompletedEngineResults() {
     }));
 }
 
-async function createEmbeddedResultSession(resultBytes) {
+// Stores the FULL (untrimmed-checkpoints) result server-side, mirroring exactly how a live run's
+// completedEngineResults entry is built (result: the raw decoded result, never
+// rendererResultProjection-trimmed) -- engineReadCheckpoint reads stored.result.checkpoints
+// directly, so an embedded session must keep the same shape a live one does, or forking after
+// reopening a saved project would only ever see the last checkpoint instead of every one.
+// branchMetadata ({branchUuid, parentBranchUuid, forkTime, label}) is spread onto the returned
+// descriptor only when the caller has it (a multi-branch save); a legacy/single-result file has
+// none of it, matching bundle.resultBranches' own shape from projectFile.mjs.
+async function createEmbeddedResultSession(resultBytes, branchMetadata = {}) {
     if (!resultBytes) return null;
     const directory = await mkdtemp(join(tmpdir(), 'konjugateEmbeddedResult-'));
     const path = join(directory, 'result.bin');
     try {
         await writeFile(path, resultBytes);
         const reader = await openIndexedResult(path);
-        const result = rendererResultProjection({
+        const fullResult = {
             ...reader.metadata,
             samples: await reader.readSamples({ maximumSamples: defaultPlaybackSampleLimit })
-        });
+        };
         const sessionId = randomUUID();
         completedEngineResults.set(sessionId, {
-            result,
+            result: fullResult,
             reader,
             path,
             cleanup: () => rm(directory, { recursive: true, force: true })
         });
-        return { sessionId, result };
+        return {
+            sessionId,
+            result: rendererResultProjection(fullResult),
+            checkpointIndex: checkpointIndex(fullResult),
+            ...branchMetadata
+        };
     } catch (error) {
         await rm(directory, { recursive: true, force: true });
         throw error;
     }
 }
 
+// embeddedResult stays the first (in a legacy/single-branch file, the only) branch, so every
+// existing renderer code path that only knows about one embedded result keeps working unchanged.
+// embeddedBranches carries the rest (or, for a genuinely multi-branch save, all of them again --
+// see loadProjectDocument's own dedup-by-sessionId) for the renderer to rebuild its branch tree.
 async function decodeProjectForRenderer(bytes, options = {}) {
     const bundle = await decodeProjectBundle(bytes, options);
     JSON.parse(bundle.content);
-    return { content: bundle.content, embeddedResult: await createEmbeddedResultSession(bundle.result) };
+    const branchSessions = [];
+    for (const { buffer, length, ...branchMetadata } of bundle.resultBranches ?? []) {
+        branchSessions.push(await createEmbeddedResultSession(buffer, branchMetadata));
+    }
+    return {
+        content: bundle.content,
+        embeddedResult: branchSessions[0] ?? null,
+        embeddedBranches: branchSessions.length > 1 ? branchSessions : null
+    };
 }
 
 // Shared by the dialog-driven projectOpen handler and every OS-initiated open (double-click,
@@ -1153,7 +1178,11 @@ ipcMain.on('projectPathChanged', (event, path) => {
     if (state) state.currentProjectPath = path || null;
 });
 
-ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename, password, resultSessionId }) => {
+// resultBranches: [{jobId, branchUuid?, parentBranchUuid?, forkTime?, label?}, ...] -- a plain
+// single-branch save (today's common case, no forking) sends one entry with no branch metadata at
+// all, which encodeProjectFile writes in the exact legacy shape a build predating branching
+// already understands (see projectFile.mjs's own doc comment on why that distinction matters).
+ipcMain.handle('projectSave', async (event, { path: existingPath, content, suggestedFilename, password, resultBranches }) => {
     const targetWindow = getWindowFromEvent(event);
     let path = existingPath;
     if (!path) {
@@ -1167,16 +1196,20 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         path = result.filePath;
     }
     if (!path.toLowerCase().endsWith('.kjt')) path += '.kjt';
-    const storedResult = resultSessionId ? completedEngineResults.get(resultSessionId) : null;
-    if (resultSessionId && !storedResult?.path) throw new Error('The simulation results are no longer available.');
-    const resultBytes = storedResult ? await readFile(storedResult.path) : null;
-    const bytes = await encodeProjectFile(content, { password, result: resultBytes });
+    const resolvedBranches = [];
+    for (const { jobId, ...branchMetadata } of resultBranches ?? []) {
+        const stored = jobId ? completedEngineResults.get(jobId) : null;
+        if (jobId && !stored?.path) throw new Error('The simulation results are no longer available.');
+        if (!stored) continue;
+        resolvedBranches.push({ buffer: await readFile(stored.path), ...branchMetadata });
+    }
+    const bytes = await encodeProjectFile(content, { password, resultBranches: resolvedBranches.length ? resolvedBranches : null });
     const verification = await decodeProjectBundle(bytes, { password });
-    if (verification.content !== content || Boolean(verification.result) !== Boolean(resultBytes)) {
+    if (verification.content !== content || Boolean(verification.result) !== Boolean(resolvedBranches.length)) {
         throw new Error('The saved project could not be verified.');
     }
     await atomicWriteFile(path, bytes);
-    return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resultBytes) };
+    return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resolvedBranches.length) };
 });
 
 ipcMain.handle('projectExportResultsCsv', async (event, { suggestedFilename, csv }) => {
@@ -1933,7 +1966,8 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         updateVisualizerResult(projectWindow, execution.jobId, result);
         if (!owner.isDestroyed()) owner.send('engineRunComplete', {
             jobId: execution.jobId,
-            result: rendererResultProjection(result)
+            result: rendererResultProjection(result),
+            checkpointIndex: checkpointIndex(result)
         });
     }).catch((error) => {
         if (updateTimer) clearTimeout(updateTimer);
@@ -1960,6 +1994,12 @@ ipcMain.handle('engineSetParameterValue', async (event, jobId, parameterId, valu
     const job = activeEngineJobs.get(jobId);
     if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
     return job.setParameterValue(parameterId, value);
+});
+
+ipcMain.handle('engineScheduleParameterValue', async (event, jobId, parameterId, schedule) => {
+    const job = activeEngineJobs.get(jobId);
+    if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
+    return job.scheduleParameterValue(parameterId, schedule);
 });
 
 ipcMain.handle('engineCancel', async (event, jobId) => {
@@ -1989,6 +2029,22 @@ ipcMain.handle('engineReadResultSample', async (event, jobId, time) => {
     const stored = completedEngineResults.get(jobId);
     if (!stored) return null;
     return structuredClone(await stored.reader.readNearestSample(Number(time)));
+});
+
+// Reads from the in-memory `stored.result.checkpoints` (decoded once, in full, by
+// decodeResultFile -- see engineProtocol.mjs) rather than `stored.reader`, whose
+// indexedResultReader.mjs never copies a checkpoint's providerStates when building its
+// on-disk index. Fetching through the reader would silently drop provider state and make
+// any fork of a provider-bearing model fail to restore.
+ipcMain.handle('engineReadCheckpoint', async (event, jobId, time) => {
+    if (!senderIsProjectWindow(event)) return null;
+    const stored = completedEngineResults.get(jobId);
+    const checkpoints = stored?.result.checkpoints ?? [];
+    if (!checkpoints.length) return null;
+    const target = Number(time);
+    const nearest = checkpoints.reduce((closest, candidate) =>
+        Math.abs(Number(candidate.time) - target) < Math.abs(Number(closest.time) - target) ? candidate : closest);
+    return structuredClone(nearest);
 });
 
 ipcMain.handle('engineReleaseResult', async (event, jobId) => {

@@ -55,6 +55,47 @@ message SetParameterValue {
     double value = 2;
 }
 
+enum ParameterScheduleMode {
+    PARAMETER_SCHEDULE_MODE_UNSPECIFIED = 0;
+    // An instant change to target_value at start_time -- also used for the "enable/disable" and
+    // "controller setpoint" intervention kinds docs/resultExploration.md describes, which are
+    // step changes in effect and need no distinct engine evaluation.
+    PARAMETER_SCHEDULE_MODE_STEP = 1;
+    // Linear transition from base_value at start_time to target_value at start_time + duration,
+    // holding target_value afterward.
+    PARAMETER_SCHEDULE_MODE_RAMP = 2;
+    // target_value for [start_time, start_time + duration), base_value outside that window.
+    PARAMETER_SCHEDULE_MODE_PULSE = 3;
+    // Explicit {time, value} samples, linearly interpolated and edge-held outside their range --
+    // also used for the "externally sampled input" intervention kind, which is a piecewise
+    // schedule supplied in full rather than authored as step/ramp/pulse.
+    PARAMETER_SCHEDULE_MODE_PIECEWISE = 4;
+}
+
+message ParameterScheduleSample {
+    double time = 1;
+    double value = 2;
+}
+
+// A recorded, timestamped intervention event (docs/resultExploration.md's "Parameter
+// interventions" section) rather than an instantaneous override: unlike SetParameterValue, this
+// is appended to a run's active schedule list instead of replacing the previous value outright,
+// so a parameter's effective value becomes a function of simulation time.
+message ScheduleParameterValue {
+    uint64 parameter_id = 1;
+    ParameterScheduleMode mode = 2;
+    double start_time = 3;
+    // Ramp: time to reach target_value. Pulse: width of the pulse. Unused for step/piecewise.
+    double duration = 4;
+    // Step/ramp/pulse target; ignored for piecewise.
+    double target_value = 5;
+    // Ramp's starting value and pulse's outside-the-window value; the caller always supplies the
+    // parameter's own pre-schedule value here rather than leaving the engine to infer one.
+    double base_value = 6;
+    // Piecewise only: explicit, chronologically sorted {time, value} points.
+    repeated ParameterScheduleSample samples = 7;
+}
+
 message EngineCommand {
     uint32 protocol_version = 1;
     uint64 sequence = 2;
@@ -62,6 +103,7 @@ message EngineCommand {
         SetPacing set_pacing = 3;
         SetRunState set_run_state = 4;
         SetParameterValue set_parameter_value = 5;
+        ScheduleParameterValue schedule_parameter_value = 6;
     }
 }
 

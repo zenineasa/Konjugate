@@ -65,11 +65,18 @@ export async function openIndexedResult(path) {
                 ...header.metadata,
                 sampleCount: index.sampleCount,
                 samples: [],
+                // providerStates was missing here until now -- decodeResultHeaderPayload already
+                // decodes it (see engineProtocol.mjs), this mapping just never copied it through.
+                // A checkpoint sourced from this reader (rather than a live completedEngineResults
+                // entry's own full in-memory result) would silently fail to restore any model with
+                // a computational-node provider, since simulationRunner.cpp's restart path requires
+                // an exhaustive providerStates entry for every such node.
                 checkpoints: header.checkpoints.map((checkpoint) => ({
                     uuid: checkpoint.uuid,
                     time: checkpoint.time,
                     solver: checkpoint.solver,
-                    states: header.stateIds.map((stateId, stateIndex) => ({ stateId, value: checkpoint.values[stateIndex] }))
+                    states: header.stateIds.map((stateId, stateIndex) => ({ stateId, value: checkpoint.values[stateIndex] })),
+                    providerStates: checkpoint.providerStates
                 }))
             },
             async readSamples({ startTime = -Infinity, endTime = Infinity, maximumSamples = Infinity } = {}) {

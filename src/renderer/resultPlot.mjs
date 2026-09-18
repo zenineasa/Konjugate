@@ -1,6 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-export function nodeResultSeries(result, node) {
+// branchLabel is undefined for every caller comparing nothing (the overwhelmingly common single-
+// branch inspector view) -- it only matters to ResultPlot.render's branch-coloring path below,
+// which only activates once more than one distinct label is actually present in a render() call.
+export function nodeResultSeries(result, node, branchLabel) {
     if (!result?.samples?.length || !node?.states?.length) return [];
     const samplesByState = new Map(node.states.map((state) => [state.id, []]));
     result.samples.forEach((sample) => {
@@ -15,7 +18,8 @@ export function nodeResultSeries(result, node) {
         name: state.label,
         symbol: state.symbol,
         unit: state.unit ?? '',
-        samples: samplesByState.get(state.id) ?? []
+        samples: samplesByState.get(state.id) ?? [],
+        ...(branchLabel !== undefined ? { branchLabel } : {})
     })).filter((series) => series.samples.length);
 }
 
@@ -67,19 +71,25 @@ export class ResultPlot {
         this.rendered = false;
     }
 
-    async render(series, currentTime = 0) {
+    // branchColors: Map<branchLabel, hex> -- only consulted when more than one distinct
+    // branchLabel is present across series (the N-way branch comparison overlay); a single-branch
+    // render (every existing caller) is byte-identical to before this parameter existed, since
+    // series items with no branchLabel never populate more than one entry in branchLabels below.
+    async render(series, currentTime = 0, { branchColors } = {}) {
         if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
         const units = [...new Set(series.map((item) => item.unit || 'Value'))];
         const times = series.flatMap((item) => item.samples.map((sample) => sample.time));
+        const branchLabels = new Set(series.map((item) => item.branchLabel).filter(Boolean));
+        const colorByBranch = branchLabels.size > 1 ? branchColors : null;
         const traces = series.map((item) => ({
             type: 'scatter',
             mode: 'lines',
-            name: item.symbol,
+            name: colorByBranch ? `${item.symbol} (${item.branchLabel})` : item.symbol,
             x: item.samples.map((sample) => sample.time),
             y: item.samples.map((sample) => sample.value),
             yaxis: units.indexOf(item.unit || 'Value') ? `y${units.indexOf(item.unit || 'Value') + 1}` : 'y',
-            line: { width: 2 },
-            hovertemplate: `${item.name}<br>%{y:.6g} ${item.unit}<br>t = %{x:.6g} s<extra></extra>`
+            line: { width: 2, ...(colorByBranch ? { color: colorByBranch.get(item.branchLabel) } : {}) },
+            hovertemplate: `${item.name}${colorByBranch ? ` (${item.branchLabel})` : ''}<br>%{y:.6g} ${item.unit}<br>t = %{x:.6g} s<extra></extra>`
         }));
         const layout = {
             autosize: true,

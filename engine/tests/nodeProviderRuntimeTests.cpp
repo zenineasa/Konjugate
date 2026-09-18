@@ -595,6 +595,114 @@ void providerRuntimeExecutesNodeProviderCppInProcessEndToEnd() {
     runtime.shutdown();
 }
 
+// The C++ analogue of a future stochastic (e.g. SDE) node provider: proves
+// docs/resultExploration.md's "random-generator state when stochastic models exist" checkpoint
+// requirement is already satisfiable with zero core-engine changes -- a provider that serializes
+// its PRNG's own internal state into its opaque checkpoint bytes gets bit-for-bit reproducible
+// continuation for free, since the engine never inspects, resets, or re-seeds that payload (see
+// NodeProvider::checkpoint's doc comment in relationshipProvider.hpp).
+std::string cppInlinePrngNodeSource() {
+    return R"cpp(
+#include <konjugate/relationshipProvider.hpp>
+#include <cstring>
+#include <memory>
+#include <random>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+class PrngNode final : public konjugate::sdk::v1::NodeProvider {
+public:
+    konjugate::sdk::v1::NodeProviderDescription describe() const override {
+        return {"test.cppPrngNode", "PRNG node",
+            {{"input", "Input", ""}},
+            {{"output", "Output", ""}}};
+    }
+
+    void evaluate(const konjugate::sdk::v1::EvaluationContext&,
+                  konjugate::sdk::v1::NodeOutputCollector& outputs) override {
+        std::uniform_real_distribution<double> distribution(0.0, 1.0);
+        outputs.addGradient("output", distribution(engine_));
+    }
+
+    std::vector<std::byte> checkpoint() const override {
+        std::ostringstream stream;
+        stream << engine_;
+        const std::string text = stream.str();
+        std::vector<std::byte> bytes(text.size());
+        std::memcpy(bytes.data(), text.data(), text.size());
+        return bytes;
+    }
+
+    void restore(std::span<const std::byte> payload) override {
+        const std::string text(reinterpret_cast<const char*>(payload.data()), payload.size());
+        std::istringstream stream(text);
+        stream >> engine_;
+    }
+
+private:
+    std::mt19937 engine_{12345};
+};
+
+}
+
+std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
+    return std::make_unique<PrngNode>();
+}
+)cpp";
+}
+
+void providerRuntimeCheckpointsAndRestoresPrngStateBitForBit() {
+    const std::string implementation = R"json({
+        "kind": "cpp",
+        "providerApiVersion": 1,
+        "source": "placeholder-replaced-below",
+        "bindings": [
+            {"key": "input", "kind": "state", "stateId": 11}
+        ],
+        "outputs": [
+            {"key": "output", "stateId": 11}
+        ]
+    })json";
+
+    auto project = projectWithNodeImplementation(implementation);
+    project.get_child("nodes").begin()->second.put("implementation.source", cppInlinePrngNodeSource());
+
+    const auto plan = konjugate::compileExecutionPlan(project);
+    konjugate::ProviderConfiguration config;
+    config.cppSdkPath = "..";
+    config.executionMode = konjugate::ProviderExecutionMode::inProcess;
+
+    konjugate::ProviderRuntime runtime(config);
+    runtime.initialize(plan);
+    const auto& task = *plan.nodes.front().nodeProvider;
+
+    const double inputs[] = {0.0};
+    // Draw a few values first so the PRNG is well away from its initial seed before checkpointing.
+    runtime.evaluateNode(task, inputs, 0.0, 1.0);
+    runtime.evaluateNode(task, inputs, 1.0, 1.0);
+
+    const auto checkpoint = runtime.requestNodeCheckpoint(task);
+
+    std::vector<double> referenceContinuation;
+    for (int step = 0; step < 5; ++step) {
+        referenceContinuation.push_back(runtime.evaluateNode(task, inputs, 2.0 + step, 1.0).front().second);
+    }
+
+    runtime.requestNodeRestore(task, checkpoint);
+    std::vector<double> restoredContinuation;
+    for (int step = 0; step < 5; ++step) {
+        restoredContinuation.push_back(runtime.evaluateNode(task, inputs, 2.0 + step, 1.0).front().second);
+    }
+
+    require(referenceContinuation == restoredContinuation,
+        "A restored PRNG-backed node provider did not reproduce its reference continuation bit-for-bit.");
+
+    runtime.shutdown();
+}
+
 void providerRuntimeGivesEachCppNodeProviderInstanceIndependentState() {
     auto project = twoNodesSharingOneCppImplementation(cppInlineAccumulatorNodeSource());
     const auto plan = konjugate::compileExecutionPlan(project);
@@ -677,6 +785,7 @@ int main() {
         integrateNodeAppliesSetsValueNodeProviderOutputsDirectlyNotIntegrated();
         providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd();
         providerRuntimeExecutesNodeProviderCppInProcessEndToEnd();
+        providerRuntimeCheckpointsAndRestoresPrngStateBitForBit();
         providerRuntimeGivesEachCppNodeProviderInstanceIndependentState();
         providerRuntimeRejectsACppNodeProviderOutsideInProcessMode();
     } catch (const std::exception& error) {

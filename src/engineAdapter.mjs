@@ -484,6 +484,32 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             await sendCommand({ type: 'setParameterValue', parameterId, value });
             return { parameterId, value };
         },
+        // A recorded, timestamped intervention (see docs/resultExploration.md's "Parameter
+        // interventions") rather than an instantaneous override -- appended to the run's active
+        // schedule list, not replacing the previous value outright. samples is only meaningful
+        // (and required, at least two) for mode "piecewise".
+        scheduleParameterValue: async (parameterId, schedule) => {
+            if (!liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
+            if (!['step', 'ramp', 'pulse', 'piecewise'].includes(schedule?.mode)) throw new Error('Unsupported parameter schedule mode.');
+            const startTime = Number(schedule.startTime ?? 0);
+            const duration = Number(schedule.duration ?? 0);
+            const targetValue = Number(schedule.targetValue ?? 0);
+            const baseValue = Number(schedule.baseValue ?? 0);
+            if (![startTime, duration, targetValue, baseValue].every(Number.isFinite)) {
+                throw new Error('A parameter schedule requires finite numeric fields.');
+            }
+            const samples = schedule.mode === 'piecewise' ? (schedule.samples ?? []).map((sample) => ({
+                time: Number(sample.time), value: Number(sample.value)
+            })) : undefined;
+            if (schedule.mode === 'piecewise') {
+                if (samples.length < 2) throw new Error('A piecewise parameter schedule requires at least two samples.');
+                if (!samples.every((sample) => Number.isFinite(sample.time) && Number.isFinite(sample.value))) {
+                    throw new Error('A piecewise parameter schedule requires finite numeric samples.');
+                }
+            }
+            await sendCommand({ type: 'scheduleParameterValue', parameterId, mode: schedule.mode, startTime, duration, targetValue, baseValue, samples });
+            return { parameterId, ...schedule };
+        },
         shutdown,
         cancel
     };

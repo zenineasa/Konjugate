@@ -35,6 +35,10 @@ export function rendererResultProjection(result, maximumSamples = defaultPlaybac
     };
 }
 
+export function checkpointIndex(result) {
+    return (result.checkpoints ?? []).map(({ uuid, time }) => ({ uuid, time }));
+}
+
 export function resultSignalSeries(result, signalIds, { startTime = 0, endTime = Infinity, maxPoints = 4000 } = {}) {
     const valuesBySignal = new Map(signalIds.map((signalId) => [signalId, []]));
     const samples = downsampleSamples((result.samples ?? [])

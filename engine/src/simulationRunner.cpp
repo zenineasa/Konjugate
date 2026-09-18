@@ -56,7 +56,14 @@ struct Checkpoint { std::string uuid; double time; Values states; ProviderCheckp
 enum class PacingMode { fastest, realTime, limitedRatio };
 enum class RunState { running, paused, stopped };
 struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
-struct RunControl { Pacing pacing; RunState executionState = RunState::running; EntityValues parameterValues; };
+struct RunControl {
+    Pacing pacing;
+    RunState executionState = RunState::running;
+    EntityValues parameterValues;
+    // Appended to, never overwritten -- see ParameterSchedule's own doc comment for why more than
+    // one schedule per parameter is expected (a later intervention layered onto an earlier one).
+    std::vector<ParameterSchedule> activeSchedules;
+};
 struct ControlInbox {
     std::mutex mutex;
     std::vector<protocol::EngineCommand> commands;
@@ -380,6 +387,40 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
                 throw std::runtime_error("The engine received an invalid live parameter value.");
             }
             current.parameterValues[update.parameter_id()] = update.value();
+        } else if (command.has_schedule_parameter_value()) {
+            const auto& update = command.schedule_parameter_value();
+            if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL) {
+                throw std::runtime_error("The engine received an invalid parameter schedule identifier.");
+            }
+            if (!std::isfinite(update.start_time()) || !std::isfinite(update.duration()) ||
+                !std::isfinite(update.target_value()) || !std::isfinite(update.base_value())) {
+                throw std::runtime_error("The engine received a non-finite parameter schedule value.");
+            }
+            ParameterSchedule schedule;
+            schedule.parameterId = update.parameter_id();
+            schedule.startTime = update.start_time();
+            schedule.duration = update.duration();
+            schedule.targetValue = update.target_value();
+            schedule.baseValue = update.base_value();
+            switch (update.mode()) {
+            case protocol::PARAMETER_SCHEDULE_MODE_STEP: schedule.mode = ParameterSchedule::Mode::step; break;
+            case protocol::PARAMETER_SCHEDULE_MODE_RAMP: schedule.mode = ParameterSchedule::Mode::ramp; break;
+            case protocol::PARAMETER_SCHEDULE_MODE_PULSE: schedule.mode = ParameterSchedule::Mode::pulse; break;
+            case protocol::PARAMETER_SCHEDULE_MODE_PIECEWISE:
+                schedule.mode = ParameterSchedule::Mode::piecewise;
+                schedule.samples.reserve(update.samples_size());
+                for (const auto& sample : update.samples()) {
+                    if (!std::isfinite(sample.time()) || !std::isfinite(sample.value())) {
+                        throw std::runtime_error("The engine received a non-finite piecewise parameter schedule sample.");
+                    }
+                    schedule.samples.emplace_back(sample.time(), sample.value());
+                }
+                std::sort(schedule.samples.begin(), schedule.samples.end());
+                break;
+            default:
+                throw std::runtime_error("The engine received an unsupported parameter schedule mode.");
+            }
+            current.activeSchedules.push_back(std::move(schedule));
         }
     }
     return current;
@@ -919,17 +960,22 @@ void runSimulation(const boost::property_tree::ptree& document,
         std::vector<NodeIntegrationResult> nodeResults(executionPlan.nodes.size());
         if (taskExecutor) {
             const auto parameterValues = runControl.parameterValues;
+            const auto activeSchedules = runControl.activeSchedules;
             std::vector<std::future<NodeIntegrationResult>> futures;
             futures.reserve(executionPlan.nodes.size());
             futures.resize(executionPlan.nodes.size());
             for (const auto index : executionPlan.taskSubmissionOrder) {
                 const auto* nodePlan = &executionPlan.nodes[index];
-                futures[index] = taskExecutor->submit([nodePlan, &snapshot, &parameterValues, currentTime, synchronizationStep, evaluatorPtr = providerRuntime.get()] {
-                    return integrateNode(*nodePlan, snapshot, parameterValues, currentTime, synchronizationStep, evaluatorPtr);
+                futures[index] = taskExecutor->submit([nodePlan, &snapshot, &parameterValues, &activeSchedules, currentTime, synchronizationStep, evaluatorPtr = providerRuntime.get()] {
+                    return integrateNode(*nodePlan, snapshot, parameterValues, currentTime, synchronizationStep, evaluatorPtr, activeSchedules);
                 });
             }
             for (std::size_t index = 0; index < futures.size(); ++index) nodeResults[index] = futures[index].get();
         } else if (!partitionRuntimes.empty()) {
+            // runControl.activeSchedules is deliberately NOT threaded across the partition-worker
+            // IPC boundary here -- a documented scope limit (see integrateNode's own doc comment):
+            // a scheduled parameter intervention has no effect under the partitioned backend today,
+            // only under serial/thread-pool execution.
             const auto parameterValues = runControl.parameterValues;
             for (std::size_t partition = 0; partition < partitionRuntimes.size(); ++partition) {
                 const auto preparationStartedAt = std::chrono::steady_clock::now();
@@ -968,7 +1014,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             }
         } else {
             for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
-                nodeResults[index] = integrateNode(executionPlan.nodes[index], snapshot, runControl.parameterValues, currentTime, synchronizationStep, providerRuntime.get());
+                nodeResults[index] = integrateNode(executionPlan.nodes[index], snapshot, runControl.parameterValues, currentTime, synchronizationStep, providerRuntime.get(), runControl.activeSchedules);
             }
         }
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
@@ -1007,7 +1053,13 @@ void runSimulation(const boost::property_tree::ptree& document,
         if (elapsed + 1e-12 >= nextOutputTime || step + 1 == steps) {
             samples.push_back({elapsed, states});
             appendStreamRecord("sample", elapsed, states);
-            if (step + 1 == steps && elapsed > checkpoints.back().time + 1e-12) {
+            // A checkpoint is captured at every output boundary (not only the final step) so any
+            // displayed sample is forkable, matching the documented design intent (see "Result
+            // output samples already occur at global synchronization boundaries" in
+            // docs/resultExploration.md's "Checkpoints and reproducibility" section) -- previously
+            // only the first and last checkpoints existed for an uninterrupted run, so "Fork here"
+            // at an arbitrary scrubbed time silently snapped to the nearest of just those two.
+            if (elapsed > checkpoints.back().time + 1e-12) {
                 checkpoints.push_back({createUuid(), elapsed, states, captureProviderStates()});
                 appendStreamRecord("checkpoint", elapsed, states, checkpoints.back().uuid);
             }

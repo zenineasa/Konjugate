@@ -107,8 +107,8 @@ async function unlock(path, password) {
     return fileFromBytes(pending.bytes, pending.fileName, pending.handle, password);
 }
 
-async function save(path, content, suggestedFilename, password, resultSessionId) {
-    if (resultSessionId) {
+async function save(path, content, suggestedFilename, password, resultBranches) {
+    if (resultBranches) {
         throw new Error("Saving simulation results with the project isn't supported in the web edition yet " +
             '-- export results as CSV separately, or save the model only.');
     }

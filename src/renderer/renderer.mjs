@@ -446,6 +446,23 @@ let runLaunchSettings = {
     stabilityMonitoring: true
 };
 let pendingRestart = null;
+// A fork is structurally distinct from pendingRestart's "continue in place" flow: a fork must
+// never prepend the parent's samples onto the child's (the child is a sibling branch starting
+// fresh from its checkpoint's time), and the parent's ResultBranch record must stay untouched.
+let pendingFork = null;
+let forkOverrideValues = new Map();
+// branches holds every known ResultBranch (the active one plus any parked/inactive siblings) so
+// a fork's parent can remain immutable and browsable after the fork. Only the active branch's
+// job is ever "live" -- see activateBranch's simulationRunning guard for why switching away from
+// a still-running branch is deliberately blocked rather than silently dropping its updates.
+let branches = new Map();
+let activeBranchUuid = null;
+// The project's validated dark-surface categorical palette (8 slots, fixed order -- assigned by
+// creation order and never re-cycled by selection/rank, per the palette's own CVD-safety
+// ordering). Passes every adjacent-pair gate for line-chart use against this app's actual panel
+// surface (#091219); a 9th simultaneous branch folds back to slot 1 rather than generating a
+// new hue, matching "a 9th series is never a generated hue."
+const branchColors = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 let activeResultSampleIndex = 0;
 let resultPlaybackTimer = null;
 let resultPlaying = false;
@@ -2015,14 +2032,15 @@ function previewSourceTermProviderSource(source) {
     updateValidationStatus();
 }
 
-async function renderNodeResults(node) {
-    const panel = $('.nodeResultsPanel');
-    let series = nodeResultSeries(activeResult, node.userData.definition);
-    if (activeEngineJobId && activeResult?.sampleCount > activeResult.samples.length) {
+// Shared by the active branch and every branch selected for comparison (comparisonBranchUuids) --
+// branchLabel is only actually attached to the returned series when the caller passes one.
+async function branchNodeSeries(branch, node, branchLabel) {
+    let series = nodeResultSeries(branch.result, node.userData.definition, branchLabel);
+    if (branch.jobId && branch.result?.sampleCount > branch.result.samples.length) {
         const signalIds = node.userData.definition.states.map((state) => state.id);
-        const storedSeries = await window.engine.readResultSeries(activeEngineJobId, signalIds, {
+        const storedSeries = await window.engine.readResultSeries(branch.jobId, signalIds, {
             startTime: 0,
-            endTime: activeResult.availableResultTime,
+            endTime: branch.result.availableResultTime,
             maxPoints: 4000
         });
         const bySignal = new Map(storedSeries.map((item) => [item.signalId, item.samples]));
@@ -2032,15 +2050,37 @@ async function renderNodeResults(node) {
             name: state.label,
             symbol: state.symbol,
             unit: state.unit ?? '',
-            samples: bySignal.get(state.id) ?? []
+            samples: bySignal.get(state.id) ?? [],
+            ...(branchLabel !== undefined ? { branchLabel } : {})
         })).filter((item) => item.samples.length);
+    }
+    return series;
+}
+
+async function renderNodeResults(node) {
+    const panel = $('.nodeResultsPanel');
+    // Keep the active branch's own record fresh before reading it -- this can run mid-live-update,
+    // where the branches map entry for the active branch may still hold a stale result/jobId (only
+    // activateBranch normally refreshes it, when parking a branch on switch-away).
+    const activeBranchRecord = branches.get(activeBranchUuid);
+    if (activeBranchRecord) { activeBranchRecord.result = activeResult; activeBranchRecord.jobId = activeEngineJobId; }
+    const otherBranchUuids = [...comparisonBranchUuids].filter((uuid) => uuid !== activeBranchUuid && branches.has(uuid));
+    const comparing = otherBranchUuids.length > 0;
+    const activeLabel = activeBranchRecord?.label ?? 'Active';
+    let series = await branchNodeSeries({ result: activeResult, jobId: activeEngineJobId }, node, comparing ? activeLabel : undefined);
+    for (const uuid of otherBranchUuids) {
+        series = series.concat(await branchNodeSeries(branches.get(uuid), node, branches.get(uuid).label));
     }
     panel.classList.toggle('hasResults', Boolean(series.length));
     if (!series.length) {
         nodeResultPlot.clear();
         return;
     }
-    await nodeResultPlot.render(series, activeResult.samples[activeResultSampleIndex]?.time ?? 0);
+    const branchColorMap = comparing ? new Map([
+        [activeLabel, activeBranchRecord?.color ?? branchColors[0]],
+        ...otherBranchUuids.map((uuid) => [branches.get(uuid).label, branches.get(uuid).color])
+    ]) : undefined;
+    await nodeResultPlot.render(series, activeResult.samples[activeResultSampleIndex]?.time ?? 0, { branchColors: branchColorMap });
 }
 
 function selectNodeEditorTab(tabName) {
@@ -3826,11 +3866,165 @@ function setResultModeLocked(locked) {
     refreshAddonToolstripContributions();
 }
 
+function registerActiveBranch({ parentBranchUuid = null, forkTime = null } = {}) {
+    const existing = branches.get(activeBranchUuid);
+    if (existing) {
+        existing.result = activeResult;
+        existing.jobId = activeEngineJobId;
+        return;
+    }
+    branches.set(activeBranchUuid, {
+        branchUuid: activeBranchUuid,
+        parentBranchUuid,
+        forkTime,
+        jobId: activeEngineJobId,
+        result: activeResult,
+        sampleIndex: activeResult.samples.length - 1,
+        label: parentBranchUuid ? `Fork at ${formatResultTime(forkTime)}` : 'Baseline',
+        color: branchColors[branches.size % branchColors.length]
+    });
+    renderBranchSwitcher();
+}
+
+// Branches selected for the N-way comparison overlay (workstream F), in addition to whichever is
+// active (the active branch is always implicitly compared -- see renderNodeResults). Pruned of
+// stale UUIDs whenever the tree re-renders so a closed/replaced branch can't linger here.
+let comparisonBranchUuids = new Set();
+
+function toggleComparisonBranch(branchUuid, enabled) {
+    if (enabled) comparisonBranchUuids.add(branchUuid);
+    else comparisonBranchUuids.delete(branchUuid);
+    if (selectedNode) renderNodeResults(selectedNode);
+}
+
+// Two complementary views of the same branch set, kept in sync from one function:
+//
+// - #branchChips: always-visible, inline in the transport bar -- one click switches the active
+//   branch, no popover to open first. This is the common case ("just look at another branch") and
+//   is deliberately flat (sorted by fork time, no nesting) so it stays a single readable row; a
+//   horizontal scroll (see styles.css) absorbs more branches than fit rather than wrapping and
+//   growing the transport bar's height.
+// - #branchTree (in #branchesPanel, opened via #branchesMoreButton): the real nested tree
+//   (docs/resultExploration.md's "Baseline / fork / fork-of-fork" example) plus the per-branch
+//   compare checkboxes -- branches already nest correctly via parentBranchUuid (a fork's parent is
+//   whichever branch was active when "Fork here" was clicked; this function only visualizes it).
+//   Reserved for when you actually need the hierarchy or want to build a comparison, not for
+//   quick switching, which is what made the popover-only design slow to use.
+function renderBranchSwitcher() {
+    comparisonBranchUuids = new Set([...comparisonBranchUuids].filter((uuid) => branches.has(uuid)));
+    const hasMultiple = branches.size > 1;
+    $('#branchesMoreButton').hidden = !hasMultiple;
+    $('#branchChips').hidden = !hasMultiple;
+    if (!hasMultiple) $('#branchesPanel').hidden = true;
+
+    const chips = $('#branchChips');
+    chips.replaceChildren();
+    if (hasMultiple) {
+        [...branches.values()].sort((a, b) => (a.forkTime ?? -1) - (b.forkTime ?? -1)).forEach((branch) => {
+            const isActive = branch.branchUuid === activeBranchUuid;
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'branchChip';
+            chip.classList.toggle('active', isActive);
+            chip.disabled = simulationRunning && !isActive;
+            chip.style.setProperty('--branch-color', branch.color);
+            chip.title = branch.label;
+            // Short in the chip (the fork time is the scannable, distinguishing part -- "Fork at"
+            // is implied by every non-root chip), full text in the tooltip and in the tree panel,
+            // which has the room for it. The transport bar is already dense even before branches
+            // exist; every character here is competing with the timeline, playback controls, etc.
+            chip.textContent = branch.parentBranchUuid ? formatResultTime(branch.forkTime) : branch.label;
+            chip.addEventListener('click', () => activateBranch(branch.branchUuid));
+            chips.appendChild(chip);
+        });
+    }
+
+    const container = $('#branchTree');
+    container.replaceChildren();
+    if (!hasMultiple) return;
+    const byParent = new Map();
+    for (const branch of branches.values()) {
+        const key = branch.parentBranchUuid ?? 'root';
+        if (!byParent.has(key)) byParent.set(key, []);
+        byParent.get(key).push(branch);
+    }
+    for (const siblings of byParent.values()) siblings.sort((a, b) => (a.forkTime ?? -1) - (b.forkTime ?? -1));
+    const renderLevel = (parentKey) => {
+        const level = document.createElement('div');
+        level.className = 'branchTreeLevel';
+        (byParent.get(parentKey) ?? []).forEach((branch) => {
+            const item = document.createElement('div');
+            item.className = 'branchTreeItem';
+            const isActive = branch.branchUuid === activeBranchUuid;
+            const compareCheckbox = document.createElement('input');
+            compareCheckbox.type = 'checkbox';
+            compareCheckbox.className = 'branchCompareToggle';
+            compareCheckbox.checked = isActive || comparisonBranchUuids.has(branch.branchUuid);
+            compareCheckbox.disabled = isActive;
+            compareCheckbox.title = isActive ? 'The active branch is always shown' : `Compare ${branch.label}`;
+            compareCheckbox.setAttribute('aria-label', compareCheckbox.title);
+            compareCheckbox.addEventListener('change', () => toggleComparisonBranch(branch.branchUuid, compareCheckbox.checked));
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'branchTreeButton';
+            button.classList.toggle('active', isActive);
+            button.disabled = simulationRunning && !isActive;
+            button.style.setProperty('--branch-color', branch.color);
+            button.title = branch.label;
+            button.textContent = branch.label;
+            button.addEventListener('click', () => activateBranch(branch.branchUuid));
+            item.append(compareCheckbox, button);
+            level.appendChild(item);
+            if (byParent.has(branch.branchUuid)) level.appendChild(renderLevel(branch.branchUuid));
+        });
+        return level;
+    };
+    container.appendChild(renderLevel('root'));
+}
+$('#branchesMoreButton').addEventListener('click', () => {
+    const opening = $('#branchesPanel').hidden;
+    $('#branchesPanel').hidden = !opening;
+    $('#branchesMoreButton').ariaExpanded = String(opening);
+});
+$('#closeBranchesPanel').addEventListener('click', () => {
+    $('#branchesPanel').hidden = true;
+    $('#branchesMoreButton').ariaExpanded = 'false';
+});
+
+// Switching branches is only safe when nothing is live: only the active branch's job ever
+// streams updates (applyLiveResult drops anything whose jobId isn't activeEngineJobId), so
+// flipping activeEngineJobId to a parked branch mid-run would silently lose the running child's
+// samples. The branch switcher's buttons are disabled for this same reason while a run is live.
+function activateBranch(targetUuid) {
+    if (targetUuid === activeBranchUuid || simulationRunning) return;
+    const current = branches.get(activeBranchUuid);
+    if (current) {
+        current.result = activeResult;
+        current.jobId = activeEngineJobId;
+        current.sampleIndex = activeResultSampleIndex;
+    }
+    const target = branches.get(targetUuid);
+    if (!target) return;
+    stopResultPlayback();
+    activeBranchUuid = targetUuid;
+    activeResult = target.result;
+    activeEngineJobId = target.jobId;
+    updateResultExtent();
+    projectResultSample(target.sampleIndex ?? target.result.samples.length - 1);
+    updateLiveResultControls();
+    renderBranchSwitcher();
+    if (selectedNode) renderNodeResults(selectedNode);
+}
+
 function activateResult(result) {
     stopResultPlayback();
     if (!activeResult) nodeDetailsBeforeResult = $('[data-detail="nodes"]').classList.contains('active');
     if (!activeResult) toolBeforeResult = currentTool;
     activeResult = result;
+    const forkInfo = pendingFork ? { parentBranchUuid: pendingFork.parentBranchUuid, forkTime: pendingFork.forkTime } : {};
+    if (pendingFork || !activeBranchUuid) activeBranchUuid = crypto.randomUUID();
+    registerActiveBranch(forkInfo);
+    pendingFork = null;
     setResultModeLocked(true);
     setLabelDetail('nodes', true);
     $('#resultTransport').hidden = false;
@@ -4144,6 +4338,8 @@ function updateLiveResultControls() {
     $('#continueRun').hidden = !canContinue;
     $('#continueRun').textContent = lifecycle === 'completed' ? 'Extend simulation' : 'Continue';
     $('#continueRun').ariaLabel = lifecycle === 'completed' ? 'Extend simulation from the final checkpoint' : 'Continue simulation from the latest checkpoint';
+    $('#forkHereButton').hidden = !canContinue;
+    renderBranchSwitcher();
     $$('.reviewControl').forEach((control) => { control.hidden = live; });
     $('#resultPlaybackRate').hidden = live;
     $('#simulationPacing').hidden = !live || activeResult?.pacing?.mode === 'fastest';
@@ -4203,6 +4399,20 @@ function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
     else liveParameterUpdateTimers.set(parameterId, setTimeout(apply, 50));
 }
 
+// startTime anchors a live intervention to the latest known sample time rather than the exact
+// instant the engine receives it -- close enough for a ramp/pulse authored interactively (not a
+// hard real-time requirement), and the same convention a fork's overrides use with the
+// checkpoint's own time (see openForkLaunchDialog).
+async function sendLiveParameterSchedule(parameterId, schedule) {
+    if (!activeEngineJobId || !simulationRunning) return;
+    const startTime = Number(activeResult?.samples?.at(-1)?.time ?? 0);
+    try {
+        await window.engine.scheduleParameterValue(activeEngineJobId, parameterId, { ...schedule, startTime });
+    } catch (error) {
+        $('#statusText').textContent = error.message;
+    }
+}
+
 function parameterOwnersInModel() {
     return [
         ...model.relationships.flatMap((relationship) => (relationship.parameters ?? [])
@@ -4212,36 +4422,92 @@ function parameterOwnersInModel() {
     ];
 }
 
+// allowSchedule adds a transition-mode selector (step/ramp/pulse -- docs/resultExploration.md's
+// piecewise and externally-sampled modes need a {time,value} table editor this pass does not
+// build; enable/disable and controller-setpoint are UI labels for the same step evaluation, so
+// they need no distinct mode here). Step keeps the exact instant-apply behavior every existing
+// caller already relies on; ramp/pulse route through onSchedule instead of onChange, carrying the
+// row's pre-edit value as the schedule's baseValue.
+function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedule = false, onSchedule = null } = {}) {
+    const { minimum, maximum, step } = liveParameterRange(parameter);
+    const normalizedValue = Number.isFinite(Number(value)) ? Number(value) : 0;
+    const baseValue = normalizedValue;
+    const row = document.createElement('div');
+    row.className = 'liveParameterRow';
+    row.innerHTML = `
+        <div class="liveParameterLabel"><strong>${escapeHtml(parameter.name)}</strong><small>${escapeHtml(ownerLabel)}${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''}</small></div>
+        <button data-adjust="-1" type="button" aria-label="Decrease ${escapeHtml(parameter.name)}">−</button>
+        <input type="range" min="${minimum}" max="${maximum}" step="${step}" value="${normalizedValue}" aria-label="${escapeHtml(parameter.name)}">
+        <button data-adjust="1" type="button" aria-label="Increase ${escapeHtml(parameter.name)}">+</button>
+        <input type="number" step="${step}" value="${normalizedValue}" aria-label="${escapeHtml(parameter.name)} value">
+        ${allowSchedule ? `
+        <div class="parameterScheduleRow">
+            <select data-schedule-mode aria-label="Transition mode for ${escapeHtml(parameter.name)}">
+                <option value="step">Step</option>
+                <option value="ramp">Ramp</option>
+                <option value="pulse">Pulse</option>
+            </select>
+            <input type="number" data-schedule-duration min="0" step="any" placeholder="Duration (s)" hidden aria-label="Duration for ${escapeHtml(parameter.name)}">
+        </div>` : ''}
+    `;
+    const slider = $('input[type="range"]', row);
+    const numberInput = $('input[type="number"]:not([data-schedule-duration])', row);
+    const modeSelect = allowSchedule ? $('[data-schedule-mode]', row) : null;
+    const durationInput = allowSchedule ? $('[data-schedule-duration]', row) : null;
+    if (modeSelect) modeSelect.addEventListener('change', () => { durationInput.hidden = modeSelect.value === 'step'; });
+    const setValue = (nextValue, immediate = false) => {
+        const normalized = Math.min(maximum, Math.max(minimum, Number(nextValue)));
+        slider.value = normalized;
+        numberInput.value = normalized;
+        if (!immediate) return;
+        const mode = modeSelect?.value ?? 'step';
+        if (mode === 'step' || !onSchedule) {
+            onChange(normalized, immediate);
+            return;
+        }
+        const duration = Number(durationInput.value);
+        if (!(duration > 0)) { durationInput.focus(); return; }
+        onSchedule({ mode, duration, targetValue: normalized, baseValue });
+    };
+    slider.addEventListener('input', () => setValue(slider.value));
+    slider.addEventListener('change', () => setValue(slider.value, true));
+    numberInput.addEventListener('change', () => setValue(numberInput.value, true));
+    $$('[data-adjust]', row).forEach((button) => button.addEventListener('click', () =>
+        setValue((Number(numberInput.value) || 0) + Number(button.dataset.adjust) * step, true)));
+    return row;
+}
+
 function renderLiveParameterControls() {
     const container = $('#liveParameterRows');
     container.replaceChildren();
     parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live')
         .forEach(({ parameter, ownerLabel }) => {
-            const { minimum, maximum, step } = liveParameterRange(parameter);
             const value = (liveParameterValues.get(parameter.id) ?? Number(parameter.value)) || 0;
-            const row = document.createElement('div');
-            row.className = 'liveParameterRow';
-            row.innerHTML = `
-                <div class="liveParameterLabel"><strong>${escapeHtml(parameter.name)}</strong><small>${escapeHtml(ownerLabel)}${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''}</small></div>
-                <button data-adjust="-1" type="button" aria-label="Decrease ${escapeHtml(parameter.name)}">−</button>
-                <input type="range" min="${minimum}" max="${maximum}" step="${step}" value="${value}" aria-label="${escapeHtml(parameter.name)}">
-                <button data-adjust="1" type="button" aria-label="Increase ${escapeHtml(parameter.name)}">+</button>
-                <input type="number" step="${step}" value="${value}" aria-label="${escapeHtml(parameter.name)} value">
-            `;
-            const slider = $('input[type="range"]', row);
-            const numberInput = $('input[type="number"]', row);
-            const setValue = (nextValue, immediate = false) => {
-                const normalized = Math.min(maximum, Math.max(minimum, Number(nextValue)));
-                slider.value = normalized;
-                numberInput.value = normalized;
-                scheduleLiveParameterUpdate(parameter.id, normalized, immediate);
-            };
-            slider.addEventListener('input', () => setValue(slider.value));
-            slider.addEventListener('change', () => setValue(slider.value, true));
-            numberInput.addEventListener('change', () => setValue(numberInput.value, true));
-            $$('[data-adjust]', row).forEach((button) => button.addEventListener('click', () =>
-                setValue((Number(numberInput.value) || 0) + Number(button.dataset.adjust) * step, true)));
-            container.appendChild(row);
+            container.appendChild(buildParameterRow(parameter, ownerLabel, value,
+                (normalized, immediate) => scheduleLiveParameterUpdate(parameter.id, normalized, immediate), {
+                    allowSchedule: true,
+                    onSchedule: (schedule) => sendLiveParameterSchedule(parameter.id, schedule)
+                }));
+        });
+}
+
+// Values are only committed once the fork is confirmed (see openForkLaunchDialog) -- unlike the
+// live panel, edits here must not reach a running job because there isn't one yet. Each map entry
+// is {kind:'instant', value} or {kind:'schedule', schedule}; openForkLaunchDialog dispatches on
+// kind when building the child run's post-spawn command sequence.
+function renderForkParameterControls() {
+    const container = $('#forkParameterRows');
+    container.replaceChildren();
+    forkOverrideValues = new Map();
+    parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live')
+        .forEach(({ parameter, ownerLabel }) => {
+            const baseValue = Number(parameter.value) || 0;
+            forkOverrideValues.set(parameter.id, { kind: 'instant', value: baseValue });
+            container.appendChild(buildParameterRow(parameter, ownerLabel, baseValue,
+                (normalized) => forkOverrideValues.set(parameter.id, { kind: 'instant', value: normalized }), {
+                    allowSchedule: true,
+                    onSchedule: (schedule) => forkOverrideValues.set(parameter.id, { kind: 'schedule', schedule })
+                }));
         });
 }
 
@@ -4256,7 +4522,7 @@ function applyLiveResult(jobId, result) {
             checkpoints: [...pendingRestart.checkpoints, ...result.checkpoints]
         };
     }
-    if (!activeResult || pendingRestart?.starting) {
+    if (!activeResult || pendingRestart?.starting || pendingFork) {
         if (pendingRestart) pendingRestart.starting = false;
         activateResult(result);
     }
@@ -4272,11 +4538,19 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
     if (!activeResult) return;
     if (simulationRunning) return;
     stopResultPlayback();
-    if (activeEngineJobId) await window.engine.releaseResult(activeEngineJobId);
+    const jobIds = new Set([...branches.values()].map((branch) => branch.jobId).filter(Boolean));
+    if (activeEngineJobId) jobIds.add(activeEngineJobId);
+    await Promise.all([...jobIds].map((jobId) => window.engine.releaseResult(jobId).catch((error) => {
+        console.error('A branch result session could not be released.', error);
+    })));
     window.addons.closeContext('resultSession');
     activeResult = null;
     activeEngineJobId = null;
     activeResultPersistedInProject = false;
+    branches = new Map();
+    activeBranchUuid = null;
+    pendingFork = null;
+    renderBranchSwitcher();
     simulationRunning = false;
     $('#liveParameterPanel').hidden = true;
     $('#executionSummaryCard').classList.add('hidden');
@@ -4445,6 +4719,7 @@ $('#simulationStop').addEventListener('click', async () => {
 $('#continueRun').addEventListener('click', () => {
     const checkpoint = activeResult.checkpoints.at(-1);
     if (!checkpoint) return;
+    pendingFork = null;
     pendingRestart = {
         starting: true,
         checkpoint: structuredClone(checkpoint),
@@ -4461,6 +4736,57 @@ $('#continueRun').addEventListener('click', () => {
     updateRunModeFields();
     $('#runLaunchDialog').showModal();
 });
+
+// "Fork here" fetches the authoritative checkpoint by time rather than reconstructing one from
+// activeResult.samples, which may be downsampled for display -- see engineReadCheckpoint in
+// main.mjs, which reads the full in-memory checkpoint list rather than the trimmed one this
+// renderer normally receives.
+$('#forkHereButton').addEventListener('click', async () => {
+    if (!activeResult || !activeEngineJobId || simulationRunning) return;
+    const scrubTime = Number(activeResult.samples[activeResultSampleIndex]?.time ?? 0);
+    let checkpoint;
+    try {
+        checkpoint = await window.engine.readCheckpoint(activeEngineJobId, scrubTime);
+    } catch (error) {
+        console.error('The checkpoint could not be read.', error);
+    }
+    if (!checkpoint) {
+        $('#statusText').textContent = 'No checkpoint is available at this time.';
+        return;
+    }
+    pendingFork = { parentBranchUuid: activeBranchUuid, forkTime: checkpoint.time, checkpoint, overrides: [] };
+    $('#forkParameterDescription').textContent = `Fork from ${formatResultTime(checkpoint.time)}`;
+    renderForkParameterControls();
+    if ($('#forkParameterRows').children.length > 0) $('#forkParameterPanel').hidden = false;
+    else openForkLaunchDialog();
+});
+$('#closeForkParameterPanel').addEventListener('click', () => {
+    $('#forkParameterPanel').hidden = true;
+    pendingFork = null;
+});
+$('#confirmForkParameters').addEventListener('click', () => {
+    $('#forkParameterPanel').hidden = true;
+    openForkLaunchDialog();
+});
+function openForkLaunchDialog() {
+    if (!pendingFork) return;
+    const owners = parameterOwnersInModel();
+    pendingFork.overrides = [...forkOverrideValues.entries()]
+        .filter(([parameterId, entry]) => entry.kind === 'schedule' ||
+            Number(owners.find(({ parameter }) => parameter.id === parameterId)?.parameter.value) !== entry.value)
+        .map(([parameterId, entry]) => ({ parameterId, entry }));
+    pendingRestart = null;
+    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, pendingFork.checkpoint.time + configuration.globalTimeStep);
+    $('#runLaunchDescription').textContent = `Fork from ${formatResultTime(pendingFork.checkpoint.time)}${pendingFork.overrides.length ? ' with parameter changes' : ''}.`;
+    $('#runTargetTime').value = runLaunchSettings.targetTime;
+    $('#runOnlineMode').checked = runLaunchSettings.online;
+    $('#runPacingMode').value = runLaunchSettings.pacing.mode === 'limitedRatio' ? 'limitedRatio' : 'realTime';
+    $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
+    $('#runStabilityMonitoring').checked = runLaunchSettings.stabilityMonitoring;
+    updateRunModeFields();
+    $('#runLaunchDialog').showModal();
+}
 $('#closeResults').addEventListener('click', closeResultPlayback);
 $('#saveResults').addEventListener('click', () => saveProject());
 $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
@@ -4608,14 +4934,18 @@ async function startSimulation() {
     liveParameterValues = new Map(parameterOwnersInModel()
         .filter(({ parameter }) => parameter.mode === 'live')
         .map(({ parameter }) => [parameter.id, Number(parameter.value) || 0]));
-    if (pendingRestart && activeResult) {
+    // A fork must not mark the parent's (still displayed, still immutable) result as "running" --
+    // the child is what's starting, and activateResult only swaps activeResult to the child once
+    // its first sample arrives.
+    if (pendingRestart && activeResult && !pendingFork) {
         activeResult = { ...activeResult, lifecycle: 'running' };
         updateLiveResultControls();
     }
     $('#runButton').disabled = true;
     $('#runButton').title = 'Simulation is running';
-    $('#statusText').textContent = 'Running simulation…';
+    $('#statusText').textContent = pendingFork ? 'Starting fork…' : 'Running simulation…';
     const previousResultSessionId = activeEngineJobId;
+    const forkingFromSessionId = pendingFork ? previousResultSessionId : null;
     try {
         const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
         const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(serializeProjectDocument()))), {
@@ -4625,20 +4955,40 @@ async function startSimulation() {
             // Checked (the default) omits the field so engineAdapter.mjs's own "monitor every
             // node" default applies unchanged; unchecked explicitly disables it for this run.
             ...(runLaunchSettings.stabilityMonitoring ? {} : { stabilityMonitoring: { nodeIds: [] } }),
-            ...(pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
+            ...(pendingFork ? { startCheckpoint: pendingFork.checkpoint } : pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
         activeEngineJobId = execution.jobId;
-        if (previousResultSessionId && previousResultSessionId !== execution.jobId) {
+        // A fork must keep the parent's job/result alive as an immutable sibling branch rather
+        // than releasing it the way an ordinary new run replaces its predecessor.
+        if (previousResultSessionId && previousResultSessionId !== execution.jobId && !forkingFromSessionId) {
             window.engine.releaseResult(previousResultSessionId).catch((error) => {
                 console.error('Previous result session could not be released.', error);
             });
+        }
+        const overrides = pendingFork?.overrides ?? [];
+        if (overrides.length) {
+            // Pause -> apply overrides -> run, all awaited in order onto the same ordered stdin
+            // pipe (see engineAdapter.mjs's sendCommand), guarantees the child's first
+            // synchronization step already has these values: the engine always drains queued
+            // control commands before integrating step 0 (simulationRunner.cpp), regardless of
+            // scheduling, so this ordering -- not timing -- is what makes it race-free.
+            await window.engine.setExecutionState(execution.jobId, 'paused');
+            for (const { parameterId, entry } of overrides) {
+                if (entry.kind === 'schedule') {
+                    await window.engine.scheduleParameterValue(execution.jobId, parameterId, { ...entry.schedule, startTime: pendingFork.checkpoint.time });
+                } else {
+                    await window.engine.setParameterValue(execution.jobId, parameterId, entry.value);
+                }
+            }
+            await window.engine.setExecutionState(execution.jobId, 'running');
         }
     } catch (error) {
         console.error('C++ simulation failed.', error);
         $('#statusText').textContent = 'Simulation failed';
         $('#runButton').title = error.message;
         simulationRunning = false;
+        pendingFork = null;
         $('#runButton').disabled = Boolean(activeResult) || !currentValidation.valid;
         if (currentValidation.valid) $('#runButton').title = 'Run simulation';
     }
@@ -4647,6 +4997,7 @@ async function startSimulation() {
 $('#runButton').addEventListener('click', () => {
     if (simulationRunning || !currentValidation.valid) return;
     pendingRestart = null;
+    pendingFork = null;
     $('#runLaunchDescription').textContent = "Run from the model's initial state.";
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
@@ -4679,7 +5030,7 @@ $('#runLaunchDialog form').addEventListener('submit', (event) => {
     const online = $('#runOnlineMode').checked;
     const pacingMode = online ? $('#runPacingMode').value : 'fastest';
     const pacingRatio = pacingMode === 'realTime' ? 1 : Number($('#runPacingRatio').value);
-    const startTime = pendingRestart?.checkpoint.time ?? 0;
+    const startTime = pendingFork?.checkpoint.time ?? pendingRestart?.checkpoint.time ?? 0;
     if (!(targetTime > startTime) || targetTime - startTime < configuration.globalTimeStep ||
         (pacingMode === 'limitedRatio' && (!(pacingRatio > 0) || !Number.isFinite(pacingRatio)))) {
         $('#runLaunchError').textContent = `Target time must be at least one global timestep after ${formatResultTime(startTime)}; limited pacing requires a positive ratio.`;
@@ -5147,12 +5498,41 @@ function clearRenderedModel() {
     nodePickTargets.length = 0;
 }
 
+// Reconstructs the full branch tree from a saved multi-branch project (projectFile.mjs's
+// resultSections). Real saved UUIDs are preserved -- unlike a fresh run or fork, which always
+// mints a new one -- so parent/child references still resolve. Returns the root branch's result;
+// the caller passes that straight into activateResult, which detects the pre-populated
+// branches.get(activeBranchUuid) entry this function just set and skips creating a new one,
+// running only its UI-activation tail (registerActiveBranch's existing-branch early return).
+function restoreBranchesFromSave(embeddedBranches) {
+    branches = new Map();
+    embeddedBranches.forEach((branch, index) => {
+        const branchUuid = branch.branchUuid ?? crypto.randomUUID();
+        branches.set(branchUuid, {
+            branchUuid,
+            parentBranchUuid: branch.parentBranchUuid ?? null,
+            forkTime: branch.forkTime ?? null,
+            jobId: branch.sessionId,
+            result: branch.result,
+            sampleIndex: branch.result.samples.length - 1,
+            label: branch.label ?? (index === 0 ? 'Baseline' : `Fork at ${formatResultTime(branch.forkTime)}`),
+            color: branchColors[index % branchColors.length]
+        });
+    });
+    const [rootUuid] = branches.keys();
+    activeBranchUuid = rootUuid;
+    const rootBranch = branches.get(rootUuid);
+    activeEngineJobId = rootBranch.jobId;
+    return rootBranch.result;
+}
+
 async function loadProjectDocument(document, {
     path = null,
     fileName = 'untitled.kjt',
     saved = true,
     password = null,
-    embeddedResult = null
+    embeddedResult = null,
+    embeddedBranches = null
 } = {}) {
     await discardResultPlayback();
     discardAssistantProposal();
@@ -5183,9 +5563,10 @@ async function loadProjectDocument(document, {
     setCameraView('orbit', false);
     fitCurrentView();
     if (embeddedResult) {
-        activeEngineJobId = embeddedResult.sessionId;
         activeResultPersistedInProject = true;
-        activateResult(embeddedResult.result);
+        const rootResult = embeddedBranches ? restoreBranchesFromSave(embeddedBranches) : embeddedResult.result;
+        if (!embeddedBranches) activeEngineJobId = embeddedResult.sessionId;
+        activateResult(rootResult);
         selectSuggestedPlaybackRate();
     }
 }
@@ -7784,7 +8165,8 @@ async function loadOpenedProjectFile(file) {
         path: file.path,
         fileName: file.fileName,
         password: file.encrypted ? password : null,
-        embeddedResult: file.embeddedResult
+        embeddedResult: file.embeddedResult,
+        embeddedBranches: file.embeddedBranches
     });
     activeExampleId = null;
     $('#exampleGuideButton').hidden = true;
@@ -7856,12 +8238,24 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         if (!contentChoice) return false;
         const includeResults = contentChoice === 'modelAndResults';
         const content = `${JSON.stringify(serializeProjectDocument(), null, 4)}\n`;
+        // Refresh the active branch's own record before reading it (mirrors activateBranch's own
+        // park-on-switch refresh) -- it can otherwise be stale between live updates.
+        const activeBranchRecord = branches.get(activeBranchUuid);
+        if (activeBranchRecord) activeBranchRecord.jobId = activeEngineJobId;
+        // A single branch (no forking this session) sends one entry with no branch metadata at
+        // all, so the saved file keeps the exact legacy shape a pre-branching build can still open
+        // (see encodeProjectFile's own doc comment) -- only a genuinely forked tree attaches UUIDs.
+        const resultBranches = includeResults
+            ? [...branches.values()].map((branch) => branches.size > 1
+                ? { jobId: branch.jobId, branchUuid: branch.branchUuid, parentBranchUuid: branch.parentBranchUuid, forkTime: branch.forkTime, label: branch.label }
+                : { jobId: branch.jobId })
+            : null;
         const result = await window.projectFiles.save(
             saveAs ? null : currentProjectPath,
             content,
             currentProjectFilename,
             password,
-            includeResults ? activeEngineJobId : null
+            resultBranches
         );
         if (!result) return false;
         currentProjectPath = result.path;
@@ -7889,7 +8283,8 @@ async function loadExample(id) {
         await loadProjectDocument(JSON.parse(example.content), {
             fileName: example.suggestedFilename,
             saved: false,
-            embeddedResult: example.embeddedResult
+            embeddedResult: example.embeddedResult,
+            embeddedBranches: example.embeddedBranches
         });
         activeExampleId = id;
         $('#exampleGuideButton').hidden = false;

@@ -136,6 +136,30 @@ export function encodeEngineCommand(sequence, command) {
             encodedDoubleField(2, Number(command.value))
         ]);
         payloadField = 5;
+    } else if (command.type === 'scheduleParameterValue') {
+        if (!Number.isSafeInteger(command.parameterId) || command.parameterId <= 0) {
+            throw new Error('A parameter schedule requires a positive safe integer identifier.');
+        }
+        const modes = { step: 1, ramp: 2, pulse: 3, piecewise: 4 };
+        const mode = modes[command.mode];
+        if (!mode) throw new Error('Unsupported parameter schedule mode.');
+        const samples = command.mode === 'piecewise' ? (command.samples ?? []) : [];
+        if (command.mode === 'piecewise' && samples.length < 2) {
+            throw new Error('A piecewise parameter schedule requires at least two samples.');
+        }
+        payload = concatBytes([
+            encodedField(1, 0, encodeVarint(command.parameterId)),
+            encodedField(2, 0, encodeVarint(mode)),
+            encodedDoubleField(3, Number(command.startTime ?? 0)),
+            encodedDoubleField(4, Number(command.duration ?? 0)),
+            encodedDoubleField(5, Number(command.targetValue ?? 0)),
+            encodedDoubleField(6, Number(command.baseValue ?? 0)),
+            ...samples.map((sample) => encodedMessageField(7, concatBytes([
+                encodedDoubleField(1, Number(sample.time)),
+                encodedDoubleField(2, Number(sample.value))
+            ])))
+        ]);
+        payloadField = 6;
     } else {
         throw new Error('Unsupported engine command.');
     }

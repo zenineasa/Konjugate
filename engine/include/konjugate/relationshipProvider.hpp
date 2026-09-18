@@ -110,6 +110,13 @@ public:
     [[nodiscard]] virtual NodeProviderDescription describe() const = 0;
     virtual void initialize(const InitializationContext&) {}
     virtual void evaluate(const EvaluationContext&, NodeOutputCollector&) = 0;
+    // The engine treats this payload as fully opaque -- it never inspects or transforms it, and
+    // restore() always runs after initialize() with no re-seed or reset in between (see
+    // simulationRunner.cpp's startCheckpoint handling). A stochastic provider (e.g. a seeded PRNG
+    // driving an SDE) therefore already gets bit-for-bit checkpoint/restore reproducibility for
+    // free by serializing its PRNG's full internal state into these bytes and restoring it here --
+    // no additional engine machinery is needed. See engine/tests/nodeProviderRuntimeTests.cpp's
+    // AccumulatorNode for the same pattern applied to a plain double.
     [[nodiscard]] virtual std::vector<std::byte> checkpoint() const = 0;
     virtual void restore(std::span<const std::byte>) = 0;
     virtual void shutdown() noexcept {}

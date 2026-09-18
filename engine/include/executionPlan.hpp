@@ -68,6 +68,31 @@ struct CompiledParameter {
     bool live = false;
 };
 
+// A recorded, timestamped intervention (docs/resultExploration.md's "Parameter interventions"),
+// distinct from RunControl::parameterValues' instantaneous overrides: the parameter's effective
+// value becomes a function of simulationTime rather than a single most-recently-set scalar. When
+// more than one schedule exists for the same parameter (a later intervention layered onto an
+// earlier one), the one with the latest startTime that has already begun governs -- see
+// resolveParameterValues' selection logic in executionPlan.cpp.
+struct ParameterSchedule {
+    enum class Mode { step, ramp, pulse, piecewise };
+    EntityId parameterId = 0;
+    Mode mode = Mode::step;
+    double startTime = 0;
+    // Ramp: time to reach targetValue. Pulse: width of the pulse. Unused for step/piecewise.
+    double duration = 0;
+    // Step/ramp/pulse target; ignored for piecewise.
+    double targetValue = 0;
+    // Ramp's starting value and pulse's outside-the-window value.
+    double baseValue = 0;
+    // Piecewise only: explicit, chronologically sorted {time, value} points, linearly
+    // interpolated and edge-held outside their range (the same convention as
+    // src/providerTemplate.mjs's replayProviderSource()).
+    std::vector<std::pair<double, double>> samples;
+};
+
+double evaluateParameterSchedule(const ParameterSchedule& schedule, double simulationTime);
+
 struct ContributionTask {
     std::size_t sequence = 0;
     EntityId sourceId = 0;
@@ -216,12 +241,18 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     ProviderEvaluator* providerEvaluator = nullptr,
     std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites = nullptr);
 
-NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues);
+// activeSchedules/simulationTime default to {}/0 so every existing call site (mostly tests
+// exercising a single substep in isolation) keeps its previous flat-override-only behavior
+// unchanged -- an empty schedule list can never match, so resolution falls through exactly as
+// before. Only simulationRunner.cpp's main loop (via integrateNode) passes real schedules.
+NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues,
+                                            const std::vector<ParameterSchedule>& activeSchedules = {}, double simulationTime = 0);
 // Shared by evaluateContributionTasks (indexed by position in node.contributions) and
 // applyAlgebraicTasks (indexed by position in node.algebraicTasks) -- two structurally separate
 // lists, so each needs its own resolved-values vector rather than sharing one keyed by a single
 // shared index space.
-NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues);
+NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues,
+                                            const std::vector<ParameterSchedule>& activeSchedules = {}, double simulationTime = 0);
 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions);
@@ -250,11 +281,16 @@ struct NodeIntegrationResult {
 // verbatim by the serial/thread-pool backend (simulationRunner.cpp) and the partitioned backend
 // (partitionRuntime.cpp, which wraps this with its own node index) so the two can never silently
 // diverge on this logic.
+// activeSchedules defaults to {} (no effect on existing callers, including the partitioned
+// backend via partitionRuntime.cpp, which does not thread schedules across its worker-process
+// boundary -- a documented, deliberate scope limit, not an oversight: interventions only affect
+// the serial and thread-pool backends today).
 NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const StateValues& synchronizationSnapshot,
                                     const EntityValues& liveParameterValues,
                                     double simulationTime,
                                     double synchronizationStep,
-                                    ProviderEvaluator* providerEvaluator = nullptr);
+                                    ProviderEvaluator* providerEvaluator = nullptr,
+                                    const std::vector<ParameterSchedule>& activeSchedules = {});
 
 }

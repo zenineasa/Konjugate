@@ -531,22 +531,75 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     return evaluated;
 }
 
-NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues) {
+double evaluateParameterSchedule(const ParameterSchedule& schedule, double simulationTime) {
+    switch (schedule.mode) {
+    case ParameterSchedule::Mode::step:
+        return schedule.targetValue;
+    case ParameterSchedule::Mode::ramp: {
+        const auto elapsed = simulationTime - schedule.startTime;
+        if (schedule.duration <= 0 || elapsed >= schedule.duration) return schedule.targetValue;
+        if (elapsed <= 0) return schedule.baseValue;
+        const auto fraction = elapsed / schedule.duration;
+        return schedule.baseValue + fraction * (schedule.targetValue - schedule.baseValue);
+    }
+    case ParameterSchedule::Mode::pulse: {
+        const auto elapsed = simulationTime - schedule.startTime;
+        return (elapsed >= 0 && elapsed < schedule.duration) ? schedule.targetValue : schedule.baseValue;
+    }
+    case ParameterSchedule::Mode::piecewise: {
+        if (schedule.samples.empty()) return schedule.baseValue;
+        if (simulationTime <= schedule.samples.front().first) return schedule.samples.front().second;
+        if (simulationTime >= schedule.samples.back().first) return schedule.samples.back().second;
+        for (std::size_t index = 1; index < schedule.samples.size(); ++index) {
+            const auto [upperTime, upperValue] = schedule.samples[index];
+            if (simulationTime > upperTime) continue;
+            const auto [lowerTime, lowerValue] = schedule.samples[index - 1];
+            const auto fraction = upperTime > lowerTime ? (simulationTime - lowerTime) / (upperTime - lowerTime) : 0.0;
+            return lowerValue + fraction * (upperValue - lowerValue);
+        }
+        return schedule.samples.back().second;
+    }
+    }
+    return schedule.targetValue;
+}
+
+namespace {
+// Among every schedule recorded for this parameter, the one whose startTime is the latest that
+// has already arrived governs -- a later intervention layered onto an earlier one takes over the
+// instant it begins, matching how a real operator's most recent decision supersedes an earlier
+// one already in effect. Falls through to the flat live-override map, then the compiled constant,
+// exactly as before schedules existed, when no schedule for this parameter has started yet.
+double resolveParameterValue(const CompiledParameter& parameter, const EntityValues& liveParameterValues,
+                              const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+    if (!parameter.live) return parameter.value;
+    const ParameterSchedule* active = nullptr;
+    for (const auto& schedule : activeSchedules) {
+        if (schedule.parameterId != parameter.id || schedule.startTime > simulationTime) continue;
+        if (!active || schedule.startTime > active->startTime) active = &schedule;
+    }
+    if (active) return evaluateParameterSchedule(*active, simulationTime);
+    const auto override = liveParameterValues.find(parameter.id);
+    return override != liveParameterValues.end() ? override->second : parameter.value;
+}
+}
+
+NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues,
+                                            const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
     NodeParameterValues resolved;
     resolved.reserve(tasks.size());
     for (const auto& task : tasks) {
         auto& values = resolved.emplace_back();
         values.reserve(task.parameters.size());
         for (const auto& parameter : task.parameters) {
-            const auto override = liveParameterValues.find(parameter.id);
-            values.push_back(parameter.live && override != liveParameterValues.end() ? override->second : parameter.value);
+            values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, simulationTime));
         }
     }
     return resolved;
 }
 
-NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues) {
-    return resolveParameterValues(node.contributions, liveParameterValues);
+NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues,
+                                            const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+    return resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
 }
 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
@@ -625,17 +678,28 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const EntityValues& liveParameterValues,
                                     double simulationTime,
                                     double synchronizationStep,
-                                    ProviderEvaluator* providerEvaluator) {
+                                    ProviderEvaluator* providerEvaluator,
+                                    const std::vector<ParameterSchedule>& activeSchedules) {
     const auto startedAt = std::chrono::steady_clock::now();
     StateValues localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
         localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
     }
-    const auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues);
-    const auto algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues);
     const auto nodeTimeStep = synchronizationStep / static_cast<double>(node.substeps);
+    // Re-resolving every substep only matters for a ramp/pulse mid-transition (ordinary live
+    // overrides and step schedules are already constant across one global step, same as before
+    // schedules existed) -- gated on activeSchedules being non-empty so a node with no pending
+    // intervention pays zero extra allocation cost even at node.substeps in the hundreds/thousands
+    // (multi-rate models like HFT order routing per docs/proposals/fintechToolbox.md).
+    const auto hasSchedules = !activeSchedules.empty();
+    auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
+    auto algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, simulationTime);
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
         const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
+        if (hasSchedules && substep > 0) {
+            parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, substepTime);
+            algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, substepTime);
+        }
         // Algebraic states are recomputed first, in their precomputed dependency order, so both
         // a later algebraic task and every ordinary (differential) contribution evaluated next
         // in this same substep see the fresh value -- never the previous substep's.

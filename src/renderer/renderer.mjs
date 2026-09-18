@@ -4734,6 +4734,7 @@ $('#continueRun').addEventListener('click', () => {
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
     $('#runStabilityMonitoring').checked = runLaunchSettings.stabilityMonitoring;
     updateRunModeFields();
+    $('#runLaunchError').textContent = '';
     $('#runLaunchDialog').showModal();
 });
 
@@ -4785,6 +4786,7 @@ function openForkLaunchDialog() {
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
     $('#runStabilityMonitoring').checked = runLaunchSettings.stabilityMonitoring;
     updateRunModeFields();
+    $('#runLaunchError').textContent = '';
     $('#runLaunchDialog').showModal();
 }
 $('#closeResults').addEventListener('click', closeResultPlayback);
@@ -5031,7 +5033,10 @@ $('#runLaunchDialog form').addEventListener('submit', (event) => {
     const pacingMode = online ? $('#runPacingMode').value : 'fastest';
     const pacingRatio = pacingMode === 'realTime' ? 1 : Number($('#runPacingRatio').value);
     const startTime = pendingFork?.checkpoint.time ?? pendingRestart?.checkpoint.time ?? 0;
-    if (!(targetTime > startTime) || targetTime - startTime < configuration.globalTimeStep ||
+    // The tolerance absorbs floating-point error: a fork or restart at the final sample defaults
+    // the target to startTime + globalTimeStep, and that difference can land a hair below the step.
+    const timeTolerance = configuration.globalTimeStep * 1e-9;
+    if (!(targetTime > startTime) || targetTime - startTime < configuration.globalTimeStep - timeTolerance ||
         (pacingMode === 'limitedRatio' && (!(pacingRatio > 0) || !Number.isFinite(pacingRatio)))) {
         $('#runLaunchError').textContent = `Target time must be at least one global timestep after ${formatResultTime(startTime)}; limited pacing requires a positive ratio.`;
         return;

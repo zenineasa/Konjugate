@@ -3845,6 +3845,21 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `document.querySelectorAll('#parametersBody tr:not(.sharedUserRow)').length`), 1);
         await evaluate(opened, `(() => { const filter = document.querySelector('#parametersFilter'); filter.value = 'all'; filter.dispatchEvent(new Event('change', { bubbles: true })); })()`);
 
+        // Fit: marking the shared parameter tunable from the table makes it one fitting variable for the
+        // tuning panel, and the Tunable filter finds it.
+        const fitBox = `document.querySelector('#parametersBody tr.sharedRow input[data-field="tunable"]')`;
+        await evaluate(opened, `(() => { const box = ${fitBox}; box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `document.querySelector('#parametersBody tr.sharedRow input[data-field="tuning-minimum"]').hidden`), false, 'Bounds must appear once tunable.');
+        await evaluate(opened, `(() => { const filter = document.querySelector('#parametersFilter'); filter.value = 'tunable'; filter.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#parametersBody tr:not(.sharedUserRow)').length`), 1, 'Only the tunable shared parameter should remain.');
+        await evaluate(opened, `(() => { const filter = document.querySelector('#parametersFilter'); filter.value = 'all'; filter.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning panel did not open.');
+        await evaluate(opened, `window.__debugParameterTuning.loadCsv('time,level\\n0,0\\n1,1\\n2,2\\n3,3\\n4,4\\n5,5\\n6,6\\n7,7\\n8,8\\n9,9\\n10,10\\n11,11\\n')`);
+        await waitFor(opened, `document.querySelector('#parameterTuningParameterRows').textContent.includes('Shared')`, 'The tuning panel did not offer the shared parameter.');
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#parameterTuningParameterRows > *').length`), 1, 'One shared parameter is one fitting variable however many parameters link to it.');
+        await evaluate(opened, `document.querySelector('#parameterTuning [data-close-card]').click()`);
+
         // Clicking an owner opens its editor while the table stays open.
         await evaluate(opened, `document.querySelector('#parametersBody tr.sharedUserRow .ownerLink').click()`);
         await waitFor(opened, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking an owner did not open its edge editor.');

@@ -260,3 +260,15 @@ test('removing a node cascades to connected edges and their parameters', () => {
         proposalVersion: 1, operations: [{ kind: 'updateParameter', parameterRef: result.temporaryReferences.gain, value: 2 }]
     }), /does not exist/);
 });
+
+test('a fitted value can be applied to a shared parameter by its id', () => {
+    const document = {
+        ...emptyProject(),
+        sharedParameters: [{ id: 50, name: 'Shared gain', symbol: 'gain', value: 1, mode: 'constant', tuning: { minimum: 0, maximum: 10 } }],
+        nodes: [{ id: 1, name: 'Node', states: [{ id: 2, symbol: 'level', initialValue: 0 }], sourceTerms: [] }]
+    };
+    const result = applyAssistantProposal(document, { proposalVersion: 1, operations: [{ kind: 'updateParameter', parameterRef: 50, value: 3 }] });
+    assert.equal(result.document.sharedParameters[0].value, 3);
+    assert.deepEqual(result.document.sharedParameters[0].tuning, { minimum: 0, maximum: 10 }, 'Fitting keeps the bounds.');
+    assert.equal(document.sharedParameters[0].value, 1, 'The input document must not be mutated.');
+});

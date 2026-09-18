@@ -302,7 +302,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             add(result, "parameterValueInvalid", "error", "A shared parameter needs a finite value.", "sharedParameter", sharedId, "value");
         }
         if (shared.get_child_optional("tuning")) {
-            add(result, "sharedParameterTuningUnsupported", "error", "Shared parameters cannot be marked as tunable.", "sharedParameter", sharedId, "tuning");
+            const auto tuningMinimum = shared.get_optional<double>("tuning.minimum");
+            const auto tuningMaximum = shared.get_optional<double>("tuning.maximum");
+            const auto tuningValue = shared.get_optional<double>("value");
+            if (!tuningMinimum || !tuningMaximum || !tuningValue || !std::isfinite(*tuningMinimum) || !std::isfinite(*tuningMaximum) ||
+                !(*tuningMinimum < *tuningMaximum) || *tuningValue < *tuningMinimum || *tuningValue > *tuningMaximum) {
+                add(result, "parameterTuningInvalid", "error", "Tunable parameter fitting bounds require minimum < maximum and an initial value within the bounds.", "sharedParameter", sharedId, "tuning");
+            }
         }
         if (mode == "live" && shared.get_child_optional("control")) {
             const auto minimum = shared.get_optional<double>("control.minimum");
@@ -317,7 +323,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         }
     }
     // A parameter linked to a shared one takes its value and mode from it, so the link must
-    // resolve and the parameter cannot also carry its own fitting bounds.
+    // resolve and the parameter cannot also carry its own fitting bounds (a shared parameter
+    // carries them instead, and fitting it moves every parameter linked to it).
     auto validateSharedLink = [&](const boost::property_tree::ptree& parameter, const std::string& kind, const std::string& ownerId, const std::string& field) {
         if (!parameter.get_child_optional("sharedParameterId")) return;
         if (!sharedParameterIds.contains(value(parameter, "sharedParameterId"))) {

@@ -69,9 +69,13 @@ export function suggestSymbol(columnName) {
 export function mapColumnsToNodes(columnNames, existingNodes) {
     return columnNames.map((columnName) => {
         const normalized = columnName.trim().toLowerCase();
+        // "Node — State (unit)", the heading Konjugate's own CSV export writes, names a state
+        // unambiguously even when several nodes share state names; the unit suffix is ignored.
+        const qualified = normalized.replace(/\s*\([^)]*\)$/, '');
         for (const node of existingNodes) {
             const state = node.states.find((candidate) =>
-                candidate.symbol.toLowerCase() === normalized || candidate.name.toLowerCase() === normalized);
+                candidate.symbol.toLowerCase() === normalized || candidate.name.toLowerCase() === normalized ||
+                (node.name && `${node.name.toLowerCase()} — ${candidate.name.toLowerCase()}` === qualified));
             if (state) return { columnName, nodeId: node.id, stateId: state.id, createNew: false };
         }
         return { columnName, nodeId: null, stateId: null, createNew: true, suggestedSymbol: suggestSymbol(columnName) };

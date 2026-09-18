@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { decodeProjectBundle, encodeProjectFile } from '../../src/projectFile.mjs';
-import { normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
+import { fitWithEngine, normalizePacing, runWithEngine, startEngineRun, validateWithEngine } from '../../src/engineAdapter.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from '../../src/engineProtocol.mjs';
 import { openIndexedResult } from '../../src/indexedResultReader.mjs';
 import { decodeValidationReport } from '../../src/reportProtocol.mjs';
@@ -428,6 +428,42 @@ assert.ok(sharedLive.x > 2.5 && Math.abs(sharedLive.x - sharedLive.y) < 1e-9, `S
 
 await assert.rejects(() => startEngineRun(JSON.stringify(sharedParameterProject({ linkedId: 999 })), sharedConfiguration, { ...engineOptions }).then((run) => run.completion),
     /MODEL_INVALID/, 'A link to a missing shared parameter must be rejected.');
+
+// A shared parameter can be a fitting target: fitting it moves every parameter linked to it at once.
+// Measured data comes from a run with the shared gain at 3; the fit starts from 1 and must recover it.
+{
+    const fitProject = (gain, tuning) => {
+        const project = sharedParameterProject({ sharedValue: gain });
+        // Distinct state symbols, so CSV columns map to states by name.
+        project.nodes[1].states[0].symbol = 'x';
+        project.nodes[2].states[0].symbol = 'y';
+        if (tuning) project.sharedParameters[0].tuning = tuning;
+        return project;
+    };
+    const measuredRun = await startEngineRun(JSON.stringify(fitProject(3)), { name: 'Measured', targetTime: 1, globalTimeStep: 0.1, outputInterval: 0.1 }, { ...engineOptions });
+    const measured = await measuredRun.completion;
+    const value = (sample, stateId) => sample.states.find((state) => state.stateId === stateId).value;
+    const csv = ['time,x,y', ...measured.samples.map((sample) => `${sample.time},${value(sample, 4)},${value(sample, 6)}`)].join('\n');
+    const fitted = await fitWithEngine(JSON.stringify(fitProject(1, { minimum: 0, maximum: 10 })), csv, { maxIterations: 200 }, { ...engineOptions });
+    assert.equal(fitted.available, true);
+    const gainFit = fitted.report.finalParameters.find((entry) => entry.parameterId === 100);
+    assert.ok(gainFit && Math.abs(gainFit.value - 3) < 0.05, `Fitting the shared gain should recover 3, got ${JSON.stringify(fitted.report.finalParameters)}`);
+    assert.equal(fitted.report.finalParameters.length, 1, 'One shared parameter is one fitting variable, however many edges link to it.');
+
+    // Columns named like Konjugate's own CSV export ("Node — State (unit)") map to one node's state even
+    // when both nodes call their state "Level".
+    const qualifiedProject = (gain, tuning) => {
+        const project = fitProject(gain, tuning);
+        project.nodes[1].states[0].symbol = 'level';
+        project.nodes[2].states[0].symbol = 'level';
+        return project;
+    };
+    const qualifiedCsv = ['time,X — Level (u),Y — Level (u)', ...measured.samples.map((sample) => `${sample.time},${value(sample, 4)},${value(sample, 6)}`)].join('\n');
+    const qualified = await fitWithEngine(JSON.stringify(qualifiedProject(1, { minimum: 0, maximum: 10 })), qualifiedCsv, { maxIterations: 200 }, { ...engineOptions });
+    const qualifiedFit = qualified.report.finalParameters.find((entry) => entry.parameterId === 100);
+    assert.ok(qualifiedFit && Math.abs(qualifiedFit.value - 3) < 0.05, `Node-qualified columns should fit too, got ${JSON.stringify(qualified.report.finalParameters)}`);
+}
+
 
 // Proves the full wire path for a recorded, timestamped intervention (docs/resultExploration.md's
 // "Parameter interventions") -- JS encodeEngineCommand -> C++ drainRunControl ->

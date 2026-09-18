@@ -1094,3 +1094,7 @@ input, select, textarea { user-select: text; }
 #parametersTable .ownerLink:hover { color: #d0e0e4; }
 .sharedBadge { display: inline-block; margin-right: 6px; padding: 1px 6px; color: #d9cdee; background: rgb(156 131 196 / 22%); border-radius: 8px; font-size: 7px; font-weight: 700; }
 .parametersNotice { margin: 0; padding: 10px 12px; color: #78909a; font-size: 8px; }
+#parametersTable .fitCell { display: flex; align-items: center; gap: 4px; }
+#parametersTable .fitCell input[type="number"] { width: 58px; }
+#parametersTable .fitCell input[hidden] { display: none; }
+#parametersTable { min-width: 720px; }

@@ -27,6 +27,11 @@ struct FittingSignalMapping {
 // boost::property_tree::ptree has no id-indexed lookup -- every trial clones the base document
 // and re-addresses the same position, which is stable because the clone has the same structure.
 struct TunableParameter {
+    // A project-level shared parameter (top-level "sharedParameters" entry) rather than one owned by
+    // a relationship or source term: located by sharedIndex, and fitting it moves every parameter
+    // linked to it at once.
+    bool shared = false;
+    std::size_t sharedIndex = 0;
     bool sourceTerm = false;
     std::size_t edgeIndex = 0;
     std::size_t nodeIndex = 0;
@@ -38,7 +43,7 @@ struct TunableParameter {
     ParameterBounds bounds;
 };
 
-// Scans relationship and source-term parameters for every entry with a "tuning" child.
+// Scans relationship, source-term and shared parameters for every entry with a "tuning" child.
 std::vector<TunableParameter> findTunableParameters(const boost::property_tree::ptree& document);
 
 // Case-insensitive exact match of each CSV column name against every state's own symbol or

@@ -59,3 +59,12 @@ test('mapColumnsToNodes never picks a fuzzy/close match', () => {
     assert.equal(mapping[0].createNew, true);
     assert.equal(mapping[0].nodeId, null);
 });
+
+test('mapColumnsToNodes matches the "Node — State (unit)" headings the CSV export writes, even across nodes that share state names', () => {
+    const nodes = [
+        { id: 1, name: 'Bank A', states: [{ id: 10, symbol: 'reserves', name: 'Reserves' }] },
+        { id: 2, name: 'Bank B', states: [{ id: 20, symbol: 'reserves', name: 'Reserves' }] }
+    ];
+    const mapped = mapColumnsToNodes(['Bank B — Reserves (M)', 'Bank A — Reserves', 'Bank C — Reserves (M)'], nodes);
+    assert.deepEqual(mapped.map((entry) => [entry.nodeId, entry.stateId, entry.createNew]), [[2, 20, false], [1, 10, false], [null, null, true]]);
+});

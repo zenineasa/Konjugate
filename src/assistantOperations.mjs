@@ -57,6 +57,11 @@ function projectEntities(document) {
             for (const parameter of term.parameters ?? []) entities.set(parameter.id, { kind: 'parameter', value: parameter, parent: term, owner: node });
         }
     }
+    // Shared parameters are addressable like any other parameter (a fitted value is applied to one
+    // by id); their "owner" for labelling purposes is the project's shared list.
+    for (const shared of document.sharedParameters ?? []) {
+        entities.set(shared.id, { kind: 'parameter', value: shared, parent: { id: shared.id, name: 'shared parameters' } });
+    }
     for (const edge of document.edges) {
         entities.set(edge.id, { kind: 'edge', value: edge });
         for (const parameter of edge.parameters ?? []) entities.set(parameter.id, { kind: 'parameter', value: parameter, parent: edge });

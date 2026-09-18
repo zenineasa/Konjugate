@@ -100,6 +100,24 @@ SimulationSamples readSimulationSamples(const std::filesystem::path& path) {
 
 std::vector<TunableParameter> findTunableParameters(const boost::property_tree::ptree& document) {
     std::vector<TunableParameter> found;
+    if (const auto sharedParameters = document.get_child_optional("sharedParameters")) {
+        std::size_t sharedIndex = 0;
+        for (const auto& sharedEntry : *sharedParameters) {
+            const auto& parameter = sharedEntry.second;
+            if (parameter.get_child_optional("tuning")) {
+                TunableParameter tunable;
+                tunable.shared = true;
+                tunable.sharedIndex = sharedIndex;
+                tunable.parameterId = parameter.get<std::uint64_t>("id");
+                tunable.name = parameter.get<std::string>("name", "");
+                tunable.initialValue = parameter.get<double>("value");
+                tunable.bounds.minimum = parameter.get<double>("tuning.minimum");
+                tunable.bounds.maximum = parameter.get<double>("tuning.maximum");
+                found.push_back(std::move(tunable));
+            }
+            ++sharedIndex;
+        }
+    }
     const auto edgesOptional = document.get_child_optional("edges");
     std::size_t edgeIndex = 0;
     if (edgesOptional) for (const auto& edgeEntry : *edgesOptional) {
@@ -166,16 +184,28 @@ std::vector<FittingSignalMapping> autoMapColumnsToStates(const std::vector<std::
     if (!nodesOptional) return mapping;
     for (const auto& columnName : csvColumnNames) {
         const auto normalizedColumn = lowercase(columnName);
+        // "Node — State (unit)" is the heading Konjugate's own CSV export writes; it names one state
+        // unambiguously even when several nodes share state names. A trailing "(unit)" is ignored.
+        auto qualifiedColumn = normalizedColumn;
+        if (!qualifiedColumn.empty() && qualifiedColumn.back() == ')') {
+            const auto open = qualifiedColumn.rfind('(');
+            if (open != std::string::npos) {
+                qualifiedColumn.erase(open);
+                while (!qualifiedColumn.empty() && qualifiedColumn.back() == ' ') qualifiedColumn.pop_back();
+            }
+        }
         bool matched = false;
         for (const auto& nodeEntry : *nodesOptional) {
             if (matched) break;
             const auto statesOptional = nodeEntry.second.get_child_optional("states");
             if (!statesOptional) continue;
+            const auto nodeName = lowercase(nodeEntry.second.get<std::string>("name", ""));
             for (const auto& stateEntry : *statesOptional) {
                 const auto& state = stateEntry.second;
                 const auto symbol = lowercase(state.get<std::string>("symbol", ""));
                 const auto name = lowercase(state.get<std::string>("name", ""));
-                if (normalizedColumn == symbol || normalizedColumn == name) {
+                if (normalizedColumn == symbol || normalizedColumn == name ||
+                    (!nodeName.empty() && qualifiedColumn == nodeName + " \xE2\x80\x94 " + name)) {
                     mapping.push_back({columnName, state.get<std::uint64_t>("id"), 1.0});
                     matched = true;
                     break;
@@ -194,6 +224,10 @@ double evaluateFittingLoss(const FittingProblem& problem, const std::vector<doub
     auto& nodes = document.get_child("nodes");
     for (std::size_t index = 0; index < problem.tunableParameters.size(); ++index) {
         const auto& tunable = problem.tunableParameters[index];
+        if (tunable.shared) {
+            childAt(document.get_child("sharedParameters"), tunable.sharedIndex).put("value", parameterValues[index]);
+            continue;
+        }
         auto& parameters = tunable.sourceTerm
             ? childAt(childAt(nodes, tunable.nodeIndex).get_child("sourceTerms"), tunable.sourceTermIndex).get_child("parameters")
             : childAt(edges, tunable.edgeIndex).get_child("parameters");

@@ -1936,7 +1936,7 @@ function renderSourceTermParameters(node, term) {
                 <span>Shared parameter</span>
                 <select data-shared-select>${sharedParameterOptions()}</select>
             </label>
-            <label class="parameterTuningToggle"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' || linkedShared ? 'disabled' : ''}> Tunable (fitting target)</label>
+            <label class="parameterTuningToggle" title="${linkedShared ? 'A shared parameter is marked tunable in the Parameters table, and fitting it moves every parameter linked to it.' : ''}"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' || linkedShared ? 'disabled' : ''}> Tunable (fitting target)</label>
             <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
                 <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
                 <label class="parameterField"><span>Fitting maximum</span><input data-tuning-field="maximum" type="number" value="${tuning.maximum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
@@ -2405,7 +2405,7 @@ function renderEdgeEditor(definition) {
                 <span>Shared parameter</span>
                 <select data-shared-select>${sharedParameterOptions()}</select>
             </label>
-            <label class="parameterTuningToggle" title="${parameter.mode === 'live' ? 'A live parameter is adjusted interactively during a run; fitting it against measured data doesn’t apply while Mode is Live.' : ''}">
+            <label class="parameterTuningToggle" title="${linkedShared ? 'A shared parameter is marked tunable in the Parameters table, and fitting it moves every parameter linked to it.' : parameter.mode === 'live' ? 'A live parameter is adjusted interactively during a run; fitting it against measured data doesn’t apply while Mode is Live.' : ''}">
                 <input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' || linkedShared ? 'disabled' : ''}> Tunable (fitting target)
             </label>
             <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
@@ -4736,25 +4736,34 @@ function collectParameterRows() {
 }
 
 // Validates and applies a value/unit/mode edit; returns an error string when the edit is refused.
+// `patch.tuning` is a { minimum, maximum } to mark the parameter as a fitting target, or null to clear it.
 function editParameterRow(entry, patch) {
     if (activeResult) return 'Close results to edit parameters.';
     const current = entry.parameter;
-    const next = { ...current, ...patch };
-    if (patch.value !== undefined && !Number.isFinite(patch.value)) return 'Enter a number.';
+    const { tuning: tuningPatch, ...fields } = patch;
+    const next = { ...current, ...fields };
+    if (fields.value !== undefined && !Number.isFinite(fields.value)) return 'Enter a number.';
     const control = next.mode === 'live' ? normalizedParameterControl({ ...next, control: current.control }) : null;
+    // Live and tunable are exclusive: a live parameter is adjusted during a run, not fitted beforehand.
+    const tuning = tuningPatch === undefined ? current.tuning : tuningPatch;
     if (control) {
         const error = parameterControlError(next.value, control);
         if (error) return error;
-    } else if (current.tuning) {
-        const error = parameterTuningError(next.value, current.tuning);
+        if (tuningPatch) return 'A live parameter cannot be a fitting target.';
+    } else if (tuning) {
+        const error = parameterTuningError(next.value, tuning);
         if (error) return error;
     }
     const assign = (target) => {
-        Object.assign(target, patch);
+        Object.assign(target, fields);
         if (target.mode === 'live') {
             target.control = control;
             delete target.tuning;
-        } else delete target.control;
+        } else {
+            delete target.control;
+            if (tuning) target.tuning = structuredClone(tuning);
+            else delete target.tuning;
+        }
     };
     if (entry.kind === 'shared') changeSharedParameter(current.id, assign);
     else if (entry.kind === 'edge') {
@@ -4823,7 +4832,7 @@ function parameterRowCells(entry, { locked, indent = false }) {
     if (indent) {
         cell(`↳ ${parameter.name}`);
         cell(parameter.symbol).className = 'symbolCell';
-        ['', '', ''].forEach(() => cell(''));
+        ['', '', '', ''].forEach(() => cell(''));
         const link = document.createElement('button');
         link.type = 'button';
         link.className = 'ownerLink';
@@ -4873,6 +4882,51 @@ function parameterRowCells(entry, { locked, indent = false }) {
     });
     cell(mode);
 
+    // Fit: mark the parameter as a digital-twin fitting target with bounds. Not for live parameters
+    // (adjusted during a run, not fitted beforehand); a shared parameter carries the bounds for every
+    // parameter linked to it.
+    const fit = document.createElement('span');
+    fit.className = 'fitCell';
+    const tunable = document.createElement('input');
+    tunable.type = 'checkbox';
+    tunable.dataset.field = 'tunable';
+    tunable.checked = Boolean(parameter.tuning);
+    tunable.setAttribute('aria-label', `${parameter.name} is a fitting target`);
+    tunable.disabled = locked || parameter.mode === 'live';
+    tunable.title = parameter.mode === 'live' ? 'A live parameter is adjusted during a run, not fitted.' : 'Mark as a fitting target for digital-twin tuning';
+    const bound = (field) => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = 'any';
+        input.dataset.field = `tuning-${field}`;
+        input.value = parameter.tuning?.[field] ?? '';
+        input.hidden = !parameter.tuning;
+        input.disabled = locked;
+        input.setAttribute('aria-label', `${parameter.name} fitting ${field}`);
+        return input;
+    };
+    const minimumInput = bound('minimum');
+    const maximumInput = bound('maximum');
+    const commitTuning = (input) => {
+        const error = editParameterRow(entry, { tuning: { minimum: Number(minimumInput.value), maximum: Number(maximumInput.value) } });
+        showError(input, error);
+    };
+    tunable.addEventListener('change', () => {
+        if (!tunable.checked) {
+            editParameterRow(entry, { tuning: null });
+            return;
+        }
+        const error = editParameterRow(entry, { tuning: normalizedParameterTuning(parameter) });
+        if (error) {
+            tunable.checked = false;
+            showError(tunable, error);
+        }
+    });
+    minimumInput.addEventListener('change', () => commitTuning(minimumInput));
+    maximumInput.addEventListener('change', () => commitTuning(maximumInput));
+    fit.append(tunable, minimumInput, maximumInput);
+    cell(fit);
+
     const owner = document.createElement('span');
     if (entry.kind === 'shared') {
         const badge = document.createElement('span');
@@ -4912,6 +4966,7 @@ function refreshParametersPanel() {
     const matches = (entry) => {
         const parameter = entry.parameter;
         if (filter === 'shared' && entry.kind !== 'shared') return false;
+        if (filter === 'tunable' && !parameter.tuning) return false;
         if ((filter === 'live' || filter === 'constant') && (parameter.mode ?? 'constant') !== filter) return false;
         if (!query) return true;
         const owners = entry.kind === 'shared' ? entry.users.map((user) => user.ownerLabel) : [entry.ownerLabel];
@@ -6471,6 +6526,7 @@ function existingNodesForMapping() {
     // for what csvImport.mjs (and the on-disk document) call "name".
     return model.nodes.filter((node) => !node.deleted).map((node) => ({
         id: node.id,
+        name: node.title,
         states: node.states.map((state) => ({ id: state.id, symbol: state.symbol, name: state.label }))
     }));
 }
@@ -7087,6 +7143,15 @@ function loadParameterTuningBackendIds() {
 function findTunableParametersInModel() {
     const document = serializeProjectDocument();
     const found = [];
+    // A shared parameter is one fitting variable however many parameters link to it.
+    for (const shared of document.sharedParameters ?? []) {
+        if (shared.tuning) {
+            found.push({
+                ownerName: 'Shared', parameterId: shared.id,
+                name: shared.name, symbol: shared.symbol, value: shared.value, tuning: shared.tuning
+            });
+        }
+    }
     for (const edge of document.edges) {
         for (const parameter of edge.parameters ?? []) {
             if (parameter.tuning) {
@@ -7189,7 +7254,7 @@ async function loadParameterTuningCsv(content) {
         const tunableParameters = findTunableParametersInModel();
         if (!tunableParameters.length) {
             status.className = 'equationDiagnostics';
-            status.textContent = 'No parameters are marked "Tunable" yet -- mark at least one in a relationship or source-term editor first.';
+            status.textContent = 'No parameters are marked "Tunable" yet -- mark at least one in a relationship or source-term editor, or in the Parameters table, first.';
             return;
         }
         // Existing-states-only: unlike causal inference, tuning never creates a node -- it fits a

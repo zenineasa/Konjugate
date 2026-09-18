@@ -71,6 +71,7 @@
             <button id="zoomInButton" class="uiZoomButton" type="button" aria-label="Zoom interface in" data-tooltip="Zoom interface in">A+</button>
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="assistantButton" class="titleAssistantControl" type="button" aria-label="Model assistant" data-tooltip="Model assistant" aria-expanded="false" aria-controls="assistantPanel">✦</button>
+            <button id="parametersButton" class="titleAssistantControl" type="button" aria-label="Parameters table" data-tooltip="Parameters" aria-expanded="false" aria-controls="parametersPanel">☰</button>
             <button id="providerToolchainsButton" class="titleAssistantControl" type="button" aria-label="Provider toolchains" data-tooltip="Provider toolchains" aria-haspopup="dialog">⚒</button>
             <button id="diagnosticsButton" class="titleAssistantControl" type="button" aria-label="Diagnostics log" data-tooltip="Diagnostics log" aria-haspopup="dialog">⚠<span id="diagnosticsBadge" class="diagnosticsBadge" hidden></span></button>
             <span class="windowControlDivider" aria-hidden="true"></span>
@@ -872,6 +873,29 @@
         <section id="branchesPanel" class="liveParameterPanel branchesPanel" aria-label="Branch tree and comparison" hidden>
             <header><div><strong>Branch tree</strong><small>Click a branch to view it · check others to compare</small></div><button id="closeBranchesPanel" type="button" aria-label="Close branch tree">×</button></header>
             <div id="branchTree"></div>
+        </section>
+        <section id="parametersPanel" class="liveParameterPanel parametersPanel" aria-label="Model parameters" hidden>
+            <header>
+                <div><strong>Parameters</strong><small id="parametersSummary"></small></div>
+                <div class="parametersControls">
+                    <input id="parametersSearch" type="search" placeholder="Search…" aria-label="Search parameters">
+                    <select id="parametersFilter" aria-label="Filter parameters">
+                        <option value="all">All</option>
+                        <option value="shared">Shared</option>
+                        <option value="live">Live</option>
+                        <option value="constant">Constant</option>
+                    </select>
+                </div>
+                <button id="closeParametersPanel" type="button" aria-label="Close parameters">×</button>
+            </header>
+            <p id="parametersReadOnly" class="parametersNotice" hidden>Results mode · model locked. Close results to edit parameters.</p>
+            <div class="parametersTableWrap">
+                <table id="parametersTable">
+                    <thead><tr><th>Name</th><th>Symbol</th><th>Value</th><th>Unit</th><th>Mode</th><th>Belongs to</th></tr></thead>
+                    <tbody id="parametersBody"></tbody>
+                </table>
+            </div>
+            <p id="parametersEmpty" class="parametersNotice" hidden>No parameters match.</p>
         </section>
         <section id="resultTransport" class="resultTransport" aria-label="Simulation status and results" hidden>
             <span class="resultMode"><b>Results</b><small>Model locked</small></span>

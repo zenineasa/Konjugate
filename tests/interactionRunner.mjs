@@ -180,6 +180,36 @@ async function retryGesture(window, perform, checkExpression, times = 5, settleM
     return false;
 }
 
+// Two edges (and, optionally, one source term) whose "gain" parameters all link to one shared
+// parameter -- the fixture for the shared-parameter and parameters-table scenarios below.
+function sharedParameterTestProject({ withSourceTerm = false } = {}) {
+    const parameter = (id, name = 'Gain', symbol = 'gain') => ({ id, name, symbol, value: 5, mode: 'constant', sharedParameterId: 100 });
+    const node = (id, name, stateId, position, sourceTerms = []) => ({
+        id, name, position, sourceTerms, appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+        states: [{ id: stateId, name: 'Level', symbol: 'level', initialValue: 0 }]
+    });
+    const edge = (id, name, targetNodeId, targetStateId, parameterId) => ({
+        id, name, source: { nodeId: 1, stateId: 2 }, target: { nodeId: targetNodeId, stateId: targetStateId }, directionality: 'directed',
+        equation: '\\mathrm{gain}',
+        equationModel: {
+            latex: '\\mathrm{gain}', output: { role: 'target', stateId: targetStateId },
+            bindings: [{ kind: 'parameter', parameterId, symbol: 'gain' }], mathJson: 'gain'
+        },
+        parameters: [parameter(parameterId)], appearance: { color: '#888888', offset: 0 }
+    });
+    const sourceTerm = {
+        id: 13, state: 'level', expression: '\\mathrm{gain}',
+        expressionModel: { latex: '\\mathrm{gain}', output: { stateId: 4 }, bindings: [{ kind: 'parameter', parameterId: 14, symbol: 'gain' }], mathJson: 'gain' },
+        parameters: [parameter(14, 'Source gain')]
+    };
+    return {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' },
+        sharedParameters: [{ id: 100, name: 'Shared gain', symbol: 'gain', value: 2, unit: 'x', mode: 'constant' }],
+        nodes: [node(1, 'Source', 2, [-4, 0, 0]), node(3, 'Target X', 4, [4, 3, 0], withSourceTerm ? [sourceTerm] : []), node(5, 'Target Y', 6, [4, -3, 0])],
+        edges: [edge(7, 'Feed X', 3, 4, 8), edge(9, 'Feed Y', 5, 6, 10)]
+    };
+}
+
 export async function runInteractionTests(driver) {
     const window = driver.mainHandle;
     let passedCount = 0;
@@ -3735,26 +3765,7 @@ export async function runInteractionTests(driver) {
         // Two edges link one parameter to a project-level shared parameter: the linked row shows the
         // shared value (2), not its own stale one (5); editing it changes the shared definition, so
         // the sibling edge follows; and unlinking keeps the value in effect as the row's own.
-        const parameter = (id) => ({ id, name: 'Gain', symbol: 'gain', value: 5, mode: 'constant', sharedParameterId: 100 });
-        const node = (id, name, stateId, position) => ({
-            id, name, position, sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
-            states: [{ id: stateId, name: 'Level', symbol: 'level', initialValue: 0 }]
-        });
-        const edge = (id, name, targetNodeId, targetStateId, parameterId) => ({
-            id, name, source: { nodeId: 1, stateId: 2 }, target: { nodeId: targetNodeId, stateId: targetStateId }, directionality: 'directed',
-            equation: '\\mathrm{gain}',
-            equationModel: {
-                latex: '\\mathrm{gain}', output: { role: 'target', stateId: targetStateId },
-                bindings: [{ kind: 'parameter', parameterId, symbol: 'gain' }], mathJson: 'gain'
-            },
-            parameters: [parameter(parameterId)], appearance: { color: '#888888', offset: 0 }
-        });
-        const project = {
-            format: 'konjugate', version: 1, metadata: { units: 'SI' },
-            sharedParameters: [{ id: 100, name: 'Shared gain', symbol: 'gain', value: 2, unit: 'x', mode: 'constant' }],
-            nodes: [node(1, 'Source', 2, [-4, 0, 0]), node(3, 'Target X', 4, [4, 3, 0]), node(5, 'Target Y', 6, [4, -3, 0])],
-            edges: [edge(7, 'Feed X', 3, 4, 8), edge(9, 'Feed Y', 5, 6, 10)]
-        };
+        const project = sharedParameterTestProject();
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-shared-'));
         const projectPath = join(directory, 'sharedParameters.kjt');
         await writeFile(projectPath, await encodeProjectFile(JSON.stringify(project)));
@@ -3784,6 +3795,72 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `(() => { const select = ${row}.querySelector('[data-shared-select]'); select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitFor(opened, `${row}.querySelector('[data-shared-select]').value === ''`, 'Unlinking did not take effect.');
         assert.equal(await evaluate(opened, `${row}.querySelector('[data-field="value"]').value`), '3', 'Unlinking keeps the value in effect as the parameter\'s own.');
+        await opened.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('the parameters table lists shared and ordinary parameters, edits inline, and jumps to owners', async () => {
+        const project = sharedParameterTestProject({ withSourceTerm: true });
+        // One ordinary parameter alongside the shared ones, so both row kinds are covered.
+        project.edges[1].parameters.push({ id: 15, name: 'Offset', symbol: 'offset', value: 1, unit: 'm', mode: 'constant' });
+        project.edges[1].equationModel.bindings.push({ kind: 'parameter', parameterId: 15, symbol: 'offset' });
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-parameters-table-'));
+        const projectPath = join(directory, 'parametersTable.kjt');
+        await writeFile(projectPath, await encodeProjectFile(JSON.stringify(project)));
+
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The parameters-table project did not load.');
+        await evaluate(opened, `document.querySelector('#parametersButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parametersPanel').hidden`, 'The parameters panel did not open.');
+
+        assert.equal(await evaluate(opened, `document.querySelector('#parametersSummary').textContent`), '2 parameters · 1 shared',
+            'One shared parameter (with its three linked uses folded under it) plus one ordinary parameter.');
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#parametersBody tr').length`), 2);
+        assert.match(await evaluate(opened, `document.querySelector('#parametersBody tr.sharedRow').textContent`), /Shared.*3 uses/,
+            'Both edges and the source term must count as uses of the shared parameter.');
+
+        await evaluate(opened, `document.querySelector('[data-toggle-shared]').click()`);
+        assert.equal(await evaluate(opened, `[...document.querySelectorAll('#parametersBody tr.sharedUserRow')].map((row) => row.lastElementChild.textContent).join('|')`),
+            'Feed X (Source → Target X)|Feed Y (Source → Target Y)|Target X · source term', 'The expanded rows must name each owner.');
+
+        // Inline edit of the shared value goes through the shared definition, undoably.
+        const sharedValue = `document.querySelector('#parametersBody tr.sharedRow input[data-field="value"]')`;
+        await evaluate(opened, `(() => { const input = ${sharedValue}; input.value = '7'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `${sharedValue}.value`), '7');
+        await evaluate(opened, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(opened, `${sharedValue}.value`), '2', 'Undo must restore the shared value.');
+        await evaluate(opened, `document.querySelector('#redoButton').click()`);
+
+        // An out-of-range value for a live parameter is refused and marked, not applied.
+        const modeSelect = `document.querySelector('#parametersBody tr:not(.sharedRow):not(.sharedUserRow) select[data-field="mode"]')`;
+        await evaluate(opened, `(() => { const select = ${modeSelect}; select.value = 'live'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `${modeSelect}.value`), 'live', 'An in-range value can switch to live.');
+        const ordinaryValue = `document.querySelector('#parametersBody tr:not(.sharedRow):not(.sharedUserRow) input[data-field="value"]')`;
+        await evaluate(opened, `(() => { const input = ${ordinaryValue}; input.value = '1e9'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `${ordinaryValue}.classList.contains('invalid')`), true, 'A value outside the live slider range must be flagged.');
+
+        // Filtering and search.
+        await evaluate(opened, `(() => { const filter = document.querySelector('#parametersFilter'); filter.value = 'shared'; filter.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#parametersBody tr:not(.sharedUserRow)').length`), 1);
+        await evaluate(opened, `(() => { const filter = document.querySelector('#parametersFilter'); filter.value = 'all'; filter.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
+        // Clicking an owner opens its editor while the table stays open.
+        await evaluate(opened, `document.querySelector('#parametersBody tr.sharedUserRow .ownerLink').click()`);
+        await waitFor(opened, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking an owner did not open its edge editor.');
+        assert.equal(await evaluate(opened, `document.querySelector('#parametersPanel').hidden`), false, 'The table must stay open beside the editor.');
+        assert.equal(await evaluate(opened, `document.querySelector('#edgeEditorParameters [data-shared-select]').value`), '100');
+
+        // A source-term parameter links the same way: its row shows the shared value and can unlink.
+        await evaluate(opened, `[...document.querySelectorAll('#parametersBody tr.sharedUserRow .ownerLink')].find((link) => link.textContent.includes('source term')).click()`);
+        await waitFor(opened, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Clicking the source-term owner did not open its editor.');
+        const termRow = `document.querySelector('#termParameters .editorParameterRow')`;
+        assert.equal(await evaluate(opened, `${termRow}.querySelector('[data-shared-select]').value`), '100');
+        assert.equal(await evaluate(opened, `${termRow}.querySelector('[data-field="value"]').value`), '7', 'The source-term row must show the shared value.');
+        await evaluate(opened, `(() => { const select = ${termRow}.querySelector('[data-shared-select]'); select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(opened, `${termRow}.querySelector('[data-shared-select]').value === ''`, 'Unlinking the source-term parameter did not take effect.');
+        assert.match(await evaluate(opened, `document.querySelector('#parametersSummary').textContent`), /· 1 shared/);
+        assert.match(await evaluate(opened, `document.querySelector('#parametersBody tr.sharedRow').textContent`), /2 uses/, 'Unlinking must drop the source term from the shared parameter\'s uses.');
         await opened.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 

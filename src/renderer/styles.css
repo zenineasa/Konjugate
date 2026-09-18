@@ -790,7 +790,7 @@ input, select, textarea { user-select: text; }
    aligned with the transport bar the way the original right-docked position was. The live-controls
    panel (#liveParameterPanel) deliberately keeps the base right-docked position -- not reported as
    colliding, and left unchanged rather than moved speculatively. */
-#forkParameterPanel, .branchesPanel { left: 210px; right: auto; bottom: 62px; }
+#forkParameterPanel, .branchesPanel, .parametersPanel { left: 210px; right: auto; bottom: 62px; }
 /* Width recomputed against the new left offset (210px) plus an 18px right margin, same margin
    budget the base right:18px rule already used -- otherwise these could run past the right edge
    on a narrow window instead of shrinking symmetrically the way right-anchoring did. */
@@ -1064,3 +1064,30 @@ input, select, textarea { user-select: text; }
     margin: 12px 0 0;
     padding: 0;
 }
+
+/* Parameters table: docked left like the branch tree so it stays open beside the right-docked
+   editors it navigates to. Not a .contextCard on purpose -- hideCards() closes every context
+   card whenever a node or edge is selected, which would close this table on the very click that
+   jumps to a row's owner. */
+.parametersPanel { width: min(720px, calc(100% - 228px)); max-height: min(420px, calc(100% - 150px)); }
+.parametersPanel > header { gap: 10px; }
+.parametersPanel > header .parametersControls { display: flex; flex: 1; justify-content: flex-end; gap: 6px; }
+.parametersControls input, .parametersControls select { height: 22px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
+.parametersControls input { width: 120px; padding: 0 6px; }
+.parametersTableWrap { overflow-x: auto; }
+#parametersTable { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 8px; }
+#parametersTable th { position: sticky; top: 0; padding: 6px 8px; color: #647984; background: #0b1922; border-bottom: 1px solid #263b46; font-size: 7px; font-weight: 750; letter-spacing: .08em; text-align: left; text-transform: uppercase; }
+#parametersTable td { padding: 4px 8px; color: #b7cbd0; border-bottom: 1px solid #1e313b; vertical-align: middle; }
+#parametersTable tr.sharedRow td { background: rgb(156 131 196 / 8%); }
+#parametersTable tr.sharedUserRow td { color: #7f939c; background: rgb(255 255 255 / 2%); }
+#parametersTable td:first-child { color: #d0e0e4; }
+#parametersTable td.symbolCell { font-family: ui-monospace, monospace; color: #8fb5bd; }
+#parametersTable input, #parametersTable select { height: 22px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
+#parametersTable input[type="number"] { width: 78px; padding: 0 5px; }
+#parametersTable input[data-field="unit"] { width: 54px; padding: 0 5px; }
+#parametersTable input:disabled, #parametersTable select:disabled { opacity: .55; }
+#parametersTable .invalid { border-color: #d0665a; }
+#parametersTable .ownerLink { padding: 0; color: #8fb5bd; background: transparent; border: 0; font-size: 8px; text-align: left; text-decoration: underline dotted; cursor: pointer; }
+#parametersTable .ownerLink:hover { color: #d0e0e4; }
+.sharedBadge { display: inline-block; margin-right: 6px; padding: 1px 6px; color: #d9cdee; background: rgb(156 131 196 / 22%); border-radius: 8px; font-size: 7px; font-weight: 700; }
+.parametersNotice { margin: 0; padding: 10px 12px; color: #78909a; font-size: 8px; }

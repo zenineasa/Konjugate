@@ -1644,6 +1644,9 @@ function captureNodeModel(node) {
         type: definition.type,
         states: structuredClone(definition.states),
         sourceTerms: structuredClone(definition.sourceTerms),
+        // Shared parameters ride along so linking, unlinking and editing a shared value are one
+        // undoable step with the source-term edit that caused them.
+        sharedParameters: structuredClone(model.sharedParameters),
         substepsPerGlobalStep: definition.substepsPerGlobalStep,
         bindings: model.relationships.map((edge) => ({
             id: edge.id,
@@ -1668,6 +1671,7 @@ function applyNodeModel(node, snapshot) {
     definition.type = snapshot.type;
     definition.states = structuredClone(snapshot.states);
     definition.sourceTerms = structuredClone(snapshot.sourceTerms);
+    if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
     definition.substepsPerGlobalStep = snapshot.substepsPerGlobalStep;
     snapshot.bindings.forEach((binding) => {
         const edge = model.relationships.find((candidate) => candidate.id === binding.id);
@@ -1895,7 +1899,12 @@ function renderSourceTermParameters(node, term) {
     container.replaceChildren();
     $('#termParameterError').textContent = '';
     if (!(term.parameters ?? []).length) container.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
-    (term.parameters ?? []).forEach((parameter) => {
+    (term.parameters ?? []).forEach((ownParameter) => {
+        // Same linked-row behavior as the edge editor: value, unit, mode and slider range come from
+        // (and are edited on) the shared definition; name and symbol stay local.
+        const linkedShared = ownParameter.sharedParameterId !== undefined
+            ? model.sharedParameters.find((shared) => shared.id === ownParameter.sharedParameterId) : null;
+        const parameter = linkedShared ? { ...ownParameter, value: linkedShared.value, unit: linkedShared.unit, mode: linkedShared.mode, control: linkedShared.control } : ownParameter;
         const control = normalizedParameterControl(parameter);
         const tuning = normalizedParameterTuning(parameter);
         const row = document.createElement('div');
@@ -1914,16 +1923,29 @@ function renderSourceTermParameters(node, term) {
                 <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
                 <span class="parameterControlError" role="status"></span>
             </div>
-            <label class="parameterTuningToggle"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' ? 'disabled' : ''}> Tunable (fitting target)</label>
+            <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
+                <span>Shared parameter</span>
+                <select data-shared-select>${sharedParameterOptions()}</select>
+            </label>
+            <label class="parameterTuningToggle"><input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' || linkedShared ? 'disabled' : ''}> Tunable (fitting target)</label>
             <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
                 <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
                 <label class="parameterField"><span>Fitting maximum</span><input data-tuning-field="maximum" type="number" value="${tuning.maximum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
                 <span class="parameterTuningError" role="status"></span>
             </div>`;
         $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
+        $('[data-shared-select]', row).value = linkedShared ? String(linkedShared.id) : '';
         const readControl = () => Object.fromEntries($$('[data-control-field]', row).map((input) => [input.dataset.controlField, Number(input.value)]));
         const readTuning = () => Object.fromEntries($$('[data-tuning-field]', row).map((input) => [input.dataset.tuningField, Number(input.value)]));
+        $('[data-shared-select]', row).addEventListener('change', (event) => {
+            changeSourceTermModel(node, term.id, (snapshotTerm, snapshot) => {
+                const target = snapshotTerm.parameters.find((candidate) => candidate.id === parameter.id);
+                applySharedParameterChoice(event.target.value, target, snapshot.sharedParameters,
+                    { value: parameter.value, unit: parameter.unit, mode: parameter.mode, control: readControl() });
+            });
+        });
         const commit = (input) => {
+            if (input.matches('[data-shared-select]')) return;
             const symbol = $('[data-field="symbol"]', row).value.trim();
             const siblings = (term.parameters ?? []).filter((candidate) => candidate.id !== parameter.id);
             if (!modelSymbolPattern.test(symbol) || siblings.some((candidate) => candidate.symbol === symbol)) {
@@ -1935,20 +1957,23 @@ function renderSourceTermParameters(node, term) {
             const value = Number($('[data-field="value"]', row).value) || 0;
             if (mode === 'live' && parameterControlError(value, readControl())) return;
             if ($('[data-field="tunable"]', row).checked && parameterTuningError(value, readTuning())) return;
-            changeSourceTermModel(node, term.id, (snapshotTerm) => {
+            changeSourceTermModel(node, term.id, (snapshotTerm, snapshot) => {
                 const target = snapshotTerm.parameters.find((candidate) => candidate.id === parameter.id);
                 target.name = $('[data-field="name"]', row).value.trim();
                 target.symbol = symbol;
-                target.value = value;
-                target.unit = $('[data-field="unit"]', row).value.trim();
-                target.mode = mode;
+                // Value, unit and mode belong to the shared definition when linked.
+                const owner = target.sharedParameterId !== undefined
+                    ? snapshot.sharedParameters.find((shared) => shared.id === target.sharedParameterId) : target;
+                owner.value = value;
+                owner.unit = $('[data-field="unit"]', row).value.trim();
+                owner.mode = mode;
                 if (mode === 'live') {
-                    target.control = readControl();
-                    delete target.tuning;
+                    owner.control = readControl();
+                    delete owner.tuning;
                 } else {
-                    delete target.control;
-                    if ($('[data-field="tunable"]', row).checked) target.tuning = readTuning();
-                    else delete target.tuning;
+                    delete owner.control;
+                    if (owner === target && $('[data-field="tunable"]', row).checked) target.tuning = readTuning();
+                    else delete owner.tuning;
                 }
             });
         };
@@ -2248,6 +2273,45 @@ function changeEdgeModel(definition, mutate) {
     });
 }
 
+// Applies a "Shared parameter" dropdown choice to `target` (a parameter inside an edit snapshot):
+// '' unlinks it, keeping the values currently in effect as its own; 'new' creates a shared
+// parameter from `effective` (the row's displayed value, unit, mode and slider range) and links
+// to it; anything else links to that existing shared parameter. Mutates `sharedParameters` (the
+// snapshot's copy) in place.
+function applySharedParameterChoice(choice, target, sharedParameters, effective) {
+    if (choice === '') {
+        const previous = sharedParameters.find((shared) => shared.id === target.sharedParameterId);
+        if (previous) {
+            Object.assign(target, { value: previous.value, unit: previous.unit, mode: previous.mode });
+            if (previous.control) target.control = structuredClone(previous.control);
+            else delete target.control;
+        }
+        delete target.sharedParameterId;
+        return;
+    }
+    if (choice === 'new') {
+        let symbol = target.symbol;
+        for (let suffix = 2; sharedParameters.some((shared) => shared.symbol === symbol); suffix += 1) symbol = `${target.symbol}${suffix}`;
+        const created = {
+            id: allocateModelEntityId(), name: target.name, symbol,
+            value: Number(effective.value) || 0, unit: effective.unit ?? '', mode: effective.mode ?? 'constant',
+            ...(effective.mode === 'live' ? { control: structuredClone(effective.control) } : {})
+        };
+        sharedParameters.push(created);
+        target.sharedParameterId = created.id;
+    } else {
+        target.sharedParameterId = Number(choice);
+    }
+    delete target.tuning;
+    delete target.control;
+}
+
+function sharedParameterOptions() {
+    return `<option value="">Not shared</option>
+        ${model.sharedParameters.map((shared) => `<option value="${shared.id}">${escapeHtml(shared.name)} (${escapeHtml(shared.symbol)})</option>`).join('')}
+        <option value="new">New shared parameter from this row…</option>`;
+}
+
 function normalizedParameterControl(parameter) {
     const { minimum, maximum, step } = liveParameterRange(parameter);
     return {
@@ -2330,11 +2394,7 @@ function renderEdgeEditor(definition) {
             </div>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
                 <span>Shared parameter</span>
-                <select data-shared-select>
-                    <option value="">Not shared</option>
-                    ${model.sharedParameters.map((shared) => `<option value="${shared.id}">${escapeHtml(shared.name)} (${escapeHtml(shared.symbol)})</option>`).join('')}
-                    <option value="new">New shared parameter from this row…</option>
-                </select>
+                <select data-shared-select>${sharedParameterOptions()}</select>
             </label>
             <label class="parameterTuningToggle" title="${parameter.mode === 'live' ? 'A live parameter is adjusted interactively during a run; fitting it against measured data doesn’t apply while Mode is Live.' : ''}">
                 <input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' || linkedShared ? 'disabled' : ''}> Tunable (fitting target)
@@ -2424,30 +2484,10 @@ function renderEdgeEditor(definition) {
             });
         }));
         $('[data-shared-select]', row).addEventListener('change', (event) => {
-            const choice = event.target.value;
             changeEdgeModel(definition, (snapshot) => {
                 const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
-                if (choice === '') {
-                    // Unlinking keeps the values currently in effect as this parameter's own.
-                    const previous = snapshot.sharedParameters.find((shared) => shared.id === targetParameter.sharedParameterId);
-                    if (previous) Object.assign(targetParameter, { value: previous.value, unit: previous.unit, mode: previous.mode },
-                        previous.control ? { control: structuredClone(previous.control) } : {});
-                    delete targetParameter.sharedParameterId;
-                } else if (choice === 'new') {
-                    let symbol = targetParameter.symbol;
-                    for (let suffix = 2; snapshot.sharedParameters.some((shared) => shared.symbol === symbol); suffix += 1) symbol = `${targetParameter.symbol}${suffix}`;
-                    const created = {
-                        id: allocateModelEntityId(), name: targetParameter.name, symbol,
-                        value: Number(parameter.value) || 0, unit: parameter.unit ?? '', mode: parameter.mode ?? 'constant',
-                        ...(parameter.mode === 'live' ? { control: readControl() } : {})
-                    };
-                    snapshot.sharedParameters.push(created);
-                    targetParameter.sharedParameterId = created.id;
-                    delete targetParameter.tuning;
-                } else {
-                    targetParameter.sharedParameterId = Number(choice);
-                    delete targetParameter.tuning;
-                }
+                applySharedParameterChoice(event.target.value, targetParameter, snapshot.sharedParameters,
+                    { value: parameter.value, unit: parameter.unit, mode: parameter.mode, control: readControl() });
             });
         });
         $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
@@ -4396,6 +4436,8 @@ $('#closeStabilityFindings').addEventListener('click', () => {
 });
 
 function updateLiveResultControls() {
+    // The parameters table locks while results are open (the model is read-only then).
+    refreshParametersPanel();
     const lifecycle = activeResult?.lifecycle;
     const live = simulationRunning && ['running', 'paused'].includes(lifecycle);
     const paused = lifecycle === 'paused';
@@ -4508,6 +4550,261 @@ function parameterOwnersInModel() {
         }))
     ];
 }
+
+// ---- Parameters table -------------------------------------------------------------------------
+// One row per shared parameter (with an expandable list of what links to it) and per ordinary
+// edge / source-term parameter; linked parameters appear only under their shared row. Value, unit
+// and mode edit inline through the same undoable paths as the owning editor. Edge-group member
+// edges are omitted: their parameters belong to the group definition, edited in its own editor.
+
+const expandedSharedParameters = new Set();
+
+function edgeOwnerLabel(relationship) {
+    const source = model.nodes.find((node) => node.id === relationship.source)?.title ?? '?';
+    const target = model.nodes.find((node) => node.id === relationship.target)?.title ?? '?';
+    return `${relationship.title} (${source} → ${target})`;
+}
+
+function collectParameterRows() {
+    const ordinary = [];
+    const usersByShared = new Map();
+    const place = (entry) => {
+        if (entry.parameter.sharedParameterId === undefined) ordinary.push(entry);
+        else {
+            const users = usersByShared.get(entry.parameter.sharedParameterId) ?? [];
+            users.push(entry);
+            usersByShared.set(entry.parameter.sharedParameterId, users);
+        }
+    };
+    model.relationships.filter((relationship) => !relationship.deleted && relationship.groupId == null).forEach((relationship) => {
+        (relationship.parameters ?? []).forEach((parameter) => place({
+            kind: 'edge', parameter, relationship, ownerLabel: edgeOwnerLabel(relationship)
+        }));
+    });
+    model.nodes.filter((node) => !node.deleted).forEach((node) => {
+        (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => place({
+            kind: 'sourceTerm', parameter, node, term, ownerLabel: `${node.title} · source term`
+        })));
+    });
+    const shared = model.sharedParameters.filter((definition) => usersByShared.has(definition.id)).map((definition) => ({
+        kind: 'shared', parameter: definition, users: usersByShared.get(definition.id)
+    }));
+    return [...shared, ...ordinary];
+}
+
+// Validates and applies a value/unit/mode edit; returns an error string when the edit is refused.
+function editParameterRow(entry, patch) {
+    if (activeResult) return 'Close results to edit parameters.';
+    const current = entry.parameter;
+    const next = { ...current, ...patch };
+    if (patch.value !== undefined && !Number.isFinite(patch.value)) return 'Enter a number.';
+    const control = next.mode === 'live' ? normalizedParameterControl({ ...next, control: current.control }) : null;
+    if (control) {
+        const error = parameterControlError(next.value, control);
+        if (error) return error;
+    } else if (current.tuning) {
+        const error = parameterTuningError(next.value, current.tuning);
+        if (error) return error;
+    }
+    const assign = (target) => {
+        Object.assign(target, patch);
+        if (target.mode === 'live') {
+            target.control = control;
+            delete target.tuning;
+        } else delete target.control;
+    };
+    if (entry.kind === 'shared') changeSharedParameter(current.id, assign);
+    else if (entry.kind === 'edge') {
+        changeEdgeModel(entry.relationship, (snapshot) => assign(snapshot.parameters.find((candidate) => candidate.id === current.id)));
+    } else {
+        changeSourceTermModel(nodeObjects.get(entry.node.id), entry.term.id, (snapshotTerm) => {
+            assign(snapshotTerm.parameters.find((candidate) => candidate.id === current.id));
+        });
+    }
+    return '';
+}
+
+function changeSharedParameter(id, mutate) {
+    if (activeResult) return;
+    const before = structuredClone(model.sharedParameters);
+    const after = structuredClone(before);
+    mutate(after.find((candidate) => candidate.id === id));
+    const apply = (list) => {
+        model.sharedParameters = structuredClone(list);
+        updateValidationStatus();
+        refreshOpenParameterEditors();
+        refreshParametersPanel();
+    };
+    apply(after);
+    recordHistory({ undo: () => apply(before), redo: () => apply(after) });
+}
+
+// Re-renders whichever parameter-bearing editor is open, so it shows a shared value that was just
+// changed from the table (or undone) rather than a stale one.
+function refreshOpenParameterEditors() {
+    if (selectedRelationship && !$('#edgeEditor').classList.contains('hidden')) renderEdgeEditor(selectedRelationship);
+    if (selectedSourceTermNodeId != null && !$('#sourceTermEditor').classList.contains('hidden')) {
+        const node = nodeObjects.get(selectedSourceTermNodeId);
+        const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
+        if (node && term) renderSourceTermEditor(node, term);
+    }
+}
+
+function jumpToParameterOwner(entry) {
+    const parameterId = entry.parameter.id;
+    if (entry.kind === 'edge') {
+        openRelationshipEditor(entry.relationship);
+        requestAnimationFrame(() => $(`#edgeEditorParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`)?.focus());
+    } else if (entry.kind === 'sourceTerm') {
+        const node = nodeObjects.get(entry.node.id);
+        if (!node) return;
+        selectNode(node);
+        openNodeEditor(node.userData.definition);
+        openSourceTermEditor(node, entry.term);
+        requestAnimationFrame(() => $(`#termParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`)?.focus());
+    }
+}
+
+function parameterRowCells(entry, { locked, indent = false }) {
+    const parameter = entry.parameter;
+    const row = document.createElement('tr');
+    if (entry.kind === 'shared') row.className = 'sharedRow';
+    if (indent) row.className = 'sharedUserRow';
+    const cell = (content) => {
+        const td = document.createElement('td');
+        if (content instanceof Node) td.appendChild(content);
+        else td.textContent = content;
+        row.appendChild(td);
+        return td;
+    };
+    if (indent) {
+        cell(`↳ ${parameter.name}`);
+        cell(parameter.symbol).className = 'symbolCell';
+        ['', '', ''].forEach(() => cell(''));
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'ownerLink';
+        link.textContent = entry.ownerLabel;
+        link.addEventListener('click', () => jumpToParameterOwner(entry));
+        cell(link);
+        return row;
+    }
+    cell(parameter.name);
+    cell(parameter.symbol).className = 'symbolCell';
+
+    const showError = (control, message) => {
+        control.classList.toggle('invalid', Boolean(message));
+        control.title = message;
+    };
+    const value = document.createElement('input');
+    value.type = 'number';
+    value.step = 'any';
+    value.value = parameter.value;
+    value.dataset.field = 'value';
+    value.setAttribute('aria-label', `${parameter.name} value`);
+    value.disabled = locked;
+    value.addEventListener('change', () => {
+        const error = editParameterRow(entry, { value: value.value.trim() === '' ? NaN : Number(value.value) });
+        showError(value, error);
+    });
+    cell(value);
+
+    const unit = document.createElement('input');
+    unit.value = parameter.unit ?? '';
+    unit.dataset.field = 'unit';
+    unit.setAttribute('aria-label', `${parameter.name} unit`);
+    unit.disabled = locked;
+    unit.addEventListener('change', () => showError(unit, editParameterRow(entry, { unit: unit.value.trim() })));
+    cell(unit);
+
+    const mode = document.createElement('select');
+    mode.dataset.field = 'mode';
+    mode.setAttribute('aria-label', `${parameter.name} mode`);
+    mode.append(new Option('Constant', 'constant'), new Option('Live', 'live'));
+    mode.value = parameter.mode ?? 'constant';
+    mode.disabled = locked;
+    mode.addEventListener('change', () => {
+        const error = editParameterRow(entry, { mode: mode.value });
+        showError(mode, error);
+        if (error) mode.value = parameter.mode ?? 'constant';
+    });
+    cell(mode);
+
+    const owner = document.createElement('span');
+    if (entry.kind === 'shared') {
+        const badge = document.createElement('span');
+        badge.className = 'sharedBadge';
+        badge.textContent = 'Shared';
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'ownerLink';
+        toggle.dataset.toggleShared = String(parameter.id);
+        const expanded = expandedSharedParameters.has(parameter.id);
+        toggle.textContent = `${expanded ? '▾' : '▸'} ${entry.users.length} ${entry.users.length === 1 ? 'use' : 'uses'}`;
+        toggle.addEventListener('click', () => {
+            if (expandedSharedParameters.has(parameter.id)) expandedSharedParameters.delete(parameter.id);
+            else expandedSharedParameters.add(parameter.id);
+            refreshParametersPanel();
+        });
+        owner.append(badge, toggle);
+    } else {
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'ownerLink';
+        link.textContent = entry.ownerLabel;
+        link.addEventListener('click', () => jumpToParameterOwner(entry));
+        owner.appendChild(link);
+    }
+    cell(owner);
+    return row;
+}
+
+function refreshParametersPanel() {
+    const panel = $('#parametersPanel');
+    if (panel.hidden) return;
+    const query = $('#parametersSearch').value.trim().toLowerCase();
+    const filter = $('#parametersFilter').value;
+    const locked = Boolean(activeResult);
+    const all = collectParameterRows();
+    const matches = (entry) => {
+        const parameter = entry.parameter;
+        if (filter === 'shared' && entry.kind !== 'shared') return false;
+        if ((filter === 'live' || filter === 'constant') && (parameter.mode ?? 'constant') !== filter) return false;
+        if (!query) return true;
+        const owners = entry.kind === 'shared' ? entry.users.map((user) => user.ownerLabel) : [entry.ownerLabel];
+        return [parameter.name, parameter.symbol, ...owners].join(' ').toLowerCase().includes(query);
+    };
+    const visible = all.filter(matches);
+    const body = $('#parametersBody');
+    // Keep keyboard focus stable across the re-render an edit triggers.
+    const focused = document.activeElement;
+    body.replaceChildren();
+    for (const entry of visible) {
+        body.appendChild(parameterRowCells(entry, { locked }));
+        if (entry.kind === 'shared' && expandedSharedParameters.has(entry.parameter.id)) {
+            entry.users.forEach((user) => body.appendChild(parameterRowCells(user, { locked, indent: true })));
+        }
+    }
+    if (focused && focused !== document.body && panel.contains(focused) && focused.dataset?.toggleShared) {
+        $(`[data-toggle-shared="${focused.dataset.toggleShared}"]`, body)?.focus();
+    }
+    const sharedCount = all.filter((entry) => entry.kind === 'shared').length;
+    $('#parametersSummary').textContent = `${all.length} ${all.length === 1 ? 'parameter' : 'parameters'}${sharedCount ? ` · ${sharedCount} shared` : ''}`;
+    $('#parametersEmpty').hidden = visible.length > 0;
+    $('#parametersReadOnly').hidden = !locked;
+}
+
+function setParametersPanelOpen(open) {
+    $('#parametersPanel').hidden = !open;
+    $('#parametersButton').ariaExpanded = String(open);
+    if (open) refreshParametersPanel();
+}
+
+$('#parametersButton').addEventListener('click', () => setParametersPanelOpen($('#parametersPanel').hidden));
+$('#closeParametersPanel').addEventListener('click', () => setParametersPanelOpen(false));
+$('#parametersSearch').addEventListener('input', refreshParametersPanel);
+$('#parametersFilter').addEventListener('change', refreshParametersPanel);
+documentController.subscribe(refreshParametersPanel);
 
 // allowSchedule adds a transition-mode selector (step/ramp/pulse -- docs/resultExploration.md's
 // piecewise and externally-sampled modes need a {time,value} table editor this pass does not

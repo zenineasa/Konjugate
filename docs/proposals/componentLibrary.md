@@ -35,6 +35,20 @@ There is deliberately **no fallback picker** for the no-match case. A picker tha
 
 This also means the design does **not** attempt unit/quantity type-checking beyond the exact symbol match. States already carry a `unit` string, so a softer, ranked-suggestion picker could theoretically use it — but that reintroduces the wrong-guess risk above and was explicitly dropped in favor of the binary match-or-unbound approach. A related idea — an edge template optionally suggesting a paired node template it's known to work with, for discoverability — was also considered and dropped as unnecessary given the validator already closes the correctness gap; it could still be a nice-to-have later but isn't required.
 
+## Bundles: several edges among several nodes, in one step
+
+**Status: shipped**, added after the node and edge templates above. A **bundle** (`kind: "bundle"`) stamps out a set of related edges among N named endpoint nodes as one undoable action. It exists for physics and finance that cannot be expressed as a single edge: a bank run needs one edge that drains reserves and a matched edge that drains deposits, and those two must always move by the same amount; a battery-powered motor needs an armature edge, a discharge edge and a heating edge, two of which must agree on one winding resistance.
+
+A bundle declares:
+
+- `endpoints`: two or more `{ id, label }` roles (a bank, the depositor wallets).
+- `sharedParameters`: parameters declared once and linked from any edge parameter that names them via `shared` (see [Project schema](../projectSchema.md) for what a shared parameter is). Each has a `scope`: `"instance"` (the default) creates a fresh one for every application of the bundle, right for a per-facility control such as an emergency-lending slider; `"project"` reuses an existing shared parameter with the same symbol and creates one only if none exists, right for model-wide constants such as a reserve target that several bundles (and several applications of one bundle) must agree on.
+- `edges`: each with a `from` and `to` endpoint id, the same `ports`, `output`, `latex`, `bidirectional` and `parameters` an edge template has, plus an optional `color`. A parameter is either a plain local one or `{ name, symbol, shared: <key> }`.
+
+**Applying one.** Select the endpoint nodes on the canvas and click the bundle; there is no chained endpoint pick, since a bundle can have more endpoints than a single edge. Which node plays which endpoint is decided by the nodes themselves: a node fits an endpoint when it has every state symbol that endpoint's edge ports name, so the user need not remember an order. Selection order only breaks ties (two banks in an interbank-lending bundle are interchangeable, so the first-selected one lends). If the selection cannot be assigned, nothing is created and the library panel says which endpoint has no match, mirroring the no-fallback-picker stance above. Edges sharing an endpoint pair fan out sideways so each stays individually clickable. The whole application, including any shared parameters it created, is one undo step.
+
+**Not supported.** Bundles create edges only, not nodes, and cannot yet be instantiated from the `Add` menu or dragged; a group of nodes with their edges (a whole sub-model) is a separate, larger idea.
+
 ## Why nodes and edges must be one coordinated vocabulary
 
 Auto-binding by symbol only works if node templates and edge templates agree on names — the "Thermal mass" node template and the "Thermal conductor" edge template both have to spell temperature the same way. That is a **naming-convention discipline for whoever curates the built-in library**, not new engine machinery: a small canonical vocabulary per domain (e.g. `temperature`, `voltage`, `pressure`), applied consistently across every bundled template.

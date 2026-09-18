@@ -1,0 +1,128 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "batteryMotorDrive",
+    "kind": "bundle",
+    "name": "Battery-powered motor drive",
+    "domains": [
+        "electrical",
+        "thermal"
+    ],
+    "description": "Wires a battery, a motor and a thermal mass together in one step: the battery drives the motor's armature, the motor's current discharges the battery, and the same current heats the thermal mass. The armature and heating edges share one winding resistance, so they can never disagree about it. Select the three nodes, then click this bundle.",
+    "color": "#68a9cc",
+    "endpoints": [
+        {
+            "id": "battery",
+            "label": "Battery"
+        },
+        {
+            "id": "motor",
+            "label": "Motor"
+        },
+        {
+            "id": "housing",
+            "label": "Thermal mass"
+        }
+    ],
+    "sharedParameters": [
+        {
+            "key": "resistance",
+            "name": "Winding resistance",
+            "symbol": "resistance",
+            "value": 2,
+            "unit": "Ω",
+            "mode": "constant",
+            "scope": "instance"
+        }
+    ],
+    "edges": [
+        {
+            "name": "Armature dynamics",
+            "from": "battery",
+            "to": "motor",
+            "ports": {
+                "source": "voltage",
+                "target": [
+                    "current",
+                    "angularVelocity"
+                ]
+            },
+            "output": {
+                "role": "target",
+                "state": "current"
+            },
+            "latex": "\\frac{\\mathrm{sourceVoltage} - \\mathrm{resistance} \\cdot \\mathrm{targetCurrent} - \\mathrm{backEmfConstant} \\cdot \\mathrm{targetAngularVelocity}}{\\mathrm{inductance}}",
+            "parameters": [
+                {
+                    "name": "Winding resistance",
+                    "symbol": "resistance",
+                    "shared": "resistance"
+                },
+                {
+                    "name": "Back EMF constant",
+                    "symbol": "backEmfConstant",
+                    "value": 0.1,
+                    "unit": "V·s/rad",
+                    "mode": "constant"
+                },
+                {
+                    "name": "Armature inductance",
+                    "symbol": "inductance",
+                    "value": 0.5,
+                    "unit": "H",
+                    "mode": "constant"
+                }
+            ]
+        },
+        {
+            "name": "Discharge",
+            "from": "motor",
+            "to": "battery",
+            "ports": {
+                "source": "current",
+                "target": "stateOfCharge"
+            },
+            "output": {
+                "role": "target",
+                "state": "stateOfCharge"
+            },
+            "latex": "-\\mathrm{dischargeCoefficient} \\cdot \\mathrm{sourceCurrent}",
+            "parameters": [
+                {
+                    "name": "Discharge coefficient",
+                    "symbol": "dischargeCoefficient",
+                    "value": 0.05,
+                    "unit": "%/(A·s)",
+                    "mode": "constant"
+                }
+            ]
+        },
+        {
+            "name": "Resistive heating",
+            "from": "motor",
+            "to": "housing",
+            "ports": {
+                "source": "current",
+                "target": "temperature"
+            },
+            "output": {
+                "role": "target",
+                "state": "temperature"
+            },
+            "latex": "\\frac{\\mathrm{resistance} \\cdot \\mathrm{sourceCurrent}^{2}}{\\mathrm{thermalCapacitance}}",
+            "parameters": [
+                {
+                    "name": "Winding resistance",
+                    "symbol": "resistance",
+                    "shared": "resistance"
+                },
+                {
+                    "name": "Thermal capacitance",
+                    "symbol": "thermalCapacitance",
+                    "value": 50,
+                    "unit": "J/K",
+                    "mode": "constant"
+                }
+            ]
+        }
+    ]
+}

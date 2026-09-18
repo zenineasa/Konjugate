@@ -790,7 +790,7 @@ input, select, textarea { user-select: text; }
    aligned with the transport bar the way the original right-docked position was. The live-controls
    panel (#liveParameterPanel) deliberately keeps the base right-docked position -- not reported as
    colliding, and left unchanged rather than moved speculatively. */
-#forkParameterPanel, .branchesPanel, .parametersPanel { left: 210px; right: auto; bottom: 62px; }
+#forkParameterPanel, .branchesPanel { left: 210px; right: auto; bottom: 62px; }
 /* Width recomputed against the new left offset (210px) plus an 18px right margin, same margin
    budget the base right:18px rule already used -- otherwise these could run past the right edge
    on a narrow window instead of shrinking symmetrically the way right-anchoring did. */
@@ -1069,7 +1069,10 @@ input, select, textarea { user-select: text; }
    editors it navigates to. Not a .contextCard on purpose -- hideCards() closes every context
    card whenever a node or edge is selected, which would close this table on the very click that
    jumps to a row's owner. */
-.parametersPanel { width: min(720px, calc(100% - 228px)); max-height: min(420px, calc(100% - 150px)); }
+/* Anchored to the top-left, not the bottom-left where Fork here and the branch tree dock, so the
+   table can stay open while forking; its height leaves room for those bottom panels, and it sits
+   one layer below them for the short-window case where they still meet. */
+.parametersPanel { z-index: 12; top: calc(var(--title-height) + var(--tools-height) + 10px); left: 210px; right: auto; bottom: auto; width: min(720px, calc(100% - 228px)); max-height: min(420px, calc(100% - 340px)); }
 .parametersPanel > header { gap: 10px; }
 .parametersPanel > header .parametersControls { display: flex; flex: 1; justify-content: flex-end; gap: 6px; }
 .parametersControls input, .parametersControls select { height: 22px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }

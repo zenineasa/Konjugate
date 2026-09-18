@@ -3864,5 +3864,54 @@ export async function runInteractionTests(driver) {
         await opened.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    await run('a component bundle wires several edges among the selected nodes with a shared parameter, as one undoable step', async () => {
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        const bundleWindow = await driver.waitForNewHandle(before);
+        await waitFor(bundleWindow, `document.querySelector('.documentTitle')`, 'Bundle test window did not finish loading.');
+        await evaluate(bundleWindow, `document.querySelector('#componentLibraryButton').click()`);
+        await waitFor(bundleWindow, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
+        assert.match(await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"] small').textContent`), /Bundle · 3 edges/);
+        const edgeCount = `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`;
+
+        // Too few nodes selected: the bundle explains what it needs and changes nothing.
+        await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"]').click()`);
+        assert.match(await evaluate(bundleWindow, `document.querySelector('#componentLibraryHint').textContent`), /Select 3 nodes first \(Battery, Motor, Thermal mass\)/);
+        assert.equal(await evaluate(bundleWindow, edgeCount), 0);
+
+        // Place the three nodes, deliberately in an order that does not match the bundle's endpoints:
+        // assignment is by state symbols, so it should not matter.
+        for (const id of ['thermalMass', 'motor', 'battery']) {
+            await evaluate(bundleWindow, `document.querySelector('[data-template-id="${id}"]').click()`);
+        }
+        await waitFor(bundleWindow, `document.querySelectorAll('.objectLabel').length >= 3`, 'The three node templates were not placed.');
+        await evaluate(bundleWindow, `document.querySelector('[data-action="select-all"]').click()`);
+        await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"]').click()`);
+        await waitFor(bundleWindow, `${edgeCount} === 3`, 'The bundle did not create its three edges.');
+
+        await evaluate(bundleWindow, `document.querySelector('#parametersButton').click()`);
+        await waitFor(bundleWindow, `!document.querySelector('#parametersPanel').hidden`, 'The parameters panel did not open.');
+        assert.match(await evaluate(bundleWindow, `document.querySelector('#parametersSummary').textContent`), /· 1 shared/);
+        const sharedRow = await evaluate(bundleWindow, `document.querySelector('#parametersBody tr.sharedRow').textContent`);
+        assert.match(sharedRow, /Winding resistance/);
+        assert.match(sharedRow, /2 uses/, 'The armature and heating edges must both link the one winding resistance.');
+
+        // One undo removes every edge and the shared parameter with them; redo restores both.
+        await evaluate(bundleWindow, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(bundleWindow, edgeCount), 0);
+        assert.equal(await evaluate(bundleWindow, `document.querySelectorAll('#parametersBody tr.sharedRow').length`), 0);
+        await evaluate(bundleWindow, `document.querySelector('#redoButton').click()`);
+        assert.equal(await evaluate(bundleWindow, edgeCount), 3);
+        assert.match(await evaluate(bundleWindow, `document.querySelector('#parametersBody tr.sharedRow').textContent`), /2 uses/);
+
+        // Applying it again on nodes that cannot fit reports which endpoint has no match.
+        await evaluate(bundleWindow, `document.querySelector('[data-template-id="thermalMass"]').click()`);
+        await waitFor(bundleWindow, `document.querySelectorAll('.objectLabel').length >= 4`, 'The extra node was not placed.');
+        await evaluate(bundleWindow, `document.querySelector('[data-action="select-all"]').click()`);
+        await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"]').click()`);
+        assert.match(await evaluate(bundleWindow, `document.querySelector('#componentLibraryHint').textContent`), /Select 3 nodes first/);
+        await bundleWindow.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; no web-edition equivalent' });
+
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

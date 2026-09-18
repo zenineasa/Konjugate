@@ -840,6 +840,15 @@ window.__debugTransform = {
         const node = nodeObjects.get(id);
         if (node) selectNode(node, { additive: true });
     },
+    // Replaces the whole selection with exactly these nodes, in this order (the order a bundle
+    // reads as its tie-break when several assignments of nodes to endpoints would fit).
+    selectExactly: (ids) => {
+        clearSelection();
+        ids.forEach((id) => {
+            const node = nodeObjects.get(id);
+            if (node) selectNode(node, { additive: true });
+        });
+    },
     // A lower-level, multi-step alternative to simulateDragTo for exercising the real
     // Shift-uniform-scale override in objectChange: mouseDown captures transformStartValues as
     // usual, then each move step can set the object's scale directly (standing in for whatever
@@ -3149,7 +3158,7 @@ function renderComponentLibraryItem(template) {
     button.className = 'componentLibraryItem';
     button.dataset.templateId = template.id;
     button.title = template.description ?? '';
-    button.innerHTML = `<span class="componentLibrarySwatch" style="background:${escapeHtml(template.color ?? '#42c9bc')}"></span><span><b>${escapeHtml(template.name)}</b><small>${template.kind === 'node' ? 'Node' : 'Edge'} · ${escapeHtml(template.domains.map(domainLabel).join(', '))}</small></span>`;
+    button.innerHTML = `<span class="componentLibrarySwatch" style="background:${escapeHtml(template.color ?? '#42c9bc')}"></span><span><b>${escapeHtml(template.name)}</b><small>${template.kind === 'bundle' ? `Bundle · ${template.edges.length} edges` : template.kind === 'node' ? 'Node' : 'Edge'} · ${escapeHtml(template.domains.map(domainLabel).join(', '))}</small></span>`;
     button.addEventListener('click', () => applyComponentTemplate(template));
     return button;
 }
@@ -3182,7 +3191,7 @@ function renderComponentLibraryResults() {
 }
 
 function renderComponentLibraryChips() {
-    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges']];
+    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges'], ['bundle', 'Bundles']];
     $('#componentLibraryTypeChips').replaceChildren(...types.map(([type, label]) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -3355,9 +3364,143 @@ function applyEdgeTemplate(template) {
     };
 }
 
+// Assigns the selected nodes to a bundle's endpoints. A node fits an endpoint when it has every
+// state symbol that endpoint's edge ports name, so the assignment is normally forced by the nodes
+// themselves and the order they were selected in only breaks ties -- a user need not remember
+// which node to click first. Returns { assignment: Map(endpointId -> node) } or { error }.
+function assignBundleEndpoints(template, nodes) {
+    const required = new Map(template.endpoints.map((endpoint) => [endpoint.id, new Set()]));
+    for (const edge of template.edges) {
+        [edge.ports.source].flat().forEach((symbol) => required.get(edge.from).add(symbol));
+        [edge.ports.target].flat().forEach((symbol) => required.get(edge.to).add(symbol));
+    }
+    const fits = (endpoint, node) => [...required.get(endpoint.id)].every((symbol) => node.states.some((state) => state.symbol === symbol));
+    const permutations = (items) => items.length <= 1 ? [items] : items.flatMap((item, index) =>
+        permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [item, ...rest]));
+    // Permutations come out with the identity (selection) order first, so a tie keeps the user's order.
+    const match = permutations(nodes).find((candidate) => template.endpoints.every((endpoint, index) => fits(endpoint, candidate[index])));
+    if (match) return { assignment: new Map(template.endpoints.map((endpoint, index) => [endpoint.id, match[index]])) };
+    const missing = template.endpoints.filter((endpoint) => !nodes.some((node) => fits(endpoint, node)))
+        .map((endpoint) => `${endpoint.label} (needs states ${[...required.get(endpoint.id)].map((symbol) => `"${symbol}"`).join(', ')})`);
+    return { error: missing.length
+        ? `The selected nodes don't fit: nothing matches ${missing.join('; ')}.`
+        : 'The selected nodes cannot be matched to the bundle\'s endpoints one-to-one.' };
+}
+
+// Stamps out every edge of a bundle between the selected nodes as one undoable step. Shared
+// parameters the bundle declares are created once and linked from each edge parameter that names
+// them; a "project"-scoped one reuses an existing shared parameter with the same symbol instead,
+// so constants that belong to the whole model (a reserve target) stay a single definition across
+// bundle applications.
+function applyBundleTemplate(template) {
+    const hint = $('#componentLibraryHint');
+    const fail = (message) => {
+        hint.textContent = message;
+        hint.hidden = false;
+        $('#statusText').textContent = message;
+    };
+    const selected = [...selectedNodeIds].map((id) => model.nodes.find((node) => node.id === id)).filter((node) => node && !node.deleted);
+    const labels = template.endpoints.map((endpoint) => endpoint.label).join(', ');
+    if (selected.length !== template.endpoints.length) {
+        fail(`Select ${template.endpoints.length} nodes first (${labels}), then click "${template.name}" again.`);
+        return;
+    }
+    const { assignment, error } = assignBundleEndpoints(template, selected);
+    if (error) {
+        fail(error);
+        return;
+    }
+
+    const sharedBefore = structuredClone(model.sharedParameters);
+    const sharedAfter = structuredClone(sharedBefore);
+    const sharedByKey = new Map();
+    for (const declared of template.sharedParameters ?? []) {
+        const existing = declared.scope === 'project' ? sharedAfter.find((shared) => shared.symbol === declared.symbol) : null;
+        if (existing) {
+            sharedByKey.set(declared.key, existing);
+            continue;
+        }
+        let symbol = declared.symbol;
+        for (let suffix = 2; sharedAfter.some((shared) => shared.symbol === symbol); suffix += 1) symbol = `${declared.symbol}${suffix}`;
+        const created = {
+            id: allocateModelEntityId(), name: declared.name, symbol, value: declared.value, unit: declared.unit ?? '',
+            mode: declared.mode ?? 'constant',
+            ...(declared.mode === 'live' ? { control: structuredClone(declared.control) } : {})
+        };
+        sharedAfter.push(created);
+        sharedByKey.set(declared.key, created);
+    }
+
+    const definitions = [];
+    for (const [index, edge] of template.edges.entries()) {
+        const fromNode = assignment.get(edge.from);
+        const toNode = assignment.get(edge.to);
+        const stateFor = (node, role, ports) => {
+            const symbol = edge.output.role === role ? edge.output.state : [ports].flat()[0];
+            return node.states.find((state) => state.symbol === symbol);
+        };
+        const outputNode = edge.output.role === 'source' ? fromNode : toNode;
+        const parameters = (edge.parameters ?? []).map((parameter) => {
+            const shared = parameter.shared === undefined ? null : sharedByKey.get(parameter.shared);
+            const source = shared ?? parameter;
+            return {
+                id: allocateModelEntityId(), name: parameter.name, symbol: parameter.symbol,
+                value: Number(source.value) || 0, unit: source.unit ?? '', mode: source.mode ?? 'constant',
+                ...(source.mode === 'live' ? { control: structuredClone(source.control) } : {}),
+                ...(shared ? { sharedParameterId: shared.id } : {})
+            };
+        });
+        const definition = {
+            id: allocateModelEntityId(), title: edge.name, source: fromNode.id, target: toNode.id,
+            sourceStateId: stateFor(fromNode, 'source', edge.ports.source)?.id ?? null,
+            targetStateId: stateFor(toNode, 'target', edge.ports.target)?.id ?? null,
+            directionality: edge.bidirectional ? 'bidirectional' : 'directed',
+            color: Number.parseInt((edge.color ?? template.color ?? '#9c83c4').replace('#', ''), 16),
+            // Edges sharing an endpoint pair fan out sideways so they stay individually clickable.
+            offset: (index - (template.edges.length - 1) / 2) * 0.3,
+            enabled: true, equation: edge.latex, parameters
+        };
+        definition.equationModel = normalizeEdgeEquationModel(definition);
+        const outputState = outputNode.states.find((state) => state.symbol === edge.output.state);
+        if (!outputState || definition.equationModel.mathJson === null) {
+            fail(`"${template.name}" could not build its "${edge.name}" edge: ${!outputState ? `${outputNode.title} has no state "${edge.output.state}"` : 'its equation did not resolve'}.`);
+            return;
+        }
+        definition.equationModel.output = { role: edge.output.role, stateId: outputState.id };
+        definitions.push(definition);
+    }
+
+    hint.hidden = true;
+    hideCards();
+    model.sharedParameters = sharedAfter;
+    for (const definition of definitions) {
+        model.relationships.push(definition);
+        createRelationship(definition);
+    }
+    updateRelationships();
+    updateModelStatus();
+    updateValidationStatus();
+    $('#statusText').textContent = `Added ${definitions.length} edges from "${template.name}".`;
+    recordHistory({
+        undo: () => {
+            definitions.forEach((definition) => setRelationshipVisibility(definition.id, false));
+            model.sharedParameters = structuredClone(sharedBefore);
+            updateRelationships();
+            updateModelStatus();
+        },
+        redo: () => {
+            definitions.forEach((definition) => setRelationshipVisibility(definition.id, true));
+            model.sharedParameters = structuredClone(sharedAfter);
+            updateRelationships();
+            updateModelStatus();
+        }
+    });
+}
+
 function applyComponentTemplate(template) {
     if (activeResult) return;
     if (template.kind === 'node') applyNodeTemplate(template);
+    else if (template.kind === 'bundle') applyBundleTemplate(template);
     else applyEdgeTemplate(template);
 }
 

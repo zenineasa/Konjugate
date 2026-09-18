@@ -196,6 +196,14 @@ function hydrateProjectDocument(document) {
         ids.add(id);
         nextModelEntityId = Math.max(nextModelEntityId, id + 1);
     };
+    // Project-level shared parameters: one definition that relationship and source-term parameters
+    // link to (sharedParameterId), so a single value or live control drives all of them.
+    const sharedParameters = (document.sharedParameters ?? []).map((shared) => {
+        registerId(shared.id, 'Every shared parameter must have a unique positive integer id.');
+        if (!modelSymbolPattern.test(shared.symbol)) throw new Error(`Shared parameter “${shared.name ?? shared.id}” needs a lower camel case symbol.`);
+        if (!['constant', 'live'].includes(shared.mode)) throw new Error(`Shared parameter “${shared.name ?? shared.id}” mode must be constant or live.`);
+        return { ...structuredClone(shared), value: Number(shared.value) || 0 };
+    });
     document.nodes.forEach((node) => {
         registerId(node.id, 'Every node must have a unique positive integer id.');
         nodeIds.add(node.id);
@@ -266,6 +274,16 @@ function hydrateProjectDocument(document) {
     (document.runConfigurations ?? []).forEach((configuration) => {
         registerId(configuration.id, 'Every run configuration must have a unique positive integer id.');
     });
+
+    const linkedParameters = [
+        ...document.edges.flatMap((edge) => edge.parameters ?? []),
+        ...document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+    ].filter((parameter) => parameter.sharedParameterId !== undefined);
+    for (const parameter of linkedParameters) {
+        if (!sharedParameters.some((shared) => shared.id === parameter.sharedParameterId)) {
+            throw new Error(`Parameter “${parameter.name ?? parameter.id}” links to a shared parameter that does not exist.`);
+        }
+    }
 
     const nodes = document.nodes.map((node) => {
         const appearance = node.appearance ?? {};
@@ -338,6 +356,7 @@ function hydrateProjectDocument(document) {
         runConfigurations,
         activeRunConfigurationId: runConfigurations.some((item) => item.id === document.activeRunConfigurationId)
             ? document.activeRunConfigurationId : runConfigurations[0].id,
+        sharedParameters,
         nodes,
         relationships,
         subsystems,
@@ -351,6 +370,7 @@ const emptyProjectDocument = {
     copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
     metadata: { units: 'SI' },
     runConfigurations: [],
+    sharedParameters: [],
     nodes: [],
     edges: [],
     subsystems: [],
@@ -2146,6 +2166,9 @@ function captureEdgeModel(definition) {
         equationModel: structuredClone(equationModel),
         implementation: structuredClone(definition.implementation ?? null),
         parameters: structuredClone(definition.parameters),
+        // Shared parameters ride along so linking, unlinking and editing a shared value are one
+        // undoable step with the edge edit that caused them.
+        sharedParameters: structuredClone(model.sharedParameters),
         color: definition.color,
         waypoints: structuredClone(definition.waypoints ?? [])
     };
@@ -2181,6 +2204,7 @@ function applyEdgeModel(definition, snapshot) {
     definition.target = snapshot.target;
     definition.targetStateId = snapshot.targetStateId;
     definition.parameters = structuredClone(snapshot.parameters);
+    if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
     definition.equationModel = normalizeEdgeEquationModel(definition, snapshot.equationModel);
     definition.equation = definition.equationModel.latex;
     definition.implementation = structuredClone(snapshot.implementation ?? null);
@@ -2279,7 +2303,13 @@ function renderEdgeEditor(definition) {
     const parameterContainer = $('#edgeEditorParameters');
     parameterContainer.replaceChildren();
     if (!definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
-    definition.parameters.forEach((parameter) => {
+    definition.parameters.forEach((ownParameter) => {
+        // A linked parameter shows (and edits) its shared definition's value, unit, mode and slider
+        // range; only its name and symbol stay local, since the symbol is what this edge's own
+        // equation refers to.
+        const linkedShared = ownParameter.sharedParameterId !== undefined
+            ? model.sharedParameters.find((shared) => shared.id === ownParameter.sharedParameterId) : null;
+        const parameter = linkedShared ? { ...ownParameter, value: linkedShared.value, unit: linkedShared.unit, mode: linkedShared.mode, control: linkedShared.control } : ownParameter;
         const control = normalizedParameterControl(parameter);
         const tuning = normalizedParameterTuning(parameter);
         const row = document.createElement('div');
@@ -2298,8 +2328,16 @@ function renderEdgeEditor(definition) {
                 <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
                 <span class="parameterControlError" role="status"></span>
             </div>
+            <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
+                <span>Shared parameter</span>
+                <select data-shared-select>
+                    <option value="">Not shared</option>
+                    ${model.sharedParameters.map((shared) => `<option value="${shared.id}">${escapeHtml(shared.name)} (${escapeHtml(shared.symbol)})</option>`).join('')}
+                    <option value="new">New shared parameter from this row…</option>
+                </select>
+            </label>
             <label class="parameterTuningToggle" title="${parameter.mode === 'live' ? 'A live parameter is adjusted interactively during a run; fitting it against measured data doesn’t apply while Mode is Live.' : ''}">
-                <input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' ? 'disabled' : ''}> Tunable (fitting target)
+                <input data-field="tunable" type="checkbox" ${parameter.tuning ? 'checked' : ''} ${parameter.mode === 'live' || linkedShared ? 'disabled' : ''}> Tunable (fitting target)
             </label>
             <div class="parameterTuningFields" ${parameter.tuning ? '' : 'hidden'}>
                 <label class="parameterField"><span>Fitting minimum</span><input data-tuning-field="minimum" type="number" value="${tuning.minimum}" ${parameter.mode === 'live' ? 'disabled' : ''}></label>
@@ -2308,6 +2346,7 @@ function renderEdgeEditor(definition) {
             </div>
         `;
         $('[data-field="mode"]', row).value = parameter.mode ?? 'constant';
+        $('[data-shared-select]', row).value = linkedShared ? String(linkedShared.id) : '';
         const readControl = () => Object.fromEntries($$('[data-control-field]', row)
             .map((input) => [input.dataset.controlField, Number(input.value)]));
         const readTuning = () => Object.fromEntries($$('[data-tuning-field]', row)
@@ -2352,21 +2391,28 @@ function renderEdgeEditor(definition) {
                     else delete targetParameter.tuning;
                     return;
                 }
-                targetParameter[input.dataset.field] = input.dataset.field === 'value'
+                // Value, unit and mode belong to the shared definition when linked; name and symbol
+                // always stay on this edge's own parameter.
+                const editedShared = targetParameter.sharedParameterId !== undefined && ['value', 'unit', 'mode'].includes(input.dataset.field)
+                    ? snapshot.sharedParameters.find((shared) => shared.id === targetParameter.sharedParameterId) : null;
+                const edited = editedShared ?? targetParameter;
+                edited[input.dataset.field] = input.dataset.field === 'value'
                     ? Number(input.value) || 0
                     : input.value.trim();
-                if (targetParameter.mode === 'live') {
-                    targetParameter.control = readControl();
-                    delete targetParameter.tuning;
-                } else delete targetParameter.control;
+                if (edited.mode === 'live') {
+                    edited.control = readControl();
+                    delete edited.tuning;
+                } else delete edited.control;
             });
         }));
         $$('[data-control-field]', row).forEach((input) => input.addEventListener('change', () => {
             if (showControlError()) return;
             changeEdgeModel(definition, (snapshot) => {
                 const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
-                targetParameter.value = Number($('[data-field="value"]', row).value) || 0;
-                targetParameter.control = readControl();
+                const edited = targetParameter.sharedParameterId !== undefined
+                    ? snapshot.sharedParameters.find((shared) => shared.id === targetParameter.sharedParameterId) : targetParameter;
+                edited.value = Number($('[data-field="value"]', row).value) || 0;
+                edited.control = readControl();
             });
         }));
         $$('[data-tuning-field]', row).forEach((input) => input.addEventListener('change', () => {
@@ -2377,6 +2423,33 @@ function renderEdgeEditor(definition) {
                 targetParameter.tuning = readTuning();
             });
         }));
+        $('[data-shared-select]', row).addEventListener('change', (event) => {
+            const choice = event.target.value;
+            changeEdgeModel(definition, (snapshot) => {
+                const targetParameter = snapshot.parameters.find((candidate) => candidate.id === parameter.id);
+                if (choice === '') {
+                    // Unlinking keeps the values currently in effect as this parameter's own.
+                    const previous = snapshot.sharedParameters.find((shared) => shared.id === targetParameter.sharedParameterId);
+                    if (previous) Object.assign(targetParameter, { value: previous.value, unit: previous.unit, mode: previous.mode },
+                        previous.control ? { control: structuredClone(previous.control) } : {});
+                    delete targetParameter.sharedParameterId;
+                } else if (choice === 'new') {
+                    let symbol = targetParameter.symbol;
+                    for (let suffix = 2; snapshot.sharedParameters.some((shared) => shared.symbol === symbol); suffix += 1) symbol = `${targetParameter.symbol}${suffix}`;
+                    const created = {
+                        id: allocateModelEntityId(), name: targetParameter.name, symbol,
+                        value: Number(parameter.value) || 0, unit: parameter.unit ?? '', mode: parameter.mode ?? 'constant',
+                        ...(parameter.mode === 'live' ? { control: readControl() } : {})
+                    };
+                    snapshot.sharedParameters.push(created);
+                    targetParameter.sharedParameterId = created.id;
+                    delete targetParameter.tuning;
+                } else {
+                    targetParameter.sharedParameterId = Number(choice);
+                    delete targetParameter.tuning;
+                }
+            });
+        });
         $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
             snapshot.parameters = snapshot.parameters.filter((candidate) => candidate.id !== parameter.id);
         }));
@@ -4413,12 +4486,26 @@ async function sendLiveParameterSchedule(parameterId, schedule) {
     }
 }
 
+// A parameter linked to a shared one is controlled through the shared definition (one entry,
+// whichever relationships use it), so live/fork controls list the shared parameter once and skip
+// its linked copies.
 function parameterOwnersInModel() {
-    return [
-        ...model.relationships.flatMap((relationship) => (relationship.parameters ?? [])
+    const own = [
+        ...model.relationships.filter((relationship) => !relationship.deleted).flatMap((relationship) => (relationship.parameters ?? [])
             .map((parameter) => ({ parameter, ownerLabel: relationship.title }))),
-        ...model.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
+        ...model.nodes.filter((node) => !node.deleted).flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
             .map((parameter) => ({ parameter, ownerLabel: `${node.title} · source term` }))))
+    ];
+    const users = new Map();
+    own.filter(({ parameter }) => parameter.sharedParameterId !== undefined).forEach(({ parameter }) => {
+        users.set(parameter.sharedParameterId, (users.get(parameter.sharedParameterId) ?? 0) + 1);
+    });
+    return [
+        ...own.filter(({ parameter }) => parameter.sharedParameterId === undefined),
+        ...model.sharedParameters.filter((shared) => users.has(shared.id)).map((shared) => ({
+            parameter: shared,
+            ownerLabel: `Shared · ${users.get(shared.id)} ${users.get(shared.id) === 1 ? 'use' : 'uses'}`
+        }))
     ];
 }
 
@@ -5357,6 +5444,19 @@ function serializeGeometry(geometry) {
     };
 }
 
+// A shared parameter is written only while something visible still links to it, so unlinking
+// (or deleting) the last user of one never leaves an orphan definition in the saved file.
+function serializedSharedParameters(visibleNodeIds) {
+    const linkedIds = new Set([
+        ...model.relationships.filter((relationship) => !relationship.deleted)
+            .flatMap((relationship) => relationship.parameters ?? []),
+        ...model.nodes.filter((node) => visibleNodeIds.has(node.id))
+            .flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+    ].map((parameter) => parameter.sharedParameterId).filter((id) => id !== undefined));
+    const written = model.sharedParameters.filter((shared) => linkedIds.has(shared.id));
+    return written.length ? { sharedParameters: structuredClone(written) } : {};
+}
+
 function serializeProjectDocument() {
     const visibleNodes = model.nodes.filter((node) => !node.deleted);
     const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
@@ -5367,6 +5467,7 @@ function serializeProjectDocument() {
         metadata: { units: model.metadata.units },
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
+        ...serializedSharedParameters(visibleNodeIds),
         nodes: visibleNodes.map((node) => {
             const object = nodeObjects.get(node.id);
             return {
@@ -5550,6 +5651,7 @@ async function loadProjectDocument(document, {
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
+    model.sharedParameters = nextModel.sharedParameters;
     model.nodes.forEach(createNode);
     model.subsystems.forEach(createSubsystemObject);
     model.relationships.forEach(createRelationship);
@@ -5585,6 +5687,7 @@ function replaceModelContents(document) {
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
+    model.sharedParameters = nextModel.sharedParameters;
     model.nodes.forEach(createNode);
     model.subsystems.forEach(createSubsystemObject);
     model.relationships.forEach(createRelationship);

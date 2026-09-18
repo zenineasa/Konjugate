@@ -283,6 +283,51 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         else if (!allIds.insert(id).second) add(result, "duplicateId", "error", label + " reuses an existing id.", kind, entityId, "id");
     };
 
+    // Project-level shared parameters: one definition that any number of relationship or
+    // source-term parameters link to (via sharedParameterId), so a single value or live control
+    // drives all of them. Their ids share the project-wide id space.
+    std::set<std::string> sharedParameterIds;
+    std::set<std::string> sharedParameterSymbols;
+    if (const auto sharedParameters = document.get_child_optional("sharedParameters")) for (const auto& entry : *sharedParameters) {
+        const auto& shared = entry.second;
+        const auto sharedId = value(shared, "id");
+        registerId(sharedId, "sharedParameter", sharedId, "Shared parameter \"" + value(shared, "name") + "\"");
+        sharedParameterIds.insert(sharedId);
+        const auto symbol = value(shared, "symbol");
+        if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Shared parameter symbol must be lower camel case.", "sharedParameter", sharedId, "symbol");
+        else if (!sharedParameterSymbols.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Shared parameter symbol \"" + symbol + "\" is duplicated.", "sharedParameter", sharedId, "symbol");
+        const auto mode = value(shared, "mode");
+        if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "sharedParameter", sharedId, "mode");
+        if (!shared.get_optional<double>("value") || !std::isfinite(*shared.get_optional<double>("value"))) {
+            add(result, "parameterValueInvalid", "error", "A shared parameter needs a finite value.", "sharedParameter", sharedId, "value");
+        }
+        if (shared.get_child_optional("tuning")) {
+            add(result, "sharedParameterTuningUnsupported", "error", "Shared parameters cannot be marked as tunable.", "sharedParameter", sharedId, "tuning");
+        }
+        if (mode == "live" && shared.get_child_optional("control")) {
+            const auto minimum = shared.get_optional<double>("control.minimum");
+            const auto maximum = shared.get_optional<double>("control.maximum");
+            const auto step = shared.get_optional<double>("control.step");
+            const auto initialValue = shared.get_optional<double>("value");
+            if (!minimum || !maximum || !step || !initialValue || !std::isfinite(*minimum) || !std::isfinite(*maximum) ||
+                !std::isfinite(*step) || !std::isfinite(*initialValue) || !(*minimum < *maximum) || !(*step > 0) ||
+                *initialValue < *minimum || *initialValue > *maximum) {
+                add(result, "parameterControlInvalid", "error", "Live parameter slider settings require minimum < maximum, step > 0 and an initial value within the bounds.", "sharedParameter", sharedId, "control");
+            }
+        }
+    }
+    // A parameter linked to a shared one takes its value and mode from it, so the link must
+    // resolve and the parameter cannot also carry its own fitting bounds.
+    auto validateSharedLink = [&](const boost::property_tree::ptree& parameter, const std::string& kind, const std::string& ownerId, const std::string& field) {
+        if (!parameter.get_child_optional("sharedParameterId")) return;
+        if (!sharedParameterIds.contains(value(parameter, "sharedParameterId"))) {
+            add(result, "sharedParameterMissing", "error", "Parameter \"" + value(parameter, "name") + "\" links to a shared parameter that does not exist.", kind, ownerId, field);
+        }
+        if (parameter.get_child_optional("tuning")) {
+            add(result, "sharedParameterTuningUnsupported", "error", "A parameter linked to a shared parameter cannot be marked as tunable.", kind, ownerId, field);
+        }
+    };
+
     std::set<std::string> runConfigurationIds;
     // Populated when the active run configuration parses cleanly, for the stability-diagnostic
     // pass near the end of this function -- the pre-run phase of
@@ -371,6 +416,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 const auto& parameter = parameterEntry.second;
                 registerId(value(parameter, "id"), "node", id, "Source-term parameter \"" + value(parameter, "name") + "\"");
                 sourceParameterIds.insert(value(parameter, "id"));
+                validateSharedLink(parameter, "node", id, "sourceTerms");
                 if (!nodeEnabled) continue;
                 const auto symbol = value(parameter, "symbol");
                 if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "node", id, "sourceTerms");
@@ -660,6 +706,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             const auto& parameter = parameterEntry.second;
             registerId(value(parameter, "id"), "edge", id, "Parameter \"" + value(parameter, "name") + "\"");
             parameterIds.insert(value(parameter, "id"));
+            validateSharedLink(parameter, "edge", id, "parameters");
             if (!edgeEnabled) continue;
             const auto symbol = value(parameter, "symbol");
             if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "edge", id, "parameters");

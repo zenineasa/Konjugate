@@ -28,6 +28,7 @@
 import { encodeEngineCommand } from './engineProtocol.mjs';
 import { nearestResultSample, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createStdinRingBuffer, pushStdinBytes } from './webEngineStdinBuffer.mjs';
+import { liveControlParameterIds } from './sharedParameters.mjs';
 
 const jobs = new Map(); // jobId -> the raw decodeResultFile()-shaped result (full precision, not projected)
 const liveJobs = new Map(); // jobId -> { worker, stdinRing, commandSequence, liveParameterIds } -- real live jobs only, see startRealLiveRun()
@@ -114,12 +115,7 @@ function findLiveParameterIds(content) {
     } catch {
         return new Set();
     }
-    return new Set([
-        ...(document.edges ?? []).flatMap((edge) => (edge.parameters ?? [])
-            .filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)),
-        ...(document.nodes ?? []).flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
-            .filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)))
-    ]);
+    return liveControlParameterIds(document);
 }
 
 // Real live run (web-threads build only -- see liveRunSupported above): mirrors

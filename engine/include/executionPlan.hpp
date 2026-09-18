@@ -66,6 +66,10 @@ struct CompiledParameter {
     EntityId id = 0;
     double value = 0;
     bool live = false;
+    // The id live overrides and schedules are keyed by. Equal to `id` for an ordinary parameter;
+    // for one linked to a project-level shared parameter it is that shared parameter's id, so a
+    // single control value reaches every relationship that links to it.
+    EntityId controlId = 0;
 };
 
 // A recorded, timestamped intervention (docs/resultExploration.md's "Parameter interventions"),

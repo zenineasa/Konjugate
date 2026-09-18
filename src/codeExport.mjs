@@ -20,6 +20,8 @@
 //   - a contribution's finalized value (post negation) must be finite or the run aborts, exactly
 //     like the engine's per-task check -- sub-expression NaN/Infinity is not itself an error.
 
+import { resolveSharedParameters } from './sharedParameters.mjs';
+
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
 const minimumArgumentCounts = { Negate: 1, Divide: 2, Power: 2, Sqrt: 1, Abs: 1, Exp: 1, Ln: 1, Log: 1, Sin: 1, Cos: 1, Tan: 1, Min: 2, Max: 2 };
@@ -99,7 +101,9 @@ export function emitExpression(node, symbols, operators) {
 // ---- graph build: mirrors engine/src/executionPlan.cpp's compileExecutionPlan exactly enough to
 // reproduce its numerics, without needing any of its parallel-execution/checkpoint machinery. ----
 
-export function buildModel(document) {
+export function buildModel(sourceDocument) {
+    // Standalone programs have no runtime notion of sharing: bake each link to its shared value.
+    const document = resolveSharedParameters(sourceDocument);
     const enabledNodes = (document.nodes ?? []).filter((node) => node.enabled !== false);
     const disabledNodeIds = new Set((document.nodes ?? []).filter((node) => node.enabled === false).map((node) => node.id));
     const stateOwnerNodeId = new Map();

@@ -374,6 +374,61 @@ const controlledResult = await controlledRun.completion;
 assert.equal(controlledResult.lifecycle, 'completed');
 assert.equal(controlledResult.pacing.mode, 'fastest');
 
+// Shared parameters: two edges link to one project-level parameter, so one constant value -- or
+// one live control value keyed by the shared id -- drives both.
+function sharedParameterProject({ mode = 'constant', sharedValue = 1, linkedId = 100 } = {}) {
+    const node = (id, name, stateId) => ({
+        id, name, position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+        states: [{ id: stateId, name: 'Level', symbol: 'level', initialValue: 0 }]
+    });
+    const edge = (id, targetNodeId, targetStateId, parameterId, name) => ({
+        id, name, source: { nodeId: 1, stateId: 2 }, target: { nodeId: targetNodeId, stateId: targetStateId }, directionality: 'directed',
+        equation: '\\mathrm{gain}',
+        equationModel: {
+            latex: '\\mathrm{gain}', output: { role: 'target', stateId: targetStateId },
+            bindings: [{ kind: 'parameter', parameterId, symbol: 'gain' }], mathJson: 'gain'
+        },
+        parameters: [{ id: parameterId, name: 'Gain', symbol: 'gain', value: 5, mode: 'constant', sharedParameterId: linkedId }],
+        appearance: { color: '#888888', offset: 0 }
+    });
+    return {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' },
+        nodes: [node(1, 'Source', 2), node(3, 'X', 4), node(5, 'Y', 6)],
+        edges: [edge(7, 3, 4, 8, 'Feed X'), edge(9, 5, 6, 10, 'Feed Y')],
+        sharedParameters: [{
+            id: 100, name: 'Shared gain', symbol: 'gain', value: sharedValue, mode,
+            ...(mode === 'live' ? { control: { minimum: 0, maximum: 10, step: 0.5 } } : {})
+        }],
+        runConfigurations: [{ id: 200, name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1 }],
+        activeRunConfigurationId: 200
+    };
+}
+const sharedFinalLevels = (result) => {
+    const last = result.samples.at(-1);
+    const level = (stateId) => last.states.find((state) => state.stateId === stateId).value;
+    return { x: level(4), y: level(6) };
+};
+const sharedConfiguration = { name: 'Shared', targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1 };
+const sharedConstantRun = await startEngineRun(JSON.stringify(sharedParameterProject({ sharedValue: 2 })), sharedConfiguration, { ...engineOptions });
+const sharedConstant = sharedFinalLevels(await sharedConstantRun.completion);
+// The linked parameters' own value (5) is ignored: the shared value (2) governs both edges.
+assert.ok(Math.abs(sharedConstant.x - 2) < 1e-6 && Math.abs(sharedConstant.y - 2) < 1e-6, `Shared constant: ${JSON.stringify(sharedConstant)}`);
+
+const sharedLiveRun = await startEngineRun(JSON.stringify(sharedParameterProject({ mode: 'live' })), {
+    ...sharedConfiguration, pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 }
+}, { ...engineOptions });
+await sharedLiveRun.setExecutionState('paused');
+await sharedLiveRun.setParameterValue(100, 3);
+await assert.rejects(() => sharedLiveRun.setParameterValue(8, 3), /not available for live control/,
+    'A linked parameter is controlled through the shared id, not its own.');
+await sharedLiveRun.setExecutionState('running');
+const sharedLive = sharedFinalLevels(await sharedLiveRun.completion);
+// Paused before (or right at) the start, so the live value of 3 applies to both edges nearly throughout.
+assert.ok(sharedLive.x > 2.5 && Math.abs(sharedLive.x - sharedLive.y) < 1e-9, `Shared live: ${JSON.stringify(sharedLive)}`);
+
+await assert.rejects(() => startEngineRun(JSON.stringify(sharedParameterProject({ linkedId: 999 })), sharedConfiguration, { ...engineOptions }).then((run) => run.completion),
+    /MODEL_INVALID/, 'A link to a missing shared parameter must be rejected.');
+
 // Proves the full wire path for a recorded, timestamped intervention (docs/resultExploration.md's
 // "Parameter interventions") -- JS encodeEngineCommand -> C++ drainRunControl ->
 // RunControl.activeSchedules -> resolveParameterValues -- not just the schedule-evaluation math

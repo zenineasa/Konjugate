@@ -16,6 +16,7 @@ import { resolveInstalledFmus } from './fmiResolver.mjs';
 // module-top-level evaluation time, which is exactly the shape Node's ESM live-binding
 // resolution handles correctly.
 import { checkSubstepConvergence } from './postRunStabilityDiagnostics.mjs';
+import { liveControlParameterIds } from './sharedParameters.mjs';
 
 function engineFileName() {
     return process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine';
@@ -279,12 +280,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         }
     }));
     const parsedDocument = JSON.parse(content);
-    const liveParameterIds = new Set([
-        ...parsedDocument.edges.flatMap((edge) => (edge.parameters ?? [])
-            .filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)),
-        ...parsedDocument.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
-            .filter((parameter) => parameter.mode === 'live').map((parameter) => parameter.id)))
-    ]);
+    const liveParameterIds = liveControlParameterIds(parsedDocument);
     const child = spawn(executable, [
         'run', inputPath,
         '--configuration', configurationPath,

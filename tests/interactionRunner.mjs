@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
 import { unzipSync } from 'fflate';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { encodeProjectFile } from '../src/projectFile.mjs';
 
 // These 10 primitives, and every scenario below, operate on a "handle" -- a driver-produced
 // object wrapping either a live Electron BrowserWindow (tests/drivers/electronWindowDriver.mjs)
@@ -3727,6 +3730,62 @@ export async function runInteractionTests(driver) {
 
         await diagnosticWindow.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated diagnostic window; no web-edition equivalent' });
+
+    await run('a parameter linked to a shared parameter edits and unlinks through the edge editor', async () => {
+        // Two edges link one parameter to a project-level shared parameter: the linked row shows the
+        // shared value (2), not its own stale one (5); editing it changes the shared definition, so
+        // the sibling edge follows; and unlinking keeps the value in effect as the row's own.
+        const parameter = (id) => ({ id, name: 'Gain', symbol: 'gain', value: 5, mode: 'constant', sharedParameterId: 100 });
+        const node = (id, name, stateId, position) => ({
+            id, name, position, sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+            states: [{ id: stateId, name: 'Level', symbol: 'level', initialValue: 0 }]
+        });
+        const edge = (id, name, targetNodeId, targetStateId, parameterId) => ({
+            id, name, source: { nodeId: 1, stateId: 2 }, target: { nodeId: targetNodeId, stateId: targetStateId }, directionality: 'directed',
+            equation: '\\mathrm{gain}',
+            equationModel: {
+                latex: '\\mathrm{gain}', output: { role: 'target', stateId: targetStateId },
+                bindings: [{ kind: 'parameter', parameterId, symbol: 'gain' }], mathJson: 'gain'
+            },
+            parameters: [parameter(parameterId)], appearance: { color: '#888888', offset: 0 }
+        });
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' },
+            sharedParameters: [{ id: 100, name: 'Shared gain', symbol: 'gain', value: 2, unit: 'x', mode: 'constant' }],
+            nodes: [node(1, 'Source', 2, [-4, 0, 0]), node(3, 'Target X', 4, [4, 3, 0]), node(5, 'Target Y', 6, [4, -3, 0])],
+            edges: [edge(7, 'Feed X', 3, 4, 8), edge(9, 'Feed Y', 5, 6, 10)]
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-shared-'));
+        const projectPath = join(directory, 'sharedParameters.kjt');
+        await writeFile(projectPath, await encodeProjectFile(JSON.stringify(project)));
+
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The shared-parameter project did not load.');
+        const openEdge = async (name) => {
+            const point = await evaluate(opened, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
+            assert.ok(point, `Could not locate ${name} on screen.`);
+            await opened.mouseMove(point);
+            await opened.mouseDown(point, { button: 'left', clickCount: 1 });
+            await opened.mouseUp(point, { button: 'left', clickCount: 1 });
+            await waitFor(opened, `document.querySelector('#editEdgeName').value === ${JSON.stringify(name)}`, `The ${name} edge editor did not open.`);
+        };
+        const row = `document.querySelector('#edgeEditorParameters .editorParameterRow')`;
+        await openEdge('Feed X');
+        assert.equal(await evaluate(opened, `${row}.querySelector('[data-shared-select]').value`), '100');
+        assert.equal(await evaluate(opened, `${row}.querySelector('[data-field="value"]').value`), '2', 'A linked row must show the shared value.');
+
+        await evaluate(opened, `(() => { const input = ${row}.querySelector('[data-field="value"]'); input.value = '3'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(opened, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+        await openEdge('Feed Y');
+        assert.equal(await evaluate(opened, `${row}.querySelector('[data-field="value"]').value`), '3', 'The sibling edge must follow the shared value.');
+
+        await evaluate(opened, `(() => { const select = ${row}.querySelector('[data-shared-select]'); select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(opened, `${row}.querySelector('[data-shared-select]').value === ''`, 'Unlinking did not take effect.');
+        assert.equal(await evaluate(opened, `${row}.querySelector('[data-field="value"]').value`), '3', 'Unlinking keeps the value in effect as the parameter\'s own.');
+        await opened.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

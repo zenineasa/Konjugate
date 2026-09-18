@@ -99,6 +99,33 @@ std::vector<CompiledBinding> compileBindings(const boost::property_tree::ptree& 
     return result;
 }
 
+// Project-level shared parameters (top-level "sharedParameters"), keyed by id. A relationship or
+// source-term parameter carrying `sharedParameterId` takes its value and live/constant mode from
+// the shared definition, and is controlled by the shared id, so one edit or one live control
+// value drives every linked parameter. The linked parameter's own value and mode are left in the
+// file only so an unlinked copy would still make sense; they are ignored here.
+using SharedParameters = std::unordered_map<EntityId, const boost::property_tree::ptree*>;
+
+SharedParameters collectSharedParameters(const boost::property_tree::ptree& document) {
+    SharedParameters shared;
+    if (const auto entries = document.get_child_optional("sharedParameters")) {
+        for (const auto& entry : *entries) shared.emplace(idValue(entry.second, "id"), &entry.second);
+    }
+    return shared;
+}
+
+CompiledParameter compileParameter(const boost::property_tree::ptree& parameter, const SharedParameters& shared) {
+    const auto id = idValue(parameter, "id");
+    if (parameter.get_child_optional("sharedParameterId")) {
+        const auto sharedId = idValue(parameter, "sharedParameterId");
+        const auto found = shared.find(sharedId);
+        if (found == shared.end()) throw std::runtime_error("A parameter links to a shared parameter that does not exist.");
+        const auto& definition = *found->second;
+        return {id, definition.get<double>("value", 0), value(definition, "mode") == "live", sharedId};
+    }
+    return {id, parameter.get<double>("value", 0), value(parameter, "mode") == "live", id};
+}
+
 void bindExpressionSymbols(CompiledExpression& expression, const std::vector<CompiledBinding>& bindings) {
     if (expression.operation == ExpressionOperation::symbol) {
         const auto found = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
@@ -171,6 +198,7 @@ std::size_t CompiledExpression::operationCount() const noexcept {
 }
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
+    const auto sharedParameters = collectSharedParameters(document);
     ExecutionPlan plan;
     std::unordered_map<EntityId, std::size_t> nodeIndexes;
     // A disabled node contributes no state and no contribution tasks -- exactly as if it, and
@@ -218,7 +246,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 compiledNode.nodeId, true, plan.stateIndexes, localStateIndexes, termProgrammable ? "key" : "symbol");
             if (const auto parameters = term.get_child_optional("parameters")) for (const auto& parameterItem : *parameters) {
                 const auto& parameter = parameterItem.second;
-                task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
+                task.parameters.push_back(compileParameter(parameter, sharedParameters));
             }
             if (termProgrammable) {
                 task.implementation = termImplementationKind == "cpp"
@@ -352,7 +380,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 contributionNodeId, false, plan.stateIndexes, localStateIndexes, programmable ? "key" : "symbol");
             for (const auto& parameterItem : edge.get_child("parameters")) {
                 const auto& parameter = parameterItem.second;
-                task.parameters.push_back({idValue(parameter, "id"), parameter.get<double>("value", 0), value(parameter, "mode") == "live"});
+                task.parameters.push_back(compileParameter(parameter, sharedParameters));
             }
             if (programmable) {
                 task.implementation = implementationKind == "cpp"
@@ -564,6 +592,10 @@ double evaluateParameterSchedule(const ParameterSchedule& schedule, double simul
 }
 
 namespace {
+// controlId defaults to 0 for a CompiledParameter built directly (tests, tools) rather than through
+// compileParameter; those are controlled by their own id.
+EntityId controlIdOf(const CompiledParameter& parameter) { return parameter.controlId ? parameter.controlId : parameter.id; }
+
 // Among every schedule recorded for this parameter, the one whose startTime is the latest that
 // has already arrived governs -- a later intervention layered onto an earlier one takes over the
 // instant it begins, matching how a real operator's most recent decision supersedes an earlier
@@ -574,11 +606,11 @@ double resolveParameterValue(const CompiledParameter& parameter, const EntityVal
     if (!parameter.live) return parameter.value;
     const ParameterSchedule* active = nullptr;
     for (const auto& schedule : activeSchedules) {
-        if (schedule.parameterId != parameter.id || schedule.startTime > simulationTime) continue;
+        if (schedule.parameterId != controlIdOf(parameter) || schedule.startTime > simulationTime) continue;
         if (!active || schedule.startTime > active->startTime) active = &schedule;
     }
     if (active) return evaluateParameterSchedule(*active, simulationTime);
-    const auto override = liveParameterValues.find(parameter.id);
+    const auto override = liveParameterValues.find(controlIdOf(parameter));
     return override != liveParameterValues.end() ? override->second : parameter.value;
 }
 }

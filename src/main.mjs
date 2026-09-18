@@ -40,6 +40,7 @@ import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu }
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
+import { registerLauncherHandlers } from './launcherHost.mjs';
 import { normalizeShapeLibraryEntry } from './shapeLibraryCatalog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -708,6 +709,10 @@ ipcMain.handle('addonInvokeCommand', async (event, { addonId, commandId, context
         const projectWindow = getWindowFromEvent(event);
         await openResultsVisualizer(projectWindow, addon, contexts.resultSession);
         return { addonId, commandId, sessionId: projectWindowState.get(projectWindow).visualizerSession.sessionId };
+    }
+    if (addon.manifest.kind === 'launcher') {
+        await launcherHost.openLauncher(getWindowFromEvent(event), addon);
+        return { addonId, commandId };
     }
     throw new Error(`Unsupported add-on kind: ${addon.manifest.kind}.`);
 });
@@ -1819,6 +1824,11 @@ const engineOptions = async () => {
         }
     };
 };
+
+const launcherHost = registerLauncherHandlers({
+    ipcMain, dialog, BrowserWindow, app, screen, currentDir, projectWindows, projectWindowState, installCustomWindowState,
+    auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry
+});
 
 const cliUsage = 'Usage: konjugate --cli run <project.kjt> --target-time <seconds> '
     + '[--configuration <name-or-id>] [--output-kjt <path>] [--output-csv <path>]\n'

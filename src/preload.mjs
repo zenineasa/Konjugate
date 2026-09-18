@@ -74,6 +74,12 @@ contextBridge.exposeInMainWorld('shapeLibrary', {
     saveUpload: (fileName, data) => ipcRenderer.invoke('shapeLibrarySaveUpload', { fileName, data })
 });
 
+// A launcher add-on's "open in canvas": the host sends a decoded project (model plus any result
+// branches) for this window to load, exactly like an example.
+contextBridge.exposeInMainWorld('launcherHost', {
+    onOpenProject: (callback) => ipcRenderer.on('launcherOpenProject', (_event, payload) => callback(payload))
+});
+
 contextBridge.exposeInMainWorld('componentLibrary', {
     list: () => ipcRenderer.invoke('componentLibraryList')
 });

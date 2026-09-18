@@ -121,6 +121,19 @@ export function inspectPackageArchive(archive, { extension = null } = {}) {
         if (contributionManifest.addonId !== packageManifest.packageId) {
             throw new PackageArchiveError('The package and add-on IDs do not match.', 'MANIFEST_MISMATCH');
         }
+        if (contributionManifest.kind === 'launcher') {
+            // Everything a launcher declares must ship in the archive, so a missing file is caught at install
+            // time and not the first time a user clicks it.
+            const declared = [
+                contributionManifest.entry,
+                ...(contributionManifest.contributes.importers ?? []).flatMap((importer) => [importer.entry, ...importer.files.map((file) => file.sample).filter(Boolean)]),
+                ...(contributionManifest.contributes.pages ?? []).map((page) => page.entry)
+            ];
+            for (const path of declared) {
+                safeArchivePath(path);
+                if (!files[path]) throw new PackageArchiveError(`The launcher declares a file the package does not contain: ${path}.`, 'MISSING_ENTRY');
+            }
+        }
     } else {
         if (contributionManifest.pluginId !== packageManifest.packageId || contributionManifest.apiVersion !== 1 || !Array.isArray(contributionManifest.contributes) || !contributionManifest.contributes.length) {
             throw new PackageArchiveError('The plugin manifest is invalid or does not match the package.', 'INVALID_MANIFEST');

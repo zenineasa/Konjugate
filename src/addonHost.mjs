@@ -18,7 +18,83 @@ const allowedPermissions = new Set([
     'results.export'
 ]);
 
+const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open']);
+const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
+
+function safeRelativePath(path, description, extensions) {
+    if (typeof path !== 'string' || !path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) {
+        throw new Error(`The launcher ${description} must be a relative path inside the add-on directory.`);
+    }
+    if (extensions && !extensions.some((extension) => path.endsWith(extension))) throw new Error(`The launcher ${description} must end in ${extensions.join(' or ')}.`);
+    return path;
+}
+
+// A launcher add-on opens a guided starting window instead of visualizing results (see
+// docs/proposals/launcherAddons.md). Everything it may refer to -- importers, scenarios, help pages,
+// sample files -- is declared here as data, and the window can only name a declared id; it can never
+// supply a path or a URL of its own.
+export function validateLauncherManifest(manifest) {
+    if (manifest.apiVersion !== visualizerApiVersion) throw new Error(`Unsupported launcher API version: ${manifest.apiVersion}.`);
+    if (!addonIdPattern.test(manifest.addonId ?? '') || !manifest.name || !manifest.version || !manifest.entry) throw new Error('The launcher manifest is incomplete.');
+    safeRelativePath(manifest.entry, 'entry', ['.html']);
+    const permissions = manifest.permissions ?? [];
+    if (!permissions.every((permission) => launcherPermissions.has(permission))) throw new Error('The launcher requests an unsupported permission.');
+    const contributes = manifest.contributes ?? {};
+    const toolstrip = contributes.toolstrip ?? [];
+    if (toolstrip.length !== 1 || !commandIdPattern.test(toolstrip[0].commandId ?? '') || !toolstrip[0].label || !toolstrip[0].tooltip ||
+        toolstrip[0].when !== 'always' || (toolstrip[0].contexts ?? []).length) {
+        throw new Error('A launcher must contribute exactly one always-visible toolstrip command with no result context.');
+    }
+    const unique = (items, key, description) => {
+        const seen = new Set();
+        for (const item of items) {
+            if (!contributionIdPattern.test(item?.[key] ?? '') || seen.has(item[key])) throw new Error(`The launcher has an invalid or duplicated ${description} id.`);
+            seen.add(item[key]);
+        }
+    };
+    const importers = contributes.importers ?? [];
+    unique(importers, 'importerId', 'importer');
+    for (const importer of importers) {
+        if (!importer.name) throw new Error('A launcher importer needs a name.');
+        safeRelativePath(importer.entry, 'importer entry', ['.mjs']);
+        const files = importer.files ?? [];
+        if (!files.length) throw new Error('A launcher importer must declare the files it reads.');
+        unique(files, 'role', 'importer file role');
+        for (const file of files) {
+            if (!file.label) throw new Error('A launcher importer file needs a label.');
+            if (file.sample !== undefined) safeRelativePath(file.sample, 'importer sample', null);
+        }
+    }
+    const scenarios = contributes.scenarios ?? [];
+    unique(scenarios, 'scenarioId', 'scenario');
+    for (const scenario of scenarios) {
+        if (!scenario.name || !scenario.description || !Number.isFinite(scenario.forkAt) || scenario.forkAt < 0 || !Number.isFinite(scenario.runTime) || !(scenario.runTime > scenario.forkAt)) {
+            throw new Error('A launcher scenario needs a name, a description, a fork time and a longer run time.');
+        }
+        if (scenario.choose !== undefined && !scenario.choose?.label) throw new Error('A launcher scenario choice needs a label.');
+        if (scenario.effects !== undefined && (!Array.isArray(scenario.effects) || !scenario.effects.every((line) => typeof line === 'string'))) {
+            throw new Error('A launcher scenario\'s effects must be a list of sentences.');
+        }
+        if (!Array.isArray(scenario.interventions) || !scenario.interventions.length) throw new Error('A launcher scenario needs at least one intervention.');
+        for (const intervention of scenario.interventions) {
+            if (!contributionIdPattern.test(intervention.parameter ?? '') || !['chosen', 'all', 'global'].includes(intervention.target) ||
+                (Number.isFinite(intervention.value) === Number.isFinite(intervention.fractionOfMaximum)) || (intervention.at !== undefined && !(intervention.at >= 0)) ||
+                (intervention.duration !== undefined && !(intervention.duration > 0))) {
+                throw new Error('A launcher scenario intervention needs a parameter, a target (chosen, all or global), an optional delay and duration, and exactly one of value or fractionOfMaximum.');
+            }
+        }
+    }
+    const pages = contributes.pages ?? [];
+    unique(pages, 'pageId', 'page');
+    for (const page of pages) {
+        if (!page.label) throw new Error('A launcher page needs a label.');
+        safeRelativePath(page.entry, 'page entry', ['.html']);
+    }
+    return structuredClone(manifest);
+}
+
 export function validateAddonManifest(manifest) {
+    if (manifest?.kind === 'launcher') return validateLauncherManifest(manifest);
     if (!manifest || manifest.kind !== 'resultVisualizer') throw new Error('The add-on is not a result visualizer.');
     if (manifest.apiVersion !== visualizerApiVersion) throw new Error(`Unsupported visualizer API version: ${manifest.apiVersion}.`);
     if (!addonIdPattern.test(manifest.addonId ?? '') || !manifest.name || !manifest.version || !manifest.entry) throw new Error('The visualizer manifest is incomplete.');

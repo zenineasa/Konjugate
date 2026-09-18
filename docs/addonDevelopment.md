@@ -376,6 +376,12 @@ A domain-specific add-on should therefore let the user map signals to its requir
 
 Semantic quantity and coordinate-frame metadata are candidates for a later API version. They should remain domain-agnostic and optional.
 
+## Launcher add-ons (experimental)
+
+A second add-on kind, `"kind": "launcher"`, opens a guided starting window instead of visualizing results, for a package that wants to give a first-time user a simple path: bring your data, choose a scenario, read a comparison. Its toolstrip button is always visible (`"when": "always"`, no contexts), and its page is an ordinary sandboxed add-on page with the host titlebar. It gets a different bridge, `window.konjugateLauncher`, whose every call names something the manifest declared and never takes a path or URL of its own.
+
+The manifest declares `contributes.importers` (a module that turns chosen files into a model, run by the host in a worker, plus the file roles it reads and optional sample files), `contributes.scenarios` (named sets of parameter changes with a fork time, run time, optional entity choice and effect sentences), and `contributes.pages` (bundled help pages). Permissions are `data.import`, `scenario.run`, `model.open`, `results.export` and `pages.open`. The host runs the importer, runs each scenario headless as a baseline and a fork of it, opens the result in the canvas as a baseline and a forked branch, and exports a folder with the results, the project and a provenance manifest. A launcher package is rejected at install if it declares a file the archive does not contain. The design, the trust model and what is not yet built are in [Launcher add-ons](proposals/launcherAddons.md).
+
 ## Versioning and forward compatibility
 
 - Reject an unavailable `apiVersion`; do not guess compatible behavior.

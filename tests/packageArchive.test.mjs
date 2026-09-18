@@ -257,3 +257,24 @@ test('an invalid example contribution is rejected', () => {
     rejects({ guide: 'examples/missing.md' }, {}, /guide is missing/);
     rejects({ thumbnail: '../escape.png' }, {}, /Unsafe|unsafe|missing/);
 });
+
+function launcherArchive(files) {
+    const manifest = {
+        addonId: 'example.helloWorld', name: 'Hello Launcher', version: '0.1.0', apiVersion: 1, kind: 'launcher', entry: 'index.html', permissions: ['data.import', 'pages.open'],
+        contributes: {
+            toolstrip: [{ commandId: 'openStart', label: 'Hello', tooltip: 'Open', symbol: 'H', when: 'always', contexts: [] }],
+            importers: [{ importerId: 'rooms', name: 'Rooms', entry: 'importers/rooms.mjs', files: [{ role: 'rooms', label: 'Rooms', sample: 'samples/rooms.csv' }] }],
+            pages: [{ pageId: 'help', label: 'Help', entry: 'help/help.html' }]
+        }
+    };
+    return createPackageArchive({ packageManifest: packageManifest('addon'), contributionManifest: manifest, files });
+}
+
+test('a launcher package must contain every file its manifest declares', () => {
+    const complete = { 'index.html': '<!doctype html>', 'importers/rooms.mjs': 'export default 1', 'samples/rooms.csv': 'a', 'help/help.html': '<p>' };
+    assert.equal(inspectPackageArchive(launcherArchive(complete), { extension: '.kja' }).contributionManifest.kind, 'launcher');
+    for (const missing of Object.keys(complete)) {
+        const { [missing]: _removed, ...rest } = complete;
+        assert.throws(() => inspectPackageArchive(launcherArchive(rest), { extension: '.kja' }), /does not contain|missing/i, `dropping ${missing}`);
+    }
+});

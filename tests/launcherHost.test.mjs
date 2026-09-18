@@ -1,0 +1,145 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { validateAddonManifest } from '../src/addonHost.mjs';
+import {
+    buildRunManifest, composeBranchSamples, extractSeries, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
+} from '../src/launcherHost.mjs';
+
+const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'launcher');
+
+const launcher = () => ({
+    addonId: 'example.thermalStart', name: 'Thermal Start', version: '0.1.0', apiVersion: 1, kind: 'launcher', entry: 'index.html',
+    permissions: ['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open'],
+    contributes: {
+        toolstrip: [{ commandId: 'openStart', label: 'Thermal', tooltip: 'Open Thermal Start', symbol: '◆', when: 'always', contexts: [] }],
+        importers: [{ importerId: 'rooms', name: 'Rooms', entry: 'importers/rooms.mjs', files: [{ role: 'rooms', label: 'Rooms', required: true, sample: 'samples/rooms.csv' }] }],
+        scenarios: [{
+            scenarioId: 'coldDay', name: 'Cold day', description: 'The outside temperature drops.', forkAt: 5, runTime: 20,
+            interventions: [{ parameter: 'outsideTemperature', target: 'global', value: 250 }]
+        }],
+        pages: [{ pageId: 'gettingStarted', label: 'Getting started', entry: 'help/gettingStarted.html' }]
+    }
+});
+
+test('a well-formed launcher manifest is accepted', () => {
+    assert.equal(validateAddonManifest(launcher()).kind, 'launcher');
+});
+
+test('a launcher manifest is rejected when it breaks the contract', () => {
+    const rejects = (mutate, pattern) => {
+        const manifest = launcher();
+        mutate(manifest);
+        assert.throws(() => validateAddonManifest(manifest), pattern);
+    };
+    rejects((m) => { m.permissions.push('model.write'); }, /unsupported permission/);
+    rejects((m) => { m.contributes.toolstrip[0].when = 'resultsActive'; }, /always-visible toolstrip/);
+    rejects((m) => { m.contributes.toolstrip[0].contexts = ['resultSession']; }, /always-visible toolstrip/);
+    rejects((m) => { m.entry = '../index.html'; }, /relative path/);
+    rejects((m) => { m.contributes.importers[0].entry = '/etc/importer.mjs'; }, /relative path/);
+    rejects((m) => { m.contributes.importers[0].entry = 'importers/rooms.js'; }, /must end in \.mjs/);
+    rejects((m) => { m.contributes.importers[0].files[0].sample = '../secret.csv'; }, /relative path/);
+    rejects((m) => { m.contributes.importers.push({ ...m.contributes.importers[0] }); }, /duplicated importer/);
+    rejects((m) => { m.contributes.scenarios[0].runTime = 3; }, /longer run time/);
+    rejects((m) => { m.contributes.scenarios[0].interventions[0].target = 'nowhere'; }, /intervention/);
+    rejects((m) => { m.contributes.scenarios[0].interventions[0].fractionOfMaximum = 0.5; }, /exactly one of value or fractionOfMaximum/);
+    rejects((m) => { m.contributes.scenarios[0].choose = {}; }, /choice needs a label/);
+    rejects((m) => { m.contributes.scenarios[0].effects = 'x'; }, /effects must be a list/);
+    rejects((m) => { m.contributes.pages[0].entry = 'help/../../x.html'; }, /relative path/);
+    rejects((m) => { m.apiVersion = 2; }, /Unsupported launcher API version/);
+});
+
+test('an importer runs in a worker, can read its own package JSON, and its output is checked', async () => {
+    const importer = { entry: 'echoImporter.mjs' };
+    const run = (text) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'data', name: 'data.csv', text }], timeoutMilliseconds: 1500 });
+    assert.deepEqual((await run('hello')).report.summary, { text: 'hello', extra: 7 });
+    await assert.rejects(() => run('boom'), /The importer failed: boom/);
+    await assert.rejects(() => run('bad'), /unexpected result/);
+    await assert.rejects(() => run('hang'), /did not finish within/);
+});
+
+test('scenario interventions resolve to concrete parameter changes', () => {
+    const index = [
+        { key: 'withdrawalRate', scope: 'institution', entity: 'Alder', sharedParameterId: 1, name: 'Withdrawal (Alder)', live: true, minimum: 0, maximum: 0.2 },
+        { key: 'withdrawalRate', scope: 'institution', entity: 'Birch', sharedParameterId: 2, name: 'Withdrawal (Birch)', live: true, minimum: 0, maximum: 0.2 },
+        { key: 'lending', scope: 'institution', entity: 'Alder', sharedParameterId: 3, name: 'Lending (Alder)', live: true, minimum: 0, maximum: 100 },
+        { key: 'haircut', scope: 'global', sharedParameterId: 4, name: 'Haircut', live: true, minimum: 0, maximum: 1 },
+        { key: 'fixed', scope: 'global', sharedParameterId: 5, name: 'Fixed', live: false }
+    ];
+    const scenario = { name: 'Stress', interventions: [
+        { parameter: 'withdrawalRate', target: 'chosen', value: 0.05 },
+        { parameter: 'lending', target: 'chosen', fractionOfMaximum: 0.5, at: 3 },
+        { parameter: 'haircut', target: 'global', value: 5 }
+    ] };
+    const resolved = resolveInterventions(scenario, index, 'Alder');
+    assert.deepEqual(resolved.map((change) => [change.sharedParameterId, change.value, change.at]), [[1, 0.05, 0], [3, 50, 3], [4, 1, 0]], 'Values are clamped to the parameter range.');
+    assert.equal(resolveInterventions({ name: 'Run on all', interventions: [{ parameter: 'withdrawalRate', target: 'all', value: 0.01 }] }, index).length, 2);
+    assert.throws(() => resolveInterventions(scenario, index, null), /choose one first/);
+    assert.throws(() => resolveInterventions({ name: 'X', interventions: [{ parameter: 'absent', target: 'global', value: 1 }] }, index), /does not have/);
+    assert.throws(() => resolveInterventions({ name: 'X', interventions: [{ parameter: 'fixed', target: 'global', value: 1 }] }, index), /cannot be changed during a run/);
+});
+
+const document = { nodes: [{ id: 1, name: 'Room', states: [{ id: 2, symbol: 'temperature', name: 'Temperature', unit: 'K' }] }], edges: [] };
+const sample = (time, value) => ({ time, states: [{ stateId: 2, value }] });
+
+test('a forked branch reads as one continuous history, and series and CSV come out in the expected shape', () => {
+    const parent = [sample(0, 1), sample(1, 2), sample(2, 3), sample(3, 4)];
+    const child = [sample(2, 30), sample(3, 40)];
+    const composed = composeBranchSamples(parent, child, 2);
+    assert.deepEqual(composed.map((item) => [item.time, item.states[0].value]), [[0, 1], [1, 2], [2, 30], [3, 40]]);
+    assert.deepEqual(extractSeries(composed, document, ['temperature']), { Room: { temperature: [[0, 1], [1, 2], [2, 30], [3, 40]] } });
+    assert.deepEqual(extractSeries(composed, document, ['humidity']), {});
+    const csv = resultsToCsv([{ label: 'Base, line', samples: parent.slice(0, 1) }, { label: 'Cold', samples: child.slice(0, 1) }], document);
+    assert.equal(csv, 'branch,time,node,state,unit,value\n"Base, line",0,Room,Temperature,K,1\nCold,2,Room,Temperature,K,30\n');
+});
+
+test('the run manifest records what produced a result', () => {
+    const manifest = buildRunManifest({
+        appVersion: '1.2.3', addon: { addonId: 'example.thermalStart', name: 'Thermal Start', version: '0.1.0' }, importerId: 'rooms',
+        inputs: [{ role: 'rooms', name: 'rooms.csv', sha256: 'abc', bytes: 12, text: 'not recorded' }], contentText: '{"a":1}', document,
+        config: { targetTime: 20 }, scenario: { scenarioId: 'coldDay', name: 'Cold day', description: 'd', forkAt: 5 }, chosenEntity: null,
+        interventions: [{ sharedParameterId: 4, value: 250 }], files: { 'results.csv': { sha256: 'x', bytes: 1 } }
+    });
+    assert.equal(manifest.model.sha256, sha256('{"a":1}'));
+    assert.deepEqual(manifest.inputs, [{ role: 'rooms', name: 'rooms.csv', sha256: 'abc', bytes: 12 }], 'The file text is never recorded, only its hash.');
+    assert.equal(manifest.scenario.forkAt, 5);
+    assert.equal(manifest.package.version, '0.1.0');
+});
+
+// A forked scenario against the real engine: a level fed by a shared live gain, doubled at the fork.
+const enginePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'out', 'engine', 'konjugateEngine');
+test('a scenario forks the baseline at its time and changes a live shared parameter from there', { skip: !existsSync(enginePath) && 'the engine is not built' }, async () => {
+    const { startEngineRun } = await import('../src/engineAdapter.mjs');
+    const engineOptions = { applicationPath: join(dirname(fileURLToPath(import.meta.url)), '..'), resourcesPath: '', packaged: false };
+    const node = (id, name, stateId) => ({ id, name, position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: stateId, name: 'Level', symbol: 'level', initialValue: 0 }] });
+    const project = {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [node(1, 'Source', 2), node(3, 'Target', 4)],
+        edges: [{
+            id: 5, name: 'Feed', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 3, stateId: 4 }, directionality: 'directed', equation: '\\mathrm{gain}',
+            equationModel: { latex: '\\mathrm{gain}', output: { role: 'target', stateId: 4 }, bindings: [{ kind: 'parameter', parameterId: 6, symbol: 'gain' }], mathJson: 'gain' },
+            parameters: [{ id: 6, name: 'Gain', symbol: 'gain', value: 1, mode: 'live', control: { minimum: 0, maximum: 10, step: 1 }, sharedParameterId: 7 }],
+            appearance: { color: '#888888', offset: 0 }
+        }],
+        sharedParameters: [{ id: 7, name: 'Shared gain', symbol: 'gain', value: 1, mode: 'live', control: { minimum: 0, maximum: 10, step: 1 } }],
+        runConfigurations: [{ id: 8, name: 'Default', globalTimeStep: 0.1, outputInterval: 0.5 }], activeRunConfigurationId: 8
+    };
+    const content = JSON.stringify(project);
+    const config = { name: 'Baseline', targetTime: 10, globalTimeStep: 0.1, outputInterval: 0.5 };
+    const baselineRun = await startEngineRun(content, config, engineOptions, { retainResult: true });
+    const baselineResult = await baselineRun.completion;
+    const baseline = { result: baselineResult, resultPath: baselineRun.resultPath, cleanup: baselineRun.cleanup };
+    const scenario = { forkAt: 5, runTime: 10 };
+    const { forkTime, child } = await runScenarioBranches({ content, config, scenario, interventions: [{ sharedParameterId: 7, value: 3, at: 0 }], baseline, engineOptions });
+    assert.equal(forkTime, 5);
+    const finalLevel = (samples) => samples.at(-1).states.find((state) => state.stateId === 4).value;
+    assert.ok(Math.abs(finalLevel(baselineResult.samples) - 10) < 1e-6, 'Baseline: gain 1 for 10 days.');
+    // Gain 1 for 5 days, then 3 for 5 days: 5 + 15 = 20.
+    assert.ok(Math.abs(finalLevel(child.result.samples) - 20) < 0.2, `Scenario level ${finalLevel(child.result.samples)} should be about 20`);
+    assert.equal(child.result.samples[0].time, 5, 'The forked run starts at the fork point.');
+    await baseline.cleanup?.();
+    await child.cleanup?.();
+});

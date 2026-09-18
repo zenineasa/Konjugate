@@ -8913,6 +8913,25 @@ async function loadExample(id) {
     }
 }
 
+// A launcher add-on's "open in canvas": load the project it built (with its result branches) as an
+// unsaved copy, behind the usual unsaved-work confirmation. Not present in the web edition.
+window.launcherHost?.onOpenProject(async (payload) => {
+    try {
+        if (simulationRunning) return;
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
+        await loadProjectDocument(JSON.parse(payload.content), {
+            fileName: payload.suggestedFilename,
+            saved: false,
+            embeddedResult: payload.embeddedResult,
+            embeddedBranches: payload.embeddedBranches
+        });
+        $('#statusText').textContent = 'Opened from the start window as an unsaved copy';
+    } catch (error) {
+        console.error(error);
+        $('#statusText').textContent = `Could not open the project · ${error.message}`;
+    }
+});
+
 $('#exampleGuideButton').addEventListener('click', () => {
     if (activeExampleId) window.projectFiles.openExampleGuide(activeExampleId);
 });

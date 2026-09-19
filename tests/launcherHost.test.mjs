@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
-    buildRunManifest, composeBranchSamples, decodeText, extractSeries, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
+    buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
 } from '../src/launcherHost.mjs';
 
 const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'launcher');
@@ -43,6 +43,8 @@ test('a launcher manifest is rejected when it breaks the contract', () => {
     rejects((m) => { m.contributes.importers[0].entry = '/etc/importer.mjs'; }, /relative path/);
     rejects((m) => { m.contributes.importers[0].entry = 'importers/rooms.js'; }, /must end in \.mjs/);
     rejects((m) => { m.contributes.importers[0].files[0].sample = '../secret.csv'; }, /relative path/);
+    rejects((m) => { m.contributes.importers[0].files[0].multiple = 'yes'; }, /multiple must be true or false/);
+    rejects((m) => { m.contributes.importers[0].files[0].sample = ['a.csv', 'b.csv']; }, /several files/);
     rejects((m) => { m.contributes.importers.push({ ...m.contributes.importers[0] }); }, /duplicated importer/);
     rejects((m) => { m.contributes.scenarios[0].runTime = 3; }, /longer run time/);
     rejects((m) => { m.contributes.scenarios[0].interventions[0].target = 'nowhere'; }, /intervention/);
@@ -60,6 +62,23 @@ test('an importer runs in a worker, can read its own package JSON, and its outpu
     await assert.rejects(() => run('boom'), /The importer failed: boom/);
     await assert.rejects(() => run('bad'), /unexpected result/);
     await assert.rejects(() => run('hang'), /did not finish within/);
+});
+
+test('an importer can return only data, receive options, and build a model from construction operations', async () => {
+    const importer = { entry: 'echoImporter.mjs' };
+    const run = (text, options) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'data', name: 'data.csv', text }], options, timeoutMilliseconds: 1500 });
+    const first = await run('data-only', { stage: 'read' });
+    assert.deepEqual(first.data, { received: 'read', files: 1 });
+    assert.equal(first.document, undefined);
+    const built = await run('operations');
+    assert.equal(built.document.nodes[0].sourceTerms[0].expression, '-x');
+    assert.equal(typeof built.data.references.x, 'number');
+});
+
+test('a launcher file role may accept several files and list several samples', () => {
+    const manifest = launcher();
+    Object.assign(manifest.contributes.importers[0].files[0], { multiple: true, sample: ['samples/a.csv', 'samples/b.csv'] });
+    assert.equal(validateAddonManifest(manifest).kind, 'launcher');
 });
 
 test('scenario interventions resolve to concrete parameter changes', () => {
@@ -150,4 +169,44 @@ test('text is decoded as UTF-8, UTF-16 or, failing that, Windows-1252, and the e
     assert.equal(decodeText(Buffer.from([0x43, 0x72, 0xE9, 0x64, 0x69, 0x74])).text, 'Crédit', 'A Windows-1252 é (0xE9) is not valid UTF-8.');
     assert.equal(decodeText(Buffer.from([0x43, 0x72, 0xE9, 0x64, 0x69, 0x74])).encoding, 'windows-1252');
     assert.deepEqual(decodeText(Buffer.from([0xFF, 0xFE, 0x41, 0x00, 0x42, 0x00])), { text: 'AB', encoding: 'utf-16le' });
+});
+
+const answer = (status, body = 'ok', headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: new Headers(headers), arrayBuffer: async () => new TextEncoder().encode(body).buffer });
+
+test('a fetch reaches only the hosts the manifest lists, over https, and follows redirects only within them', async () => {
+    const calls = [];
+    const fetchImpl = async (url) => { calls.push(url); return url.includes('start') ? answer(302, '', { location: '/next' }) : url.includes('away') ? answer(302, '', { location: 'https://evil.example/x' }) : answer(200, 'data'); };
+    const hosts = ['data.example.com'];
+    assert.equal(new TextDecoder().decode(await fetchAllowed({ url: 'https://data.example.com/file', hosts, fetchImpl })), 'data');
+    assert.equal(new TextDecoder().decode(await fetchAllowed({ url: 'https://data.example.com/start', hosts, fetchImpl })), 'data');
+    assert.deepEqual(calls.slice(-2), ['https://data.example.com/start', 'https://data.example.com/next']);
+    await assert.rejects(() => fetchAllowed({ url: 'https://data.example.com/away', hosts, fetchImpl }), /may not connect to evil\.example/);
+    await assert.rejects(() => fetchAllowed({ url: 'https://other.example.com/file', hosts, fetchImpl }), /may not connect to other\.example\.com/);
+    await assert.rejects(() => fetchAllowed({ url: 'http://data.example.com/file', hosts, fetchImpl }), /Only https/);
+    await assert.rejects(() => fetchAllowed({ url: 'https://user:pw@data.example.com/file', hosts, fetchImpl }), /user name or password/);
+    await assert.rejects(() => fetchAllowed({ url: 'not a url', hosts, fetchImpl }), /not a web address/);
+});
+
+test('a fetch explains a missing symbol, rate limiting, a network failure and an oversized answer', async () => {
+    const hosts = ['data.example.com'];
+    const url = 'https://data.example.com/x';
+    await assert.rejects(() => fetchAllowed({ url, hosts, fetchImpl: async () => answer(404) }), /404 \(not found: check the symbol\)/);
+    await assert.rejects(() => fetchAllowed({ url, hosts, fetchImpl: async () => answer(429) }), /too many requests/);
+    await assert.rejects(() => fetchAllowed({ url, hosts, fetchImpl: async () => { throw new Error('offline'); } }), /Could not reach data\.example\.com/);
+    await assert.rejects(() => fetchAllowed({ url, hosts, fetchImpl: async () => answer(200, 'x', { 'content-length': String(6 * 1024 * 1024) }) }), /larger than the size limit/);
+});
+
+test('a launcher that fetches must list exact host names, and only such a launcher may list them', () => {
+    const withNetwork = (mutate) => { const manifest = launcher(); manifest.permissions.push('network.fetch'); manifest.network = { hosts: ['query1.finance.yahoo.com'] }; mutate(manifest); return manifest; };
+    assert.equal(validateAddonManifest(withNetwork(() => {})).kind, 'launcher');
+    for (const hosts of [undefined, [], ['*.yahoo.com'], ['https://yahoo.com'], ['localhost'], ['a b.com']]) {
+        assert.throws(() => validateAddonManifest(withNetwork((manifest) => { manifest.network = hosts === undefined ? undefined : { hosts }; })), /exact host names/);
+    }
+    assert.throws(() => validateAddonManifest({ ...launcher(), network: { hosts: ['example.com'] } }), /only with the network\.fetch permission/);
+});
+
+test('a name for a fetched file cannot carry a path', () => {
+    assert.equal(safeFileName('../../etc/passwd'), '.._.._etc_passwd');
+    assert.equal(safeFileName('S&P 500'), 'S&P 500');
+    assert.equal(safeFileName('  '), '');
 });

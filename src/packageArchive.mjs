@@ -126,7 +126,7 @@ export function inspectPackageArchive(archive, { extension = null } = {}) {
             // time and not the first time a user clicks it.
             const declared = [
                 contributionManifest.entry,
-                ...(contributionManifest.contributes.importers ?? []).flatMap((importer) => [importer.entry, ...importer.files.map((file) => file.sample).filter(Boolean)]),
+                ...(contributionManifest.contributes.importers ?? []).flatMap((importer) => [importer.entry, ...importer.files.flatMap((file) => [file.sample].flat()).filter(Boolean)]),
                 ...(contributionManifest.contributes.pages ?? []).map((page) => page.entry)
             ];
             for (const path of declared) {

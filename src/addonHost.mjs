@@ -18,7 +18,7 @@ const allowedPermissions = new Set([
     'results.export'
 ]);
 
-const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open']);
+const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 
 function safeRelativePath(path, description, extensions) {
@@ -39,6 +39,14 @@ export function validateLauncherManifest(manifest) {
     safeRelativePath(manifest.entry, 'entry', ['.html']);
     const permissions = manifest.permissions ?? [];
     if (!permissions.every((permission) => launcherPermissions.has(permission))) throw new Error('The launcher requests an unsupported permission.');
+    // Fetching from the internet is allowed only from hosts the manifest names, so what a launcher can reach is
+    // readable before it is installed.
+    const hosts = manifest.network?.hosts;
+    if (permissions.includes('network.fetch')) {
+        if (!Array.isArray(hosts) || !hosts.length || !hosts.every((host) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host))) {
+            throw new Error('A launcher that fetches from the internet must list the exact host names it may reach in network.hosts.');
+        }
+    } else if (manifest.network !== undefined) throw new Error('A launcher may declare network hosts only with the network.fetch permission.');
     const contributes = manifest.contributes ?? {};
     const toolstrip = contributes.toolstrip ?? [];
     if (toolstrip.length !== 1 || !commandIdPattern.test(toolstrip[0].commandId ?? '') || !toolstrip[0].label || !toolstrip[0].tooltip ||
@@ -62,7 +70,9 @@ export function validateLauncherManifest(manifest) {
         unique(files, 'role', 'importer file role');
         for (const file of files) {
             if (!file.label) throw new Error('A launcher importer file needs a label.');
-            if (file.sample !== undefined) safeRelativePath(file.sample, 'importer sample', null);
+            if (file.multiple !== undefined && typeof file.multiple !== 'boolean') throw new Error('A launcher importer file\'s multiple must be true or false.');
+            for (const sample of file.sample === undefined ? [] : [file.sample].flat()) safeRelativePath(sample, 'importer sample', null);
+            if (Array.isArray(file.sample) && !file.multiple) throw new Error('Only a file role that accepts several files can list several samples.');
         }
     }
     const scenarios = contributes.scenarios ?? [];

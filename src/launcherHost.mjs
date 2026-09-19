@@ -15,6 +15,11 @@ import { encodeProjectFile } from './projectFile.mjs';
 
 const maximumInputBytes = 10 * 1024 * 1024;
 const importerTimeoutMilliseconds = 30000;
+const maximumImporterDataBytes = 8 * 1024 * 1024;
+const maximumOptionsBytes = 2 * 1024 * 1024;
+const maximumFetchBytes = 5 * 1024 * 1024;
+const fetchTimeoutMilliseconds = 20000;
+const maximumRedirects = 3;
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
@@ -31,14 +36,51 @@ export function decodeText(bytes) {
     }
 }
 
+// ---- fetching ---------------------------------------------------------------------------------------------
+
+// One HTTPS GET, only to a host the manifest lists, following at most a few redirects and only to listed hosts,
+// with a size limit and a time limit. Returns the bytes; throws a message a user can act on.
+export async function fetchAllowed({ url, hosts, fetchImpl = globalThis.fetch, userAgent = 'Konjugate' }) {
+    const allowed = new Set(hosts.map((host) => host.toLowerCase()));
+    let current;
+    try { current = new URL(url); } catch { throw new Error('That is not a web address.'); }
+    for (let hop = 0; hop <= maximumRedirects; hop += 1) {
+        if (current.protocol !== 'https:') throw new Error('Only https addresses can be fetched.');
+        if (current.username || current.password) throw new Error('An address with a user name or password cannot be fetched.');
+        if (!allowed.has(current.hostname.toLowerCase())) throw new Error(`This window may not connect to ${current.hostname}. It may reach: ${[...allowed].join(', ')}.`);
+        let response;
+        try {
+            response = await fetchImpl(current.href, { redirect: 'manual', headers: { 'User-Agent': userAgent, Accept: '*/*' }, signal: AbortSignal.timeout(fetchTimeoutMilliseconds) });
+        } catch (error) {
+            throw new Error(error.name === 'TimeoutError' ? `${current.hostname} did not answer within ${fetchTimeoutMilliseconds / 1000} seconds.` : `Could not reach ${current.hostname}. Check the connection.`);
+        }
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+            const location = response.headers.get('location');
+            if (!location) throw new Error(`${current.hostname} redirected without saying where.`);
+            current = new URL(location, current);
+            continue;
+        }
+        if (!response.ok) throw new Error(`${current.hostname} answered ${response.status}${response.status === 404 ? ' (not found: check the symbol)' : response.status === 429 ? ' (too many requests: wait a while)' : ''}.`);
+        const declared = Number(response.headers.get('content-length'));
+        if (declared > maximumFetchBytes) throw new Error('The answer is larger than the size limit.');
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length > maximumFetchBytes) throw new Error('The answer is larger than the size limit.');
+        return bytes;
+    }
+    throw new Error('Too many redirects.');
+}
+
+// A name safe to show and to key a file by: no path separators or control characters.
+export const safeFileName = (name) => String(name ?? '').replace(/[^\p{L}\p{N} .&()_=^-]+/gu, '_').trim().slice(0, 60);
+
 // ---- importers --------------------------------------------------------------------------------------
 
 // Runs a declared importer over the given files ([{ role, name, text }]) in a worker thread with a time
 // limit, and checks the shape of what comes back before anyone uses it.
-export function runImporter({ addonDirectory, importer, files, timeoutMilliseconds = importerTimeoutMilliseconds }) {
+export function runImporter({ addonDirectory, importer, files, options = {}, timeoutMilliseconds = importerTimeoutMilliseconds }) {
     return new Promise((resolvePromise, reject) => {
         const worker = new Worker(new URL('./importerWorker.mjs', import.meta.url), {
-            workerData: { entry: importer.entry, packageRoot: addonDirectory, files },
+            workerData: { entry: importer.entry, packageRoot: addonDirectory, files, options },
             resourceLimits: { maxOldGenerationSizeMb: 512 }
         });
         const timer = setTimeout(() => {
@@ -51,7 +93,10 @@ export function runImporter({ addonDirectory, importer, files, timeoutMillisecon
             if (!message.ok) return reject(new Error(`The importer failed: ${message.message}`));
             const { result } = message;
             if (typeof result?.ok !== 'boolean' || !result.report) return reject(new Error('The importer returned an unexpected result.'));
-            if (result.ok && (!Array.isArray(result.document?.nodes) || !Array.isArray(result.document?.edges))) return reject(new Error('The importer reported success without a model.'));
+            // A successful importer returns a model, or only `data` when it is a first step that needs the window to do more
+            // (for example run an analysis) before the model can be built.
+            if (result.ok && result.data === undefined && (!Array.isArray(result.document?.nodes) || !Array.isArray(result.document?.edges))) return reject(new Error('The importer reported success without a model.'));
+            if (result.data !== undefined && JSON.stringify(result.data).length > maximumImporterDataBytes) return reject(new Error('The importer returned more data than a window may receive.'));
             resolvePromise(result);
         });
         worker.once('error', (error) => { clearTimeout(timer); reject(new Error(`The importer failed: ${error.message}`)); });
@@ -136,7 +181,7 @@ export function buildRunManifest({ appVersion, addon, importerId, inputs, conten
         createdAt: new Date().toISOString(),
         konjugate: { version: appVersion },
         package: { addonId: addon.addonId, name: addon.name, version: addon.version, importerId },
-        inputs: inputs.map(({ role, name, sha256: hash, bytes }) => ({ role, name, sha256: hash, bytes })),
+        inputs: inputs.map(({ role, name, sha256: hash, bytes, url, retrievedAt }) => ({ role, name, sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}) })),
         model: { sha256: sha256(contentText), nodes: document.nodes.length, edges: document.edges.length },
         runConfiguration: config,
         scenario: scenario ? {
@@ -181,7 +226,7 @@ export async function runScenarioBranches({ content, config, scenario, intervent
 export function registerLauncherHandlers(deps) {
     const {
         ipcMain, dialog, BrowserWindow, app, screen, currentDir, iconPath, projectWindows, projectWindowState, installCustomWindowState,
-        auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry
+        auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine, fetchImpl = (...args) => globalThis.fetch(...args)
     } = deps;
     const workspaces = new Map();
 
@@ -275,36 +320,64 @@ export function registerLauncherHandlers(deps) {
         const contributes = manifest.contributes ?? {};
         return {
             addonId: manifest.addonId, name: manifest.name, version: manifest.version,
+            network: { hosts: manifest.network?.hosts ?? [] },
             importers: (contributes.importers ?? []).map(({ importerId, name, guide, files }) => ({
                 importerId, name, guide: guide ?? null,
-                files: files.map(({ role, label, required = false, description = '', accept = ['csv'], sample }) => ({ role, label, required, description, accept, hasSample: Boolean(sample) }))
+                files: files.map(({ role, label, required = false, description = '', accept = ['csv'], sample, multiple = false }) => ({ role, label, required, description, accept, multiple, hasSample: Boolean(sample) }))
             })),
             scenarios: (contributes.scenarios ?? []).map(({ scenarioId, name, description, forkAt, runTime, choose, effects }) => ({ scenarioId, name, description, forkAt, runTime, choose: choose ?? null, effects: effects ?? [] })),
             pages: (contributes.pages ?? []).map(({ pageId, label }) => ({ pageId, label })),
-            files: Object.fromEntries([...workspace.pending].map(([role, file]) => [role, { name: file.name, bytes: file.bytes, sample: file.sample }])),
+            // One entry per role; a role that accepts several files lists them all.
+            files: (() => {
+                const chosen = {};
+                const multiple = new Set((contributes.importers ?? []).flatMap((importer) => importer.files.filter((file) => file.multiple).map((file) => file.role)));
+                for (const file of workspace.pending.values()) {
+                    const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: Boolean(file.url) };
+                    if (multiple.has(file.role)) (chosen[file.role] ??= []).push(summary);
+                    else chosen[file.role] = summary;
+                }
+                return chosen;
+            })(),
             imported: workspace.imported ? { importerId: workspace.imported.importerId, report: workspace.imported.report, entities: workspace.imported.entities } : null
         };
     }));
+
+    // A pending file is kept under its role, or under role and name for a role that accepts several files.
+    const pendingKey = (file, name) => (file.multiple ? `${file.role}::${name}` : file.role);
+    const dropRole = (workspace, file) => { for (const [key, item] of workspace.pending) if (item.role === file.role) workspace.pending.delete(key); };
 
     ipcMain.handle('launcherChooseFile', guarded(async ({ addon, workspace, projectWindow, state }, { importerId, role }) => {
         needs(addon, 'data.import');
         const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
         const file = declared(importer.files, 'role', role, 'file role');
         const extensions = file.accept ?? ['csv'];
-        const chosen = await dialog.showOpenDialog(state.launcherWindow, { title: file.label, properties: ['openFile'], filters: [{ name: extensions.join(', ').toUpperCase(), extensions }] });
-        if (chosen.canceled || !chosen.filePaths[0]) return { chosen: false };
-        const bytes = await readFile(chosen.filePaths[0]);
-        if (bytes.length > maximumInputBytes) throw new Error(`That file is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
-        workspace.pending.set(role, { role, name: basename(chosen.filePaths[0]), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: false });
+        const chosen = await dialog.showOpenDialog(state.launcherWindow, {
+            title: file.label, properties: file.multiple ? ['openFile', 'multiSelections'] : ['openFile'], filters: [{ name: extensions.join(', ').toUpperCase(), extensions }]
+        });
+        if (chosen.canceled || !chosen.filePaths.length) return { chosen: false };
+        const paths = file.multiple ? chosen.filePaths : chosen.filePaths.slice(0, 1);
+        const read = [];
+        for (const path of paths) {
+            const bytes = await readFile(path);
+            if (bytes.length > maximumInputBytes) throw new Error(`${basename(path)} is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
+            read.push({ path, bytes });
+        }
+        if (!file.multiple) dropRole(workspace, file);
+        for (const { path, bytes } of read) {
+            const name = basename(path);
+            workspace.pending.set(pendingKey(file, name), { role, name, path, ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: false });
+        }
         workspace.imported = null;
         await releaseRuns(workspace);
-        return { chosen: true, name: basename(chosen.filePaths[0]), bytes: bytes.length };
+        return { chosen: true, name: basename(paths[0]), names: paths.map((path) => basename(path)), bytes: read[0].bytes.length };
     }));
 
-    ipcMain.handle('launcherClearFile', guarded(async ({ addon, workspace }, { importerId, role }) => {
+    ipcMain.handle('launcherClearFile', guarded(async ({ addon, workspace }, { importerId, role, name }) => {
         needs(addon, 'data.import');
-        declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
-        workspace.pending.delete(role);
+        const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
+        const file = declared(importer.files, 'role', role, 'file role');
+        if (file.multiple && typeof name === 'string') workspace.pending.delete(pendingKey(file, name));
+        else dropRole(workspace, file);
         workspace.imported = null;
         await releaseRuns(workspace);
         return {};
@@ -315,33 +388,85 @@ export function registerLauncherHandlers(deps) {
         const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
         workspace.pending.clear();
         for (const file of importer.files.filter((item) => item.sample)) {
-            const bytes = await readFile(insidePackage(addon, file.sample));
-            workspace.pending.set(file.role, { role: file.role, name: basename(file.sample), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: true });
+            for (const sample of [file.sample].flat()) {
+                const bytes = await readFile(insidePackage(addon, sample));
+                workspace.pending.set(pendingKey(file, basename(sample)), { role: file.role, name: basename(sample), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: true });
+            }
         }
         workspace.imported = null;
         await releaseRuns(workspace);
         return {};
     }));
 
-    ipcMain.handle('launcherRunImport', guarded(async ({ addon, workspace }, { importerId }) => {
+    // Fetches a file from the internet into a file role, from a host the manifest names. The bytes go through the
+    // same reading as a chosen file, and the address and time are kept for the run manifest.
+    ipcMain.handle('launcherFetchFile', guarded(async ({ addon, workspace }, { importerId, role, url, name }) => {
+        needs(addon, 'network.fetch');
         needs(addon, 'data.import');
         const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
-        const missing = importer.files.filter((file) => file.required && !workspace.pending.has(file.role));
+        const file = declared(importer.files, 'role', role, 'file role');
+        const fileName = safeFileName(name);
+        if (!fileName) throw new Error('Give the series a name.');
+        const bytes = await fetchAllowed({ url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
+        if (!file.multiple) dropRole(workspace, file);
+        workspace.pending.set(pendingKey(file, fileName), { role, name: fileName, url, retrievedAt: new Date().toISOString(), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: false });
+        workspace.imported = null;
+        await releaseRuns(workspace);
+        return { name: fileName, bytes: bytes.length };
+    }));
+
+    // Reads the chosen files from disk again, for data that another program keeps up to date. Sample files are
+    // packaged and never change. Answers how many files changed.
+    ipcMain.handle('launcherReloadFiles', guarded(async ({ addon, workspace }, { importerId }) => {
+        needs(addon, 'data.import');
+        declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
+        let changed = 0;
+        const missing = [];
+        for (const [key, file] of workspace.pending) {
+            if (file.sample || (!file.path && !file.url)) continue;
+            let bytes;
+            try { bytes = file.url ? await fetchAllowed({ url: file.url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` }) : await readFile(file.path); } catch { missing.push(file.name); continue; }
+            if (bytes.length > maximumInputBytes) throw new Error(`${file.name} is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
+            const hash = sha256(bytes);
+            if (hash === file.sha256) continue;
+            workspace.pending.set(key, { ...file, ...decodeText(bytes), sha256: hash, bytes: bytes.length, ...(file.url ? { retrievedAt: new Date().toISOString() } : {}) });
+            changed += 1;
+        }
+        if (changed) { workspace.imported = null; await releaseRuns(workspace); }
+        return { changed, missing };
+    }));
+
+    // Causal inference on a table the launcher supplies, for a launcher that builds its own model from data. The
+    // CSV is Konjugate's inference format: a numeric, regularly spaced time column, then one column per series.
+    ipcMain.handle('launcherInfer', guarded(async ({ addon }, { csv, config = {} }) => {
+        needs(addon, 'analysis.infer');
+        if (typeof csv !== 'string' || !csv.length) throw new Error('Provide the table as CSV text.');
+        const result = await inferWithEngine(csv, config, await engineOptions());
+        if (!result.available) throw new Error('The inference engine is not available.');
+        return { edges: result.report.edges ?? [], selfTerms: result.report.selfTerms ?? [] };
+    }));
+
+    ipcMain.handle('launcherRunImport', guarded(async ({ addon, workspace }, { importerId, options = {} }) => {
+        needs(addon, 'data.import');
+        const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
+        const chosenRoles = new Set([...workspace.pending.values()].map((file) => file.role));
+        const missing = importer.files.filter((file) => file.required && !chosenRoles.has(file.role));
         if (missing.length) throw new Error(`Choose ${missing.map((file) => file.label).join(' and ')} first.`);
-        const files = importer.files.filter((file) => workspace.pending.has(file.role)).map((file) => {
-            const { role, name, text, encoding } = workspace.pending.get(file.role);
-            return { role, name, text, encoding };
-        });
-        const result = await runImporter({ addonDirectory: addon.addonDirectory, importer, files });
+        const roles = new Set(importer.files.map((file) => file.role));
+        const files = [...workspace.pending.values()].filter((file) => roles.has(file.role)).map(({ role, name, text, encoding }) => ({ role, name, text, encoding }));
+        if (JSON.stringify(options ?? {}).length > maximumOptionsBytes) throw new Error('The options are larger than the host accepts.');
+        const result = await runImporter({ addonDirectory: addon.addonDirectory, importer, files, options: options ?? {} });
+        // A first step that returns only data leaves any earlier model alone and builds none.
+        if (result.ok && !result.document) return { imported: false, report: result.report, data: result.data };
         await releaseRuns(workspace);
         if (!result.ok) {
             workspace.imported = null;
-            return { imported: false, report: result.report };
+            return { imported: false, report: result.report, data: result.data };
         }
         const contentText = JSON.stringify(result.document);
         const entities = [...new Set((result.parameterIndex ?? []).map((entry) => entry.entity).filter(Boolean))];
         workspace.imported = { importerId, document: result.document, contentText, parameterIndex: result.parameterIndex ?? [], report: result.report, entities };
-        return { imported: true, report: result.report, entities };
+        return { imported: true, report: result.report, entities, data: result.data };
     }));
 
     async function ensureBaseline(workspace, runTime, notify) {

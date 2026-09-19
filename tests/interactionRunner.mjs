@@ -3973,8 +3973,8 @@ export async function runInteractionTests(driver) {
         await exampleWindow.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; a plugin directory is written to the desktop userData' });
 
-    await run('label detail cycles compact, expanded, hidden, and Auto declutters a crowded canvas', async () => {
-        // Sixteen nodes packed into a small area: far more labels than fit, the case that motivated all of this.
+    await run('label detail cycles compact, expanded and hidden, keeping the selected label', async () => {
+        // Sixteen nodes packed into a small area: far more labels than fit, the case that motivated the hidden state.
         const project = {
             format: 'konjugate', version: 1, metadata: { units: 'SI' }, edges: [],
             nodes: Array.from({ length: 16 }, (_unused, index) => ({
@@ -3991,13 +3991,6 @@ export async function runInteractionTests(driver) {
         const crowded = await driver.waitForNewHandle(before);
         await waitFor(crowded, `document.querySelectorAll('.node-label-container').length === 16`, 'The crowded project did not load.');
         const visibleLabels = `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).visibility !== 'hidden').length`;
-
-        // Auto is on by default and hides labels that would overlap a more important one.
-        await waitFor(crowded, `document.querySelectorAll('.node-label-container.decluttered').length > 0`, 'Auto did not declutter the crowded labels.');
-        assert.ok(await evaluate(crowded, visibleLabels) > 0 && await evaluate(crowded, visibleLabels) < 16);
-        await evaluate(crowded, `document.querySelector('#autoDeclutter').click()`);
-        await waitFor(crowded, `document.querySelectorAll('.node-label-container.decluttered').length === 0`, 'Turning Auto off did not restore every label.');
-        assert.equal(await evaluate(crowded, `document.querySelector('#autoDeclutter').getAttribute('aria-pressed')`), 'false');
 
         // The Nodes button cycles compact -> expanded -> hidden -> compact, and says which it is.
         const nodesButton = `document.querySelector('[data-detail="nodes"]')`;

@@ -1115,5 +1115,3 @@ input, select, textarea { user-select: text; }
 /* Hidden labels vanish unless they are selected, hovered (.peek), flagged, pinned, or needed to pick an endpoint. */
 .hideNodeLabels:not(.pickingEndpoint) .node-label-container:not(.selected):not(.peek):not(.hasStabilityFinding),
 .hideEdgeLabels .bundleLabel:not(.pinned):not(.peek):not(:focus-within) { visibility: hidden; pointer-events: none; }
-/* Labels the automatic declutter hid because they would overlap a more important one. */
-.node-label-container.decluttered, .bundleLabel.decluttered { visibility: hidden; pointer-events: none; }

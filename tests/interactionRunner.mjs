@@ -3973,5 +3973,54 @@ export async function runInteractionTests(driver) {
         await exampleWindow.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; a plugin directory is written to the desktop userData' });
 
+    await run('label detail cycles compact, expanded, hidden, and Auto declutters a crowded canvas', async () => {
+        // Sixteen nodes packed into a small area: far more labels than fit, the case that motivated all of this.
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, edges: [],
+            nodes: Array.from({ length: 16 }, (_unused, index) => ({
+                id: 1 + index * 2, name: `Crowded ${index + 1}`, position: [(index % 4) * 0.5, Math.floor(index / 4) * 0.5, 0], sourceTerms: [],
+                appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                states: [{ id: 2 + index * 2, name: 'Level', symbol: 'level', initialValue: index }]
+            }))
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-labels-'));
+        const projectPath = join(directory, 'crowded.kjt');
+        await writeFile(projectPath, await encodeProjectFile(JSON.stringify(project)));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const crowded = await driver.waitForNewHandle(before);
+        await waitFor(crowded, `document.querySelectorAll('.node-label-container').length === 16`, 'The crowded project did not load.');
+        const visibleLabels = `[...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).visibility !== 'hidden').length`;
+
+        // Auto is on by default and hides labels that would overlap a more important one.
+        await waitFor(crowded, `document.querySelectorAll('.node-label-container.decluttered').length > 0`, 'Auto did not declutter the crowded labels.');
+        assert.ok(await evaluate(crowded, visibleLabels) > 0 && await evaluate(crowded, visibleLabels) < 16);
+        await evaluate(crowded, `document.querySelector('#autoDeclutter').click()`);
+        await waitFor(crowded, `document.querySelectorAll('.node-label-container.decluttered').length === 0`, 'Turning Auto off did not restore every label.');
+        assert.equal(await evaluate(crowded, `document.querySelector('#autoDeclutter').getAttribute('aria-pressed')`), 'false');
+
+        // The Nodes button cycles compact -> expanded -> hidden -> compact, and says which it is.
+        const nodesButton = `document.querySelector('[data-detail="nodes"]')`;
+        assert.equal(await evaluate(crowded, `${nodesButton}.dataset.mode`), 'compact');
+        await evaluate(crowded, `${nodesButton}.click()`);
+        assert.equal(await evaluate(crowded, `${nodesButton}.dataset.mode`), 'expanded');
+        assert.equal(await evaluate(crowded, `document.querySelector('#canvas').classList.contains('showNodesDetails')`), true);
+        assert.match(await evaluate(crowded, `${nodesButton}.title`), /expanded · click for hidden/);
+        await evaluate(crowded, `${nodesButton}.click()`);
+        assert.equal(await evaluate(crowded, `${nodesButton}.dataset.mode`), 'hidden');
+        assert.equal(await evaluate(crowded, `document.querySelector('#canvas').classList.contains('hideNodeLabels')`), true);
+        assert.equal(await evaluate(crowded, `document.querySelector('#canvas').classList.contains('showNodesDetails')`), false);
+        assert.equal(await evaluate(crowded, visibleLabels), 0, 'Hidden node labels are all gone when nothing is selected.');
+
+        // A selected node keeps its label, so it is never hard to tell what you have picked.
+        await evaluate(crowded, `document.querySelector('.node-label-container[data-node="1"]').click()`);
+        await waitFor(crowded, `${visibleLabels} === 1`, 'The selected node did not keep its label while labels were hidden.');
+        assert.equal(await evaluate(crowded, `getComputedStyle(document.querySelector('.node-label-container[data-node="1"]')).visibility`), 'visible');
+        await evaluate(crowded, `${nodesButton}.click()`);
+        assert.equal(await evaluate(crowded, `${nodesButton}.dataset.mode`), 'compact');
+        assert.equal(await evaluate(crowded, visibleLabels), 16);
+        await crowded.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

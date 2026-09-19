@@ -416,6 +416,21 @@ const relationshipObjects = new Map();
 const subsystemObjects = new Map();
 const nodePickTargets = [];
 const relationshipPickTargets = [];
+
+// Label detail per group: 'compact' (the default), 'expanded', or 'hidden'. A hidden label still shows
+// while it is selected, hovered, flagged, pinned, or needed to pick an endpoint, so the canvas never
+// hides what you are pointing at. `labelAuto` additionally hides whichever labels would overlap a
+// higher-priority one (see declutterLabels).
+const labelModes = { nodes: 'compact', edges: 'compact' };
+let labelAuto = true;
+const declutterMinimumLabels = 12;
+let hoveredNodeId = null;
+let hoveredRelationshipId = null;
+let labelSystemReady = false;
+let declutterSignature = '';
+let declutterDue = true;
+let lastDeclutterTime = 0;
+let hoverFrame = null;
 // Handles are pushed into nodePickTargets (not a separate DragControls instance) -- DragControls'
 // internal _selected/_hovered/_plane state is module-scope, not per-instance, so two concurrent
 // instances on the same domElement would race over it. Keyed by relationship id since only the
@@ -1489,6 +1504,7 @@ function updateSelectionOutline() {
     $$('.node-label-container').forEach((label) => {
         label.classList.toggle('selected', selectedNodeIds.has(Number(label.dataset.node)));
     });
+    updateLabelPeek();
     selectionOutlines.forEach((outline, id) => {
         if (selectedNodeIds.has(id) && nodeObjects.get(id)?.visible) return;
         scene.remove(outline);
@@ -1605,6 +1621,7 @@ function syncWaypointHandles(relationshipId) {
 }
 
 function updateRelationshipSelection() {
+    updateLabelPeek();
     relationshipObjects.forEach((relationship) => {
         const selected = relationship.definition.id === selectedRelationship?.id;
         const validationSeverity = relationship.line.userData.validationSeverity;
@@ -4274,7 +4291,7 @@ function activateBranch(targetUuid) {
 
 function activateResult(result) {
     stopResultPlayback();
-    if (!activeResult) nodeDetailsBeforeResult = $('[data-detail="nodes"]').classList.contains('active');
+    if (!activeResult) nodeDetailsBeforeResult = labelModes.nodes;
     if (!activeResult) toolBeforeResult = currentTool;
     activeResult = result;
     const forkInfo = pendingFork ? { parentBranchUuid: pendingFork.parentBranchUuid, forkTime: pendingFork.forkTime } : {};
@@ -9619,17 +9636,172 @@ $('#createEdge').addEventListener('click', () => {
     insertRelationshipDefinition(definition);
 });
 
-function setLabelDetail(detail, expanded) {
+const labelModeOrder = ['compact', 'expanded', 'hidden'];
+const labelModeText = { compact: 'compact', expanded: 'expanded', hidden: 'hidden' };
+const labelNoun = { nodes: 'Node', edges: 'Relationship' };
+
+// `mode` is 'compact' | 'expanded' | 'hidden'; a boolean still means expanded/compact for older callers.
+function setLabelDetail(detail, mode) {
+    if (typeof mode === 'boolean') mode = mode ? 'expanded' : 'compact';
+    labelModes[detail] = mode;
     const button = $(`[data-detail="${detail}"]`);
-    button.classList.toggle('active', expanded);
-    button.ariaPressed = String(expanded);
-    canvas.classList.toggle(`show${detail[0].toUpperCase()}${detail.slice(1)}Details`, expanded);
+    const next = labelModeOrder[(labelModeOrder.indexOf(mode) + 1) % labelModeOrder.length];
+    button.dataset.mode = mode;
+    button.classList.toggle('active', mode === 'expanded');
+    button.setAttribute('aria-label', `${labelNoun[detail]} labels: ${labelModeText[mode]}. Click to make them ${labelModeText[next]}.`);
+    button.title = `${labelNoun[detail]} labels: ${labelModeText[mode]} · click for ${labelModeText[next]}`;
+    const capital = `${detail[0].toUpperCase()}${detail.slice(1)}`;
+    canvas.classList.toggle(`show${capital}Details`, mode === 'expanded');
+    canvas.classList.toggle(detail === 'nodes' ? 'hideNodeLabels' : 'hideEdgeLabels', mode === 'hidden');
+    updateHoverTracking();
+    updateLabelPeek();
+    scheduleDeclutter();
 }
 
 $$('[data-detail]').forEach((button) => {
-    button.ariaPressed = 'false';
-    button.addEventListener('click', () => setLabelDetail(button.dataset.detail, !button.classList.contains('active')));
+    const detail = button.dataset.detail;
+    setLabelDetail(detail, 'compact');
+    button.addEventListener('click', () => setLabelDetail(detail, labelModeOrder[(labelModeOrder.indexOf(labelModes[detail]) + 1) % labelModeOrder.length]));
 });
+
+function setLabelAuto(enabled) {
+    labelAuto = enabled;
+    const button = $('#autoDeclutter');
+    button.classList.toggle('active', enabled);
+    button.ariaPressed = String(enabled);
+    if (!enabled) $$('.decluttered').forEach((label) => label.classList.remove('decluttered'));
+    updateHoverTracking();
+    scheduleDeclutter();
+}
+$('#autoDeclutter').addEventListener('click', () => setLabelAuto(!labelAuto));
+
+// ---- label peeking and decluttering -------------------------------------------------------------------
+
+function relationshipBundleKey(relationship) {
+    return [relationship.source, relationship.target].sort().join('|');
+}
+
+// Marks the labels that must stay visible whatever the mode: whatever is hovered, and the label of the
+// selected relationship's bundle (a selected node's own label is already marked `selected`).
+function updateLabelPeek() {
+    if (!labelSystemReady) return;
+    $$('.node-label-container').forEach((label) => label.classList.toggle('peek', Number(label.dataset.node) === hoveredNodeId));
+    const keys = new Set();
+    for (const id of [selectedRelationship?.id, hoveredRelationshipId]) {
+        const relationship = id == null ? null : model.relationships.find((candidate) => candidate.id === id);
+        if (relationship) keys.add(relationshipBundleKey(relationship));
+    }
+    relationshipBundleObjects.forEach((overlay, key) => overlay.element.classList.toggle('peek', keys.has(key)));
+    scheduleDeclutter();
+}
+
+// While a group is hidden (or Auto is decluttering), pointing at a shape or a relationship shows its
+// label, since the label is the only thing that says what it is. Only tracked when it can matter, and
+// only while the pointer is not dragging.
+// Also tracked while Auto is on, so pointing at a shape whose label was decluttered brings it back.
+function hoverTrackingNeeded() {
+    return labelAuto || labelModes.nodes === 'hidden' || labelModes.edges === 'hidden';
+}
+function updateHoverTracking() {
+    if (hoverTrackingNeeded()) return;
+    if (hoveredNodeId !== null || hoveredRelationshipId !== null) {
+        hoveredNodeId = null;
+        hoveredRelationshipId = null;
+        updateLabelPeek();
+    }
+}
+renderer.domElement.addEventListener('pointermove', (event) => {
+    if (!hoverTrackingNeeded() || event.buttons !== 0 || hoverFrame) return;
+    hoverFrame = requestAnimationFrame(() => {
+        hoverFrame = null;
+        setPointerFromEvent(event);
+        const node = labelAuto || labelModes.nodes === 'hidden' ? rootNodeFromIntersection(firstIntersection(nodePickTargets)) : null;
+        // A relationship's label sits on top of the line it names, so revealing it under the pointer would
+        // intercept the click the user is about to make; only a hidden group reveals it on hover.
+        const relationship = !node && labelModes.edges === 'hidden' ? firstIntersection(relationshipPickTargets)?.object.userData.definition : null;
+        const nextNode = node?.userData.id ?? null;
+        const nextRelationship = relationship?.id ?? null;
+        if (nextNode === hoveredNodeId && nextRelationship === hoveredRelationshipId) return;
+        hoveredNodeId = nextNode;
+        hoveredRelationshipId = nextRelationship;
+        updateLabelPeek();
+    });
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+    if (hoveredNodeId === null && hoveredRelationshipId === null) return;
+    hoveredNodeId = null;
+    hoveredRelationshipId = null;
+    updateLabelPeek();
+});
+
+// Greedy label decluttering: labels that must stay (selected, hovered, flagged, pinned, needed to pick
+// an endpoint) claim their space first; then nodes before relationships, nearer before farther, hide
+// any label that would overlap one already kept. Runs at most every 120 ms and only when the view, the
+// selection or the label modes changed, so an idle canvas costs nothing.
+function scheduleDeclutter() {
+    declutterDue = true;
+}
+
+function labelPositionChecksum() {
+    let sum = 0;
+    nodeObjects.forEach((object) => { sum += object.position.x * 1.1 + object.position.y * 1.3 + object.position.z * 1.7; });
+    return sum.toFixed(3);
+}
+
+function declutterLabels(time) {
+    if (!labelSystemReady || time - lastDeclutterTime < 120) return;
+    if (!labelAuto) {
+        if (declutterDue) { $$('.decluttered').forEach((label) => label.classList.remove('decluttered')); declutterDue = false; }
+        return;
+    }
+    const signature = [
+        camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2),
+        camera.quaternion.x.toFixed(3), camera.quaternion.y.toFixed(3), camera.quaternion.z.toFixed(3), camera.zoom,
+        nodeObjects.size, relationshipBundleObjects.size, labelPositionChecksum(), canvas.clientWidth, canvas.clientHeight
+    ].join('|');
+    if (!declutterDue && signature === declutterSignature) return;
+    declutterDue = false;
+    declutterSignature = signature;
+    lastDeclutterTime = time;
+
+    const candidates = [];
+    nodeObjects.forEach((object, id) => {
+        if (!object.visible) return;
+        const element = object.children.find((child) => child.element?.classList.contains('node-label-container'))?.element;
+        if (!element || element.style.display === 'none') return;
+        const forced = element.classList.contains('selected') || element.classList.contains('peek') || element.classList.contains('hasStabilityFinding') || Boolean(activeEndpointPick);
+        if (labelModes.nodes === 'hidden' && !forced && !element.classList.contains('endpointEligible')) { element.classList.remove('decluttered'); return; }
+        candidates.push({ element, forced, kind: 0, id, position: object.position });
+    });
+    relationshipBundleObjects.forEach((overlay, key) => {
+        const element = overlay.element;
+        if (!overlay.anchor.visible || element.style.display === 'none') return;
+        const forced = element.classList.contains('pinned') || element.classList.contains('peek') || element.matches(':hover, :focus-within');
+        if (labelModes.edges === 'hidden' && !forced) { element.classList.remove('decluttered'); return; }
+        candidates.push({ element, forced, kind: 1, id: key, position: overlay.anchor.position });
+    });
+    const measured = candidates.map((candidate) => ({ ...candidate, rect: candidate.element.getBoundingClientRect() })).filter((candidate) => candidate.rect.width > 0);
+    // Only a crowded canvas needs decluttering: with a handful of labels, overlap is rare and a label that
+    // is really there should stay where the user put it.
+    if (measured.length <= declutterMinimumLabels) {
+        measured.forEach((candidate) => candidate.element.classList.remove('decluttered'));
+        return;
+    }
+    const padding = 3;
+    const kept = [];
+    const overlaps = (rect) => kept.some((other) => rect.left < other.right + padding && rect.right + padding > other.left && rect.top < other.bottom + padding && rect.bottom + padding > other.top);
+    for (const candidate of measured.filter((item) => item.forced)) {
+        candidate.element.classList.remove('decluttered');
+        kept.push(candidate.rect);
+    }
+    const rest = measured.filter((item) => !item.forced).sort((left, right) =>
+        left.kind - right.kind || camera.position.distanceTo(left.position) - camera.position.distanceTo(right.position) || String(left.id).localeCompare(String(right.id)));
+    for (const candidate of rest) {
+        const hide = overlaps(candidate.rect);
+        candidate.element.classList.toggle('decluttered', hide);
+        if (!hide) kept.push(candidate.rect);
+    }
+}
 
 $('#validationSummary').addEventListener('click', () => {
     const panel = $('#validationPanel');
@@ -10913,6 +11085,9 @@ function render(time) {
 
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);
+    declutterLabels(time);
 }
 
+labelSystemReady = true;
+updateLabelPeek();
 requestAnimationFrame(render);

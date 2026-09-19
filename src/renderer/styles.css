@@ -1098,3 +1098,22 @@ input, select, textarea { user-select: text; }
 #parametersTable .fitCell input[type="number"] { width: 58px; }
 #parametersTable .fitCell input[hidden] { display: none; }
 #parametersTable { min-width: 720px; }
+
+/* Label detail has three states per group: compact, expanded, hidden. The small glyph in each button shows
+   which: one line, three lines, or a dashed empty box. */
+.labelControls button { white-space: nowrap; }
+.detailMode { display: inline-block; width: 11px; height: 9px; margin-left: 5px; vertical-align: -1px; border: 1px solid currentColor; border-radius: 2px; opacity: .85; }
+[data-mode="compact"] .detailMode { background: linear-gradient(currentColor, currentColor) 50% 3px / 6px 1px no-repeat; }
+[data-mode="expanded"] .detailMode {
+    background: linear-gradient(currentColor, currentColor) 50% 1px / 7px 1px no-repeat,
+        linear-gradient(currentColor, currentColor) 50% 3px / 7px 1px no-repeat,
+        linear-gradient(currentColor, currentColor) 50% 5px / 7px 1px no-repeat;
+}
+[data-mode="hidden"] .detailMode { border-style: dashed; opacity: .55; }
+.labelControls button[data-mode="hidden"] { color: #4a5d69; }
+
+/* Hidden labels vanish unless they are selected, hovered (.peek), flagged, pinned, or needed to pick an endpoint. */
+.hideNodeLabels:not(.pickingEndpoint) .node-label-container:not(.selected):not(.peek):not(.hasStabilityFinding),
+.hideEdgeLabels .bundleLabel:not(.pinned):not(.peek):not(:focus-within) { visibility: hidden; pointer-events: none; }
+/* Labels the automatic declutter hid because they would overlap a more important one. */
+.node-label-container.decluttered, .bundleLabel.decluttered { visibility: hidden; pointer-events: none; }

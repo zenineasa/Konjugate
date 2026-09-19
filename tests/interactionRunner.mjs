@@ -4015,5 +4015,29 @@ export async function runInteractionTests(driver) {
         await crowded.close();
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    await run('opening a model with hundreds of relationships starts with relationship labels hidden', async () => {
+        const node = (id, name) => ({ id, name, position: [id, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: id + 1, name: 'Level', symbol: 'level', initialValue: 0 }] });
+        const large = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [node(1, 'Left'), node(3, 'Right')],
+            edges: Array.from({ length: 160 }, (_unused, index) => ({
+                id: 10 + index, name: `Link ${index}`, source: { nodeId: 1, stateId: 2 }, target: { nodeId: 3, stateId: 4 }, directionality: 'directed',
+                equation: '', parameters: [], appearance: { color: '#888888', offset: 0 }
+            }))
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-large-'));
+        const largePath = join(directory, 'large.kjt');
+        await writeFile(largePath, await encodeProjectFile(JSON.stringify(large)));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(largePath);
+        const largeWindow = await driver.waitForNewHandle(before);
+        await waitFor(largeWindow, `document.querySelectorAll('.node-label-container').length === 2`, 'The large project did not load.');
+        assert.equal(await evaluate(largeWindow, `document.querySelector('[data-detail="edges"]').dataset.mode`), 'hidden');
+        assert.equal(await evaluate(largeWindow, `document.querySelector('[data-detail="nodes"]').dataset.mode`), 'compact', 'Node labels are left alone.');
+        // The user can bring them back with one more cycle.
+        await evaluate(largeWindow, `document.querySelector('[data-detail="edges"]').click()`);
+        assert.equal(await evaluate(largeWindow, `document.querySelector('[data-detail="edges"]').dataset.mode`), 'compact');
+        await largeWindow.close();
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

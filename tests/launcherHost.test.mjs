@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
-    buildRunManifest, composeBranchSamples, extractSeries, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
+    buildRunManifest, composeBranchSamples, decodeText, extractSeries, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
 } from '../src/launcherHost.mjs';
 
 const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'launcher');
@@ -142,4 +142,12 @@ test('a scenario forks the baseline at its time and changes a live shared parame
     assert.equal(child.result.samples[0].time, 5, 'The forked run starts at the fork point.');
     await baseline.cleanup?.();
     await child.cleanup?.();
+});
+
+test('text is decoded as UTF-8, UTF-16 or, failing that, Windows-1252, and the encoding is reported', () => {
+    assert.deepEqual(decodeText(Buffer.from('Crédit,1\n', 'utf8')), { text: 'Crédit,1\n', encoding: 'utf-8' });
+    assert.deepEqual(decodeText(Buffer.from([0xEF, 0xBB, 0xBF, 0x41])).encoding, 'utf-8');
+    assert.equal(decodeText(Buffer.from([0x43, 0x72, 0xE9, 0x64, 0x69, 0x74])).text, 'Crédit', 'A Windows-1252 é (0xE9) is not valid UTF-8.');
+    assert.equal(decodeText(Buffer.from([0x43, 0x72, 0xE9, 0x64, 0x69, 0x74])).encoding, 'windows-1252');
+    assert.deepEqual(decodeText(Buffer.from([0xFF, 0xFE, 0x41, 0x00, 0x42, 0x00])), { text: 'AB', encoding: 'utf-16le' });
 });

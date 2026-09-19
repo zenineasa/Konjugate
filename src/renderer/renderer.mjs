@@ -5834,7 +5834,8 @@ function syncContextualOverlays() {
         // while any of its relationships has waypoint handles showing (i.e. is the selected
         // relationship and has at least one waypoint) keeps that whole editing gesture clear.
         const editingWaypoints = bundle.relationships.some((relationship) => waypointHandleObjects.has(relationship.id));
-        overlay.anchor.visible = Boolean(sourceObject?.visible && targetObject?.visible) && !editingWaypoints;
+        overlay.baseVisible = Boolean(sourceObject?.visible && targetObject?.visible) && !editingWaypoints;
+        overlay.anchor.visible = overlay.baseVisible && bundleLabelAllowed(overlay);
         const curveMidpoints = bundle.relationships
             .map((relationship) => relationshipObjects.get(relationship.id)?.line.userData.curve?.getPoint(0.5))
             .filter(Boolean);
@@ -6175,6 +6176,7 @@ async function loadProjectDocument(document, {
     updateEncryptionControls();
     setCameraView('orbit', false);
     fitCurrentView();
+    applyLargeModelLabelDefault();
     if (embeddedResult) {
         activeResultPersistedInProject = true;
         const rootResult = embeddedBranches ? restoreBranchesFromSave(embeddedBranches) : embeddedResult.result;
@@ -9654,13 +9656,49 @@ function setLabelDetail(detail, mode) {
 $$('[data-detail]').forEach((button) => {
     const detail = button.dataset.detail;
     setLabelDetail(detail, 'compact');
-    button.addEventListener('click', () => setLabelDetail(detail, labelModeOrder[(labelModeOrder.indexOf(labelModes[detail]) + 1) % labelModeOrder.length]));
+    button.addEventListener('click', () => {
+        if (detail === 'edges') edgeLabelsHiddenByDefault = false;
+        setLabelDetail(detail, labelModeOrder[(labelModeOrder.indexOf(labelModes[detail]) + 1) % labelModeOrder.length]);
+    });
 });
 
 // ---- label peeking ------------------------------------------------------------------------------------
 
+// A model with hundreds of relationships is unreadable, and slow to draw, with a label on every one, so
+// opening one starts with relationship labels hidden (the Edges button shows how to bring them back). It
+// only ever undoes its own choice: a user's explicit setting is left alone, and opening a small model
+// afterwards restores compact labels only if this default is what hid them.
+const largeModelRelationshipCount = 150;
+let edgeLabelsHiddenByDefault = false;
+function applyLargeModelLabelDefault() {
+    const large = model.relationships.filter((relationship) => !relationship.deleted).length > largeModelRelationshipCount;
+    if (large && labelModes.edges === 'compact') {
+        setLabelDetail('edges', 'hidden');
+        edgeLabelsHiddenByDefault = true;
+    } else if (!large && edgeLabelsHiddenByDefault) {
+        if (labelModes.edges === 'hidden') setLabelDetail('edges', 'compact');
+        edgeLabelsHiddenByDefault = false;
+    }
+}
+
 function relationshipBundleKey(relationship) {
     return [relationship.source, relationship.target].sort().join('|');
+}
+
+// A hidden group's labels are switched off at the scene level, not just styled invisible: the label
+// renderer then skips them entirely, which is what keeps a model with hundreds of relationships
+// responsive once its labels are hidden. The exceptions are the labels that must stay.
+function bundleLabelAllowed(overlay) {
+    return labelModes.edges !== 'hidden' || overlay.element.classList.contains('pinned') || overlay.element.classList.contains('peek');
+}
+function refreshLabelObjectVisibility() {
+    nodeObjects.forEach((object) => {
+        const label = object.children.find((child) => child.element?.classList.contains('node-label-container'));
+        if (!label) return;
+        const classes = label.element.classList;
+        label.visible = labelModes.nodes !== 'hidden' || classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding') || Boolean(activeEndpointPick);
+    });
+    relationshipBundleObjects.forEach((overlay) => { overlay.anchor.visible = (overlay.baseVisible ?? true) && bundleLabelAllowed(overlay); });
 }
 
 // Marks the labels that must stay visible whatever the mode: whatever is hovered, and the label of the
@@ -9674,6 +9712,7 @@ function updateLabelPeek() {
         if (relationship) keys.add(relationshipBundleKey(relationship));
     }
     relationshipBundleObjects.forEach((overlay, key) => overlay.element.classList.toggle('peek', keys.has(key)));
+    refreshLabelObjectVisibility();
 }
 
 // While a group is hidden, pointing at a shape (or a relationship) shows its label, since the label is
@@ -10981,6 +11020,7 @@ initializeAddonToolstripContributions();
 checkPendingProjectOpen();
 
 let lastRenderTime = 0;
+let lastLabelRefresh = 0;
 function render(time) {
     requestAnimationFrame(render);
     if (document.hidden || time - lastRenderTime < 1000 / 30) return;
@@ -10994,6 +11034,10 @@ function render(time) {
             : 0.92;
     });
 
+    if (time - lastLabelRefresh > 250) {
+        lastLabelRefresh = time;
+        if (labelModes.nodes === 'hidden' || labelModes.edges === 'hidden') refreshLabelObjectVisibility();
+    }
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);
 }

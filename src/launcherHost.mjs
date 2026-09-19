@@ -18,6 +18,19 @@ const importerTimeoutMilliseconds = 30000;
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
+// Text as a spreadsheet may have saved it: UTF-8 (with or without a byte-order mark), UTF-16 with a mark, or,
+// failing a strict UTF-8 read, Windows-1252, which is what Excel writes for "CSV" on Windows. The name of the
+// encoding used is returned so the importer can tell the user when it was not UTF-8.
+export function decodeText(bytes) {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), encoding: 'utf-16le' };
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), encoding: 'utf-16be' };
+    try {
+        return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'utf-8' };
+    } catch {
+        return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows-1252' };
+    }
+}
+
 // ---- importers --------------------------------------------------------------------------------------
 
 // Runs a declared importer over the given files ([{ role, name, text }]) in a worker thread with a time
@@ -282,7 +295,7 @@ export function registerLauncherHandlers(deps) {
         if (chosen.canceled || !chosen.filePaths[0]) return { chosen: false };
         const bytes = await readFile(chosen.filePaths[0]);
         if (bytes.length > maximumInputBytes) throw new Error(`That file is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
-        workspace.pending.set(role, { role, name: basename(chosen.filePaths[0]), text: bytes.toString('utf8'), sha256: sha256(bytes), bytes: bytes.length, sample: false });
+        workspace.pending.set(role, { role, name: basename(chosen.filePaths[0]), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: false });
         workspace.imported = null;
         await releaseRuns(workspace);
         return { chosen: true, name: basename(chosen.filePaths[0]), bytes: bytes.length };
@@ -303,7 +316,7 @@ export function registerLauncherHandlers(deps) {
         workspace.pending.clear();
         for (const file of importer.files.filter((item) => item.sample)) {
             const bytes = await readFile(insidePackage(addon, file.sample));
-            workspace.pending.set(file.role, { role: file.role, name: basename(file.sample), text: bytes.toString('utf8'), sha256: sha256(bytes), bytes: bytes.length, sample: true });
+            workspace.pending.set(file.role, { role: file.role, name: basename(file.sample), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: true });
         }
         workspace.imported = null;
         await releaseRuns(workspace);
@@ -316,8 +329,8 @@ export function registerLauncherHandlers(deps) {
         const missing = importer.files.filter((file) => file.required && !workspace.pending.has(file.role));
         if (missing.length) throw new Error(`Choose ${missing.map((file) => file.label).join(' and ')} first.`);
         const files = importer.files.filter((file) => workspace.pending.has(file.role)).map((file) => {
-            const { role, name, text } = workspace.pending.get(file.role);
-            return { role, name, text };
+            const { role, name, text, encoding } = workspace.pending.get(file.role);
+            return { role, name, text, encoding };
         });
         const result = await runImporter({ addonDirectory: addon.addonDirectory, importer, files });
         await releaseRuns(workspace);

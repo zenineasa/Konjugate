@@ -18,6 +18,9 @@ const importerTimeoutMilliseconds = 30000;
 const maximumImporterDataBytes = 8 * 1024 * 1024;
 const maximumOptionsBytes = 2 * 1024 * 1024;
 const maximumFetchBytes = 5 * 1024 * 1024;
+const maximumSuppliedSamples = 5000;
+const maximumRunTime = 2000;
+const maximumFetchedTextBytes = 1024 * 1024;
 const fetchTimeoutMilliseconds = 20000;
 const maximumRedirects = 3;
 
@@ -108,10 +111,33 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
 // Turns a declared scenario into concrete parameter changes. A parameter is found by its `key` in the
 // importer's parameter index: `chosen` targets the entry belonging to the entity the user picked, `all`
 // every entry with that key, `global` the single entity-less entry. Throws a message a user can act on.
-export function resolveInterventions(scenario, parameterIndex, chosenEntity) {
+export function resolveInterventions(scenario, parameterIndex, chosenEntity, supplied = null) {
     const resolved = [];
     for (const intervention of scenario.interventions) {
         const entries = parameterIndex.filter((entry) => entry.key === intervention.parameter);
+        if (intervention.target === 'supplied') {
+            const entities = supplied?.entities ?? [];
+            if (!entities.length) throw new Error(`The scenario "${scenario.name}" needs the window to supply data.`);
+            for (const entity of entities) {
+                const entry = entries.find((candidate) => candidate.entity === entity);
+                if (!entry) throw new Error(`The scenario "${scenario.name}" changes "${intervention.parameter}", which this model does not have for ${entity}.`);
+                if (!entry.live) throw new Error(`"${entry.name}" cannot be changed during a run.`);
+                const clamp = (value) => Math.min(Math.max(value, entry.minimum ?? -Infinity), entry.maximum ?? Infinity);
+                if (intervention.samples) {
+                    const samples = supplied.samples?.[entity];
+                    if (!Array.isArray(samples) || samples.length < 2 || samples.length > maximumSuppliedSamples || !samples.every((pair) => Array.isArray(pair) && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))) {
+                        throw new Error(`The data supplied for ${entity} must be at least two, and at most ${maximumSuppliedSamples}, pairs of time and value.`);
+                    }
+                    resolved.push({
+                        sharedParameterId: entry.sharedParameterId, name: entry.name, parameter: intervention.parameter, entity,
+                        samples: samples.map(([time, value]) => ({ time, value: clamp(value) })), at: 0, duration: 0, baseValue: entry.value ?? 0
+                    });
+                } else {
+                    resolved.push({ sharedParameterId: entry.sharedParameterId, name: entry.name, parameter: intervention.parameter, entity, value: clamp(intervention.value), at: intervention.at ?? 0, duration: intervention.duration ?? 0, baseValue: entry.value ?? 0 });
+                }
+            }
+            continue;
+        }
         const matching = intervention.target === 'global' ? entries.filter((entry) => entry.scope === 'global')
             : intervention.target === 'all' ? entries.filter((entry) => entry.entity !== undefined)
                 : entries.filter((entry) => entry.entity === chosenEntity);
@@ -210,8 +236,11 @@ export async function runScenarioBranches({ content, config, scenario, intervent
     const child = await runToCompletion(content, { ...config, targetTime: scenario.runTime, startCheckpoint: structuredClone(checkpoint) }, engineOptions, async (execution) => {
         await execution.setExecutionState('paused');
         for (const change of interventions) {
-            // A change with a duration is a pulse that returns to the parameter's base value when it ends.
-            const schedule = change.duration > 0
+            // A path of values is followed as a piecewise schedule, its times counted from the fork; a change with a
+            // duration is a pulse that returns to the parameter's base value when it ends.
+            const schedule = change.samples
+                ? { mode: 'piecewise', samples: change.samples.map((sample) => ({ time: checkpoint.time + sample.time, value: sample.value })), baseValue: change.baseValue ?? 0 }
+                : change.duration > 0
                 ? { mode: 'pulse', startTime: checkpoint.time + change.at, duration: change.duration, targetValue: change.value, baseValue: change.baseValue ?? 0 }
                 : { mode: 'step', startTime: checkpoint.time + change.at, targetValue: change.value };
             await execution.scheduleParameterValue(change.sharedParameterId, schedule);
@@ -398,6 +427,15 @@ export function registerLauncherHandlers(deps) {
         return {};
     }));
 
+    // Fetches a page of text from a listed host and hands it to the window, for a launcher that needs an answer to show
+    // (a symbol search, say) rather than a file to read. Same hosts, https, size and time limits as a file fetch.
+    ipcMain.handle('launcherFetchText', guarded(async ({ addon }, { url }) => {
+        needs(addon, 'network.fetch');
+        const bytes = await fetchAllowed({ url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
+        if (bytes.length > maximumFetchedTextBytes) throw new Error('The answer is larger than a window may receive as text.');
+        return { text: new TextDecoder().decode(bytes) };
+    }));
+
     // Fetches a file from the internet into a file role, from a host the manifest names. The bytes go through the
     // same reading as a chosen file, and the address and time are kept for the run manifest.
     ipcMain.handle('launcherFetchFile', guarded(async ({ addon, workspace }, { importerId, role, url, name }) => {
@@ -482,13 +520,17 @@ export function registerLauncherHandlers(deps) {
         return workspace.baseline;
     }
 
-    ipcMain.handle('launcherRunScenario', guarded(async ({ addon, workspace, state }, { scenarioId, entity = null, signals = [] }) => {
+    ipcMain.handle('launcherRunScenario', guarded(async ({ addon, workspace, state }, { scenarioId, entity = null, signals = [], runTime = null, supplied = null }) => {
         needs(addon, 'scenario.run');
-        const scenario = declared(addon.manifest.contributes?.scenarios, 'scenarioId', scenarioId, 'scenario');
+        const declaredScenario = declared(addon.manifest.contributes?.scenarios, 'scenarioId', scenarioId, 'scenario');
         if (!workspace.imported) throw new Error('Import your data first.');
+        // The window may choose how far ahead to run, and may supply the data a scenario declares it takes.
+        if (runTime !== null && !(Number.isFinite(runTime) && runTime > declaredScenario.forkAt && runTime <= maximumRunTime)) throw new Error(`The run length must be more than ${declaredScenario.forkAt} and at most ${maximumRunTime}.`);
+        if (supplied !== null && JSON.stringify(supplied).length > maximumOptionsBytes) throw new Error('The supplied data is larger than the host accepts.');
+        const scenario = { ...declaredScenario, ...(runTime === null ? {} : { runTime }) };
         if (scenario.choose && !workspace.imported.entities.includes(entity)) throw new Error(`Choose ${scenario.choose.label.toLowerCase()} first.`);
         const notify = (progress) => { if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', progress); };
-        const interventions = resolveInterventions(scenario, workspace.imported.parameterIndex, scenario.choose ? entity : null);
+        const interventions = resolveInterventions(scenario, workspace.imported.parameterIndex, scenario.choose ? entity : null, supplied);
         const { document, contentText } = workspace.imported;
         const baseline = await ensureBaseline(workspace, scenario.runTime, notify);
         notify({ stage: 'scenario', message: `Running “${scenario.name}”…` });

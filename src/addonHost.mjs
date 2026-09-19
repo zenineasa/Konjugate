@@ -87,10 +87,16 @@ export function validateLauncherManifest(manifest) {
         }
         if (!Array.isArray(scenario.interventions) || !scenario.interventions.length) throw new Error('A launcher scenario needs at least one intervention.');
         for (const intervention of scenario.interventions) {
-            if (!contributionIdPattern.test(intervention.parameter ?? '') || !['chosen', 'all', 'global'].includes(intervention.target) ||
-                (Number.isFinite(intervention.value) === Number.isFinite(intervention.fractionOfMaximum)) || (intervention.at !== undefined && !(intervention.at >= 0)) ||
+            // A `supplied` target is filled in by the window when it runs the scenario: either a fixed value for the entities it
+            // names, or (samples: true) a path of values over time for each of them, followed by the parameter as a piecewise schedule.
+            const supplied = intervention.target === 'supplied';
+            const validValue = supplied
+                ? (intervention.samples === true) !== Number.isFinite(intervention.value)
+                : Number.isFinite(intervention.value) !== Number.isFinite(intervention.fractionOfMaximum);
+            if (!contributionIdPattern.test(intervention.parameter ?? '') || !['chosen', 'all', 'global', 'supplied'].includes(intervention.target) ||
+                !validValue || (intervention.at !== undefined && !(intervention.at >= 0)) ||
                 (intervention.duration !== undefined && !(intervention.duration > 0))) {
-                throw new Error('A launcher scenario intervention needs a parameter, a target (chosen, all or global), an optional delay and duration, and exactly one of value or fractionOfMaximum.');
+                throw new Error('A launcher scenario intervention needs a parameter, a target (chosen, all, global or supplied), an optional delay and duration, and exactly one of value or fractionOfMaximum (a supplied target takes a value, or samples: true).');
             }
         }
     }

@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('konjugateLauncher', Object.freeze({
     getManifest: () => ipcRenderer.invoke('launcherGetManifest'),
     chooseFile: (importerId, role) => ipcRenderer.invoke('launcherChooseFile', { importerId, role }),
     clearFile: (importerId, role, name) => ipcRenderer.invoke('launcherClearFile', { importerId, role, name }),
+    fetchText: (url) => ipcRenderer.invoke('launcherFetchText', { url }),
     fetchFile: (importerId, role, url, name) => ipcRenderer.invoke('launcherFetchFile', { importerId, role, url, name }),
     reloadFiles: (importerId) => ipcRenderer.invoke('launcherReloadFiles', { importerId }),
     useSample: (importerId) => ipcRenderer.invoke('launcherUseSample', { importerId }),

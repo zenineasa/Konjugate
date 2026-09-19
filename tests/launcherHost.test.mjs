@@ -81,6 +81,31 @@ test('a launcher file role may accept several files and list several samples', (
     assert.equal(validateAddonManifest(manifest).kind, 'launcher');
 });
 
+test('a scenario can take values or paths of values that the window supplies', () => {
+    const index = [
+        { key: 'drive', scope: 'series', entity: 'Gold', sharedParameterId: 1, name: 'Drive (Gold)', live: true, minimum: -0.5, maximum: 0.5, value: 0 },
+        { key: 'drive', scope: 'series', entity: 'Oil', sharedParameterId: 2, name: 'Drive (Oil)', live: true, minimum: -0.5, maximum: 0.5, value: 0 },
+        { key: 'gain', scope: 'series', entity: 'Gold', sharedParameterId: 3, name: 'Gain (Gold)', live: true, minimum: 0, maximum: 20, value: 0 }
+    ];
+    const scenario = { name: 'Replay', interventions: [{ parameter: 'gain', target: 'supplied', value: 8 }, { parameter: 'drive', target: 'supplied', samples: true }] };
+    const resolved = resolveInterventions(scenario, index, null, { entities: ['Gold'], samples: { Gold: [[0, 0.01], [1, 0.9], [2, -0.02]] } });
+    assert.deepEqual(resolved.map((change) => [change.parameter, change.entity]), [['gain', 'Gold'], ['drive', 'Gold']]);
+    assert.equal(resolved[0].value, 8);
+    assert.deepEqual(resolved[1].samples, [{ time: 0, value: 0.01 }, { time: 1, value: 0.5 }, { time: 2, value: -0.02 }], 'Values are held to the parameter\'s range.');
+    assert.throws(() => resolveInterventions(scenario, index, null, null), /needs the window to supply data/);
+    assert.throws(() => resolveInterventions(scenario, index, null, { entities: ['Oil'], samples: { Oil: [[0, 1], [1, 2]] } }), /does not have for Oil|gain/);
+    assert.throws(() => resolveInterventions(scenario, index, null, { entities: ['Gold'], samples: { Gold: [[0, 1]] } }), /at least two/);
+    assert.throws(() => resolveInterventions(scenario, index, null, { entities: ['Gold'], samples: { Gold: [[0, 'x'], [1, 2]] } }), /at least two/);
+});
+
+test('a supplied intervention takes a value or samples, and not both or neither', () => {
+    const withIntervention = (intervention) => { const manifest = launcher(); manifest.contributes.scenarios[0].interventions = [intervention]; return manifest; };
+    assert.equal(validateAddonManifest(withIntervention({ parameter: 'drive', target: 'supplied', samples: true })).kind, 'launcher');
+    assert.equal(validateAddonManifest(withIntervention({ parameter: 'gain', target: 'supplied', value: 8 })).kind, 'launcher');
+    assert.throws(() => validateAddonManifest(withIntervention({ parameter: 'drive', target: 'supplied' })), /supplied target takes a value, or samples/);
+    assert.throws(() => validateAddonManifest(withIntervention({ parameter: 'drive', target: 'supplied', samples: true, value: 1 })), /supplied target takes a value, or samples/);
+});
+
 test('scenario interventions resolve to concrete parameter changes', () => {
     const index = [
         { key: 'withdrawalRate', scope: 'institution', entity: 'Alder', sharedParameterId: 1, name: 'Withdrawal (Alder)', live: true, minimum: 0, maximum: 0.2 },

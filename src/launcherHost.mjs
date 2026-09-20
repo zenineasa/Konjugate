@@ -159,6 +159,34 @@ export function resolveInterventions(scenario, parameterIndex, chosenEntity, sup
     return resolved;
 }
 
+// Adjusts the interventions a scenario declares with values the window supplies, for parameters the importer has declared live.
+// `overrides` is { parameterKey: { entityName | '*': { value, at?, duration? } | null } }: '*' names the one entity-less (global)
+// entry, an entry replaces the declared change for that entity or adds one, and null removes it. With no overrides nothing changes,
+// so a scenario that is run as declared is run exactly as it always was. Values outside a parameter's declared range are still held
+// to it, as a backstop; the window is expected to check them first and say so.
+export function applyOverrides(resolved, parameterIndex, overrides) {
+    if (!overrides || !Object.keys(overrides).length) return resolved;
+    const result = [...resolved];
+    for (const [parameter, byEntity] of Object.entries(overrides)) {
+        if (!byEntity || typeof byEntity !== 'object') throw new Error(`The changes for "${parameter}" must name the entities they apply to.`);
+        for (const [entityName, change] of Object.entries(byEntity)) {
+            const entry = parameterIndex.find((candidate) => candidate.key === parameter && (entityName === '*' ? candidate.scope === 'global' : candidate.entity === entityName));
+            if (!entry) throw new Error(`This model has no "${parameter}" for ${entityName === '*' ? 'the whole model' : entityName}.`);
+            if (!entry.live) throw new Error(`"${entry.name}" cannot be changed during a run.`);
+            const at = result.findIndex((candidate) => candidate.sharedParameterId === entry.sharedParameterId);
+            if (change === null) { if (at >= 0) result.splice(at, 1); continue; }
+            const { value, at: delay = 0, duration = 0 } = change ?? {};
+            if (![value, delay, duration].every(Number.isFinite) || delay < 0 || duration < 0) throw new Error(`The change to ${entry.name} needs a finite value, and a start and duration of zero or more.`);
+            const replacement = {
+                sharedParameterId: entry.sharedParameterId, name: entry.name, parameter, entity: entry.entity ?? null,
+                value: Math.min(Math.max(value, entry.minimum ?? -Infinity), entry.maximum ?? Infinity), at: delay, duration, baseValue: entry.value ?? 0
+            };
+            if (at >= 0) result[at] = replacement; else result.push(replacement);
+        }
+    }
+    return result;
+}
+
 // Samples of the forked branch as one continuous history: the parent's samples before the fork, then
 // the child's from the fork on (the child's first sample is the fork point itself).
 export function composeBranchSamples(parentSamples, childSamples, forkTime) {
@@ -201,12 +229,16 @@ export function resultsToCsv(branches, document) {
 
 // The record that lets a result be reproduced and explained: what produced it, from which inputs, with
 // what changes. Plain JSON, so it can be attached to a report and compared between runs.
-export function buildRunManifest({ appVersion, addon, importerId, inputs, contentText, document, config, scenario, chosenEntity, interventions, files }) {
+export function buildRunManifest({ appVersion, addon, importerId, importerOptions = null, overrides = null, inputs, contentText, document, config, scenario, chosenEntity, interventions, files }) {
     return {
         manifestVersion: 1,
         createdAt: new Date().toISOString(),
         konjugate: { version: appVersion },
         package: { addonId: addon.addonId, name: addon.name, version: addon.version, importerId },
+        // What the window asked for beyond the declared scenario: the options the importer was given, and the changes made to the
+        // scenario's interventions. Absent when nothing was changed, so a run as declared records exactly what it always did.
+        ...(importerOptions && Object.keys(importerOptions).length ? { importerOptions } : {}),
+        ...(overrides && Object.keys(overrides).length ? { overrides } : {}),
         inputs: inputs.map(({ role, name, sha256: hash, bytes, url, retrievedAt }) => ({ role, name, sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}) })),
         model: { sha256: sha256(contentText), nodes: document.nodes.length, edges: document.edges.length },
         runConfiguration: config,
@@ -354,7 +386,7 @@ export function registerLauncherHandlers(deps) {
                 importerId, name, guide: guide ?? null,
                 files: files.map(({ role, label, required = false, description = '', accept = ['csv'], sample, multiple = false }) => ({ role, label, required, description, accept, multiple, hasSample: Boolean(sample) }))
             })),
-            scenarios: (contributes.scenarios ?? []).map(({ scenarioId, name, description, forkAt, runTime, choose, effects }) => ({ scenarioId, name, description, forkAt, runTime, choose: choose ?? null, effects: effects ?? [] })),
+            scenarios: (contributes.scenarios ?? []).map(({ scenarioId, name, description, forkAt, runTime, choose, effects, interventions }) => ({ scenarioId, name, description, forkAt, runTime, choose: choose ?? null, effects: effects ?? [], interventions: (interventions ?? []).map(({ parameter, target, value, fractionOfMaximum, at, duration }) => ({ parameter, target, value: value ?? null, fractionOfMaximum: fractionOfMaximum ?? null, at: at ?? 0, duration: duration ?? 0 })) })),
             pages: (contributes.pages ?? []).map(({ pageId, label }) => ({ pageId, label })),
             // One entry per role; a role that accepts several files lists them all.
             files: (() => {
@@ -503,24 +535,37 @@ export function registerLauncherHandlers(deps) {
         }
         const contentText = JSON.stringify(result.document);
         const entities = [...new Set((result.parameterIndex ?? []).map((entry) => entry.entity).filter(Boolean))];
-        workspace.imported = { importerId, document: result.document, contentText, parameterIndex: result.parameterIndex ?? [], report: result.report, entities };
+        workspace.imported = { importerId, options: options ?? {}, document: result.document, contentText, parameterIndex: result.parameterIndex ?? [], report: result.report, entities };
         return { imported: true, report: result.report, entities, data: result.data };
     }));
 
+    // One baseline per run length. Runs that ask for it at the same time share one engine run, and a run that needs a different length waits
+    // for the one in progress. Changing the length replaces the baseline, so a batch of runs must all use the same length.
     async function ensureBaseline(workspace, runTime, notify) {
-        if (workspace.baseline?.runTime === runTime) return workspace.baseline;
+        for (;;) {
+            if (workspace.baseline?.runTime === runTime) return workspace.baseline;
+            const pending = workspace.baselinePending;
+            if (!pending) break;
+            if (pending.runTime === runTime) return pending.promise;
+            await pending.promise.catch(() => {});
+        }
         if (workspace.baseline) await Promise.all([workspace.baseline.cleanup?.()].filter(Boolean));
         workspace.baseline = null;
         const { document, contentText } = workspace.imported;
         const configuration = document.runConfigurations[0];
         const config = { name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval };
         notify({ stage: 'baseline', message: 'Running the baseline…' });
-        const run = await runToCompletion(contentText, config, await engineOptions());
-        workspace.baseline = { runTime, config, uuid: randomUUID(), ...run };
-        return workspace.baseline;
+        const entry = { runTime, promise: null };
+        entry.promise = (async () => {
+            const run = await runToCompletion(contentText, config, await engineOptions());
+            workspace.baseline = { runTime, config, uuid: randomUUID(), ...run };
+            return workspace.baseline;
+        })().finally(() => { if (workspace.baselinePending === entry) workspace.baselinePending = null; });
+        workspace.baselinePending = entry;
+        return entry.promise;
     }
 
-    ipcMain.handle('launcherRunScenario', guarded(async ({ addon, workspace, state }, { scenarioId, entity = null, signals = [], runTime = null, supplied = null }) => {
+    ipcMain.handle('launcherRunScenario', guarded(async ({ addon, workspace, state }, { scenarioId, entity = null, signals = [], runTime = null, supplied = null, overrides = null, retain = true }) => {
         needs(addon, 'scenario.run');
         const declaredScenario = declared(addon.manifest.contributes?.scenarios, 'scenarioId', scenarioId, 'scenario');
         if (!workspace.imported) throw new Error('Import your data first.');
@@ -530,24 +575,28 @@ export function registerLauncherHandlers(deps) {
         const scenario = { ...declaredScenario, ...(runTime === null ? {} : { runTime }) };
         if (scenario.choose && !workspace.imported.entities.includes(entity)) throw new Error(`Choose ${scenario.choose.label.toLowerCase()} first.`);
         const notify = (progress) => { if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', progress); };
-        const interventions = resolveInterventions(scenario, workspace.imported.parameterIndex, scenario.choose ? entity : null, supplied);
+        if (overrides !== null && JSON.stringify(overrides).length > maximumOptionsBytes) throw new Error('The changes are larger than the host accepts.');
+        const interventions = applyOverrides(resolveInterventions(scenario, workspace.imported.parameterIndex, scenario.choose ? entity : null, supplied), workspace.imported.parameterIndex, overrides);
         const { document, contentText } = workspace.imported;
         const baseline = await ensureBaseline(workspace, scenario.runTime, notify);
         notify({ stage: 'scenario', message: `Running “${scenario.name}”…` });
         const key = `${scenarioId}|${entity ?? ''}`;
-        const previous = workspace.scenarios.get(key);
+        // A run that is not retained (one of many in a batch) is summarized and then released, so a batch does not keep a result file each.
+        const previous = retain ? workspace.scenarios.get(key) : null;
         if (previous) await previous.child.cleanup?.();
         const { forkTime, child } = await runScenarioBranches({ content: contentText, config: baseline.config, scenario, interventions, baseline, engineOptions: await engineOptions() });
         const scenarioSamples = composeBranchSamples(baseline.result.samples, child.result.samples, forkTime);
-        workspace.scenarios.set(key, { scenarioId, entity, scenario, interventions, forkTime, child, samples: scenarioSamples, uuid: randomUUID() });
-        notify({ stage: 'done', message: 'Done' });
-        return {
+        if (retain) workspace.scenarios.set(key, { scenarioId, entity, scenario, interventions, overrides, forkTime, child, samples: scenarioSamples, uuid: randomUUID() });
+        const answer = {
             scenarioId, entity, forkTime, runTime: scenario.runTime, interventions,
             branches: [
                 { id: 'baseline', label: 'Baseline', series: extractSeries(baseline.result.samples, document, signals) },
                 { id: 'scenario', label: scenario.name, series: extractSeries(scenarioSamples, document, signals) }
             ]
         };
+        if (!retain) await child.cleanup?.();
+        notify({ stage: 'done', message: 'Done' });
+        return answer;
     }));
 
     // The project the canvas would hold after these runs: the model with a baseline branch and, when a
@@ -600,6 +649,7 @@ export function registerLauncherHandlers(deps) {
         await put('project.kjt', await buildProject(workspace, scenarioKey));
         const manifest = buildRunManifest({
             appVersion: app.getVersion(), addon: addon.manifest, importerId: workspace.imported.importerId,
+            importerOptions: workspace.imported.options, overrides: run?.overrides ?? null,
             inputs: [...workspace.pending.values()], contentText, document, config: workspace.baseline.config,
             scenario: run?.scenario ?? null, chosenEntity: run?.entity ?? null,
             interventions: run?.interventions ?? [], files: written

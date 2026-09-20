@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
-    buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
+    applyOverrides, buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
 } from '../src/launcherHost.mjs';
 
 const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'launcher');
@@ -234,4 +234,51 @@ test('a name for a fetched file cannot carry a path', () => {
     assert.equal(safeFileName('../../etc/passwd'), '.._.._etc_passwd');
     assert.equal(safeFileName('S&P 500'), 'S&P 500');
     assert.equal(safeFileName('  '), '');
+});
+
+const overrideIndex = [
+    { key: 'withdrawalRate', scope: 'institution', entity: 'Alder', sharedParameterId: 1, name: 'Withdrawal (Alder)', live: true, minimum: 0, maximum: 1, value: 0 },
+    { key: 'withdrawalRate', scope: 'institution', entity: 'Birch', sharedParameterId: 2, name: 'Withdrawal (Birch)', live: true, minimum: 0, maximum: 1, value: 0 },
+    { key: 'baseHaircut', scope: 'global', sharedParameterId: 3, name: 'Haircut', live: true, minimum: 0, maximum: 1, value: 0.1 },
+    { key: 'fixed', scope: 'global', sharedParameterId: 4, name: 'Fixed', live: false }
+];
+const declaredChange = { sharedParameterId: 1, name: 'Withdrawal (Alder)', parameter: 'withdrawalRate', entity: 'Alder', value: 0.015, at: 0, duration: 8, baseValue: 0 };
+
+test('overrides change only what they name, and with none a scenario is exactly as declared', () => {
+    const declaredList = [declaredChange];
+    assert.equal(applyOverrides(declaredList, overrideIndex, null), declaredList);
+    assert.equal(applyOverrides(declaredList, overrideIndex, {}), declaredList);
+    const changed = applyOverrides(declaredList, overrideIndex, { withdrawalRate: { Alder: { value: 0.03, at: 2, duration: 5 }, Birch: { value: 0.01 } }, baseHaircut: { '*': { value: 0.4 } } });
+    assert.deepEqual(changed.map((change) => [change.entity, change.value, change.at, change.duration]), [['Alder', 0.03, 2, 5], ['Birch', 0.01, 0, 0], [null, 0.4, 0, 0]]);
+    assert.deepEqual(declaredList, [declaredChange], 'The declared list is not modified.');
+    assert.deepEqual(applyOverrides(declaredList, overrideIndex, { withdrawalRate: { Alder: null } }), [], 'null removes a declared change.');
+});
+
+test('overrides are checked: unknown entities, parameters that cannot change during a run, and values that are not finite are refused', () => {
+    assert.throws(() => applyOverrides([], overrideIndex, { withdrawalRate: { Nobody: { value: 0.1 } } }), /no "withdrawalRate" for Nobody/);
+    assert.throws(() => applyOverrides([], overrideIndex, { fixed: { '*': { value: 1 } } }), /cannot be changed during a run/);
+    assert.throws(() => applyOverrides([], overrideIndex, { withdrawalRate: { Alder: { value: Number.NaN } } }), /finite value/);
+    assert.throws(() => applyOverrides([], overrideIndex, { withdrawalRate: { Alder: { value: 0.1, at: -1 } } }), /start and duration of zero or more/);
+    assert.throws(() => applyOverrides([], overrideIndex, { withdrawalRate: { Alder: { value: 'x' } } }), /finite value/);
+    assert.throws(() => applyOverrides([], overrideIndex, { withdrawalRate: 5 }), /must name the entities/);
+    assert.equal(applyOverrides([], overrideIndex, { withdrawalRate: { Alder: { value: 7 } } })[0].value, 1, 'A value beyond the declared range is held to it as a backstop.');
+});
+
+test('the run manifest records importer options and overrides only when there are some', () => {
+    const base = { appVersion: '1', addon: { addonId: 'a', name: 'A', version: '1' }, importerId: 'i', inputs: [], contentText: '{}', document: { nodes: [], edges: [] }, config: {}, scenario: null, interventions: [], files: {} };
+    const plain = buildRunManifest(base);
+    assert.equal('importerOptions' in plain || 'overrides' in plain, false, 'A run as declared records what it always did.');
+    assert.equal(plain.manifestVersion, 1);
+    const custom = buildRunManifest({ ...base, importerOptions: { network: 'frozen' }, overrides: { baseHaircut: { '*': { value: 0.4 } } } });
+    assert.deepEqual(custom.importerOptions, { network: 'frozen' });
+    assert.deepEqual(custom.overrides, { baseHaircut: { '*': { value: 0.4 } } });
+    assert.equal('importerOptions' in buildRunManifest({ ...base, importerOptions: {} }), false);
+});
+
+test('a launcher may require features, and one this version does not have is refused with a message', () => {
+    const withRequires = (requires) => { const manifest = launcher(); manifest.requires = requires; return manifest; };
+    assert.equal(validateAddonManifest(withRequires(['scenarioOverrides', 'runRecord'])).kind, 'launcher');
+    assert.equal(validateAddonManifest(withRequires([])).kind, 'launcher');
+    assert.throws(() => validateAddonManifest(withRequires(['scenarioOverrides', 'timeTravel'])), /needs timeTravel, which this version of Konjugate does not provide/);
+    assert.throws(() => validateAddonManifest(withRequires('runRecord')), /list of names/);
 });

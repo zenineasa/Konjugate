@@ -18,6 +18,9 @@ const allowedPermissions = new Set([
     'results.export'
 ]);
 
+// Optional behaviours a launcher may depend on. A launcher lists the ones it needs in `requires`, and a version of Konjugate that does not
+// know one of them refuses the launcher, rather than ignoring the entry and running it without what it needs.
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 
@@ -39,6 +42,10 @@ export function validateLauncherManifest(manifest) {
     safeRelativePath(manifest.entry, 'entry', ['.html']);
     const permissions = manifest.permissions ?? [];
     if (!permissions.every((permission) => launcherPermissions.has(permission))) throw new Error('The launcher requests an unsupported permission.');
+    const requires = manifest.requires ?? [];
+    if (!Array.isArray(requires) || !requires.every((feature) => typeof feature === 'string')) throw new Error('A launcher\'s requires must be a list of names.');
+    const missing = requires.filter((feature) => !launcherFeatures.has(feature));
+    if (missing.length) throw new Error(`This launcher needs ${missing.join(', ')}, which this version of Konjugate does not provide. Update Konjugate to use it.`);
     // Fetching from the internet is allowed only from hosts the manifest names, so what a launcher can reach is
     // readable before it is installed.
     const hosts = manifest.network?.hosts;

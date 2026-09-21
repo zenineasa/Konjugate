@@ -8931,14 +8931,14 @@ async function loadExample(id) {
 window.launcherHost?.onOpenProject(async (payload) => {
     try {
         if (simulationRunning) return;
-        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
+        if (!payload.silent && (documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
         await loadProjectDocument(JSON.parse(payload.content), {
             fileName: payload.suggestedFilename,
             saved: false,
             embeddedResult: payload.embeddedResult,
             embeddedBranches: payload.embeddedBranches
         });
-        $('#statusText').textContent = 'Opened from the start window as an unsaved copy';
+        $('#statusText').textContent = payload.silent ? 'Live-synced from FinTech Toolbox' : 'Opened from the toolbox as an unsaved copy';
     } catch (error) {
         console.error(error);
         $('#statusText').textContent = `Could not open the project · ${error.message}`;

@@ -617,14 +617,16 @@ export function registerLauncherHandlers(deps) {
         return matches.at(-1) ?? null;
     };
 
-    ipcMain.handle('launcherOpenInCanvas', guarded(async ({ addon, workspace, projectWindow }, { scenarioId = null }) => {
+    ipcMain.handle('launcherOpenInCanvas', guarded(async ({ addon, workspace, projectWindow }, { scenarioId = null, focus = true, silent = false }) => {
         needs(addon, 'model.open');
         if (!workspace.imported) throw new Error('Import your data first.');
         const payload = await decodeProjectForRenderer(await buildProject(workspace, keyFor(workspace, scenarioId)));
         if (projectWindow.isDestroyed()) throw new Error('The project window has been closed.');
-        projectWindow.webContents.send('launcherOpenProject', { ...payload, suggestedFilename: `${addon.manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '')}.kjt` });
-        projectWindow.show();
-        projectWindow.focus();
+        projectWindow.webContents.send('launcherOpenProject', { ...payload, silent, suggestedFilename: `${addon.manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '')}.kjt` });
+        if (focus) {
+            projectWindow.show();
+            projectWindow.focus();
+        }
         return {};
     }));
 

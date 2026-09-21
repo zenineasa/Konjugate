@@ -3,7 +3,7 @@
 export function auxiliaryWindowPresentation(mainWindow, platform = process.platform) {
     if (!mainWindow || mainWindow.isDestroyed()) return {};
     if (platform === 'darwin' && mainWindow.isFullScreen()) return { fullscreen: true };
-    return { parent: mainWindow };
+    return {};
 }
 export function auxiliaryWindowBounds(mainWindow, defaultWidth, defaultHeight, savedBounds, screenModule) {
     const width = savedBounds?.width ?? defaultWidth;

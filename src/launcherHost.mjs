@@ -347,11 +347,13 @@ export function registerLauncherHandlers(deps) {
             icon: iconPath,
             frame: false,
             backgroundColor: '#0b1620',
+            show: false,
             webPreferences: {
                 preload: join(currentDir, 'launcherPreload.cjs'),
                 contextIsolation: true, nodeIntegration: false, sandbox: true
             }
         });
+        window.once('ready-to-show', () => { if (!window.isDestroyed()) window.show(); });
         installCustomWindowState(window);
         state.launcherWindow = window;
         const id = window.webContents.id;

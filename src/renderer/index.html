@@ -57,7 +57,8 @@
                 <button id="exportCodeButton" type="button" aria-label="Export simulation code" data-tooltip="Export simulation code" aria-haspopup="dialog">
                     <img class="documentActionIcon" src="../../assets/exportCode.svg" alt="">
                 </button>
-                <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="dialog">
+                <button id="exampleButton" class="exampleButton" type="button" aria-haspopup="dialog" data-tooltip="Examples">
+                    <svg class="exampleButtonIcon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 3.5h4a2 2 0 0 1 2 2v7.5a1.5 1.5 0 0 0-2-1.5h-4zM13.5 3.5h-4a2 2 0 0 0-2 2v7.5a1.5 1.5 0 0 1 2-1.5h4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
                     <span>Examples</span><i aria-hidden="true"></i>
                 </button>
                 <button id="extensionsButton" type="button" aria-label="Manage extensions" aria-haspopup="dialog" data-tooltip="Extensions">
@@ -363,31 +364,49 @@
     </dialog>
 
     <nav class="toolstrip" aria-label="Model tools">
-        <div class="toolGroup createToolGroup" role="group" aria-label="Create">
-            <button id="addButton" class="toolButton primaryTool" type="button"><span>＋</span> Add</button>
-            <button id="componentLibraryButton" class="toolButton" type="button" aria-expanded="false" aria-controls="componentLibraryPanel"><span>▤</span> Library</button>
-            <button id="causalInferenceButton" class="toolButton" type="button" aria-controls="causalInference"><span>⇩</span> Causal inference</button>
-            <button id="parameterTuningButton" class="toolButton" type="button" aria-controls="parameterTuning"><span>⇧</span> Tuning</button>
-        </div>
-        <div class="toolGroup" role="group" aria-label="History">
-            <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
-            <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↷</button>
-        </div>
-        <div class="toolGroup" role="group" aria-label="Selection tools">
-            <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
-            <button class="squareTool rectangleSelectTool" data-tool="rectangleSelect" type="button" aria-label="Select nodes in a rectangle" data-tooltip="Rectangle select">▱</button>
-            <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
-            <button class="squareTool" data-tool="rotate" type="button" aria-label="Rotate around a precise axis" data-tooltip="Rotate · Precise axis">⟳</button>
-            <button class="squareTool" data-tool="scale" type="button" aria-label="Scale along a precise axis, or hold Shift to scale all axes together" data-tooltip="Scale · Precise axis · Shift for uniform">⤢</button>
-        </div>
-        <div class="toolGroup" role="group" aria-label="Selection actions">
-            <button id="createSubsystem" class="squareTool" type="button" aria-label="Create subsystem from selected nodes" data-tooltip="Create subsystem" disabled>▤</button>
-            <button id="createEdgeGroup" class="squareTool" type="button" aria-label="Create edge group from selected nodes" data-tooltip="Create edge group" disabled>⬡</button>
-            <button id="copySelection" class="squareTool clipboardTool" type="button" aria-label="Copy selected nodes" data-tooltip="Copy selected" disabled>⧉</button>
-            <button id="pasteSelection" class="squareTool clipboardTool" type="button" aria-label="Paste copied nodes" data-tooltip="Paste" disabled>▣</button>
-            <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
+        <!-- Below --tools-compact-width (see .toolButtonLabel in styles.css), these drop their text
+             and shrink to icon-only, like .squareTool already is: the core toolstrip's own natural
+             width (before a single add-on tool is even installed) otherwise exceeds the app's
+             minimum window width, which pushed Run itself off the edge on a narrow window. -->
+        <div class="toolstripLeft">
+            <div class="toolGroup createToolGroup" role="group" aria-label="Create">
+                <button id="addButton" class="squareTool primaryTool" type="button" aria-label="Add node" data-tooltip="Add node">
+                    <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
+                <button id="componentLibraryButton" class="squareTool" type="button" aria-expanded="false" aria-controls="componentLibraryPanel" aria-label="Component library" data-tooltip="Component library">
+                    <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="9" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>
+                <button id="causalInferenceButton" class="squareTool" type="button" aria-controls="causalInference" aria-label="Causal inference" data-tooltip="Causal inference">
+                    <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="4" cy="11.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="4.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.6 10l4.8-4.2M7.2 5.6l3.3.2-.3 3.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button id="parameterTuningButton" class="squareTool" type="button" aria-controls="parameterTuning" aria-label="Parameter tuning" data-tooltip="Parameter tuning">
+                    <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 5h3m3 0h5M2.5 11h6m3 0h2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="5" r="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>
+            </div>
+            <div class="toolGroup" role="group" aria-label="History">
+                <button id="undoButton" class="squareTool historyTool" type="button" aria-label="Undo" data-tooltip="Undo" disabled>↶</button>
+                <button id="redoButton" class="squareTool historyTool" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↷</button>
+            </div>
+            <div class="toolGroup" role="group" aria-label="Selection tools">
+                <button class="squareTool active" data-tool="select" type="button" aria-label="Select and freely drag" data-tooltip="Select · Free drag">↖</button>
+                <button class="squareTool rectangleSelectTool" data-tool="rectangleSelect" type="button" aria-label="Select nodes in a rectangle" data-tooltip="Rectangle select">▱</button>
+                <button class="squareTool" data-tool="move" type="button" aria-label="Move along a precise axis" data-tooltip="Move · Precise axis">☩</button>
+                <button class="squareTool" data-tool="rotate" type="button" aria-label="Rotate around a precise axis" data-tooltip="Rotate · Precise axis">⟳</button>
+                <button class="squareTool" data-tool="scale" type="button" aria-label="Scale along a precise axis, or hold Shift to scale all axes together" data-tooltip="Scale · Precise axis · Shift for uniform">⤢</button>
+            </div>
+            <div class="toolGroup" role="group" aria-label="Selection actions">
+                <button id="createSubsystem" class="squareTool" type="button" aria-label="Create subsystem from selected nodes" data-tooltip="Create subsystem" disabled>▤</button>
+                <button id="createEdgeGroup" class="squareTool" type="button" aria-label="Create edge group from selected nodes" data-tooltip="Create edge group" disabled>⬡</button>
+                <button id="copySelection" class="squareTool clipboardTool" type="button" aria-label="Copy selected nodes" data-tooltip="Copy selected" disabled>⧉</button>
+                <button id="pasteSelection" class="squareTool clipboardTool" type="button" aria-label="Paste copied nodes" data-tooltip="Paste" disabled>▣</button>
+                <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
+            </div>
         </div>
         <span id="addonToolstripSeparator" class="divider" hidden></span>
+        <!-- The one deliberate "give" point in the toolstrip: everything else here is flex-shrink:0
+             (see .toolstrip in styles.css), so an arbitrary and growing number of installed add-ons
+             scrolls horizontally within its own bounds instead of pushing Run and the other fixed
+             controls off the edge of the window, unreachable. -->
         <span id="addonToolstripContributions" class="addonToolstripContributions"></span>
         <div class="toolSpacer"></div>
         <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
@@ -899,40 +918,48 @@
             <p id="parametersEmpty" class="parametersNotice" hidden>No parameters match.</p>
         </section>
         <section id="resultTransport" class="resultTransport" aria-label="Simulation status and results" hidden>
-            <span class="resultMode"><b>Results</b><small>Model locked</small></span>
-            <!-- Deliberately NOT .reviewControl: that class is blanket-unhidden by
-                 updateLiveResultControls' `$$('.reviewControl').forEach(c => c.hidden = live)`
-                 whenever not live, which would override renderBranchSwitcher's own
-                 branch-count-based hidden state. Visibility here is governed solely by whether
-                 more than one branch exists, in both live and non-live modes -- kept visible
-                 (with individual items disabled, not hidden) during a live run so branch context
-                 isn't lost, matching each chip/tree-button's own `disabled = simulationRunning`. -->
-            <div id="branchChips" class="branchChips" aria-label="Result branches" hidden></div>
-            <button id="branchesMoreButton" class="executionButton" type="button" aria-label="Open branch tree and comparison" aria-expanded="false" hidden><span aria-hidden="true">⑃</span></button>
-            <div id="simulationExecutionControls" class="transportGroup" hidden>
-                <button id="simulationPauseResume" class="executionButton" type="button" aria-label="Pause simulation"><span aria-hidden="true">❚❚</span> Pause</button>
-                <button id="simulationStop" class="executionButton" type="button" aria-label="Stop simulation"><span aria-hidden="true">■</span> Stop</button>
+            <!-- Tier 1: Full-width Scrubber Timeline -->
+            <div class="transportTimelineTrack">
+                <output id="simulationProgress" class="liveControl" hidden>0 / 0 s</output>
+                <output id="resultCurrentTime" class="reviewControl">0 s</output>
+                <input id="resultTimeline" class="reviewControl" type="range" min="0" max="0" value="0" step="any" aria-label="Simulation time">
+                <output id="resultExtent" class="reviewControl" aria-label="Available and target simulation time">available 0 · target 0 s</output>
             </div>
-            <output id="simulationProgress" class="liveControl" hidden>0 / 0 s</output>
-            <button id="continueRun" type="button" hidden>Continue</button>
-            <button id="forkHereButton" class="executionButton reviewControl" type="button" aria-label="Fork a new branch from the current time" hidden><span aria-hidden="true">⑂</span> Fork here</button>
-            <div id="resultPlaybackControls" class="transportGroup">
-                <button id="resultStart" type="button" aria-label="First result sample">|◀</button>
-                <button id="resultPrevious" type="button" aria-label="Previous result sample">◀</button>
-                <button id="resultPlayPause" class="resultPlayPause" type="button" aria-label="Play results">▶</button>
-                <button id="resultNext" type="button" aria-label="Next result sample">▶</button>
-                <button id="resultEnd" type="button" aria-label="Last result sample">▶|</button>
+            <!-- Tier 2: Streamlined Status, Transport, and Action Controls -->
+            <div class="transportControlBar">
+                <div class="transportStatusGroup">
+                    <span class="resultMode"><b>Results</b><small>Model locked</small></span>
+                    <button id="stabilitySummaryButton" class="executionButton stabilitySummaryButton" type="button" aria-label="Show numerical stability findings" aria-expanded="false" hidden><i></i> Stability <small id="stabilityFindingsCount"></small></button>
+                    <button id="executionSummaryButton" class="executionButton" type="button" aria-label="Show execution summary" aria-expanded="false" hidden><span aria-hidden="true">⌁</span> <span id="executionSummaryBackend">Execution</span></button>
+                </div>
+                <div class="transportPlaybackGroup">
+                    <div id="simulationExecutionControls" class="transportGroup" hidden>
+                        <button id="simulationPauseResume" class="executionButton" type="button" aria-label="Pause simulation"><span aria-hidden="true">❚❚</span> Pause</button>
+                        <button id="simulationStop" class="executionButton" type="button" aria-label="Stop simulation"><span aria-hidden="true">■</span> Stop</button>
+                    </div>
+                    <div id="resultPlaybackControls" class="transportGroup playbackGroup">
+                        <button id="resultStart" type="button" aria-label="First result sample">|◀</button>
+                        <!-- Previous/Next use chevrons, not triangles, so they can't be mistaken for the
+                             Play/Pause button beside them (both used to render as a plain ▶, indistinguishable
+                             at a glance from #resultPlayPause's own ▶). -->
+                        <button id="resultPrevious" type="button" aria-label="Previous result sample">❮</button>
+                        <button id="resultPlayPause" class="resultPlayPause" type="button" aria-label="Play results">▶</button>
+                        <button id="resultNext" type="button" aria-label="Next result sample">❯</button>
+                        <button id="resultEnd" type="button" aria-label="Last result sample">▶|</button>
+                    </div>
+                    <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option></select>
+                    <button id="continueRun" class="executionButton continueRunButton" type="button" hidden>Continue</button>
+                    <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
+                </div>
+                <div class="transportActionsGroup">
+                    <div id="branchChips" class="branchChips" aria-label="Result branches" hidden></div>
+                    <button id="branchesMoreButton" class="executionButton" type="button" aria-label="Open branch tree and comparison" aria-expanded="false" hidden><span aria-hidden="true">⑃</span></button>
+                    <button id="forkHereButton" class="executionButton reviewControl" type="button" aria-label="Fork a new branch from the current time" data-tooltip="Fork new branch" hidden><span aria-hidden="true">⑂</span> Fork here</button>
+                    <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
+                    <button id="saveResults" class="executionButton reviewControl" type="button" aria-label="Save project with simulation results" data-tooltip="Save with results"><span aria-hidden="true">↓</span> Save</button>
+                    <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close and remove results" data-tooltip="Close and edit"><span aria-hidden="true">×</span>Close and edit</button>
+                </div>
             </div>
-            <output id="resultCurrentTime" class="reviewControl">0 s</output>
-            <input id="resultTimeline" class="reviewControl" type="range" min="0" max="0" value="0" step="any" aria-label="Simulation time">
-            <output id="resultExtent" class="reviewControl" aria-label="Available and target simulation time">available 0 · target 0 s</output>
-            <select id="resultPlaybackRate" aria-label="Result playback rate"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option></select>
-            <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
-            <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
-            <button id="stabilitySummaryButton" class="executionButton stabilitySummaryButton" type="button" aria-label="Show numerical stability findings" aria-expanded="false" hidden><i></i> Stability <small id="stabilityFindingsCount"></small></button>
-            <button id="executionSummaryButton" class="executionButton" type="button" aria-label="Show execution summary" aria-expanded="false" hidden><span aria-hidden="true">⌁</span> <span id="executionSummaryBackend">Execution</span></button>
-            <button id="saveResults" class="executionButton reviewControl" type="button" aria-label="Save project with simulation results"><span aria-hidden="true">↓</span> Save project</button>
-            <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close and remove results"><span aria-hidden="true">×</span>Close and edit</button>
         </section>
         <section id="executionSummaryCard" class="contextCard executionSummaryCard hidden" aria-label="Execution summary">
             <header><span><small>Execution summary</small><strong id="executionSummaryTitle">Automatic</strong></span><button id="closeExecutionSummary" type="button" aria-label="Close execution summary">×</button></header>

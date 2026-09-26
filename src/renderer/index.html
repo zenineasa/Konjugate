@@ -889,8 +889,9 @@
             <div id="forkParameterRows"></div>
             <footer><button id="confirmForkParameters" class="doneButton" type="button">Continue</button></footer>
         </section>
-        <section id="branchesPanel" class="liveParameterPanel branchesPanel" aria-label="Branch tree and comparison" hidden>
-            <header><div><strong>Branch tree</strong><small>Click a branch to view it · check others to compare</small></div><button id="closeBranchesPanel" type="button" aria-label="Close branch tree">×</button></header>
+        <section id="branchesPanel" class="liveParameterPanel branchesPanel" aria-label="Branches" hidden>
+            <header><div><strong>Branches</strong><small id="branchesPanelHint">Click a branch to view it · check others to compare</small></div><button id="closeBranchesPanel" type="button" aria-label="Close branches">×</button></header>
+            <button id="forkHereButton" class="branchForkAction" type="button" aria-label="Fork a new branch from the current time"><span aria-hidden="true">⑂</span> <span id="forkHereLabel">Fork here</span></button>
             <div id="branchTree"></div>
         </section>
         <section id="parametersPanel" class="liveParameterPanel parametersPanel" aria-label="Model parameters" hidden>
@@ -952,11 +953,8 @@
                     <select id="simulationPacing" aria-label="Live simulation pacing" hidden><option value="limitedRatio:0.5">0.5× real time</option><option value="realTime">Real time</option><option value="limitedRatio:2">2× real time</option><option value="limitedRatio:10">10× real time</option></select>
                 </div>
                 <div class="transportActionsGroup">
-                    <div id="branchChips" class="branchChips" aria-label="Result branches" hidden></div>
-                    <button id="branchesMoreButton" class="executionButton" type="button" aria-label="Open branch tree and comparison" aria-expanded="false" hidden><span aria-hidden="true">⑃</span></button>
-                    <button id="forkHereButton" class="executionButton reviewControl" type="button" aria-label="Fork a new branch from the current time" data-tooltip="Fork new branch" hidden><span aria-hidden="true">⑂</span> Fork here</button>
+                    <button id="branchesButton" class="executionButton branchesButton" type="button" aria-label="Branches and forking" aria-haspopup="true" aria-expanded="false" data-tooltip="Branches · fork" hidden><i></i><span id="branchesButtonLabel">Baseline</span><small id="branchesButtonCount"></small><b aria-hidden="true">▾</b></button>
                     <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
-                    <button id="saveResults" class="executionButton reviewControl" type="button" aria-label="Save project with simulation results" data-tooltip="Save with results"><span aria-hidden="true">↓</span> Save</button>
                     <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close and remove results" data-tooltip="Close and edit"><span aria-hidden="true">×</span>Close and edit</button>
                 </div>
             </div>

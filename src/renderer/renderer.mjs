@@ -530,8 +530,11 @@ const documentController = new DocumentController();
 function updateHistoryControls() {
     $('#undoButton').disabled = Boolean(activeResult) || !documentController.canUndo;
     $('#redoButton').disabled = Boolean(activeResult) || !documentController.canRedo;
-    $('#saveButton').disabled = !documentController.dirty && currentProjectPath !== null;
-    $('.windowTitle i').style.visibility = documentController.dirty ? 'visible' : 'hidden';
+    // Fresh simulation results count as unsaved work (the same test the discard prompts use), so the
+    // titlebar Save stays usable for them even when the model itself is clean.
+    const unsaved = documentController.dirty || Boolean(activeResult && !activeResultPersistedInProject);
+    $('#saveButton').disabled = !unsaved && currentProjectPath !== null;
+    $('.windowTitle i').style.visibility = unsaved ? 'visible' : 'hidden';
     updateSelectionActionControls();
 }
 
@@ -4034,6 +4037,7 @@ function projectResultSample(index) {
     if (!activeResult?.samples.length) return;
     activeResultSampleIndex = Math.max(0, Math.min(index, activeResult.samples.length - 1));
     projectResultSampleValue(activeResult.samples[activeResultSampleIndex]);
+    if (!$('#branchesPanel').hidden) updateForkHereLabel();
 }
 
 function projectResultSampleValue(sample) {
@@ -4164,47 +4168,63 @@ function toggleComparisonBranch(branchUuid, enabled) {
     if (selectedNode) renderNodeResults(selectedNode);
 }
 
-// Two complementary views of the same branch set, kept in sync from one function:
-//
-// - #branchChips: always-visible, inline in the transport bar -- one click switches the active
-//   branch, no popover to open first. This is the common case ("just look at another branch") and
-//   is deliberately flat (sorted by fork time, no nesting) so it stays a single readable row; a
-//   horizontal scroll (see styles.css) absorbs more branches than fit rather than wrapping and
-//   growing the transport bar's height.
-// - #branchTree (in #branchesPanel, opened via #branchesMoreButton): the real nested tree
-//   (docs/resultExploration.md's "Baseline / fork / fork-of-fork" example) plus the per-branch
-//   compare checkboxes -- branches already nest correctly via parentBranchUuid (a fork's parent is
-//   whichever branch was active when "Fork here" was clicked; this function only visualizes it).
-//   Reserved for when you actually need the hierarchy or want to build a comparison, not for
-//   quick switching, which is what made the popover-only design slow to use.
+// All branch UI lives behind one transport-bar button (#branchesButton), which shows the active
+// branch and opens #branchesPanel: the "Fork at <time>" action on top, then the real nested tree
+// (docs/resultExploration.md's "Baseline / fork / fork-of-fork" example) with per-branch compare
+// checkboxes -- branches already nest correctly via parentBranchUuid (a fork's parent is whichever
+// branch was active when the fork was made; this function only visualizes it). This used to be
+// inline chips plus separate tree and fork buttons, which crowded the transport bar until its
+// controls overlapped.
+function canForkActiveResult() {
+    return !simulationRunning && ['stopped', 'completed'].includes(activeResult?.lifecycle) && Boolean(activeResult?.checkpoints?.length);
+}
+
+function updateForkHereLabel() {
+    const time = Number(activeResult?.samples[activeResultSampleIndex]?.time ?? 0);
+    $('#forkHereLabel').textContent = `Fork at ${formatResultTime(time)}`;
+}
+
+// Anchors a branch-related panel just above #branchesButton, right edges aligned, so it opens
+// where the click happened instead of at a fixed dock position. Clamped to stay inside its
+// positioning container on narrow windows.
+function anchorPanelToBranchesButton(panel) {
+    const button = $('#branchesButton');
+    const container = panel.offsetParent;
+    if (!container || button.hidden) return;
+    const buttonRect = button.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const margin = 18;
+    const left = Math.min(buttonRect.right - containerRect.left, containerRect.width - margin) - panel.offsetWidth;
+    panel.style.left = `${Math.max(margin, left)}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = `${containerRect.bottom - buttonRect.top + 8}px`;
+}
+
+function setBranchesPanelOpen(open) {
+    $('#branchesPanel').hidden = !open;
+    $('#branchesButton').ariaExpanded = String(open);
+    if (open) anchorPanelToBranchesButton($('#branchesPanel'));
+}
+window.addEventListener('resize', () => {
+    for (const panel of [$('#branchesPanel'), $('#forkParameterPanel')]) {
+        if (!panel.hidden) anchorPanelToBranchesButton(panel);
+    }
+});
+
 function renderBranchSwitcher() {
     comparisonBranchUuids = new Set([...comparisonBranchUuids].filter((uuid) => branches.has(uuid)));
     const hasMultiple = branches.size > 1;
-    $('#branchesMoreButton').hidden = !hasMultiple;
-    $('#branchChips').hidden = !hasMultiple;
-    if (!hasMultiple) $('#branchesPanel').hidden = true;
-
-    const chips = $('#branchChips');
-    chips.replaceChildren();
-    if (hasMultiple) {
-        [...branches.values()].sort((a, b) => (a.forkTime ?? -1) - (b.forkTime ?? -1)).forEach((branch) => {
-            const isActive = branch.branchUuid === activeBranchUuid;
-            const chip = document.createElement('button');
-            chip.type = 'button';
-            chip.className = 'branchChip';
-            chip.classList.toggle('active', isActive);
-            chip.disabled = simulationRunning && !isActive;
-            chip.style.setProperty('--branch-color', branch.color);
-            chip.title = branch.label;
-            // Short in the chip (the fork time is the scannable, distinguishing part -- "Fork at"
-            // is implied by every non-root chip), full text in the tooltip and in the tree panel,
-            // which has the room for it. The transport bar is already dense even before branches
-            // exist; every character here is competing with the timeline, playback controls, etc.
-            chip.textContent = branch.parentBranchUuid ? formatResultTime(branch.forkTime) : branch.label;
-            chip.addEventListener('click', () => activateBranch(branch.branchUuid));
-            chips.appendChild(chip);
-        });
-    }
+    const canFork = canForkActiveResult();
+    const button = $('#branchesButton');
+    button.hidden = !hasMultiple && !canFork;
+    if (button.hidden) setBranchesPanelOpen(false);
+    const active = branches.get(activeBranchUuid);
+    button.style.setProperty('--branch-color', active?.color ?? '#758a95');
+    $('#branchesButtonLabel').textContent = active?.parentBranchUuid ? `Fork · ${formatResultTime(active.forkTime)}` : active?.label ?? 'Baseline';
+    $('#branchesButtonCount').textContent = hasMultiple ? String(branches.size) : '';
+    $('#forkHereButton').hidden = !canFork;
+    updateForkHereLabel();
+    $('#branchesPanelHint').textContent = hasMultiple ? 'Click a branch to view it · check others to compare' : 'Fork to try a what-if from the current time';
 
     const container = $('#branchTree');
     container.replaceChildren();
@@ -4248,14 +4268,14 @@ function renderBranchSwitcher() {
     };
     container.appendChild(renderLevel('root'));
 }
-$('#branchesMoreButton').addEventListener('click', () => {
-    const opening = $('#branchesPanel').hidden;
-    $('#branchesPanel').hidden = !opening;
-    $('#branchesMoreButton').ariaExpanded = String(opening);
+$('#branchesButton').addEventListener('click', () => {
+    if ($('#branchesPanel').hidden) updateForkHereLabel();
+    setBranchesPanelOpen($('#branchesPanel').hidden);
 });
-$('#closeBranchesPanel').addEventListener('click', () => {
-    $('#branchesPanel').hidden = true;
-    $('#branchesMoreButton').ariaExpanded = 'false';
+$('#closeBranchesPanel').addEventListener('click', () => setBranchesPanelOpen(false));
+// Behaves like a menu: a click anywhere else dismisses it.
+document.addEventListener('pointerdown', (event) => {
+    if (!$('#branchesPanel').hidden && !event.target.closest('#branchesPanel, #branchesButton')) setBranchesPanelOpen(false);
 });
 
 // Switching branches is only safe when nothing is live: only the active branch's job ever
@@ -4607,7 +4627,6 @@ function updateLiveResultControls() {
     $('#continueRun').hidden = !canContinue;
     $('#continueRun').textContent = lifecycle === 'completed' ? 'Extend simulation' : 'Continue';
     $('#continueRun').ariaLabel = lifecycle === 'completed' ? 'Extend simulation from the final checkpoint' : 'Continue simulation from the latest checkpoint';
-    $('#forkHereButton').hidden = !canContinue;
     renderBranchSwitcher();
     $$('.reviewControl').forEach((control) => { control.hidden = live; });
     $('#resultPlaybackRate').hidden = live;
@@ -5337,6 +5356,7 @@ $('#continueRun').addEventListener('click', () => {
 // renderer normally receives.
 $('#forkHereButton').addEventListener('click', async () => {
     if (!activeResult || !activeEngineJobId || simulationRunning) return;
+    setBranchesPanelOpen(false);
     const scrubTime = Number(activeResult.samples[activeResultSampleIndex]?.time ?? 0);
     let checkpoint;
     try {
@@ -5351,7 +5371,10 @@ $('#forkHereButton').addEventListener('click', async () => {
     pendingFork = { parentBranchUuid: activeBranchUuid, forkTime: checkpoint.time, checkpoint, overrides: [] };
     $('#forkParameterDescription').textContent = `Fork from ${formatResultTime(checkpoint.time)}`;
     renderForkParameterControls();
-    if ($('#forkParameterRows').children.length > 0) $('#forkParameterPanel').hidden = false;
+    if ($('#forkParameterRows').children.length > 0) {
+        $('#forkParameterPanel').hidden = false;
+        anchorPanelToBranchesButton($('#forkParameterPanel'));
+    }
     else openForkLaunchDialog();
 });
 $('#closeForkParameterPanel').addEventListener('click', () => {
@@ -5383,7 +5406,6 @@ function openForkLaunchDialog() {
     $('#runLaunchDialog').showModal();
 }
 $('#closeResults').addEventListener('click', closeResultPlayback);
-$('#saveResults').addEventListener('click', () => saveProject());
 $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
 // Python has no thread-based parallel option (the GIL means threads would not actually run this
 // CPU-bound loop in parallel -- see src/codeExport.mjs), but it does support mpi via mpi4py. An

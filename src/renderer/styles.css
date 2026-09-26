@@ -827,37 +827,26 @@ input, select, textarea { user-select: text; }
 .parameterScheduleRow input[hidden] { display: none; }
 .liveParameterPanel > footer { position: sticky; bottom: 0; padding: 10px 12px; background: #0b1922; border-top: 1px solid #263b46; }
 .liveParameterPanel > footer button { width: 100%; height: 28px; border-radius: 5px; font-size: 8px; }
-/* Fork-here and the branch tree both dock left instead of the shared .liveParameterPanel base's
-   right:18px: the right side is where the node inspector docks, and a user forking or comparing
-   branches while looking at a node's results is exactly the common case these would otherwise
-   collide with. left:210px (not 18px) clears the view-cube navigation widget (.viewCube, bottom
-   18px/left 18px/176px wide) sitting in the bottom-left corner; bottom:62px keeps them vertically
-   aligned with the transport bar the way the original right-docked position was. The live-controls
-   panel (#liveParameterPanel) deliberately keeps the base right-docked position -- not reported as
-   colliding, and left unchanged rather than moved speculatively. */
+/* The branches menu and the fork-parameter panel open directly above #branchesButton; their
+   left/bottom are set by anchorPanelToBranchesButton in renderer.mjs. These values are only the
+   fallback until that runs. left:210px clears the view-cube widget in the bottom-left corner. */
 #forkParameterPanel, .branchesPanel { left: 210px; right: auto; bottom: 96px; }
 /* Width recomputed against the new left offset (210px) plus an 18px right margin, same margin
    budget the base right:18px rule already used -- otherwise these could run past the right edge
    on a narrow window instead of shrinking symmetrically the way right-anchoring did. */
 #forkParameterPanel { width: min(390px, calc(100% - 228px)); }
 .branchesPanel { width: min(320px, calc(100% - 228px)); max-height: min(360px, calc(100% - 150px)); }
-/* min-width matters here, not just cosmetically: overflow-x:auto makes a flex item's automatic
-   minimum width 0 instead of content-based, so under a tight transport bar the browser shrinks
-   this container to literally nothing to protect its siblings' natural sizes, rather than
-   partially shrinking it -- min-width guarantees at least one chip stays visible, with the rest
-   reachable by scrolling this element, instead of the whole strip silently disappearing.
-   Deliberately small: the transport bar's own width formula (.resultTransport, above) was tuned
-   for its pre-branching content and is left untouched here -- widening it instead of shrinking
-   this risks reopening the exact overlap with a right-docked inspector panel that formula's
-   `calc(100% - 300px)` margin exists to prevent. 92px fits within that formula's already-verified
-   slack at common window widths; it isn't meant to show every branch without scrolling. */
-.branchChips { display: flex; flex: 0 1 auto; gap: 3px; min-width: 60px; max-width: 140px; overflow-x: auto; scrollbar-width: thin; }
-.branchChips[hidden] { display: none; }
-.branchChip { display: flex !important; width: auto !important; height: 23px; flex: 0 0 auto; align-items: center; gap: 5px; padding: 0 8px; color: #8ca0aa; background: rgb(14 26 35 / 65%); border: 1px solid #304651; border-radius: 4px; font-size: 10px; font-weight: 500; white-space: nowrap; }
-.branchChip::before { display: block; width: 7px; height: 7px; flex: 0 0 auto; background: var(--branch-color, #758a95); border-radius: 50%; content: ""; }
-.branchChip.active { color: #d6e6e9; background: #182832; border-color: #30444f; }
-.branchChip:disabled { opacity: .5; }
-#branchesMoreButton[hidden] { display: none; }
+/* The fork action sits above the tree as the panel's first row; the tree below it is empty until
+   a second branch exists. */
+.branchForkAction { display: flex !important; width: calc(100% - 24px) !important; height: 28px; align-items: center; gap: 6px; margin: 10px 12px 4px; padding: 0 9px; color: #5ce3d6; background: rgb(66 201 188 / 10%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 5px; font-size: 10px; font-weight: 600; }
+.branchForkAction:hover { color: #ffffff; background: rgb(66 201 188 / 20%); border-color: rgb(66 201 188 / 45%); }
+.branchForkAction[hidden] { display: none !important; }
+.resultTransport .branchesButton[hidden] { display: none; }
+.resultTransport .branchesButton i { width: 7px; height: 7px; flex: 0 0 auto; background: var(--branch-color, #758a95); border-radius: 50%; }
+.resultTransport .branchesButton small { color: #637984; font-size: 9px; font-variant-numeric: tabular-nums; }
+.resultTransport .branchesButton small:empty { display: none; }
+.resultTransport .branchesButton b { color: #637984; font-size: 8px; font-weight: 400; }
+.resultTransport .branchesButton[aria-expanded="true"] { color: #dbe7eb; background: rgb(255 255 255 / 7%); border-color: rgb(255 255 255 / 12%); }
 #branchTree { padding: 4px 0; }
 .branchTreeLevel { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; }
 .branchTreeLevel .branchTreeLevel { margin-left: 16px; padding-left: 8px; border-left: 1px solid #263b46; }
@@ -926,7 +915,9 @@ input, select, textarea { user-select: text; }
 /* Tier 2: Streamlined Control Bar with Grid Separation */
 .transportControlBar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    /* max-content minimums: the side columns may grow to keep playback centred, but never shrink
+       below their content -- minmax(0, 1fr) let the busier actions column spill into its neighbour. */
+    grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
     align-items: center;
     width: 100%;
     column-gap: 14px;
@@ -939,9 +930,6 @@ input, select, textarea { user-select: text; }
 }
 .transportActionsGroup {
     display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 0;
-}
-.transportActionsGroup .branchChips {
-    max-width: 130px; min-width: 60px; flex-shrink: 1;
 }
 
 /* Status: Results Mode Badge */
@@ -1214,12 +1202,8 @@ input, select, textarea { user-select: text; }
     .transportStatusGroup { gap: 3px; }
     .transportPlaybackGroup { gap: 3px; }
     .transportActionsGroup { gap: 3px; }
-    .transportActionsGroup :is(#saveResults, #forkHereButton) {
-        font-size: 0; width: 26px; padding: 0; justify-content: center;
-    }
-    .transportActionsGroup :is(#saveResults, #forkHereButton) span[aria-hidden] {
-        font-size: 11px;
-    }
+    .transportActionsGroup #branchesButton { width: 26px; padding: 0; justify-content: center; }
+    .transportActionsGroup #branchesButton :is(span, small, b) { display: none; }
     .transportActionsGroup .closeResults {
         font-size: 0; width: 26px; padding: 0; justify-content: center;
     }

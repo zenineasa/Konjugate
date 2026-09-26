@@ -685,7 +685,12 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('.resultMode b').textContent`), 'Results');
         assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#simulationProgress')).display === 'none'`), true);
         assert.equal(await evaluate(window, `document.querySelector('#executionSummaryButton').hidden`), false);
-        assert.equal(await evaluate(window, `!document.querySelector('#saveResults').hidden && getComputedStyle(document.querySelector('#saveResults')).display !== 'none'`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#saveButton').disabled`), true);
+        assert.equal(await evaluate(window, `!document.querySelector('#branchesButton').hidden && document.querySelector('#branchesPanel').hidden`), true);
+        await evaluate(window, `document.querySelector('#branchesButton').click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#branchesPanel').hidden && !document.querySelector('#forkHereButton').hidden && document.querySelector('#forkHereLabel').textContent.startsWith('Fork at ')`), true);
+        await evaluate(window, `document.querySelector('#branchesButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#branchesPanel').hidden`), true);
         await evaluate(window, `document.querySelector('#executionSummaryButton').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#executionSummaryCard').classList.contains('hidden')`), true);
         assert.match(await evaluate(window, `document.querySelector('#executionSummaryTitle').textContent`), /(Serial|Thread pool|Partitioned) · \d+ workers?/);

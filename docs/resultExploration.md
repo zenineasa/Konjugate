@@ -117,7 +117,7 @@ A user should be able to select a result time, create a fork, change future deci
 A typical workflow is:
 
 1. Scrub to a global synchronization time.
-2. Choose `Fork here`.
+2. Open the transport bar's branches menu and choose `Fork at <time>`.
 3. Select or edit parameter interventions after that time.
 4. Continue execution from the engine checkpoint.
 5. Compare the child branch with its parent or another branch.

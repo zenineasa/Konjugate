@@ -10,7 +10,7 @@ if (!resourcesDirectory) {
 }
 
 const expectedFiles = [
-    'thirdPartyNotices.md',
+    'ThirdPartyNotices.md',
     join('thirdPartyLicenses', 'apache2.txt'),
     join('thirdPartyLicenses', 'metis.txt'),
     join('thirdPartyLicenses', 'gklib.txt'),
@@ -25,7 +25,7 @@ for (const relativePath of expectedFiles) {
     await access(join(resolve(resourcesDirectory), relativePath));
 }
 
-const notice = await readFile(join(resolve(resourcesDirectory), 'thirdPartyNotices.md'), 'utf8');
+const notice = await readFile(join(resolve(resourcesDirectory), 'ThirdPartyNotices.md'), 'utf8');
 if (!notice.includes('METIS 5.1.0') || !notice.includes('Regents of the University of Minnesota')) {
     throw new Error('The packaged third-party notice does not contain the expected METIS attribution.');
 }

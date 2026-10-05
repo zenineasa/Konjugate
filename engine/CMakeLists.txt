@@ -106,11 +106,11 @@ endif()
 # Every dependency documented here (boost-property-tree, eigen3, nlopt, openssl, protobuf, zlib,
 # and their transitive deps) is a core, always-present dependency, not a METIS-conditional one --
 # this used to be gated behind KONJUGATE_HAS_METIS back when METIS was the only documented
-# dependency, which silently dropped thirdPartyNotices.md entirely from a --no-metis build.
+# dependency, which silently dropped ThirdPartyNotices.md entirely from a --no-metis build.
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/thirdPartyLicenses")
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md"
-    "${CMAKE_BINARY_DIR}/thirdPartyNotices.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdPartyNotices.md"
+    "${CMAKE_BINARY_DIR}/ThirdPartyNotices.md"
     COPYONLY
 )
 foreach(licenseFile apache2.txt metis.txt gklib.txt boostSoftwareLicense1.0.txt nlopt.txt protobuf.txt utf8Range.txt zlib.txt)
@@ -218,7 +218,7 @@ endif()
 if(WIN32)
     install(DIRECTORY "${CMAKE_BINARY_DIR}/" DESTINATION . FILES_MATCHING PATTERN "*.dll")
 endif()
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyNotices.md" DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdPartyNotices.md" DESTINATION .)
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/apache2.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/../thirdPartyLicenses/metis.txt"

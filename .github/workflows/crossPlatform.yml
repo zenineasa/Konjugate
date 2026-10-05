@@ -58,7 +58,7 @@ jobs:
             - run: npm run test:engine
             - name: Install package engine layout
               run: cmake --install out/engine --config RelWithDebInfo --prefix out/packageResources/engine
-            - run: cmake -E copy thirdPartyNotices.md out/packageResources
+            - run: cmake -E copy ThirdPartyNotices.md out/packageResources
             - run: cmake -E copy_directory thirdPartyLicenses out/packageResources/thirdPartyLicenses
             - name: Verify installed METIS runtime and notices
               run: node scripts/verifyPackagingNotices.mjs out/packageResources

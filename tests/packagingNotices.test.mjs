@@ -9,7 +9,7 @@ import { createPackageOptions } from '../scripts/packageElectron.mjs';
 const rootDirectory = join(import.meta.dirname, '..');
 
 test('tracked METIS notices contain the required attribution and Apache license', async () => {
-    const notice = await readFile(join(rootDirectory, 'thirdPartyNotices.md'), 'utf8');
+    const notice = await readFile(join(rootDirectory, 'ThirdPartyNotices.md'), 'utf8');
     const metisNotice = await readFile(join(rootDirectory, 'thirdPartyLicenses', 'metis.txt'), 'utf8');
     const apacheLicense = await readFile(join(rootDirectory, 'thirdPartyLicenses', 'apache2.txt'), 'utf8');
 
@@ -40,7 +40,7 @@ test('packageElectron.mjs bundles third-party notices and the packaged engine as
         platform: 'darwin', arch: 'arm64', appVersion: '1.0.0', icon: 'icon.icns', name: 'Konjugate', appBundleId: 'com.konjugate.app'
     });
     assert.ok(extraResource.includes('out/packageResources/engine'));
-    assert.ok(extraResource.includes('thirdPartyNotices.md'));
+    assert.ok(extraResource.includes('ThirdPartyNotices.md'));
     assert.ok(extraResource.includes('thirdPartyLicenses'));
 });
 

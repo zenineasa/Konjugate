@@ -1,7 +1,7 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
 // Cross-checks every statically-shipped vcpkg dependency (any installed port with its own
-// `copyright` file) against thirdPartyNotices.md, so a new dependency can't go undocumented
+// `copyright` file) against ThirdPartyNotices.md, so a new dependency can't go undocumented
 // silently. This is exactly how abseil/utf8-range were originally missed: both are undeclared
 // transitive dependencies of protobuf, invisible in vcpkg.json, and only discoverable by
 // inspecting a real installed tree -- the same tree this script reads.
@@ -11,7 +11,7 @@
 //   vcpkg-cmake-config) never ships inside the compiled engine and is excluded entirely.
 // - Every `boost*` port (the property-tree port itself plus its ~60 transitive Boost sub-ports,
 //   each of which vcpkg gives its own `copyright` file) is treated as one logical dependency,
-//   matching thirdPartyNotices.md's own framing ("every Boost component this pulls in
+//   matching ThirdPartyNotices.md's own framing ("every Boost component this pulls in
 //   transitively"): a single "boost" mention covers the whole group, rather than requiring each
 //   individual sub-port name to appear literally.
 
@@ -27,7 +27,7 @@ const triplets = (await readdir(installedDirectory, { withFileTypes: true }))
     .map((entry) => entry.name);
 if (triplets.length === 0) throw new Error(`No vcpkg triplet directories found under ${installedDirectory}.`);
 
-const notice = (await readFile(join(rootDirectory, 'thirdPartyNotices.md'), 'utf8'))
+const notice = (await readFile(join(rootDirectory, 'ThirdPartyNotices.md'), 'utf8'))
     .toLowerCase().replace(/[^a-z]/g, '');
 
 async function hasFile(path) {
@@ -57,7 +57,7 @@ for (const triplet of triplets) {
 if (sawBoost && !notice.includes('boost')) undocumented.push('boost (transitive Boost components)');
 
 if (undocumented.length > 0) {
-    throw new Error(`thirdPartyNotices.md does not mention: ${undocumented.join(', ')}. Add a section for each before packaging.`);
+    throw new Error(`ThirdPartyNotices.md does not mention: ${undocumented.join(', ')}. Add a section for each before packaging.`);
 }
 
-console.log(`Verified thirdPartyNotices.md covers every statically-shipped vcpkg dependency across ${triplets.join(', ')}.`);
+console.log(`Verified ThirdPartyNotices.md covers every statically-shipped vcpkg dependency across ${triplets.join(', ')}.`);

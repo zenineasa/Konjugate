@@ -73,7 +73,7 @@ export function createPackageOptions({ platform, arch, appVersion, icon, name, a
         } : undefined,
         extraResource: [
             'out/packageResources/engine',
-            'thirdPartyNotices.md',
+            'ThirdPartyNotices.md',
             'thirdPartyLicenses',
             'docs/welcome.md',
             'docs/causalInferenceInteractionHelp.md',

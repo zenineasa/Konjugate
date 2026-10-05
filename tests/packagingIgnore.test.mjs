@@ -67,7 +67,7 @@ test('Electron Packager options retain resources and macOS bundle ID', () => {
     assert.equal(options.appBundleId, 'com.konjugate');
     assert.deepEqual(options.extraResource, [
         'out/packageResources/engine',
-        'thirdPartyNotices.md',
+        'ThirdPartyNotices.md',
         'thirdPartyLicenses',
         'docs/welcome.md',
         'docs/causalInferenceInteractionHelp.md',

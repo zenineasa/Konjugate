@@ -68,12 +68,12 @@ modules:
                                # first; org.freedesktop.Sdk may already provide this
   - distribution/flatpak/modules/openssl.json # TODO -- same as zlib
   - distribution/flatpak/modules/abseil.json # TODO -- protobuf's undeclared transitive dependency (see
-                                 # thirdPartyNotices.md's "Abseil" section)
+                                 # ThirdPartyNotices.md's "Abseil" section)
   - distribution/flatpak/modules/protobuf.json # TODO
   - distribution/flatpak/modules/nlopt.json # TODO -- upstream tag confirmed as v2.11.0 by reading
                                 # .tools/vcpkg/ports/nlopt/portfile.cmake directly; build WITHOUT
                                 # the luksan feature to stay MIT-licensed, matching vcpkg.json's
-                                # plain `nlopt` (no `luksan` feature) -- see thirdPartyNotices.md
+                                # plain `nlopt` (no `luksan` feature) -- see ThirdPartyNotices.md
 
   - name: konjugate
     # TODO -- this is the genuinely unsolved piece. engine/CMakeLists.txt currently always loads

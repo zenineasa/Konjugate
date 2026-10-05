@@ -253,7 +253,7 @@ The visualization add-on should demonstrate the value of the extension system th
 An initial release could provide:
 
 - 2D point, line and trajectory layers;
-- 3D points and paths for spatial or geographic data; **shipped** — [Konjugate-PoseVisualizer](https://github.com/zenineasa/Konjugate-PoseVisualizer) (install via Discover; see [docs/addonExplorer.md](addonExplorer.md)), a full Three.js scene for bodies/links.
+- 3D points and paths for spatial or geographic data; **shipped** — [Konjugate-PoseVisualizer](https://github.com/zenineasa/Konjugate-PoseVisualizer) (install via Discover; see [docs/extensionsExplorer.md](extensionsExplorer.md)), a full Three.js scene for bodies/links.
 - Plotly-backed time-series, scatter and distribution charts; **time-series shipped** — [Konjugate-ResultPlotViewer](https://github.com/zenineasa/Konjugate-ResultPlotViewer) (install via Discover); scatter/distribution still open.
 - signal-to-color, signal-to-size and signal-to-label mappings; still open.
 - a shared time cursor with the simulation result player; **shipped**.

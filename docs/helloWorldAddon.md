@@ -10,7 +10,7 @@ status: stable
 
 This example is the smallest Konjugate add-on. It opens a read-only result visualizer and reads the active project name, run name and signal count through the version 1 visualizer bridge.
 
-It no longer ships bundled with Konjugate core -- its source lives in its own repository, [Konjugate-HelloWorld](https://github.com/zenineasa/Konjugate-HelloWorld), and installs like any other add-on through the Extensions dialog's Discover tab (see [docs/addonExplorer.md](addonExplorer.md)).
+It no longer ships bundled with Konjugate core -- its source lives in its own repository, [Konjugate-HelloWorld](https://github.com/zenineasa/Konjugate-HelloWorld), and installs like any other add-on through the Extensions dialog's Discover tab (see [docs/extensionsExplorer.md](extensionsExplorer.md)).
 
 ## What it demonstrates
 

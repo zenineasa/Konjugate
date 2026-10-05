@@ -9237,7 +9237,7 @@ async function openExamplesExplorer() {
 let extensionsEntries = null;
 let extensionsTab = 'addon';
 let extensionsSelectedKey = null;
-// Discover mode (see docs/addonExplorer.md): browsing what the registry offers, as opposed to
+// Discover mode (see docs/extensionsExplorer.md): browsing what the registry offers, as opposed to
 // Installed mode's "what's on disk" above. Kept as separate state/render functions rather than
 // folding into the Installed ones, since a registry entry (title/description/license/packages) and
 // an installed package (permissions/enabled state) are different shapes of thing.
@@ -9248,7 +9248,7 @@ let discoverStale = false;
 let discoverDomain = 'all';
 let discoverSelectedPrefix = null;
 // prefix -> { latestVersion, releaseUrl, outdated: [{packageId, installedVersion}] } (see
-// docs/addonExplorer.md's Update checking note). Populated in the background on dialog open, same
+// docs/extensionsExplorer.md's Update checking note). Populated in the background on dialog open, same
 // as discoverEntries above -- a failure here just means no update information this session.
 let packageUpdates = new Map();
 
@@ -9370,7 +9370,7 @@ async function ensurePackageUpdates({ force = false } = {}) {
     renderPackageUpdatesBadge();
 }
 
-// The Explorer entry point's badge (see docs/addonExplorer.md's Update checking note): one count
+// The Explorer entry point's badge (see docs/extensionsExplorer.md's Update checking note): one count
 // per outdated installed package, not per registry entry, so a two-package bundle counts as two --
 // matching how many rows show "Update available" in Installed mode.
 function renderPackageUpdatesBadge() {
@@ -9384,7 +9384,7 @@ function renderPackageUpdatesBadge() {
 }
 
 // A human-readable warning if uninstalling/disabling entry would leave an installed bundle sibling
-// without its counterpart (see the Multi-package bundles section of docs/addonExplorer.md) -- null
+// without its counterpart (see the Multi-package bundles section of docs/extensionsExplorer.md) -- null
 // if entry isn't part of a bundle, or its siblings aren't installed anyway.
 function bundleWarningFor(entry, verb) {
     const bundleEntry = registryBundleFor(entry.packageId);
@@ -9723,7 +9723,7 @@ async function openExtensionsDialog() {
     // (registryDescriptionFor) fill in silently once this resolves, rather than making every
     // dialog-open wait on a network round trip it doesn't need to show anything. Failure here just
     // means no registry-sourced info this session -- advisory only, per the design principles in
-    // docs/addonExplorer.md.
+    // docs/extensionsExplorer.md.
     ensureDiscoverRegistry().then(() => {
         if (extensionsMode === 'installed') {
             renderExtensionsResults();
@@ -9844,7 +9844,7 @@ $('#extensionsUpdate').addEventListener('click', async () => {
         const registryEntry = discoverEntries.find((candidate) => candidate.prefix === update.prefix);
         if (!registryEntry) throw new Error(`${update.prefix} is no longer listed in the registry.`);
         // The whole entry, not just entry.packageId -- a bundle updates in lockstep (see the
-        // Multi-package bundles section of docs/addonExplorer.md), so updating one half means
+        // Multi-package bundles section of docs/extensionsExplorer.md), so updating one half means
         // reinstalling the other too, exactly like a fresh Discover install of the same entry.
         const results = await window.extensions.installFromRegistry(registryEntry, discoverRegistry);
         // Keep the same package selected at its new version, rather than letting the old version's
@@ -9879,7 +9879,7 @@ $('#extensionsToggleEnabled').addEventListener('click', async () => {
     if (!entry) return;
     // Disabling gets the identical warning uninstalling does, not a lighter touch just because it's
     // reversible -- a project needing both bundle halves fails to resolve the same way either way
-    // (see the Multi-package bundles section of docs/addonExplorer.md). Enabling never needs it.
+    // (see the Multi-package bundles section of docs/extensionsExplorer.md). Enabling never needs it.
     if (entry.enabled) {
         const bundleWarning = bundleWarningFor(entry, 'disabling');
         if (bundleWarning && !window.confirm(`Disable ${entry.name} ${entry.version}? ${bundleWarning}`)) return;

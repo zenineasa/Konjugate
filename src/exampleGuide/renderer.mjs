@@ -62,7 +62,7 @@ function renderCardSection(heading, cards) {
     return `<h2>${escapeHtml(heading)}</h2><div class="cardGrid">${cards.map(renderCard).join('')}</div>`;
 }
 
-// The one-time starter-pack offer (see the Recommended add-ons section of docs/addonExplorer.md).
+// The one-time starter-pack offer (see the Recommended add-ons section of docs/extensionsExplorer.md).
 // A distinct block rather than reusing renderCard/renderCardSection above -- those are built for
 // "thumbnail + title, links out on click," and this needs an in-app action (install, then an
 // inline result) instead, which is a different interaction shape, not just different content.

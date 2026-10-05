@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// The network side of the registry (see docs/registry.md, docs/addonExplorer.md): fetching entries
+// The network side of the registry (see docs/registry.md, docs/extensionsExplorer.md): fetching entries
 // from GitHub, and downloading/verifying/installing the packages a chosen entry lists. Kept
 // separate from packageArchive.mjs, which stays fetch-free and disk/byte-only, so that module's
 // tests never need a network mock. Everything here is a plain function taking a fetch
@@ -19,7 +19,7 @@ export class RegistryClientError extends Error {
 }
 
 // The one official registry, unless overridden. Deliberately an environment variable, not a UI
-// preference, for now -- see docs/addonExplorer.md's Design principles: this is a buried,
+// preference, for now -- see docs/extensionsExplorer.md's Design principles: this is a buried,
 // admin-level concern (pointing an organization's installs at a private fork or mirror), not
 // something worth a settings UI before anyone's actually asked for one.
 const defaultOwner = 'zenineasa';
@@ -76,7 +76,7 @@ export async function fetchRemoteRegistry({
 // entry: one registry entry (as returned by fetchRemoteRegistry/loadNamespaceRegistry's prefixes
 // map), with its packages/downloadUrl fields. namespaces: passed straight through to
 // verifyPackageArchive for each installed package -- trust status is reported per package, never
-// used to block anything here, per the advisory-only principle in docs/addonExplorer.md. Returns
+// used to block anything here, per the advisory-only principle in docs/extensionsExplorer.md. Returns
 // one { packageType, packageId, version, verification } per package the entry declares.
 export async function installFromRegistryEntry(entry, { namespaces, directory, overwrite = true, fetchImpl = fetch } = {}) {
     if (typeof entry?.downloadUrl !== 'string' || !entry.downloadUrl) throw new RegistryClientError('This registry entry has no downloadUrl.', 'NO_DOWNLOAD_URL');
@@ -205,7 +205,7 @@ export async function fetchRegistryScreenshot(entry, index, { fetchImpl = fetch,
     return { mimeType: identifyRegistryImage(bytes, url), bytes };
 }
 
-// ---- Update checking (see the Recommended add-ons/Update checking notes in docs/addonExplorer.md)
+// ---- Update checking (see the Recommended add-ons/Update checking notes in docs/extensionsExplorer.md)
 //
 // A registry entry deliberately carries no version number of its own (see docs/registry.md -- it
 // would just be a second, staler copy of what the actual release already declares), so "is there an

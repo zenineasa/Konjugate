@@ -462,7 +462,7 @@ export function validateNamespaceEntry(entry, prefix) {
         }
     }
     // Surfaced in the Welcome window's one-time starter-pack offer (see the Recommended add-ons
-    // section of docs/addonExplorer.md) -- meaningless on an entry with nothing to install, so it
+    // section of docs/extensionsExplorer.md) -- meaningless on an entry with nothing to install, so it
     // requires the same fields Discover's one-click install already requires.
     if (entry.recommended !== undefined) {
         if (typeof entry.recommended !== 'boolean') invalid('recommended, if present, must be a boolean.');
@@ -473,7 +473,7 @@ export function validateNamespaceEntry(entry, prefix) {
         for (const [index, item] of entry.packages.entries()) {
             if (!item || !packageTypes.includes(item.packageType)) invalid(`packages[${index}].packageType must be "addon" or "plugin".`);
             if (typeof item.packageId !== 'string' || !packageIdPattern.test(item.packageId)) invalid(`packages[${index}].packageId is not a valid package id.`);
-            if (!isPrefixOf(prefix, item.packageId)) invalid(`packages[${index}].packageId ("${item.packageId}") is not under this entry's own prefix ("${prefix}") -- see the Multi-package bundles note in docs/addonExplorer.md for why a bundle can't name another prefix's package.`);
+            if (!isPrefixOf(prefix, item.packageId)) invalid(`packages[${index}].packageId ("${item.packageId}") is not under this entry's own prefix ("${prefix}") -- see the Multi-package bundles note in docs/extensionsExplorer.md for why a bundle can't name another prefix's package.`);
         }
     }
 }

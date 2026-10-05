@@ -382,7 +382,7 @@ async function welcomeVideoCards() {
     return welcomeVideoCardsCache;
 }
 
-// A one-time starter-pack offer (see the Recommended add-ons section of docs/addonExplorer.md):
+// A one-time starter-pack offer (see the Recommended add-ons section of docs/extensionsExplorer.md):
 // shown once ever, regardless of what the person does with it -- declining is as final as
 // accepting, per that section's "must be ... never repeated once declined or accepted". The flag
 // is only written at the moment something is actually about to be shown (see openWelcomeWindow
@@ -1301,12 +1301,12 @@ ipcMain.handle('applicationRestart', () => {
     app.exit(0);
 });
 
-// A registry entry's own project/commercial-license/contact links (see docs/addonExplorer.md) point
+// A registry entry's own project/commercial-license/contact links (see docs/extensionsExplorer.md) point
 // at whatever a third-party publisher declared -- they will not match allowedExternalLinkPrefixes
 // above (that allowlist is for Konjugate's own trusted domains only), and loosening it to cover an
 // open, permissionless registry would defeat its purpose. Instead: any https:// URL is allowed, but
 // only after the person confirms leaving Konjugate for a destination the registry entry chose, not
-// this app -- the same pattern VS Code uses for an extension's own links (see The Addon Explorer's
+// this app -- the same pattern VS Code uses for an extension's own links (see The Extensions Explorer's
 // design principles for why that precedent already grounds this feature).
 ipcMain.handle('packageOpenRegistryLink', async (event, url) => {
     if (typeof url !== 'string' || !url.startsWith('https://')) return false;
@@ -1324,7 +1324,7 @@ ipcMain.handle('packageOpenRegistryLink', async (event, url) => {
     return true;
 });
 
-// The Explorer's "Discover" side (see docs/addonExplorer.md). A local cache means the Explorer
+// The Explorer's "Discover" side (see docs/extensionsExplorer.md). A local cache means the Explorer
 // still shows a (stale-but-present) list offline or if GitHub's API is briefly unreachable, rather
 // than an empty/broken screen -- the renderer is told stale:true so it can say so.
 const registryCachePath = () => join(app.getPath('userData'), 'registryCache.json');
@@ -1472,7 +1472,7 @@ ipcMain.handle('packageOpenRegistryVideo', async (_event, request) => {
 // re-fetched here, so what gets installed is exactly what the user saw when they clicked Install,
 // and installing doesn't cost a second round trip to GitHub for data already in hand. One click
 // installs every package a bundle entry lists (see the Multi-package bundles section of
-// docs/addonExplorer.md); nothing here shows a confirmation dialog first the way manual
+// docs/extensionsExplorer.md); nothing here shows a confirmation dialog first the way manual
 // packageInstall does -- the Explorer's own detail pane, showing what it does before the click, is
 // that review, matching how a marketplace install normally works.
 //
@@ -1528,7 +1528,7 @@ ipcMain.handle('welcomeInstallRecommendedAddons', async (_event, entries) => {
 
 // One GitHub Releases API call per installed entry that has a matching registry entry -- not a
 // download, so this is cheap enough to run every time the Extensions dialog opens (see
-// docs/addonExplorer.md's Update checking note). Only entries that are actually installed are
+// docs/extensionsExplorer.md's Update checking note). Only entries that are actually installed are
 // checked, keeping the request count proportional to what's on disk, not the whole registry.
 async function checkPackageUpdates() {
     let registry;

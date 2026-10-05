@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('windowControls', Object.freeze({
 contextBridge.exposeInMainWorld('exampleGuide', Object.freeze({
     onContent: (callback) => ipcRenderer.on('exampleGuideContent', (_event, payload) => callback(payload)),
     openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url),
-    // The Welcome window's one-time recommended-add-ons offer (see docs/addonExplorer.md) --
+    // The Welcome window's one-time recommended-add-ons offer (see docs/extensionsExplorer.md) --
     // entries is exactly the recommendedAddons array this same window was sent in onContent.
     installRecommendedAddons: (entries) => ipcRenderer.invoke('welcomeInstallRecommendedAddons', entries),
     // Same channel the main window's restart-pending banner uses (see src/main.mjs); exposed here

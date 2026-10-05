@@ -1,6 +1,6 @@
 ---
 type: Guide
-title: Addon Explorer, Registry, and Recommendations
+title: Extensions Explorer, Registry, and Recommendations
 description: Architecture and user guide for discovering, installing, and managing add-ons and plugins from package registries.
 tags: [addons, registry, explorer, extensions]
 status: stable
@@ -8,7 +8,7 @@ status: stable
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
-# Addon Explorer, Registry, and Recommendations
+# Extensions Explorer, Registry, and Recommendations
 
 ## Status and purpose
 
@@ -47,7 +47,7 @@ Deliberately left out, sourced elsewhere instead: license compatibility fields f
 
 Reviewing reservation PRs is fine at today's single-maintainer scale and won't be revisited before it's an actual, felt bottleneck — the same reasoning as deferring a hosted marketplace, just at a much smaller scale. Not a gap to close now.
 
-## The Addon Explorer
+## The Extensions Explorer
 
 Extends `#extensionsDialog` with a second mode alongside today's "Installed" list — "Discover" — rather than building a separate window or dialog.
 
@@ -107,13 +107,13 @@ The project-level case is deliberately limited to an actual unmet reference — 
 
 This isn't really a five-stage march, even though an earlier version of this document phased it that way — a habit copied from documents describing genuinely large, sequenced features, not examined against what's actually here. There's one real deliverable, and everything else is a small, independent addition to it.
 
-**The core deliverable**: the `registry/<prefix>.json` format and the Explorer's "Discover" side of `#extensionsDialog`, meant together. **Both halves are now built** — see Registry restructuring and The Addon Explorer, above. A registry format with nothing reading it isn't a usable increment on its own — it's an unused file — so splitting "define the format" and "build the UI that reads it" into separate phases was artificial; they're two halves of one thing. Bundle support (installing every package a registry entry lists, not just one) is part of the format (`packages` is a list) and part of the install UI (`installFromRegistryEntry` installs every declared package, matched by identity rather than file name) — a version of this that only installs single packages wouldn't have actually solved the problem that motivated the whole document. Verified end to end against the real, live `konjugate.fintech` registry entry and its actual GitHub release.
+**The core deliverable**: the `registry/<prefix>.json` format and the Explorer's "Discover" side of `#extensionsDialog`, meant together. **Both halves are now built** — see Registry restructuring and The Extensions Explorer, above. A registry format with nothing reading it isn't a usable increment on its own — it's an unused file — so splitting "define the format" and "build the UI that reads it" into separate phases was artificial; they're two halves of one thing. Bundle support (installing every package a registry entry lists, not just one) is part of the format (`packages` is a list) and part of the install UI (`installFromRegistryEntry` installs every declared package, matched by identity rather than file name) — a version of this that only installs single packages wouldn't have actually solved the problem that motivated the whole document. Verified end to end against the real, live `konjugate.fintech` registry entry and its actual GitHub release.
 
 **Independent follow-ons, in no particular order** — each useful on its own, none blocking or blocked by the others, none requiring the rest to exist first beyond the core deliverable above:
 
 - Turning an unmet plugin/add-on reference into an install offer instead of a bare error (needs the core deliverable's install flow to exist, nothing else). This is now the highest-priority remaining follow-on, since fully removing Pose Visualizer/Results Analysis from bundling (see Splitting the bundled example add-ons, above) left a real gap this would backfill.
 - A one-time Welcome-window starter-pack suggestion for new users. Same motivation as above — would also help backfill the gap left by no longer bundling Pose Visualizer/Results Analysis.
-- Surfacing available updates for already-installed packages. **Built**, see Update checking under The Addon Explorer, above.
+- Surfacing available updates for already-installed packages. **Built**, see Update checking under The Extensions Explorer, above.
 
 The last two in particular were only ever bundled together as "Phase 5" because they both happened last in the list, not because they have anything to do with each other.
 

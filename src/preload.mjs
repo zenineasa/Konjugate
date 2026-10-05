@@ -68,7 +68,7 @@ contextBridge.exposeInMainWorld('extensions', {
     install: () => ipcRenderer.invoke('packageInstall'),
     uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version }),
     setEnabled: (packageType, packageId, version, enabled) => ipcRenderer.invoke('packageSetEnabled', { packageType, packageId, version, enabled }),
-    // The Explorer's "Discover" side (see docs/addonExplorer.md).
+    // The Explorer's "Discover" side (see docs/extensionsExplorer.md).
     discoverRegistry: () => ipcRenderer.invoke('packageDiscoverRegistry'),
     installFromRegistry: (entry, namespaces) => ipcRenderer.invoke('packageInstallFromRegistry', { entry, namespaces }),
     // An entry's image as a data: URL, or null (see the packageRegistryImage handler in src/main.mjs).
@@ -89,7 +89,7 @@ contextBridge.exposeInMainWorld('extensions', {
     onRestartPendingChange: (callback) => {
         ipcRenderer.on('packageRestartPendingChanged', (_event, pending) => callback(pending));
     },
-    // One GitHub Releases API call per installed, registry-known package (see docs/addonExplorer.md's
+    // One GitHub Releases API call per installed, registry-known package (see docs/extensionsExplorer.md's
     // Update checking note) -- returns [{prefix, latestVersion, releaseUrl, outdated}] for whichever
     // entries have a newer release than what's installed. Cached main-process side for an hour
     // (shared across windows, cleared by any install/uninstall); force bypasses that cache.

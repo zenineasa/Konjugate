@@ -273,7 +273,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 #extensionsDetailBundleNote[hidden] { display: none; }
 #extensionsDetailEnabledBadge[hidden] { display: none; }
 .extensionsItem.disabledItem { opacity: .55; }
-/* Discover mode (see docs/addonExplorer.md): a mode toggle above the existing Installed-only
+/* Discover mode (see docs/extensionsExplorer.md): a mode toggle above the existing Installed-only
    tabs/domain-chip filters. No pre-download trust-status badge here -- see the comment on
    #extensionsDiscoverDetailContent in index.html for why one isn't shown before a package's
    signature can actually be checked. */

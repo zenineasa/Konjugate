@@ -64,7 +64,7 @@
                 <button id="extensionsButton" type="button" aria-label="Manage extensions" aria-haspopup="dialog" data-tooltip="Extensions">
         <img class="documentActionIcon" src="../../assets/extensions.svg" alt="">
         <span id="extensionsRestartBadge" class="diagnosticsBadge" hidden></span>
-        <!-- Count of installed add-ons/plugins with a newer release (see docs/addonExplorer.md's
+        <!-- Count of installed add-ons/plugins with a newer release (see docs/extensionsExplorer.md's
              Update checking note) -- kept separate from #extensionsRestartBadge above, which is a
              different state that can be showing at the same time. -->
         <span id="extensionsUpdateBadge" class="diagnosticsBadge extensionsUpdateBadge" hidden></span>
@@ -240,7 +240,7 @@
         <form method="dialog">
             <span class="contextKicker">Add-ons &amp; plugins</span>
             <strong>Extensions</strong>
-            <!-- Installed (built long before this) and Discover (see docs/addonExplorer.md) are a
+            <!-- Installed (built long before this) and Discover (see docs/extensionsExplorer.md) are a
                  mode, not a tab, since they show fundamentally different things -- what's on disk
                  vs. what a registry says exists elsewhere. The three existing tabs remain a filter
                  within Installed only; Discover filters by domain instead, mirroring the Examples
@@ -288,11 +288,11 @@
                         <p class="extensionsDetailLabel">Permissions</p>
                         <ul id="extensionsDetailPermissions" class="extensionsPermissionList"></ul>
                         <!-- Cross-references a registry-declared bundle sibling (see the Multi-package
-                             bundles section of docs/addonExplorer.md) -- only populated once the registry
+                             bundles section of docs/extensionsExplorer.md) -- only populated once the registry
                              has been fetched, so it's empty/hidden for anyone offline or without a
                              matching bundle. -->
                         <p id="extensionsDetailBundleNote" class="examplesExplorerDetailEmpty" hidden></p>
-                        <!-- Populated by packageCheckUpdates (see docs/addonExplorer.md's Update
+                        <!-- Populated by packageCheckUpdates (see docs/extensionsExplorer.md's Update
                              checking note) -- a GitHub Releases API check against this package's own
                              registry entry, not a version number stored in the registry itself. -->
                         <p id="extensionsDetailUpdateNote" class="examplesExplorerDetailEmpty" hidden></p>

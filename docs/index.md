@@ -37,7 +37,7 @@ okf_version: "0.2"
 * [Graph Selection & Editing](graphEditing.md) - Canvas navigation, multi-node movement, and clipboard interactions
 * [Result Exploration](resultExploration.md) - Paced playback, parameter interventions, and scenario branching
 * [Causal Inference](causalInference.md) - Structure discovery and parameter tuning from measured time-series data
-* [Add-on Explorer](addonExplorer.md) - Discovering, installing, and managing extensions from the registry
+* [Extensions Explorer](extensionsExplorer.md) - Discovering, installing, and managing extensions from the registry
 * [Hello World Add-on](helloWorldAddon.md) - Walkthrough of the minimal visualizer add-on
 * [Welcome](welcome.md) - Getting started overview and community links
 * [Causal Inference Help](causalInferenceInteractionHelp.md) - Interactive help documentation for structure discovery

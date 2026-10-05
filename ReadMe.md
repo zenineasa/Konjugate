@@ -99,7 +99,7 @@ It works in two stages: a lagged partial-correlation pass cheaply screens which 
 
 ## Add-ons & Plugins
 
-Konjugate ships with a built-in Explorer for discovering and one-click-installing add-ons and plugins, with no central marketplace to run or depend on — see [the Addon Explorer](docs/addonExplorer.md) for how it works. A few real examples are already published:
+Konjugate ships with a built-in Explorer for discovering and one-click-installing add-ons and plugins, with no central marketplace to run or depend on — see [the Extensions Explorer](docs/extensionsExplorer.md) for how it works. A few real examples are already published:
 
 <table>
 <td width="280"><a href="https://github.com/zenineasa/Konjugate-Logistics"><img src="registry/images/konjugate.logistics.webp" alt="Konjugate Logistics Toolbox"></a></td>

@@ -14,7 +14,7 @@ Konjugate's release pipeline (`.github/workflows/release.yml`) already builds an
 
 Two decisions shape everything below, both made deliberately: Konjugate ships **unsigned** for now (no Apple Developer ID, no Windows code-signing certificate — revisit once there's real traction), and none of the channels here cost anything to register on or publish through, so nothing is being skipped for budget reasons.
 
-**Current status:** winget and Chocolatey have CI jobs in `release.yml` (`wingetRelease`, `chocolateyRelease`) that run on every `v*` tag but are opt-in by secret — with `WINGET_TOKEN` / `CHOCOLATEY_API_KEY` unset, the job skips its real step with a notice instead of failing, so a release never goes red for a channel that isn't set up yet. Each needs a one-time human setup step first (see their sections). Homebrew Cask and Snap are deferred with no job (Cask is blocked by notarization and notability requirements; Snap by a missing store credential and an untested `snapcraft.yaml`), and Flathub is blocked by its own project-maturity and AI-content policies (see its section) — revisit once those no longer apply.
+**Current status:** winget, Chocolatey and Konjugate's own Homebrew tap have CI jobs in `release.yml` (`wingetRelease`, `chocolateyRelease`, `homebrewTapRelease`) that run on every `v*` tag but are opt-in by secret — with `WINGET_TOKEN` / `CHOCOLATEY_API_KEY` / `HOMEBREW_TAP_TOKEN` unset, the job skips its real step with a notice instead of failing, so a release never goes red for a channel that isn't set up yet. Each needs a one-time human setup step first (see their sections). The official Homebrew Cask and Snap are deferred with no job (the Cask is blocked by notarization and notability requirements; Snap by a missing store credential and an untested `snapcraft.yaml`), and Flathub is blocked by its own project-maturity and AI-content policies (see its section) — revisit once those no longer apply.
 
 ## Shared app metadata
 
@@ -23,6 +23,19 @@ Two decisions shape everything below, both made deliberately: Konjugate ships **
 `distribution/snap/snapcraft.yaml` is not generated from this yet — it isn't wired into `release.yml` today (see its own section below), so that's a real but lower-priority follow-up rather than something worth the risk of editing an unverified manifest alongside this change. Update it by hand to match if `appMetadata.yml` changes in the meantime.
 
 The generated file's own `<releases>` entry and screenshot URL version tag are still only a last-known-good snapshot at the moment someone runs the generator — `Makefile`'s `distributableLinux` target unconditionally overwrites both with the live `package.json` version at actual AppImage build time regardless (see that target's own comment), so the shipped binary's embedded copy can never be stale even if the generator hasn't been re-run recently.
+
+## Homebrew tap
+
+**Automated:** the `homebrewTapRelease` job in `release.yml` runs after the GitHub Release is published. It runs `scripts/generateHomebrewCask.mjs --tap` (also `npm run homebrew:generate-tap-cask`), which downloads the just-published DMGs and AppImage, hashes them, and writes `Casks/konjugate.rb`, then commits that file to the tap repository `zenineasa/homebrew-konjugate`. It only runs its real step when the `HOMEBREW_TAP_TOKEN` secret is set. Users install with `brew install --cask zenineasa/konjugate/konjugate` (Homebrew adds the tap automatically) and update with `brew upgrade --cask konjugate`; the app lands in `/Applications` like any other, so nothing needs running afterwards.
+
+**Why a tap and not the official cask:** the official `Homebrew/homebrew-cask` repository has the notarization and notability blockers described in the next section. A personal tap isn't held to those rules, so its cask can include a `postflight` step that removes macOS's quarantine flag (`xattr -dr com.apple.quarantine`). That step is what makes the install open without the "damaged" warning, and it was verified: installing the generated cask on a Mac leaves no quarantine flag, while an otherwise identical cask without the step leaves `com.apple.quarantine` on the app and every file inside it. The app is only ad-hoc signed, so `spctl` still rejects it — the flag removal skips Gatekeeper's check rather than satisfying it, which the cask's caveats say plainly. Only the Homebrew route gets this; a downloaded DMG still needs the steps in the ReadMe. The real fix is an Apple Developer ID plus notarization.
+
+**One-time setup, in order:**
+1. Create an empty public repository named `homebrew-konjugate` under the `zenineasa` account (Homebrew requires the `homebrew-` prefix for `brew tap zenineasa/konjugate` to find it). A short README is optional.
+2. Create a fine-grained personal access token that can write contents to that one repository only, and store it as this repo's `HOMEBREW_TAP_TOKEN` secret.
+3. Either wait for the next `v*` tag (the job generates and commits the cask), or commit `distribution/homebrew/tap/Casks/konjugate.rb` (from `npm run homebrew:generate-tap-cask`) to the tap's `Casks/` directory by hand.
+
+**Caveats:** the tap is not discoverable through `brew search`, so the install command belongs in the ReadMe (it is there). The generated cask also covers the Linux AppImage; that part is untested.
 
 ## Homebrew Cask — deferred, two real blockers found
 

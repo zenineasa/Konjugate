@@ -143,6 +143,12 @@ Konjugate isn't code-signed yet — an active choice while the project is in bet
   xattr -cr /Applications/Konjugate.app
   ```
   Alternatively, open System Settings → Privacy & Security → Open Anyway.
+
+  Or install with [Homebrew](https://brew.sh), which puts Konjugate in your Applications folder and clears that warning for you (it removes the quarantine flag, so macOS has not checked the app — only do this if you trust the project):
+  ```bash
+  brew install --cask zenineasa/konjugate/konjugate
+  ```
+  Update later with `brew upgrade --cask konjugate`.
 - **Windows**: if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
 
 ## Development

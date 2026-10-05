@@ -10,6 +10,7 @@ assets/icons
 src/generated
 distribution/flatpak/generatedSources.json
 distribution/homebrew/konjugate.rb
+distribution/homebrew/tap
 **/*.pyc
 **/__pycache__
 build

@@ -50,6 +50,7 @@
         "test:package": "make verifyPackage",
         "flatpak:generate-sources": "node scripts/generateFlatpakNodeSources.mjs",
         "homebrew:generate-cask": "node scripts/generateHomebrewCask.mjs",
+        "homebrew:generate-tap-cask": "node scripts/generateHomebrewCask.mjs --tap",
         "test:codeExportFidelity": "npm run build:engine && node tests/engine/codeExportFidelity.mjs",
         "test:fmiExportFidelity": "npm run build:engine && node tests/engine/fmiExportFidelity.mjs",
         "test:fmiRoundTrip": "npm run build:engine && node tests/engine/fmiRoundTrip.mjs",

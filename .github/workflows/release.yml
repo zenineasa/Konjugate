@@ -275,9 +275,10 @@ jobs:
     # because a channel hasn't been set up. See docs/packageManagerDistribution.md for the one-time
     # manual setup each channel needs before its secret is added.
     #
-    # Homebrew Cask and Snap remain deliberately deferred, with no job here:
-    #   - Homebrew Cask: a real `brew audit --new` run surfaced hard blockers (macOS notarization,
-    #     a project-notability bar) that aren't quick fixes.
+    # The official Homebrew Cask and Snap remain deliberately deferred, with no job here (Konjugate's
+    # own Homebrew tap is automated by homebrewTapRelease below):
+    #   - official Homebrew Cask: a real `brew audit --new` run surfaced hard blockers (macOS
+    #     notarization, a project-notability bar) that aren't quick fixes.
     #   - Snap: needs a one-time Snapcraft Store credential (SNAPCRAFT_STORE_CREDENTIALS) that
     #     doesn't exist yet, and distribution/snap/snapcraft.yaml itself has never been run through
     #     a real `snapcraft pack`.
@@ -376,3 +377,51 @@ jobs:
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                   msstore publish out/msix/Konjugate-x64.msix --appId $env:MS_STORE_PRODUCT_ID
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    homebrewTapRelease:
+        needs: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        env:
+            HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        steps:
+            # Keeps the cask in Konjugate's own tap (zenineasa/homebrew-konjugate) pointed at the
+            # release just published, so `brew upgrade --cask konjugate` finds it. Opt-in by secret
+            # like the other channels: HOMEBREW_TAP_TOKEN is a token with write access to the tap
+            # repository's contents (see docs/packageManagerDistribution.md for the setup). The tap
+            # repository has to exist already; this only updates its Casks/konjugate.rb.
+            - name: Skip when the Homebrew tap isn't set up yet
+              if: env.HOMEBREW_TAP_TOKEN == ''
+              run: echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipping the Homebrew tap (see docs/packageManagerDistribution.md)."
+            - uses: actions/checkout@v4
+              if: env.HOMEBREW_TAP_TOKEN != ''
+            - uses: actions/setup-node@v4
+              if: env.HOMEBREW_TAP_TOKEN != ''
+              with:
+                  node-version: 24.19.0
+            - uses: actions/checkout@v4
+              if: env.HOMEBREW_TAP_TOKEN != ''
+              with:
+                  repository: zenineasa/homebrew-konjugate
+                  token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+                  path: tap
+            - name: Update the tap's cask for this release
+              if: env.HOMEBREW_TAP_TOKEN != ''
+              env:
+                  TAG: ${{ github.ref_name }}
+              # The generator downloads the just-published DMGs and AppImage and hashes them, so the
+              # cask's checksums are those of exactly what users download.
+              run: |
+                  node scripts/generateHomebrewCask.mjs "$TAG" --tap
+                  mkdir -p tap/Casks
+                  cp distribution/homebrew/tap/Casks/konjugate.rb tap/Casks/konjugate.rb
+                  cd tap
+                  git add Casks/konjugate.rb
+                  if git diff --cached --quiet; then
+                      echo "The tap's cask is already up to date."
+                      exit 0
+                  fi
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git commit -m "konjugate $TAG"
+                  git push

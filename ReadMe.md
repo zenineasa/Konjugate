@@ -138,17 +138,17 @@ Want a quick look before installing anything? A free, in-browser trial of Konjug
 
 Konjugate isn't code-signed yet — an active choice while the project is in beta, not an accident — so your OS may show a security warning the first time you open a downloaded release. This doesn't mean the download is corrupted.
 
-- **macOS**: if you see "Konjugate.app is damaged and can't be opened," move it to Applications, then in Terminal run:
+- **macOS**: the recommended way is [Homebrew](https://brew.sh). One command puts Konjugate in your Applications folder, checks the download against its published checksum and opens without a warning:
+  ```bash
+  brew install --cask zenineasa/konjugate/konjugate
+  ```
+  Update later with `brew upgrade --cask konjugate`. Because Konjugate isn't signed, Homebrew clears macOS's quarantine flag for you, so macOS hasn't checked the app itself; install it if you trust the project.
+
+  Prefer to download the app yourself? If you see "Konjugate.app is damaged and can't be opened," move it to Applications, then in Terminal run:
   ```bash
   xattr -cr /Applications/Konjugate.app
   ```
   Alternatively, open System Settings → Privacy & Security → Open Anyway.
-
-  Or install with [Homebrew](https://brew.sh), which puts Konjugate in your Applications folder and clears that warning for you (it removes the quarantine flag, so macOS has not checked the app — only do this if you trust the project):
-  ```bash
-  brew install --cask zenineasa/konjugate/konjugate
-  ```
-  Update later with `brew upgrade --cask konjugate`.
 - **Windows**: if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
 
 ## Development

@@ -251,7 +251,7 @@ jobs:
                       cat <<'EOF'
                   > **Installation notes:** Konjugate isn't code-signed yet (an active choice while the project is in beta), so your OS may show a security warning on first launch. This doesn't mean the download is corrupted.
                   >
-                  > - **macOS** — if you see "is damaged and can't be opened": move Konjugate.app to Applications, then in Terminal run `xattr -cr /Applications/Konjugate.app`. Or: System Settings → Privacy & Security → Open Anyway.
+                  > - **macOS**: install with [Homebrew](https://brew.sh), the recommended way: `brew install --cask zenineasa/konjugate/konjugate` (it checks the download, puts Konjugate in Applications and opens without a warning; update with `brew upgrade --cask konjugate`). Downloaded the DMG below instead? If you see "is damaged and can't be opened": move Konjugate.app to Applications, then in Terminal run `xattr -cr /Applications/Konjugate.app`. Or: System Settings → Privacy & Security → Open Anyway.
                   > - **Windows** — if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
 
                   EOF

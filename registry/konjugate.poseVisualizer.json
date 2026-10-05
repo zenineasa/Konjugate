@@ -13,6 +13,9 @@
     "recommended": true,
     "url": "https://github.com/zenineasa/Konjugate-PoseVisualizer",
     "image": "images/konjugate.poseVisualizer.webp",
+    "screenshots": [
+        { "image": "screenshots/konjugate.poseVisualizer.fourBarLinkage.webp", "caption": "A four-bar linkage replayed in 3D, with each body's frame, its connections and timeline playback" }
+    ],
     "packages": [
         { "packageType": "addon", "packageId": "konjugate.poseVisualizer" }
     ],

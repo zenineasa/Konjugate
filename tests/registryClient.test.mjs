@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { strToU8, zipSync } from 'fflate';
 import { createPackageArchive, listInstalledPackages, loadNamespaceRegistry, PackageArchiveError } from '../src/packageArchive.mjs';
-import { fetchLatestReleaseVersion, fetchRegistryImage, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, isNewerVersion, registryImageMaxBytes, registryImageUrl, RegistryClientError } from '../src/registryClient.mjs';
+import { fetchLatestReleaseVersion, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, isNewerVersion, registryImageMaxBytes, registryImageUrl, RegistryClientError, registryScreenshotUrl } from '../src/registryClient.mjs';
 
 // A minimal but real .kja, built the same way tests/packageArchive.test.mjs does.
 function addonArchive(packageId = 'example.fintech.toolbox', version = '0.1.0') {
@@ -305,5 +305,41 @@ test('the bundled registry\'s images all exist, are valid and are referenced', a
     const referenced = Object.values(prefixes).map((entry) => entry.image).filter(Boolean);
     for (const image of referenced) identifyRegistryImage(new Uint8Array(await readFile(join('registry', image))), image);
     const shipped = (await readdir(join('registry', 'images')).catch(() => [])).filter((name) => !name.startsWith('.')).map((name) => `images/${name}`);
+    assert.deepEqual(shipped.filter((name) => !referenced.includes(name)), []);
+});
+
+const screenshotEntry = { screenshots: [{ image: 'screenshots/example.fintech.1.webp', caption: 'One' }, { image: 'screenshots/example.fintech.2.png', caption: 'Two' }] };
+const screenshotUrl = (name) => `https://raw.githubusercontent.com/zenineasa/Konjugate/master/registry/screenshots/${name}`;
+
+test('registryScreenshotUrl resolves each screenshot against the registry, and refuses anything else', () => {
+    assert.equal(registryScreenshotUrl(screenshotEntry, 0, { registryUrl: '' }), screenshotUrl('example.fintech.1.webp'));
+    assert.equal(registryScreenshotUrl(screenshotEntry, 1, { registryUrl: '', owner: 'example', repo: 'Mirror', ref: 'main' }),
+        'https://raw.githubusercontent.com/example/Mirror/main/registry/screenshots/example.fintech.2.png');
+    assert.equal(registryScreenshotUrl(screenshotEntry, 0, { registryUrl: 'https://mirror.example.org/konjugate/registry.json' }),
+        'https://mirror.example.org/konjugate/screenshots/example.fintech.1.webp');
+    assert.equal(registryScreenshotUrl(screenshotEntry, 2, { registryUrl: '' }), null);
+    assert.equal(registryScreenshotUrl({}, 0, { registryUrl: '' }), null);
+    assert.equal(registryScreenshotUrl({ screenshots: [{ image: 'images/example.webp', caption: 'x' }] }, 0, { registryUrl: '' }), null);
+    assert.equal(registryScreenshotUrl({ screenshots: [{ image: 'screenshots/../secrets.png', caption: 'x' }] }, 0, { registryUrl: '' }), null);
+});
+
+test('fetchRegistryScreenshot downloads and checks a screenshot like an image', async () => {
+    const url = screenshotUrl('example.fintech.2.png');
+    const result = await fetchRegistryScreenshot(screenshotEntry, 1, { registryUrl: '', fetchImpl: fakeFetch({ [url]: bytesResponse(new Uint8Array(pngHeader)) }) });
+    assert.equal(result.mimeType, 'image/png');
+    await assert.rejects(() => fetchRegistryScreenshot(screenshotEntry, 5, { registryUrl: '', fetchImpl: fakeFetch({}) }), (error) => error.code === 'NO_IMAGE');
+    await assert.rejects(() => fetchRegistryScreenshot(screenshotEntry, 1, { registryUrl: '', fetchImpl: fakeFetch({ [url]: bytesResponse(new Uint8Array(), { ok: false, status: 404 }) }) }),
+        (error) => error.code === 'DOWNLOAD_FAILED');
+    await assert.rejects(() => fetchRegistryScreenshot(screenshotEntry, 1, { registryUrl: '', fetchImpl: fakeFetch({ [url]: bytesResponse(strToU8('not an image')) }) }),
+        (error) => error.code === 'INVALID_IMAGE');
+});
+
+// Same guarantee as for images, for the real registry: every screenshot an entry names exists and
+// passes the checks the app applies, and nothing in screenshots/ is left unreferenced.
+test('the bundled registry\'s screenshots all exist, are valid and are referenced', async () => {
+    const { prefixes } = await loadNamespaceRegistry('registry');
+    const referenced = Object.values(prefixes).flatMap((entry) => (entry.screenshots ?? []).map((screenshot) => screenshot.image));
+    for (const image of referenced) identifyRegistryImage(new Uint8Array(await readFile(join('registry', image))), image);
+    const shipped = (await readdir(join('registry', 'screenshots')).catch(() => [])).filter((name) => !name.startsWith('.')).map((name) => `screenshots/${name}`);
     assert.deepEqual(shipped.filter((name) => !referenced.includes(name)), []);
 });

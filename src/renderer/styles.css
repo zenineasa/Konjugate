@@ -183,14 +183,19 @@ input, select, textarea { user-select: text; }
 #examplesExplorerLoad:hover { background: var(--accent-bright) !important; }
 #examplesExplorerDetailDescription { margin: 0; color: #8199a3; font-size: 8px; line-height: 1.6; }
 
-.extensionsDialog { width: 760px; }
+/* Wider and taller than the Examples dialog it was modeled on: Discover's detail pane now carries
+   screenshots and video links as well as a description, and 240px by 380px was too small for that.
+   Width and height follow the window (as .assistantConfigurationDialog does for width) so the dialog
+   stays on screen at any UI zoom, with the old 380px as the floor. */
+.extensionsDialog { --extensions-pane-height: clamp(380px, calc(100vh - 320px), 600px); width: min(980px, calc(100vw - 40px)); max-width: none; }
+.extensionsDialog .examplesExplorerBody { grid-template-columns: 1fr 360px; }
 .extensionsDialog footer span { flex: 1; }
 .extensionsTabs { display: flex; gap: 4px; margin: 10px 0 0; }
 .extensionsTab { padding: 5px 11px; color: #7c909a; background: transparent; border: 1px solid transparent; border-radius: 999px; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
 .extensionsTab:hover { color: #aebdc5; background: #101c24; }
 .extensionsTab.active { color: #09201e; background: var(--accent, #42c9bc); border-color: transparent; }
 .extensionsBody { margin-top: 12px; }
-.extensionsResults { grid-template-columns: 1fr; max-height: 380px; }
+.extensionsResults { grid-template-columns: 1fr; height: var(--extensions-pane-height); max-height: none; }
 .extensionsItem b { display: block; }
 /* Clamped to 2 lines rather than left unbounded, so a long description doesn't make one item much
    taller than its neighbors -- every item's height should come from the same shape of content.
@@ -213,6 +218,23 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
     img.extensionsThumb, .extensionsDetailImage { transition: none; }
 }
+/* A registry entry's screenshots: a strip of thumbnails in the Discover detail pane, each of which
+   expands to the pane's full width when clicked. Like the cover image, each fades in on arrival. */
+.extensionsScreenshots { display: flex; gap: 6px; margin: 6px 0; padding-bottom: 4px; overflow-x: auto; }
+.extensionsScreenshot { flex: 0 0 46%; margin: 0; }
+.extensionsScreenshot.expanded { flex-basis: 100%; }
+.extensionsScreenshotButton { display: block; width: 100%; padding: 0; border: 0; border-radius: 3px; background: #060d12; cursor: zoom-in; }
+.extensionsScreenshot.expanded .extensionsScreenshotButton { cursor: zoom-out; }
+.extensionsScreenshotButton img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 3px; object-fit: cover; opacity: 0; transition: opacity 160ms ease; }
+.extensionsScreenshot.expanded .extensionsScreenshotButton img { aspect-ratio: auto; object-fit: contain; }
+.extensionsScreenshotButton img.loaded { opacity: 1; }
+.extensionsScreenshot figcaption { margin-top: 2px; color: #8199a3; font-size: 7px; line-height: 1.4; }
+.extensionsVideoList { margin: 0 0 6px; padding: 0; list-style: none; }
+.extensionsVideoLink { padding: 2px 0; border: 0; background: none; color: #42c9bc; font: inherit; text-align: left; cursor: pointer; }
+.extensionsVideoLink:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) {
+    .extensionsScreenshotButton img { transition: none; }
+}
 .extensionsItemMeta { display: block; margin-top: 2px; color: #647984; font-size: 7px; }
 #extensionsRestartNotice { margin-top: 8px; }
 .extensionsRestartPendingNotice { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding: 8px 10px; color: #d6a35f; background: rgb(214 163 95 / 8%); border: 1px solid #4a3f2e; border-radius: 5px; font-size: 8px; }
@@ -223,8 +245,14 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
    detail pane has a different structure (badge/facts/permissions instead of a thumbnail), so it
    gets its own ID rules here rather than trying to share the examplesExplorer ones. */
 .examplesExplorerDetailEmpty { margin: 0; color: #5e747d; font-size: 8px; line-height: 1.5; }
-#extensionsDetailContent { display: grid; gap: 8px; }
-#extensionsDetailContent[hidden] { display: none; }
+/* The detail pane itself never scrolls: each content block is a column holding a scrolling region
+   (.extensionsDetailScroll) above a footer that stays put, so the action buttons are always visible
+   however long the description is. The pane's own padding moves to the two parts for that reason. */
+.extensionsDialog .examplesExplorerDetail { height: var(--extensions-pane-height); padding: 0; overflow: hidden; }
+.extensionsDialog .examplesExplorerDetail > .examplesExplorerDetailEmpty { padding: 10px; }
+#extensionsDetailContent, #extensionsDiscoverDetailContent { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+#extensionsDetailContent[hidden], #extensionsDiscoverDetailContent[hidden] { display: none; }
+.extensionsDetailScroll { display: grid; flex: 1; align-content: start; gap: 8px; min-height: 0; padding: 10px; overflow-y: auto; }
 #extensionsDetailTitle { color: #d8e4e9; font-size: 10px; }
 .extensionsBadge { display: inline-block; width: fit-content; padding: 2px 7px; color: #7c909a; background: #101c24; border: 1px solid #29404b; border-radius: 999px; font-size: 6.5px; text-transform: uppercase; letter-spacing: .06em; }
 .extensionsBadge.bundled { color: #78aaa7; background: rgb(66 201 188 / 8%); border-color: #2d484c; }
@@ -235,7 +263,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .extensionsPermissionList { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .extensionsPermissionList li { padding: 3px 7px; color: #8199a3; background: #0a151d; border: 1px solid #263b45; border-radius: 4px; font-size: 7px; }
 .extensionsPermissionList:empty::after { content: 'None requested'; color: #566b76; font-size: 7px; }
-.extensionsDetailFooter { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
+.extensionsDetailFooter { display: flex; flex: none; justify-content: flex-end; gap: 6px; padding: 8px 10px; border-top: 1px solid #2b3d48; background: #0a151d; }
 .extensionsToggleButton { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .extensionsToggleButton:hover { color: #dce9ee; background: #17232c; border-color: #293b46; }
 .extensionsDangerButton { padding: 0 10px; height: 28px; color: #c17980; background: transparent; border: 1px solid #4a2e30; border-radius: 4px; font-size: 8px; }

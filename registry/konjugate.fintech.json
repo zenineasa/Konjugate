@@ -13,6 +13,19 @@
     "domain": "finance",
     "url": "https://github.com/zenineasa/Konjugate-Fintech",
     "image": "images/konjugate.fintech.webp",
+    "screenshots": [
+        { "image": "screenshots/konjugate.fintech.interbankData.webp", "caption": "Interbank stress testing: load balance sheets and exposures, then check the data" },
+        { "image": "screenshots/konjugate.fintech.interbankResults.webp", "caption": "Results of a price shock and central-bank support: first failure, equity lost, hardest hit" },
+        { "image": "screenshots/konjugate.fintech.interbankTable.webp", "caption": "Every institution against the baseline, with its solvency status" },
+        { "image": "screenshots/konjugate.fintech.marketSeries.webp", "caption": "Market dynamics: search, group or type symbols and choose the history to fetch" },
+        { "image": "screenshots/konjugate.fintech.marketPreview.webp", "caption": "Preview each series and pick the date range before looking for links between markets" }
+    ],
+    "video": [
+        {
+            "title": "Konjugate Fintech: A Transparent Model for Bank Runs, Market and DeFi Risk Analysis",
+            "url": "https://www.youtube.com/watch?v=l-rHUY-JdoY"
+        }
+    ],
     "packages": [
         { "packageType": "plugin", "packageId": "konjugate.fintech.engine" },
         { "packageType": "addon", "packageId": "konjugate.fintech.toolbox" }

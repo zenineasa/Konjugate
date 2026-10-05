@@ -35,8 +35,8 @@ import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
 import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
-import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageKey, uninstallPackage } from './packageArchive.mjs';
-import { fetchLatestReleaseVersion, fetchRegistryImage, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, isNewerVersion, registryImageUrl } from './registryClient.mjs';
+import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
+import { fetchLatestReleaseVersion, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, isNewerVersion, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
 import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
@@ -1401,6 +1401,33 @@ async function bundledRegistryImage(entry) {
         return null;
     }
 }
+// Reads a registry picture through the on-disk cache: a file younger than a day is used as is, an
+// older (or missing) one is downloaded again, and if that fails the stale copy is still better than
+// nothing. baseName names the cache file (without its extension); fetchPicture returns
+// { mimeType, bytes }, already checked. Shared by entry images and screenshots.
+async function cachedRegistryImage(baseName, fetchPicture, description) {
+    const directory = registryImageCacheDirectory();
+    const cachedName = (await readdir(directory).catch(() => [])).find((name) => name.startsWith(`${baseName}.`));
+    const readCached = async () => {
+        const bytes = await readFile(join(directory, cachedName));
+        return toImageDataUrl(identifyRegistryImage(bytes, cachedName), bytes);
+    };
+    if (cachedName && Date.now() - (await stat(join(directory, cachedName))).mtimeMs < registryImageMaxAgeMs) return readCached();
+    try {
+        const { mimeType, bytes } = await fetchPicture();
+        await mkdir(directory, { recursive: true });
+        const name = `${baseName}.${registryImageExtensions[mimeType]}`;
+        const temporaryPath = join(directory, `${name}.${randomUUID()}.tmp`);
+        await writeFile(temporaryPath, bytes);
+        await rename(temporaryPath, join(directory, name));
+        if (cachedName && cachedName !== name) await unlink(join(directory, cachedName)).catch(() => {});
+        return toImageDataUrl(mimeType, bytes);
+    } catch (error) {
+        console.warn(`Could not fetch the registry ${description}:`, error.message);
+        return cachedName ? readCached().catch(() => null) : null;
+    }
+}
+const registryImageCacheName = (prefix, url) => `${prefix}-${createHash('sha256').update(url).digest('hex').slice(0, 16)}`;
 ipcMain.handle('packageRegistryImage', async (_event, prefix) => {
     if (typeof prefix !== 'string') return null;
     const entry = await knownRegistryEntry(prefix);
@@ -1410,27 +1437,35 @@ ipcMain.handle('packageRegistryImage', async (_event, prefix) => {
     if (bundled) return bundled;
     // Named after the URL as well as the prefix, so pointing image at a different file is never
     // answered from the previous file's cache.
-    const baseName = `${prefix}-${createHash('sha256').update(url).digest('hex').slice(0, 16)}`;
-    const directory = registryImageCacheDirectory();
-    const cachedName = (await readdir(directory).catch(() => [])).find((name) => name.startsWith(`${baseName}.`));
-    const readCached = async () => {
-        const bytes = await readFile(join(directory, cachedName));
-        return toImageDataUrl(identifyRegistryImage(bytes, cachedName), bytes);
-    };
-    if (cachedName && Date.now() - (await stat(join(directory, cachedName))).mtimeMs < registryImageMaxAgeMs) return readCached();
-    try {
-        const { mimeType, bytes } = await fetchRegistryImage(entry);
-        await mkdir(directory, { recursive: true });
-        const name = `${baseName}.${registryImageExtensions[mimeType]}`;
-        const temporaryPath = join(directory, `${name}.${randomUUID()}.tmp`);
-        await writeFile(temporaryPath, bytes);
-        await rename(temporaryPath, join(directory, name));
-        if (cachedName && cachedName !== name) await unlink(join(directory, cachedName)).catch(() => {});
-        return toImageDataUrl(mimeType, bytes);
-    } catch (error) {
-        console.warn(`Could not fetch the registry image for ${prefix}:`, error.message);
-        return cachedName ? readCached().catch(() => null) : null;
-    }
+    return cachedRegistryImage(registryImageCacheName(prefix, url), () => fetchRegistryImage(entry), `image for ${prefix}`);
+});
+
+// An entry's screenshots, unlike its image, are not bundled with the app: they only matter next to
+// an Install button, which needs the network anyway, so they are downloaded when the detail pane is
+// opened and cached the same way. The renderer only ever names an entry and a position -- the URL
+// comes from the entry the main process itself already knows.
+ipcMain.handle('packageRegistryScreenshot', async (_event, request) => {
+    const prefix = request?.prefix;
+    const index = request?.index;
+    if (typeof prefix !== 'string' || !Number.isInteger(index)) return null;
+    const entry = await knownRegistryEntry(prefix);
+    const url = entry && registryScreenshotUrl(entry, index);
+    if (!url) return null;
+    return cachedRegistryImage(`${registryImageCacheName(prefix, url)}-s${index}`, () => fetchRegistryScreenshot(entry, index), `screenshot ${index} for ${prefix}`);
+});
+
+// A registry entry's video is only a link, opened in the person's own browser -- nothing is
+// fetched or embedded by the app. Re-checked here against the entry the main process knows (the
+// renderer sends only a position), and against the same YouTube-only pattern the registry's own
+// validation applies, in case the cached copy of the registry predates a rule or was edited.
+ipcMain.handle('packageOpenRegistryVideo', async (_event, request) => {
+    const prefix = request?.prefix;
+    const index = request?.index;
+    if (typeof prefix !== 'string' || !Number.isInteger(index)) return false;
+    const url = (await knownRegistryEntry(prefix))?.videos?.[index]?.url;
+    if (typeof url !== 'string' || !registryVideoUrlPattern.test(url)) return false;
+    shell.openExternal(url);
+    return true;
 });
 
 // entry comes from whatever packageDiscoverRegistry last returned to this renderer -- not

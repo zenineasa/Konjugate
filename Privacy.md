@@ -21,7 +21,7 @@ Simulations run locally. If you write an inline C++ or Python provider, your cod
 Konjugate makes a small number of network requests to third-party services. None of them includes your projects or any personal information, but, as with any internet request, the service receiving it can see your IP address.
 
 - **Update check.** When Konjugate starts, it asks GitHub's public releases API (`api.github.com`) whether a newer version exists. GitHub's privacy statement applies.
-- **Add-on registry.** To show recommended add-ons, to browse the Add-on Explorer, to check installed add-ons for updates, and to download an add-on or plugin you choose to install, Konjugate fetches public files from GitHub (`api.github.com`, `raw.githubusercontent.com`, and the add-on's own GitHub repository).
+- **Add-on registry.** To show recommended add-ons, to browse the Add-on Explorer, to check installed add-ons for updates, and to download an add-on or plugin you choose to install, Konjugate fetches public files from GitHub (`api.github.com`, `raw.githubusercontent.com`, and the add-on's own GitHub repository). This includes the screenshots shown for an add-on, which are downloaded when you open its details. An add-on can also list video links; these are only links, and nothing is requested from the video site until you click one, when it opens in your web browser.
 - **Welcome window.** It shows recent posts from the Konjugate blog (`www.konjugate.com`, which is hosted by Google Blogger) and video thumbnails loaded from YouTube's image servers (`img.youtube.com`). Opening a link from the Welcome window opens your web browser, where the destination site's own policy applies.
 
 ## The AI assistant (optional, off until you configure it)

@@ -393,6 +393,17 @@ const packageTypes = ['addon', 'plugin'];
 // An entry's image (see validateNamespaceEntry) lives beside the entries themselves, in the
 // registry's own images/ directory: one file, no subdirectories, PNG/JPEG/WebP.
 export const registryImagePathPattern = /^images\/[\w-][\w.-]*\.(png|jpe?g|webp)$/i;
+// An entry's screenshots live in their own directory, not images/: everything in images/ ships
+// inside the app, but screenshots are only ever shown next to an Install button (which needs the
+// network anyway), so the app downloads and caches them on demand instead (see
+// packageRegistryScreenshot in src/main.mjs and docs/registry.md).
+export const registryScreenshotPathPattern = /^screenshots\/[\w-][\w.-]*\.(png|jpe?g|webp)$/i;
+export const maxRegistryScreenshots = 6;
+export const maxRegistryVideos = 4;
+// Only YouTube's two watch-link forms, with nothing after the 11-character video id: a registry
+// entry's link opens in the person's own browser, and keeping it to a video id means a listing
+// can't smuggle in a playlist, a redirect or an arbitrary page.
+export const registryVideoUrlPattern = /^https:\/\/(?:www\.youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}$/;
 
 // Every field beyond owner/contact/publicKeys is optional -- an entry with only those three is a
 // prefix reserved for private/internal use, not listed anywhere; loadNamespaceRegistry accepts it
@@ -417,6 +428,38 @@ export function validateNamespaceEntry(entry, prefix) {
     // and so the copy bundled with the app can be shown without any network access at all.
     if (entry.image !== undefined && (typeof entry.image !== 'string' || !registryImagePathPattern.test(entry.image) || entry.image.includes('..'))) {
         invalid('image, if present, must name a .png, .jpg, .jpeg or .webp file in the registry\'s images/ directory, e.g. "images/example.fintech.webp".');
+    }
+    // Pictures of the add-on at work, kept in the registry (not the publisher's repository) for the
+    // same reason image is: they are reviewed in the entry's own pull request and can't be swapped
+    // afterwards. Every one needs a caption, which is also its alternative text.
+    if (entry.screenshots !== undefined) {
+        if (!Array.isArray(entry.screenshots) || !entry.screenshots.length || entry.screenshots.length > maxRegistryScreenshots) {
+            invalid(`screenshots, if present, must be a list of 1 to ${maxRegistryScreenshots} items.`);
+        }
+        for (const [index, item] of entry.screenshots.entries()) {
+            if (!item || typeof item.image !== 'string' || !registryScreenshotPathPattern.test(item.image) || item.image.includes('..')) {
+                invalid(`screenshots[${index}].image must name a .png, .jpg, .jpeg or .webp file in the registry's screenshots/ directory, e.g. "screenshots/example.fintech.1.webp".`);
+            }
+            if (typeof item.caption !== 'string' || !item.caption.trim() || item.caption.length > 140) {
+                invalid(`screenshots[${index}].caption is required and must be at most 140 characters.`);
+            }
+        }
+    }
+    // Links, not files: a video is only ever opened in the person's own browser, never embedded or
+    // fetched by the app, so nothing about a registry entry causes a request to YouTube until the
+    // person clicks one.
+    if (entry.videos !== undefined) {
+        if (!Array.isArray(entry.videos) || !entry.videos.length || entry.videos.length > maxRegistryVideos) {
+            invalid(`videos, if present, must be a list of 1 to ${maxRegistryVideos} items.`);
+        }
+        for (const [index, item] of entry.videos.entries()) {
+            if (!item || typeof item.url !== 'string' || !registryVideoUrlPattern.test(item.url)) {
+                invalid(`videos[${index}].url must be a YouTube link of the form https://www.youtube.com/watch?v=<11-character id> or https://youtu.be/<id>.`);
+            }
+            if (typeof item.title !== 'string' || !item.title.trim() || item.title.length > 100) {
+                invalid(`videos[${index}].title is required and must be at most 100 characters.`);
+            }
+        }
     }
     // Surfaced in the Welcome window's one-time starter-pack offer (see the Recommended add-ons
     // section of docs/addonExplorer.md) -- meaningless on an entry with nothing to install, so it

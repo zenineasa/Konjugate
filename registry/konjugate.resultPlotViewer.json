@@ -12,6 +12,9 @@
     "recommended": true,
     "url": "https://github.com/zenineasa/Konjugate-ResultPlotViewer",
     "image": "images/konjugate.resultPlotViewer.webp",
+    "screenshots": [
+        { "image": "screenshots/konjugate.resultPlotViewer.fourBarLinkage.webp", "caption": "Positions, orientation and velocities of one linkage pin plotted over time, with a synced playhead" }
+    ],
     "packages": [
         { "packageType": "addon", "packageId": "konjugate.resultPlotViewer" }
     ],

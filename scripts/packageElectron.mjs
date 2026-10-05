@@ -37,9 +37,16 @@ const packagedTestAncestorDirectories = new Set(
     })
 );
 
+// The rest of registry/ ships inside the app (it is Discover's offline fallback, images included),
+// but an entry's screenshots don't: they are only shown next to an Install button, which needs the
+// network anyway, so the app downloads and caches them on demand instead (see
+// registryScreenshotPathPattern in src/packageArchive.mjs and scripts/verifyPackagedRegistry.mjs).
+const ignoredPathPrefixes = ['registry/screenshots'];
+
 export function shouldIgnorePackagePath(filePath) {
     const normalized = filePath.replaceAll('\\', '/').replace(/^\/+/, '');
     if (packagedTestFiles.has(normalized) || packagedTestAncestorDirectories.has(normalized)) return false;
+    if (ignoredPathPrefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`))) return true;
     const [topLevelDirectory] = normalized.split('/').filter(Boolean);
     return ignoredTopLevelDirectories.has(topLevelDirectory);
 }

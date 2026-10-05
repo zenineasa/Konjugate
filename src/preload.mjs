@@ -73,6 +73,10 @@ contextBridge.exposeInMainWorld('extensions', {
     installFromRegistry: (entry, namespaces) => ipcRenderer.invoke('packageInstallFromRegistry', { entry, namespaces }),
     // An entry's image as a data: URL, or null (see the packageRegistryImage handler in src/main.mjs).
     registryImage: (prefix) => ipcRenderer.invoke('packageRegistryImage', prefix),
+    // An entry's screenshots (downloaded on demand, not bundled) and its video links (opened in the
+    // person's own browser) -- the renderer names an entry and a position, never a URL.
+    registryScreenshot: (prefix, index) => ipcRenderer.invoke('packageRegistryScreenshot', { prefix, index }),
+    openRegistryVideo: (prefix, index) => ipcRenderer.invoke('packageOpenRegistryVideo', { prefix, index }),
     // Separate from applicationInfo.openExternal's fixed allowlist -- a registry entry's own links
     // point at whatever a third-party publisher declared, so this confirms with the person first
     // instead (see the matching handler in src/main.mjs).

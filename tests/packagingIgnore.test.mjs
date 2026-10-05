@@ -32,6 +32,16 @@ test('Electron Packager excludes build-only top-level directories', async () => 
     }
 });
 
+test('Electron Packager leaves registry screenshots out of the app, since they are downloaded on demand', () => {
+    for (const screenshotPath of ['/registry/screenshots', '/registry/screenshots/konjugate.fintech.1.webp', '\\registry\\screenshots\\konjugate.fintech.1.webp']) {
+        assert.equal(shouldIgnorePackagePath(screenshotPath), true);
+    }
+    // Only that directory: images and entries stay, and a lookalike name is not caught.
+    for (const packagedPath of ['/registry/images/konjugate.fintech.webp', '/registry/konjugate.fintech.json', '/registry/screenshotsOther/file.json']) {
+        assert.equal(shouldIgnorePackagePath(packagedPath), false);
+    }
+});
+
 test('Electron Packager excludes tests/ except the --interaction-test driver src/main.mjs imports at runtime', () => {
     // tests/ and tests/fixtures/ themselves (the container directories of the allowed files below)
     // must stay un-ignored, or fs.cp's recursive copy (see copyTemplate in @electron/packager's

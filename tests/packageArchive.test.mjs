@@ -506,6 +506,52 @@ test('loadNamespaceRegistry accepts an image in the registry\'s images/ director
     });
 });
 
+const screenshotEntry = (overrides = {}) => ({ image: 'screenshots/example.fintech.1.webp', caption: 'The portfolio view', ...overrides });
+const videoEntry = (overrides = {}) => ({ title: 'Walkthrough', url: 'https://www.youtube.com/watch?v=jiL0kP0VQvQ', ...overrides });
+
+test('loadNamespaceRegistry accepts screenshots from the registry\'s screenshots/ directory and YouTube video links', async () => {
+    const entry = minimalEntry({
+        screenshots: [screenshotEntry(), screenshotEntry({ image: 'screenshots/example.fintech.2.png', caption: 'Results' })],
+        videos: [videoEntry(), videoEntry({ title: 'Short link', url: 'https://youtu.be/eDHksSqKhFs' })]
+    });
+    await withRegistry({ 'example.fintech.json': entry }, async (directory) => {
+        const { prefixes } = await loadNamespaceRegistry(directory);
+        assert.equal(prefixes['example.fintech'].screenshots.length, 2);
+        assert.equal(prefixes['example.fintech'].videos[1].url, 'https://youtu.be/eDHksSqKhFs');
+    });
+});
+
+test('loadNamespaceRegistry rejects screenshots that are URLs, leave screenshots/, lack a caption or are too many', async () => {
+    const rejected = [
+        [screenshotEntry({ image: 'https://tracker.example.org/pixel.png' })], [screenshotEntry({ image: 'images/example.fintech.webp' })],
+        [screenshotEntry({ image: 'screenshots/../example.png' })], [screenshotEntry({ image: 'screenshots/nested/example.png' })],
+        [screenshotEntry({ image: 'screenshots/example.svg' })], [screenshotEntry({ caption: '' })], [screenshotEntry({ caption: 'x'.repeat(141) })],
+        [{ image: 'screenshots/example.fintech.1.webp' }], [], 'screenshots/example.png', Array.from({ length: 7 }, () => screenshotEntry())
+    ];
+    for (const screenshots of rejected) {
+        await withRegistry({ 'example.fintech.json': minimalEntry({ screenshots }) }, async (directory) => {
+            await assert.rejects(() => loadNamespaceRegistry(directory),
+                (error) => error instanceof PackageArchiveError && error.code === 'INVALID_REGISTRY_ENTRY' && /screenshots/.test(error.message), JSON.stringify(screenshots));
+        });
+    }
+});
+
+test('loadNamespaceRegistry accepts only plain YouTube video links with a title', async () => {
+    const rejected = [
+        [videoEntry({ url: 'https://vimeo.com/123456789' })], [videoEntry({ url: 'http://www.youtube.com/watch?v=jiL0kP0VQvQ' })],
+        [videoEntry({ url: 'https://www.youtube.com/watch?v=jiL0kP0VQvQ&list=PLRaxEsOU31bE' })], [videoEntry({ url: 'https://www.youtube.com/watch?v=short' })],
+        [videoEntry({ url: 'https://evil.example/https://www.youtube.com/watch?v=jiL0kP0VQvQ' })], [videoEntry({ url: 'https://www.youtube.com.evil.example/watch?v=jiL0kP0VQvQ' })],
+        [videoEntry({ title: '' })], [videoEntry({ title: 'x'.repeat(101) })], [{ url: 'https://youtu.be/eDHksSqKhFs' }], [],
+        Array.from({ length: 5 }, () => videoEntry())
+    ];
+    for (const videos of rejected) {
+        await withRegistry({ 'example.fintech.json': minimalEntry({ videos }) }, async (directory) => {
+            await assert.rejects(() => loadNamespaceRegistry(directory),
+                (error) => error instanceof PackageArchiveError && error.code === 'INVALID_REGISTRY_ENTRY' && /videos/.test(error.message), JSON.stringify(videos));
+        });
+    }
+});
+
 test('loadNamespaceRegistry rejects an image that is a URL, leaves images/ or is not a picture', async () => {
     const rejected = [
         'https://tracker.example.org/pixel.png', '/images/example.png', 'images/../example.png', 'images/nested/example.png',

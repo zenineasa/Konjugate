@@ -8,7 +8,7 @@
 // way -- with a fake fetchImpl, no real network access, no Electron.
 
 import { unzipSync } from 'fflate';
-import { buildNamespaceRegistry, inspectPackageArchive, installPackageArchive, registryImagePathPattern, verifyPackageArchive } from './packageArchive.mjs';
+import { buildNamespaceRegistry, inspectPackageArchive, installPackageArchive, registryImagePathPattern, registryScreenshotPathPattern, verifyPackageArchive } from './packageArchive.mjs';
 
 export class RegistryClientError extends Error {
     constructor(message, code) {
@@ -137,15 +137,28 @@ export async function installFromRegistryEntry(entry, { namespaces, directory, o
 // An entry's image sits in the registry's own images/ directory, so it's resolved against the same
 // registry location fetchRemoteRegistry reads: next to an alternate registry URL's JSON file, or in
 // the registry repository's registry/ directory on raw.githubusercontent.com.
-export function registryImageUrl(entry, {
+// Resolves a path an entry names (an image or a screenshot) against the registry location -- the
+// one place that knows where the registry's own files live, shared by every kind of asset.
+function registryAssetUrl(relativePath, {
     registryUrl = process.env.KONJUGATE_REGISTRY_URL,
     owner = process.env.KONJUGATE_REGISTRY_OWNER || defaultOwner,
     repo = process.env.KONJUGATE_REGISTRY_REPO || defaultRepo,
     ref = process.env.KONJUGATE_REGISTRY_REF || defaultRef
 } = {}) {
+    if (registryUrl) return new URL(relativePath, registryUrl).href;
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(ref)}/registry/${relativePath}`;
+}
+
+export function registryImageUrl(entry, location = {}) {
     if (typeof entry?.image !== 'string' || !registryImagePathPattern.test(entry.image)) return null;
-    if (registryUrl) return new URL(entry.image, registryUrl).href;
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(ref)}/registry/${entry.image}`;
+    return registryAssetUrl(entry.image, location);
+}
+
+// The URL of entry.screenshots[index]'s file, or null for an entry without that screenshot.
+export function registryScreenshotUrl(entry, index, location = {}) {
+    const screenshot = Array.isArray(entry?.screenshots) ? entry.screenshots[index] : undefined;
+    if (typeof screenshot?.image !== 'string' || !registryScreenshotPathPattern.test(screenshot.image) || screenshot.image.includes('..')) return null;
+    return registryAssetUrl(screenshot.image, location);
 }
 
 // Identified by their leading bytes rather than a file extension or a response's Content-Type,
@@ -175,6 +188,17 @@ export function identifyRegistryImage(bytes, source = 'The image') {
 export async function fetchRegistryImage(entry, { fetchImpl = fetch, ...location } = {}) {
     const url = registryImageUrl(entry, location);
     if (!url) throw new RegistryClientError('This registry entry has no image.', 'NO_IMAGE');
+    const response = await fetchImpl(url);
+    if (!response.ok) throw new RegistryClientError(`Could not download ${url} (HTTP ${response.status}).`, 'DOWNLOAD_FAILED');
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return { mimeType: identifyRegistryImage(bytes, url), bytes };
+}
+
+// Returns { mimeType, bytes } for entry.screenshots[index], downloaded and checked exactly like an
+// entry's image (same formats, same size limit).
+export async function fetchRegistryScreenshot(entry, index, { fetchImpl = fetch, ...location } = {}) {
+    const url = registryScreenshotUrl(entry, index, location);
+    if (!url) throw new RegistryClientError('This registry entry has no such screenshot.', 'NO_IMAGE');
     const response = await fetchImpl(url);
     if (!response.ok) throw new RegistryClientError(`Could not download ${url} (HTTP ${response.status}).`, 'DOWNLOAD_FAILED');
     const bytes = new Uint8Array(await response.arrayBuffer());

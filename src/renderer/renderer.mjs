@@ -9451,6 +9451,69 @@ function showExtensionsDetailImage(image, entry, isStillSelected) {
     });
 }
 
+// prefix#index -> Promise of a data: URL (or null), fetched once per window through the main
+// process (see packageRegistryScreenshot in src/main.mjs) the first time an entry's detail pane
+// opens, so browsing the list itself never downloads a screenshot.
+const discoverScreenshots = new Map();
+function discoverScreenshotFor(entry, index) {
+    if (!window.extensions.registryScreenshot) return Promise.resolve(null);
+    const key = `${entry.prefix}#${index}`;
+    if (!discoverScreenshots.has(key)) {
+        discoverScreenshots.set(key, window.extensions.registryScreenshot(entry.prefix, index).catch((error) => {
+            console.warn(`Could not load screenshot ${index} for ${entry.prefix}:`, error);
+            return null;
+        }));
+    }
+    return discoverScreenshots.get(key);
+}
+
+// The Discover detail pane's screenshot strip and video links for entry. Screenshots that can't be
+// loaded (offline, a failed download) simply don't appear rather than leaving a broken box; a
+// video is just a button that asks the main process to open that entry's own link in the browser.
+function showDiscoverMedia(entry, isStillSelected) {
+    const strip = $('#extensionsDiscoverScreenshots');
+    strip.replaceChildren();
+    const screenshots = entry.screenshots ?? [];
+    strip.hidden = screenshots.length === 0;
+    screenshots.forEach((screenshot, index) => {
+        const figure = document.createElement('figure');
+        figure.className = 'extensionsScreenshot';
+        figure.hidden = true;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'extensionsScreenshotButton';
+        button.setAttribute('aria-label', `Enlarge or shrink screenshot: ${screenshot.caption}`);
+        const image = document.createElement('img');
+        image.alt = screenshot.caption;
+        button.append(image);
+        button.addEventListener('click', () => figure.classList.toggle('expanded'));
+        const caption = document.createElement('figcaption');
+        caption.textContent = screenshot.caption;
+        figure.append(button, caption);
+        strip.append(figure);
+        discoverScreenshotFor(entry, index).then((imageUrl) => {
+            if (!imageUrl || !isStillSelected()) return;
+            image.addEventListener('load', () => image.classList.add('loaded'), { once: true });
+            image.src = imageUrl;
+            figure.hidden = false;
+        });
+    });
+
+    const videos = entry.videos ?? [];
+    $('#extensionsDiscoverVideos').hidden = videos.length === 0;
+    $('#extensionsDiscoverVideoList').replaceChildren(...videos.map((video, index) => {
+        const item = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'extensionsVideoLink';
+        button.textContent = `\u25B6 ${video.title}`;
+        button.title = 'Opens in your browser';
+        button.addEventListener('click', () => window.extensions.openRegistryVideo?.(entry.prefix, index));
+        item.append(button);
+        return item;
+    }));
+}
+
 function discoverEntryList(registry) {
     // Only entries that actually offer something to install belong in the Explorer -- a
     // reservation-only entry (identity fields but no packages/downloadUrl) is real per the
@@ -9525,6 +9588,7 @@ function renderDiscoverDetail() {
     if (!entry) return;
 
     showExtensionsDetailImage($('#extensionsDiscoverDetailImage'), entry, () => discoverSelectedPrefix === entry.prefix);
+    showDiscoverMedia(entry, () => discoverSelectedPrefix === entry.prefix);
 
     const domainBadge = $('#extensionsDiscoverDetailDomain');
     if (entry.domain) {

@@ -273,6 +273,10 @@
                 <div class="examplesExplorerDetail">
                     <p id="extensionsDetailEmpty" class="examplesExplorerDetailEmpty">Select an item to see its details.</p>
                     <div id="extensionsDetailContent" hidden>
+                        <!-- Everything except the action buttons scrolls (see .extensionsDetailScroll); the footer stays
+                             put below it, so a long description or a row of screenshots can never push
+                             Update/Disable/Uninstall or Install out of view. -->
+                        <div class="extensionsDetailScroll">
                         <img id="extensionsDetailImage" class="examplesExplorerDetailThumbnail extensionsDetailImage" alt="" hidden>
                         <span id="extensionsDetailBadge" class="extensionsBadge"></span>
                         <span id="extensionsDetailEnabledBadge" class="extensionsBadge disabled" hidden>Disabled</span>
@@ -292,6 +296,7 @@
                              checking note) -- a GitHub Releases API check against this package's own
                              registry entry, not a version number stored in the registry itself. -->
                         <p id="extensionsDetailUpdateNote" class="examplesExplorerDetailEmpty" hidden></p>
+                        </div>
                         <footer class="extensionsDetailFooter">
                             <button id="extensionsUpdate" type="button" class="doneButton" hidden>Update</button>
                             <button id="extensionsToggleEnabled" type="button" class="extensionsToggleButton">Disable</button>
@@ -304,6 +309,7 @@
                          #extensionsDetailContent above rather than overloading one markup with
                          two unrelated shapes of information. -->
                     <div id="extensionsDiscoverDetailContent" hidden>
+                        <div class="extensionsDetailScroll">
                         <!-- No pre-download "verified"/"trust" badge here -- publicKeys is a
                              required field on every valid registry entry, so a badge that only
                              checked "does this entry declare a key" would say the same thing about
@@ -315,6 +321,15 @@
                         <span id="extensionsDiscoverDetailDomain" class="extensionsBadge" hidden></span>
                         <strong id="extensionsDiscoverDetailTitle"></strong>
                         <p id="extensionsDiscoverDetailDescription"></p>
+                        <!-- Screenshots and video links a registry entry declares (see docs/registry.md).
+                             Both stay hidden for an entry without any. Screenshots are downloaded when
+                             this pane opens, not bundled; videos are only links, opened in the person's
+                             own browser. -->
+                        <div id="extensionsDiscoverScreenshots" class="extensionsScreenshots" hidden></div>
+                        <div id="extensionsDiscoverVideos" hidden>
+                            <p class="extensionsDetailLabel">Videos</p>
+                            <ul id="extensionsDiscoverVideoList" class="extensionsVideoList"></ul>
+                        </div>
                         <dl class="extensionsDetailFacts">
                             <div><dt>License</dt><dd id="extensionsDiscoverDetailLicense"></dd></div>
                             <div id="extensionsDiscoverDetailCommercialLicenseRow" hidden><dt>Commercial</dt><dd id="extensionsDiscoverDetailCommercialLicense"></dd></div>
@@ -325,6 +340,7 @@
                         <p class="extensionsDetailLabel">Installs</p>
                         <ul id="extensionsDiscoverDetailPackages" class="extensionsPermissionList"></ul>
                         <p id="extensionsDiscoverDetailStatus" class="examplesExplorerDetailEmpty" hidden></p>
+                        </div>
                         <footer class="extensionsDetailFooter">
                             <button id="extensionsDiscoverInstall" type="button" class="doneButton">Trust publisher and install</button>
                         </footer>

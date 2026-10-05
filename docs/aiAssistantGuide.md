@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Model assistant guide
+description: How Konjugate's model assistant converts natural-language requests into structured, undoable model-operation proposals.
+tags: [assistant, llm, proposals, ollama, gemini]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Model assistant guide

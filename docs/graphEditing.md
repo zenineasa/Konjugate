@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Graph selection and clipboard
+description: Canvas multi-selection, group movement, and JSON/clipboard copy-paste semantics.
+tags: [canvas, editing, selection, clipboard]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Graph selection and clipboard

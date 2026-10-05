@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Welcome to Konjugate
+description: Overview of the graph-native simulation engine, ecosystem links, and community onboarding.
+tags: [welcome, overview, community]
+status: stable
+---
+
 Konjugate is an open-source graph-native simulation engine for building composable engineering simulations and digital twins.
 
 Build models from connected components and relationships, then validate and execute them with the native simulation engine.

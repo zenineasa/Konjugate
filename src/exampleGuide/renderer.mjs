@@ -2,6 +2,7 @@
 
 import { convertLatexToMarkup } from '../../node_modules/mathlive/mathlive.min.mjs';
 import { guideKindSuffix } from './guideKind.mjs';
+import { prepareGuideMarkdown } from './markdown.mjs';
 
 const escapeHtml = (value) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 
@@ -13,7 +14,7 @@ function renderInline(value) {
 }
 
 function renderMarkdown(markdown) {
-    const lines = escapeHtml(markdown.replace(/\r/g, '').replace(/<!--[\s\S]*?-->/g, '')).split('\n');
+    const lines = escapeHtml(prepareGuideMarkdown(markdown)).split('\n');
     const output = [];
     let list = null;
     let code = false;

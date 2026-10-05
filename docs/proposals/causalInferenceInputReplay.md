@@ -1,3 +1,11 @@
+---
+type: Proposal
+title: "Causal inference: replaying recorded values for marked input columns"
+description: "Proposal for replaying exogenous time-series inputs through candidate relationships during validation runs."
+tags: [proposals, causal-inference, replay]
+status: implemented
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Causal inference: replaying recorded values for marked input columns

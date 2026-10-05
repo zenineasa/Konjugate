@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Plugin development
+description: Creating .kjp plugins providing custom C++ and Python relationship providers and declarative component templates.
+tags: [plugins, providers, templates, cpp, python]
+status: stable
+---
+
 # Plugin development
 
 Konjugate plugins are installable `.kjp` packages that provide numerical behavior and reusable modeling assets. The first plugin slice supports versioned Python and C++ relationship-provider artifacts plus declarative component templates. It reuses the existing provider protocol and engine runtime; it does not introduce a second provider ABI.

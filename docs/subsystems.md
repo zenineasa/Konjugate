@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Subsystems
+description: Authoring-hierarchy container specification, port generation, and automatic flattening before engine simulation.
+tags: [subsystems, hierarchy, canvas, ports]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Subsystems

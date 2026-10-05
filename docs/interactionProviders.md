@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Interaction providers
+description: Detailed mathematical and implementation specification for numerical solvers, substeps, and algebraic terms.
+tags: [providers, numerics, solvers, algebraic-states]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Interaction providers

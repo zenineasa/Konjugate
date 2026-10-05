@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Engine job protocol
+description: Live Protobuf streaming and event architecture replacing legacy file-based engine status protocols.
+tags: [engine, protocol, protobuf, streaming]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Engine job protocol

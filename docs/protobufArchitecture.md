@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Protobuf architecture
+description: Design for migrating high-frequency IPC boundaries between the Electron host and C++ engine to Protobuf.
+tags: [protobuf, ipc, engine, architecture]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Protobuf architecture

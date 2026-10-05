@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Development setup
+description: Prerequisites, platform toolchains, CMake configuration, and developer workflows for building Konjugate.
+tags: [setup, development, cmake, compiler]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Development setup

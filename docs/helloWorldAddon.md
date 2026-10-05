@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Hello World add-on
+description: Minimal add-on example demonstrating the version 1 visualizer bridge and metadata reading.
+tags: [addons, examples, tutorial]
+status: stable
+---
+
 # Hello World add-on
 
 This example is the smallest Konjugate add-on. It opens a read-only result visualizer and reads the active project name, run name and signal count through the version 1 visualizer bridge.

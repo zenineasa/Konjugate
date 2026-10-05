@@ -1,3 +1,11 @@
+---
+type: Proposal
+title: OpenStreetMap traffic-network simulation
+description: RFC for importing real-world road networks from OpenStreetMap into dynamic graph models for traffic simulation.
+tags: [proposals, osm, traffic, geospatial]
+status: draft
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # OpenStreetMap traffic-network simulation

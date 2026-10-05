@@ -1,3 +1,11 @@
+---
+type: Specification
+title: Exporting a simulation as standalone code
+description: Specification for standalone C++ code generation and FMI 2.0/3.0 Co-Simulation FMU export from Konjugate models.
+tags: [export, cpp, fmi, fmu, code-gen]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Exporting a simulation as standalone code

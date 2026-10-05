@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Model assistant provider architecture
+description: Design and security model for local (Ollama) and hosted (OpenAI, Gemini, NIM, HuggingFace) model providers.
+tags: [assistant, architecture, security, credentials]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Model assistant provider architecture

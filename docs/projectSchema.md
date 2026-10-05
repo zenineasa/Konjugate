@@ -1,3 +1,11 @@
+---
+type: Specification
+title: "Project document schema, version 1"
+description: "Full schema specification for .kjt JSON payloads: nodes, edges, states, source terms, equations, and subsystems."
+tags: [schema, kjt, model, entities, equations]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Project document schema, version 1

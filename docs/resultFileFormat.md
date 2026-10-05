@@ -1,3 +1,11 @@
+---
+type: Specification
+title: Embedded binary result storage
+description: Format specification for storing simulation time-series arrays as an authenticated binary segment inside .kjt files.
+tags: [results, binary, storage, format]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Embedded binary result storage

@@ -18,6 +18,7 @@ import { dirname, join, relative } from 'node:path';
 import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName } from '../src/exampleCatalog.mjs';
 import { validateComponentTemplate } from '../src/componentTemplate.mjs';
+import { stripFrontmatter } from '../src/exampleGuide/markdown.mjs';
 
 const threads = process.argv[2] === 'threads';
 const srcDirectory = join(rootDirectory, 'src');
@@ -196,7 +197,12 @@ for (const name of await readdir(componentLibraryDirectory)) {
 await writeFile(join(outputDirectory, 'assets', 'componentLibrary', 'webManifest.json'), JSON.stringify(componentEntries));
 
 await mkdir(join(outputDirectory, 'docs'), { recursive: true });
-await cp(join(rootDirectory, 'docs', 'causalInferenceInteractionHelp.md'), join(outputDirectory, 'docs', 'causalInferenceInteractionHelp.md'));
+// The web edition opens this file raw in a browser tab (webShims/projectFiles.mjs), where the YAML
+// frontmatter the docs carry would show up as text, so it is stripped on the way in.
+await writeFile(
+    join(outputDirectory, 'docs', 'causalInferenceInteractionHelp.md'),
+    stripFrontmatter(await readFile(join(rootDirectory, 'docs', 'causalInferenceInteractionHelp.md'), 'utf8'))
+);
 
 // Python provider SDK (docs/proposals/webEdition.md, phase 4) -- fetched at runtime by
 // src/webPythonProviderBridge.mjs and written into Pyodide's own virtual FS. Only the SDK

@@ -1,3 +1,11 @@
+---
+type: Proposal
+title: Launcher add-ons and plugin-contributed examples
+description: RFC for launcher add-on extension points, permissions architecture, and custom domain builders.
+tags: [proposals, addons, launcher, extensions]
+status: implemented
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Launcher add-ons and plugin-contributed examples

@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Interaction effects
+description: In-app guide explaining additive terms versus multi-variable interaction terms during causal structure discovery.
+tags: [causal-inference, help, in-app]
+status: stable
+---
+
 # Interaction effects
 
 This checkbox controls whether causal inference is allowed to fit a relationship whose strength depends on *both* variables together — not just the source column predicting the target on its own.

@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Konjugate packages
+description: Package format, directory layouts, and installation mechanisms for .kja add-ons and .kjp plugins.
+tags: [packages, kja, kjp, distribution]
+status: stable
+---
+
 # Konjugate packages
 
 Konjugate packages are portable files that users can install without finding an application-specific directory:

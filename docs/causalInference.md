@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Causal inference
+description: Continuous-time structure discovery, equation identification, and digital-twin parameter tuning from empirical time series.
+tags: [causal-inference, digital-twin, system-identification]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Causal inference

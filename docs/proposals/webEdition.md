@@ -1,3 +1,11 @@
+---
+type: Proposal
+title: "Konjugate Web: a browser edition, not a permanent preview"
+description: "Comprehensive multi-phase roadmap for compiling the C++ engine to WebAssembly and delivering Konjugate in the browser."
+tags: [proposals, web, wasm, pyodide]
+status: partially_implemented
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Konjugate Web: a browser edition, not a permanent preview

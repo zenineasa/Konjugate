@@ -1,3 +1,11 @@
+---
+type: Proposal
+title: Automatic app updates
+description: RFC for background application updates, delta updates, and user prompt mechanics.
+tags: [proposals, updates, electron]
+status: draft
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Automatic app updates

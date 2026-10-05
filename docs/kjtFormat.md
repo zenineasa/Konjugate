@@ -1,3 +1,11 @@
+---
+type: Specification
+title: KJT container format, version 1
+description: Binary container file specification for .kjt files, segment headers, and payload validation.
+tags: [kjt, binary, container, format]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # KJT container format, version 1

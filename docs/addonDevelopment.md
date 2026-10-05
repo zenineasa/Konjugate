@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Add-on development
+description: Guide for building launcher and visualizer add-ons (.kja) with the visualizer bridge, window state, and IPC permissions.
+tags: [addons, visualizer, extensions, ipc]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Add-on development

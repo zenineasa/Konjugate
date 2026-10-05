@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Provider execution transports
+description: Process models and IPC transports for executing user-authored C++ and Python simulation providers.
+tags: [providers, ipc, execution, pyodide]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Provider execution transports

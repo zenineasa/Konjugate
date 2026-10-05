@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Addon Explorer, Registry, and Recommendations
+description: Architecture and user guide for discovering, installing, and managing add-ons and plugins from package registries.
+tags: [addons, registry, explorer, extensions]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Addon Explorer, Registry, and Recommendations

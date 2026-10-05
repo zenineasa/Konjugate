@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Engine CLI contract
+description: Command-line invocation syntax, arguments, validation, and exit code contracts for the native konjugateEngine CLI.
+tags: [cli, engine, headless, reference]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Engine CLI contract

@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Result Exploration, Branching, and Paced Simulation
+description: Architecture and workflows for simulation playback, live parameter interventions, and checkpoint-based scenario forks.
+tags: [results, branching, playback, checkpoints]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Result Exploration, Branching, and Paced Simulation

@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: "Parallel execution"
+description: "Engine scheduling architectures: serial execution, shared thread pools, and METIS communication-aware graph partitioning."
+tags: [engine, threading, parallel, metis]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Parallel execution

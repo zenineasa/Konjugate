@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Package manager distribution
+description: Automated packaging and distribution workflows for winget, Chocolatey, the Microsoft Store, Homebrew Cask, Snap, and Flathub.
+tags: [distribution, winget, chocolatey, microsoft-store, homebrew, flatpak, release]
+status: partially_implemented
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Package manager distribution

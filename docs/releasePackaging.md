@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Release packaging
+description: CMake packaging configuration, bundled dependencies, and Electron installer generation for desktop releases.
+tags: [packaging, release, electron, cmake]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Release packaging

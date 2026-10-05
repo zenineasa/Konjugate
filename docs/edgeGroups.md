@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Edge groups
+description: Shared relationship definitions that automatically instantiate across an all-to-all or selected mesh of member nodes.
+tags: [graph, edge-groups, mesh, relationships]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Edge groups

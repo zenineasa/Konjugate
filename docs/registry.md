@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Package registry
+description: Specification for package namespace prefixes, cryptographic key verification, and registry index files.
+tags: [registry, security, crypto, packages]
+status: stable
+---
+
 # Package registry
 
 Every Konjugate package (`.kja` add-on, `.kjp` plugin) has a dot-namespaced id, like `konjugate.fintech.toolbox` — the same shape as a Java reverse-DNS package name or an npm scope. The `registry/` directory reserves a prefix of that namespace (its first segment or two) to a publisher, one JSON file per prefix, so a package id claiming to belong to a given author can be checked against a public key that author controls, via `signPackageArchive`/`verifyPackageArchive` in [`src/packageArchive.mjs`](../src/packageArchive.mjs). The same file also carries whatever a publisher wants to say about the prefix for discovery purposes — see Fields, below — loaded together by `loadNamespaceRegistry`.

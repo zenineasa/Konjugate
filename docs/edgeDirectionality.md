@@ -1,3 +1,11 @@
+---
+type: Architecture
+title: Edge and relationship directionality
+description: Why Konjugate relationships are directed pairs and how physical exchange symmetry is modeled conservatively.
+tags: [graph, edges, directionality, modeling]
+status: stable
+---
+
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Edge and relationship directionality

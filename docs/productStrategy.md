@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Product strategy
+description: Vision, differentiators, modular architecture, and target workflows for Konjugate as an open engineering platform.
+tags: [strategy, roadmap, vision]
+status: stable
+---
+
 # Product strategy
 
 ## Purpose

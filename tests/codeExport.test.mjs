@@ -136,7 +136,7 @@ test('a disabled node contributes no states and an edge touching it is excluded'
     });
     const source = generateStandaloneProgram(document, 'cpp');
     assert.doesNotMatch(source, /Dropped/);
-    assert.match(source, /globalState = \{ 1 \};/);
+    assert.match(source, /globalState = \{ 1\.0 \};/);
 });
 
 test('a live parameter is emitted as a plain constant, not a runtime override', () => {
@@ -292,7 +292,16 @@ test('a cases expression exports as a conditional in both languages', async () =
     const expression = ['Which', ['Less', 0, 'x', 1], 'a', ['Not', ['Equal', 'x', 2]], 2, 'True', 3];
     const symbols = new Map([['x', 'x'], ['a', 'a']]);
     assert.equal(emitExpression(compileExpressionNode(expression), symbols, cppOperators),
-        '(((0 < x) && (x < 1)) ? a : ((!((x == 2))) ? 2 : 3))');
+        '(((0.0 < x) && (x < 1.0)) ? a : ((!((x == 2.0))) ? 2.0 : 3.0))');
+});
+
+test('every number is written as a floating-point literal, so C++ neither divides integers nor mixes them with doubles', async () => {
+    const { compileExpressionNode, doubleLiteral, emitExpression, cppOperators } = await import('../src/codeExport.mjs');
+    assert.deepEqual([75, 0.5, -3, 1e21, 1e-7, -0].map(doubleLiteral), ['75.0', '0.5', '-3.0', '1e+21', '1e-7', '-0.0']);
+    const symbols = new Map([['x', 'x']]);
+    // 1 / 2 is 0 in C++ with integer literals; and std::min(75, x) does not compile with x a double.
+    assert.equal(emitExpression(compileExpressionNode(['Divide', '1', '2']), symbols, cppOperators), '(1.0 / 2.0)');
+    assert.equal(emitExpression(compileExpressionNode(['Min', '75', 'x']), symbols, cppOperators), 'std::min(75.0, x)');
 });
 
 test('a setsValue source term is assigned before the derivatives, not integrated', async () => {
@@ -382,8 +391,8 @@ function scheduledModel(schedule) {
 test('a scheduled parameter is read from one table at the instant the engine reads it, in either language', () => {
     const document = scheduledModel({ interpolation: 'hold', samples: [[0, 1], [10, 3]] });
     const cpp = generateStandaloneProgram(document, 'cpp');
-    assert.match(cpp, /const double scheduleTimes0\[\] = \{ 0, 10 \};/);
-    assert.match(cpp, /const double scheduleValues0\[\] = \{ 1, 3 \};/);
+    assert.match(cpp, /const double scheduleTimes0\[\] = \{ 0\.0, 10\.0 \};/);
+    assert.match(cpp, /const double scheduleValues0\[\] = \{ 1\.0, 3\.0 \};/);
     assert.match(cpp, /\{ scheduleTimes0, scheduleValues0, 2, true \}/);
     assert.doesNotMatch(cpp, /scheduleTimes1/, 'two parameters linked to one shared parameter share one table');
     assert.match(cpp, /double contributionValue = scheduleValue\(0, stepTime\);/);

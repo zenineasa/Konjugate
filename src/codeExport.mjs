@@ -111,9 +111,14 @@ const pythonOperators = {
     False: 'False'
 };
 
+// Always a floating-point literal, in C++ as in Python: "75" would be an int in C++, where 1 / 2 is 0 and std::min(75,
+// x) with x a double does not compile. String() already writes a large or small value with an exponent (1e+21), which
+// is a double.
 export function doubleLiteral(value) {
     if (!Number.isFinite(value)) throw new Error(`Cannot embed a non-finite constant (${value}) in generated code.`);
-    return Object.is(value, -0) ? '-0.0' : String(value);
+    if (Object.is(value, -0)) return '-0.0';
+    const text = String(value);
+    return /[.e]/.test(text) ? text : `${text}.0`;
 }
 
 function csvField(value) {

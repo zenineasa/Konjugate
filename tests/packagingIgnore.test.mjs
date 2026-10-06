@@ -64,6 +64,11 @@ test('Electron Packager excludes tests/ except the --interaction-test driver src
     }
 });
 
+test('Electron Packager leaves the Welcome feed out of the app, but keeps the bundled Welcome assets', () => {
+    for (const feedPath of ['/welcome', '/welcome/featured.json', '/welcome/images/a.webp']) assert.equal(shouldIgnorePackagePath(feedPath), true, feedPath);
+    for (const bundled of ['/assets/welcome', '/assets/welcome/videos.json', '/assets/welcome/whatsNew.json']) assert.equal(shouldIgnorePackagePath(bundled), false, bundled);
+});
+
 test('Electron Packager options retain resources and macOS bundle ID', () => {
     const options = createPackageOptions({
         platform: 'darwin',

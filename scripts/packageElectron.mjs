@@ -16,6 +16,8 @@ const ignoredTopLevelDirectories = new Set([
     'tests',
     'docs',
     'packaging',
+    // The Featured feed and its images are fetched from the repository at run time, never bundled.
+    'welcome',
 ]);
 
 // tests/ is otherwise entirely test-authoring machinery that has no business in a package shipped

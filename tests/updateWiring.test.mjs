@@ -73,7 +73,19 @@ test('browser pages import only the Node-free display model, never the modules t
 test('the title bar has the badge inside the Konjugate button, and the Welcome page has its section', async () => {
     const [html, guideRenderer] = await Promise.all([read('src/renderer/index.html'), read('src/exampleGuide/renderer.mjs')]);
     assert.match(html, /<button id="welcomeButton"[^>]*>Konjugate<span id="appUpdateBadge"[^>]*hidden><\/span><\/button>/);
-    assert.match(guideRenderer, /kind === 'welcome' \? '<section id="updatesSection"/, 'only the Welcome window carries the section');
+    assert.match(guideRenderer, /status: \(\) => '<section id="updatesSection"/, 'the Welcome page carries the section');
+    assert.ok(!/kind !== 'welcome'[^\n]*updatesSection/.test(guideRenderer), 'the other guides do not');
+});
+
+test('the Welcome page reaches main only through the IPC channels main handles', async () => {
+    const [preload, main] = await Promise.all([read('src/exampleGuide/preload.cjs'), read('src/main.mjs')]);
+    for (const channel of ['welcomeEpisodeOpened', 'welcomeDismissFeatured', 'welcomeOpenFeatured', 'appCopyBugReportDetails', 'welcomePatch']) {
+        assert.ok(preload.includes(`'${channel}'`), `${channel} is used by the preload`);
+        assert.ok(main.includes(`'${channel}'`), `${channel} is handled or sent by main`);
+    }
+    for (const method of ['onWelcomePatch', 'markEpisodeOpened', 'dismissFeatured', 'openFeatured', 'copyBugReportDetails']) {
+        assert.ok(preload.includes(`${method}:`), `${method} is exposed to the page`);
+    }
 });
 
 test('the web edition, which has no app to update, tolerates the missing update API', async () => {

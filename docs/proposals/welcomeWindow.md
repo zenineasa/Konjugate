@@ -3,14 +3,14 @@ type: Proposal
 title: The Welcome window as Konjugate's standing space
 description: Design for the Welcome window as a surface people see at every launch — the permanent On-Ramp tutorials, a time-limited Featured slot for announcements and promotions, and the rules that keep both trustworthy and fast.
 tags: [proposals, welcome, onboarding, content]
-status: draft
+status: implemented
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # The Welcome window as Konjugate's standing space
 
-**Status: proposed, nothing built yet.** Written down before any code, like [How Konjugate gets updated](../updates.md), so the decisions can be reviewed first.
+**Status: built, all four steps.** Written down before any code, like [How Konjugate gets updated](../updates.md), so the decisions can be reviewed first.
 
 ## The decision this rests on
 
@@ -60,7 +60,7 @@ A promotion that outlives its usefulness turns invisible, so the slot has rules:
 
 ## Opening fast and closing easily
 
-The window opens **immediately** with the bundled content (the On-Ramp, the layout, the footer) and fills in the blog posts, the add-on offer and the Featured item as they arrive; a slow or absent network can no longer delay it. **Esc closes it.** It must not take focus from a project that is still loading. If the Featured feed fails, the last good copy is used, then the bundled default (empty), so it never shows an error to someone who only wanted to start working.
+The window opens **immediately** with the bundled content (the On-Ramp, the layout, the footer) and fills in the blog posts, the add-on offer and the Featured item as they arrive; a slow or absent network can no longer delay it. **Esc closes it.** (The window keeps its existing focus behaviour; Esc applies when it has focus.) If the Featured feed fails, the last good copy is used, then the bundled default (empty), so it never shows an error to someone who only wanted to start working.
 
 There is no "Show at startup" opt-out in this design. If it turns out people resent the window, that is the first thing to add.
 
@@ -77,8 +77,8 @@ One small file in the user data folder, `welcomeState.json`, written atomically 
 
 Each step leaves the window working. The state file arrives with step 2 (opened episodes) and grows from there.
 
-## Open questions
+## Decisions on the open questions
 
-- **Where the Featured feed is hosted.** The repository, fetched from `raw.githubusercontent.com` like the registry, is consistent and reviewable; `konjugate.com` would allow changes without a commit but loses the review. This proposal assumes the repository.
-- **What counts as a launch** for a launch cap: every app start, or also dock reactivation.
-- **Whether a Sponsored item may ever be dismissed permanently,** or only until its end date.
+- **Where the Featured feed is hosted:** the repository, `welcome/featured.json` and `welcome/images/`, fetched from `raw.githubusercontent.com` (override with `KONJUGATE_WELCOME_FEED_URL`). It is never bundled in the app; the last good copy is cached in the user data folder.
+- **What counts as a launch:** only automatic opens (app start and macOS dock reactivation). Clicking the Konjugate button does not use up a launch cap.
+- **Sponsored items:** dismissible like any other, and the dismissal is remembered per item id.

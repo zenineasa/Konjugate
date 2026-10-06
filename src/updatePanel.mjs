@@ -17,7 +17,10 @@ const packageManagerHint = 'Installed with winget or Chocolatey? Update there in
 // coordinator's status() returns (src/updateCoordinator.mjs).
 export function describeUpdateStatus(status) {
     // A Store install makes no request, so there is nothing for "Check for updates" to do there.
-    return { canCheck: status.state !== 'managedByStore', ...describeState(status) };
+    const model = describeState(status);
+    // Nothing to do: the window shows one quiet line instead of a card.
+    const compact = (status.state === 'upToDate' && !model.notice) || (status.state === 'unknown' && !status.error);
+    return { canCheck: status.state !== 'managedByStore', compact, ...model };
 }
 
 function describeState(status) {

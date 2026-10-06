@@ -244,12 +244,14 @@ test('up to date names the running version', () => {
     assert.equal(model.headline, 'Konjugate 1.1.8 is up to date.');
     assert.equal(model.notice, null);
     assert.equal(model.canCheck, true);
+    assert.equal(model.compact, true, 'nothing to do: one quiet line');
 });
 
 test('a background failure after a good answer keeps the answer and says the last check failed', () => {
     const model = describeUpdateStatus({ source: 'other', running: '1.1.8', state: 'upToDate', latest: null, lastAttemptFailed: true, error: 'GitHub returned 403' });
     assert.equal(model.headline, 'Konjugate 1.1.8 is up to date.');
     assert.match(model.notice, /last check failed \(GitHub returned 403\)/);
+    assert.equal(model.compact, false, 'a failure is worth the full card');
 });
 
 test('with no answer yet, the failure is the headline and the success path is invited', () => {
@@ -258,6 +260,9 @@ test('with no answer yet, the failure is the headline and the success path is in
     const neverChecked = describeUpdateStatus({ source: 'other', running: '1.1.8', state: 'unknown', latest: null, lastAttemptFailed: false, error: null });
     assert.match(neverChecked.headline, /hasn't checked/);
     assert.match(neverChecked.detail, /Check for updates/);
+    assert.equal(neverChecked.compact, true);
+    assert.equal(describeUpdateStatus(availableStatus()).compact, false, 'an update gets the full card');
+    assert.equal(describeUpdateStatus({ source: 'store', running: '1.1.8', state: 'managedByStore', latest: null, lastAttemptFailed: false, error: null }).compact, false);
 });
 
 test('available, Homebrew: the brew command, what is new, the lag note, and skip', () => {

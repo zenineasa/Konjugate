@@ -68,3 +68,35 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .updatesSection button.updatesSecondary:hover { background: #12252d; }
 .updatesSection button:disabled { color: #6b8a86; background: #1e3532; border-color: transparent; cursor: default; }
 .updatesFooter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #243944; font-size: 11px; color: #778d98; }
+
+/* The Welcome window's standing sections (docs/proposals/welcomeWindow.md): the compact status line, What's
+   new, Featured, the On-Ramp extras, Community & help and the footer. Colors already used above. */
+.updatesSection.updatesCompact { margin: 4px 0 18px; padding: 8px 12px; background: transparent; border-left-width: 1px; }
+.updatesLine { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: #b8ced2; font-size: 11.5px; }
+.updatesMeta { color: #778d98; font-size: 11px; }
+.sectionIntro { margin: 0; color: #778d98; }
+.whatsNew, .featured { position: relative; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 6%); border: 1px solid #243944; border-radius: 7px; }
+.whatsNew h2 { margin: 0 0 6px; padding-top: 0; border-top: 0; }
+.whatsNew ul { margin: 6px 0; }
+.featured { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; padding-right: 40px; }
+.featuredLabel { flex: 0 0 100%; color: #778d98; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.featuredImage { flex: 0 0 200px; max-width: 100%; border-radius: 5px; }
+.featuredBody { flex: 1 1 240px; }
+.featuredTitle { color: #e6f0f2; font-size: 14px; font-weight: 600; }
+.featured button, .whatsNew button { height: 28px; padding: 0 13px; color: #09201e; background: #42c9bc; border: 0; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.featured button:hover, .whatsNew button:hover { background: #59d6ca; }
+.featured button.featuredDismiss { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; color: #8499a3; background: transparent; font-size: 16px; font-weight: 400; }
+.featured button.featuredDismiss:hover { color: #e6f0f2; background: #182730; }
+.card { position: relative; }
+.cardOpenedMark { position: absolute; top: 6px; right: 6px; padding: 1px 7px; color: #09201e; background: #42c9bc; border-radius: 9px; font-size: 10px; font-weight: 600; }
+.cardOpened .cardTitle { color: #8499a3; }
+.onRampMore { margin: -12px 0 24px; color: #778d98; }
+.linkButton { padding: 0; color: #83d7cf; background: none; border: 0; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
+.communityRow { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; }
+.communityLink { display: inline-flex; height: 30px; padding: 0 14px; align-items: center; color: #b8ced2; background: transparent; border: 1px solid #2c4350; border-radius: 5px; font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
+.communityLink:hover, .communityLink:focus-visible { background: #12252d; }
+.communityDiscord { color: #fff; background: #5865f2; border-color: #5865f2; font-weight: 600; }
+.communityDiscord:hover, .communityDiscord:focus-visible { color: #fff; background: #6f7af5; }
+.communityNote { margin: 0; color: #778d98; font-size: 11px; }
+.welcomeFooter { margin-top: 36px; padding-top: 14px; border-top: 1px solid #263a44; color: #778d98; }
+.welcomeFooter p, .welcomeFooter li { font-size: 11px; line-height: 1.6; }

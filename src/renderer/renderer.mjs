@@ -14,6 +14,16 @@ import {
     timeBinding,
     validateEquationLatex
 } from '../equationModel.mjs';
+import {
+    causalMappingCreateValue,
+    causalMappingValue,
+    equationOutputValue,
+    pacingFromValue,
+    parseCausalMappingValue,
+    parseEquationOutput,
+    parseProviderReference,
+    providerReferenceValue
+} from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
@@ -2560,7 +2570,7 @@ function renderEdgeEditor(definition) {
     [['source', definition.source], ['target', definition.target]].forEach(([role, nodeId]) => {
         const node = model.nodes.find((candidate) => candidate.id === nodeId);
         node?.states.forEach((state) => {
-            output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.id}`));
+            output.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id)));
         });
     });
 
@@ -2574,7 +2584,7 @@ function renderEdgeEditor(definition) {
         latexSource.hidden = !latexMode;
         mathField.value = definition.equationModel.latex;
         latexSource.value = definition.equationModel.latex;
-        output.value = `${definition.equationModel.output.role}:${definition.equationModel.output.stateId}`;
+        output.value = equationOutputValue(definition.equationModel.output.role, definition.equationModel.output.stateId);
         renderEquationDiagnostics(definition.equationModel.latex, definition.equationModel.bindings);
         const references = $('#editStateReferenceChips');
         references.replaceChildren();
@@ -2589,7 +2599,7 @@ function renderEdgeEditor(definition) {
     } else {
         mathField.hidden = true;
         latexSource.hidden = true;
-        output.value = `${definition.implementation.output?.role ?? 'target'}:${definition.implementation.output?.stateId ?? ''}`;
+        output.value = equationOutputValue(definition.implementation.output?.role ?? 'target', definition.implementation.output?.stateId);
         $('#editEdgeProviderSource').value = definition.implementation.source ?? '';
         $('#editInsertProviderTemplate').hidden = !definition.implementation.source?.trim();
         $('#editProviderOutputKey').value = definition.implementation.output?.key ?? '';
@@ -2607,12 +2617,6 @@ function providerReferenceCandidates(definition) {
     const sourceNode = model.nodes.find((node) => node.id === definition.source);
     const targetNode = model.nodes.find((node) => node.id === definition.target);
     return reconcileEquationBindings([], sourceNode, targetNode, definition.parameters).filter((binding) => binding.kind !== 'time');
-}
-
-function providerReferenceValue(reference) {
-    return reference.kind === 'parameter'
-        ? `parameter:${reference.parameterId}`
-        : `state:${reference.role}:${reference.nodeId}:${reference.stateId}`;
 }
 
 function providerBindingToReference(binding) {
@@ -3416,7 +3420,7 @@ function applyEdgeTemplate(template) {
             // default is not reliable across a chained two-endpoint pick to begin with.
             const roleNode = model.nodes.find((node) => node.id === Number($(`#edge${template.output.role[0].toUpperCase()}${template.output.role.slice(1)}`).value));
             const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
-            const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === `${template.output.role}:${state.id}`);
+            const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === equationOutputValue(template.output.role, state.id));
             if (option) $('#edgeEquationOutput').value = option.value;
             pendingEdgeTemplate = template;
         };
@@ -3836,10 +3840,10 @@ function refreshStateReferences() {
     const selectedOutput = output.value;
     output.replaceChildren();
     for (const [role, node] of [['source', sourceNode], ['target', targetNode]]) {
-        node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, `${role}:${state.id}`)));
+        node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id))));
     }
     if ([...output.options].some((option) => option.value === selectedOutput)) output.value = selectedOutput;
-    else if (targetNode?.states[0]) output.value = `target:${targetNode.states[0].id}`;
+    else if (targetNode?.states[0]) output.value = equationOutputValue('target', targetNode.states[0].id);
     renderBuilderEquationDiagnostics(bindings);
     refreshProviderBindingRowOptions(bindings);
 }
@@ -5387,11 +5391,7 @@ $('#resultPlaybackRate').addEventListener('change', () => {
 });
 $('#simulationPacing').addEventListener('change', async (event) => {
     if (!activeEngineJobId) return;
-    const [mode, ratio] = event.target.value.split(':');
-    await window.engine.setPacing(activeEngineJobId, {
-        mode,
-        simulationSecondsPerWallSecond: mode === 'realTime' ? 1 : Number(ratio || 1)
-    });
+    await window.engine.setPacing(activeEngineJobId, pacingFromValue(event.target.value));
 });
 $('#liveParameterButton').addEventListener('click', () => {
     const panel = $('#liveParameterPanel');
@@ -6701,21 +6701,21 @@ function renderCausalInferenceMapping() {
         label.textContent = entry.columnName;
         row.append(label);
         const select = document.createElement('select');
-        select.append(new Option(`Create node “${entry.suggestedSymbol ?? suggestSymbol(entry.columnName)}”`, 'create'));
+        select.append(new Option(`Create node “${entry.suggestedSymbol ?? suggestSymbol(entry.columnName)}”`, causalMappingCreateValue));
         nodesForMapping.forEach((node) => {
             const modelNode = model.nodes.find((candidate) => candidate.id === node.id);
             node.states.forEach((state) => {
-                select.append(new Option(`${modelNode.title} · ${state.name}`, `${node.id}:${state.id}`));
+                select.append(new Option(`${modelNode.title} · ${state.name}`, causalMappingValue(node.id, state.id)));
             });
         });
-        select.value = entry.createNew ? 'create' : `${entry.nodeId}:${entry.stateId}`;
+        select.value = entry.createNew ? causalMappingCreateValue : causalMappingValue(entry.nodeId, entry.stateId);
         select.addEventListener('change', () => {
-            if (select.value === 'create') {
+            const choice = parseCausalMappingValue(select.value);
+            if (choice?.createNew) {
                 causalInferenceState.mapping[index] =
                     { columnName: entry.columnName, nodeId: null, stateId: null, createNew: true, suggestedSymbol: suggestSymbol(entry.columnName) };
-            } else {
-                const [nodeId, stateId] = select.value.split(':').map(Number);
-                causalInferenceState.mapping[index] = { columnName: entry.columnName, nodeId, stateId, createNew: false };
+            } else if (choice) {
+                causalInferenceState.mapping[index] = { columnName: entry.columnName, nodeId: choice.nodeId, stateId: choice.stateId, createNew: false };
             }
         });
         row.append(select);
@@ -8515,7 +8515,9 @@ $('#editEdgeEquation').addEventListener('change', (event) => {
 });
 $('#editEquationOutput').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
-    const [role, stateId] = event.target.value.split(':');
+    const picked = parseEquationOutput(event.target.value);
+    if (!picked) return;
+    const { role, stateId } = picked;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         if (snapshot.implementation) snapshot.implementation.output = { ...snapshot.implementation.output, role, stateId };
         else snapshot.equationModel.output = { role, stateId };
@@ -8529,7 +8531,7 @@ $('#editEdgeImplementationKind').addEventListener('change', (event) => {
             snapshot.implementation = null;
             return;
         }
-        const [role, stateId] = $('#editEquationOutput').value.split(':');
+        const { role, stateId } = parseEquationOutput($('#editEquationOutput').value) ?? { role: 'target', stateId: null };
         const bindings = snapshot.implementation?.bindings ?? [];
         const output = snapshot.implementation?.output ?? { key: 'output', role, stateId };
         snapshot.implementation = {
@@ -10280,10 +10282,8 @@ $('#createEdge').addEventListener('click', () => {
         parameters
     };
     definition.equationModel = normalizeEdgeEquationModel(definition);
-    const [outputRole, outputStateId] = $('#edgeEquationOutput').value.split(':');
-    if (outputRole && outputStateId) {
-        definition.equationModel.output = { role: outputRole, stateId: Number(outputStateId) };
-    }
+    const pickedOutput = parseEquationOutput($('#edgeEquationOutput').value);
+    if (pickedOutput) definition.equationModel.output = pickedOutput;
     if (implementationKind === 'equation') {
         if (definition.equation && definition.equationModel.mathJson === null) {
             renderBuilderEquationDiagnostics(definition.equationModel.bindings);
@@ -10294,19 +10294,19 @@ $('#createEdge').addEventListener('click', () => {
         const fakeParameterIdToReal = Object.fromEntries(parameters.map((parameter, index) => [`builderParameter${index}`, parameter.id]));
         const bindings = $$('#providerBindingRows .providerBindingRow').map((row) => {
             const key = $('[data-field="key"]', row).value.trim();
-            const referenceValue = $('[data-field="reference"]', row).value;
-            if (referenceValue.startsWith('parameter:')) {
-                return { key, kind: 'parameter', parameterId: fakeParameterIdToReal[referenceValue.slice('parameter:'.length)] };
-            }
-            const [, role, nodeId, stateId] = referenceValue.split(':');
-            return { key, kind: 'state', role, nodeId: Number(nodeId), stateId: Number(stateId) };
+            const reference = parseProviderReference($('[data-field="reference"]', row).value);
+            if (reference?.kind === 'parameter') return { key, kind: 'parameter', parameterId: fakeParameterIdToReal[reference.parameterId] };
+            if (reference) return { key, ...reference };
+            // No usable reference selected (e.g. nothing to reference yet): left unresolved for the
+            // validation that follows to report, as a missing state was before.
+            return { key, kind: 'state', role: undefined, nodeId: null, stateId: null };
         });
         definition.implementation = {
             kind: implementationKind,
             providerApiVersion: 1,
             source: $('#edgeProviderSource').value,
             bindings,
-            output: { key: $('#providerOutputKey').value.trim(), role: outputRole, stateId: Number(outputStateId) }
+            output: { key: $('#providerOutputKey').value.trim(), role: pickedOutput?.role, stateId: pickedOutput?.stateId }
         };
     }
 
@@ -10927,7 +10927,7 @@ function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
         } else {
             const node = binding.role === 'source' ? previewSource : previewTarget;
             const state = node?.states.find((candidate) => candidate.symbol === binding.symbol);
-            if (state) select.value = `state:${binding.role}:${node.id}:${state.id}`;
+            if (state) select.value = providerReferenceValue({ kind: 'state', role: binding.role, nodeId: node.id, stateId: state.id });
         }
         $('[data-field="key"]', row).addEventListener('change', (event) => {
             changeEdgeGroupModel(group, (snapshot) => {

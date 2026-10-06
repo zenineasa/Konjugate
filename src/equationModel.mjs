@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { ComputeEngine } from '@cortex-js/compute-engine';
+import { providerReferenceValue } from './selectValues.mjs';
 
 const computeEngine = new ComputeEngine();
 const allowedOperators = new Set([
@@ -25,9 +26,9 @@ function uniqueSymbol(preferred, used) {
 
 function bindingKey(binding) {
     if (binding.kind === 'time') return 'time';
-    return binding.kind === 'parameter'
-        ? `parameter:${binding.parameterId}`
-        : `state:${binding.role}:${binding.nodeId}:${binding.stateId}`;
+    // The same encoding the provider "Reference" dropdown uses (see selectValues.mjs), so a binding's
+    // key and its dropdown value can never drift apart.
+    return providerReferenceValue(binding);
 }
 
 // Simulation time, available to every equation as t (renamed only if t is already taken). The

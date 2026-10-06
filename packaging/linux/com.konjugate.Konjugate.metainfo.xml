@@ -27,7 +27,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>Konjugate's graph-based model editor</caption>
-      <image>https://raw.githubusercontent.com/zenineasa/Konjugate/v1.1.8/assets/ForReadme/konjugateAppScreenshot.png</image>
+      <image>https://raw.githubusercontent.com/zenineasa/Konjugate/v1.1.9/assets/ForReadme/konjugateAppScreenshot.png</image>
     </screenshot>
   </screenshots>
 
@@ -43,6 +43,6 @@
        is. What's committed here is only ever a last-known-good snapshot for readability, not a
        value anything depends on staying in sync by hand. -->
   <releases>
-    <release version="1.1.8" date="2026-10-06" />
+    <release version="1.1.9" date="2026-10-06" />
   </releases>
 </component>

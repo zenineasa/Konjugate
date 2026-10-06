@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { startEngineRun } from './engineAdapter.mjs';
 import { encodeProjectFile } from './projectFile.mjs';
+import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './addonCache.mjs';
 
 const maximumInputBytes = 10 * 1024 * 1024;
 // Long enough for an importer that builds a large region (routing every lane over a city's roads takes tens of seconds,
@@ -57,9 +58,7 @@ export async function fetchAllowed({ url, hosts, fetchImpl = globalThis.fetch, u
     let current;
     try { current = new URL(url); } catch { throw new Error('That is not a web address.'); }
     for (let hop = 0; hop <= maximumRedirects; hop += 1) {
-        if (current.protocol !== 'https:') throw new Error('Only https addresses can be fetched.');
-        if (current.username || current.password) throw new Error('An address with a user name or password cannot be fetched.');
-        if (!allowed.has(current.hostname.toLowerCase())) throw new Error(`This window may not connect to ${current.hostname}. It may reach: ${[...allowed].join(', ')}.`);
+        checkAddress(current, allowed);
         let response;
         try {
             response = await fetchImpl(current.href, { redirect: 'manual', headers: { 'User-Agent': userAgent, Accept: '*/*' }, signal: AbortSignal.timeout(fetchTimeoutMilliseconds) });
@@ -80,6 +79,19 @@ export async function fetchAllowed({ url, hosts, fetchImpl = globalThis.fetch, u
         return bytes;
     }
     throw new Error('Too many redirects.');
+}
+
+// An address the window may ask for: https, no credentials, a host the manifest lists. Throws a message a user can act on.
+function checkAddress(address, allowed) {
+    if (address.protocol !== 'https:') throw new Error('Only https addresses can be fetched.');
+    if (address.username || address.password) throw new Error('An address with a user name or password cannot be fetched.');
+    if (!allowed.has(address.hostname.toLowerCase())) throw new Error(`This window may not connect to ${address.hostname}. It may reach: ${[...allowed].join(', ')}.`);
+}
+export function addressAllowed(url, hosts) {
+    let address;
+    try { address = new URL(url); } catch { throw new Error('That is not a web address.'); }
+    checkAddress(address, new Set(hosts.map((host) => host.toLowerCase())));
+    return address.href;
 }
 
 // A name safe to show and to key a file by: no path separators or control characters.
@@ -367,6 +379,13 @@ export function registerLauncherHandlers(deps) {
         auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine, fetchImpl = (...args) => globalThis.fetch(...args)
     } = deps;
     const workspaces = new Map();
+    // Each add-on's cache of what it fetched (addonCache.mjs), made when first used.
+    const caches = new Map();
+    const cacheFor = (addon) => {
+        const id = addon.manifest.addonId;
+        if (!caches.has(id)) caches.set(id, createAddonCache({ directory: addonCacheDirectory(app.getPath('userData'), id) }));
+        return caches.get(id);
+    };
 
     function launcherContext(event) {
         for (const projectWindow of projectWindows) {
@@ -549,19 +568,52 @@ export function registerLauncherHandlers(deps) {
 
     // Fetches a file from the internet into a file role, from a host the manifest names. The bytes go through the
     // same reading as a chosen file, and the address and time are kept for the run manifest.
-    ipcMain.handle('launcherFetchFile', guarded(async ({ addon, workspace }, { importerId, role, url, name }) => {
+    //
+    // With `cache: 'use'` (and `requires: ["fetchCache"]`), an answer fetched from the same address within `maximumAgeDays`
+    // (30 by default) is read from the add-on's cache instead, and a fresh one is kept there; `cache: 'refresh'` always
+    // fetches and keeps the answer; `cache: 'off'` (the default) neither reads nor keeps. The file's `retrievedAt` is when
+    // it was really fetched, whichever way it came.
+    ipcMain.handle('launcherFetchFile', guarded(async ({ addon, workspace }, { importerId, role, url, name, cache = 'off', maximumAgeDays = null }) => {
         needs(addon, 'network.fetch');
         needs(addon, 'data.import');
         const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
         const file = declared(importer.files, 'role', role, 'file role');
         const fileName = safeFileName(name);
         if (!fileName) throw new Error('Give the series a name.');
-        const bytes = await fetchAllowed({ url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
+        if (!['off', 'use', 'refresh'].includes(cache)) throw new Error('A fetch is cached with use, refresh or off.');
+        const hosts = addon.manifest.network?.hosts ?? [];
+        const store = cache === 'off' ? null : cacheFor(addon);
+        const age = Number(maximumAgeDays) > 0 ? Math.min(Number(maximumAgeDays), maximumAgeDaysLimit) : undefined;
+        // The address is checked before the cache is read, as it is before a fetch.
+        const hit = cache === 'use' ? await store.get(addressAllowed(url, hosts), { maximumAgeDays: age }) : null;
+        let bytes;
+        let retrievedAt;
+        if (hit) {
+            bytes = new Uint8Array(hit.bytes);
+            retrievedAt = hit.retrievedAt;
+        } else {
+            bytes = await fetchAllowed({ url, hosts, fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
+            retrievedAt = new Date().toISOString();
+            // A cache that cannot be written (a full disk) never stops a fetch.
+            if (store) await store.put(addressAllowed(url, hosts), Buffer.from(bytes), { retrievedAt }).catch(() => {});
+        }
         if (!file.multiple) dropRole(workspace, file);
-        workspace.pending.set(pendingKey(file, fileName), { role, name: fileName, url, retrievedAt: new Date().toISOString(), ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: false });
+        workspace.pending.set(pendingKey(file, fileName), { role, name: fileName, url, retrievedAt, ...decodeText(bytes), sha256: sha256(bytes), bytes: bytes.length, sample: false });
         workspace.imported = null;
         await releaseRuns(workspace);
-        return { name: fileName, bytes: bytes.length };
+        return { name: fileName, bytes: bytes.length, cached: Boolean(hit), retrievedAt };
+    }));
+
+    // How much the add-on's cache holds ({ entries, bytes, oldest, newest }), and clearing it: for a window that lets
+    // the user see it and start afresh.
+    ipcMain.handle('launcherCacheInfo', guarded(async ({ addon }) => {
+        needs(addon, 'network.fetch');
+        return cacheFor(addon).info();
+    }));
+    ipcMain.handle('launcherClearCache', guarded(async ({ addon }) => {
+        needs(addon, 'network.fetch');
+        await cacheFor(addon).clear();
+        return {};
     }));
 
     // Reads the chosen files from disk again, for data that another program keeps up to date. Sample files are
@@ -723,6 +775,16 @@ export function registerLauncherHandlers(deps) {
             projectWindow.show();
             projectWindow.focus();
         }
+        return {};
+    }));
+
+    // Keeps the window's session with the open project without opening a model (with `requires: ["keepSession"]`): work
+    // in the window before anything is built (sites placed on a map, say) is then saved with the project, and restored.
+    ipcMain.handle('launcherKeepSession', guarded(async ({ addon, workspace, projectWindow }, { session }) => {
+        needs(addon, 'project.data');
+        if (projectWindow.isDestroyed()) throw new Error('The project window has been closed.');
+        const entry = buildSessionEntry({ addon: addon.manifest, window: session, inputs: [...workspace.pending.values()] });
+        projectWindow.webContents.send('launcherKeepAddonData', { addonId: addon.manifest.addonId, entry });
         return {};
     }));
 

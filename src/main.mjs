@@ -42,6 +42,7 @@ import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
 import { registerLauncherHandlers } from './launcherHost.mjs';
+import { addonCacheDirectory } from './addonCache.mjs';
 import { normalizeShapeLibraryEntry } from './shapeLibraryCatalog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -1279,6 +1280,10 @@ ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, vers
         return { packageType, packageId, version };
     }
     await uninstallPackage({ directory: join(app.getPath('userData'), 'packages'), packageType, packageId, version });
+    // An add-on's cache goes with its last installed version (a reinstall or an update keeps it).
+    if (packageType === 'addon' && !(await listInstalledPackages(join(app.getPath('userData'), 'packages'))).some((entry) => entry.packageType === 'addon' && entry.packageId === packageId)) {
+        await rm(addonCacheDirectory(app.getPath('userData'), packageId), { recursive: true, force: true }).catch(() => {});
+    }
     await discoverAddons();
     await discoverComponentLibrary();
     markPackageRestartPending();

@@ -25,7 +25,7 @@ const allowedPermissions = new Set([
 // scenarioForkTime: runScenario accepts the window's own fork time (forkAt).
 // suppliedPerParameter: supplied data may be given per parameter (supplied.byParameter), so one scenario can change
 // several parameters, each for its own entities along its own paths.
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter']);
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 

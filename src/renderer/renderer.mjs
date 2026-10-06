@@ -411,6 +411,8 @@ let currentProjectPath = null;
 // model rather than in it: it is read when a project is loaded and written when it is saved, and never reaches
 // the engine, validation, copy and paste, or the undo history.
 let projectAddonData = {};
+// A launcher's session kept with the project since it was last saved or opened (see onKeepAddonData).
+let addonDataUnsaved = false;
 const addonDataOf = (document) => (document?.addonData && typeof document.addonData === 'object' && !Array.isArray(document.addonData) ? document.addonData : {});
 let currentProjectFilename = 'untitled.kjt';
 let currentProjectPassword = null;
@@ -566,7 +568,7 @@ function updateHistoryControls() {
     $('#redoButton').disabled = Boolean(activeResult) || !documentController.canRedo;
     // Fresh simulation results count as unsaved work (the same test the discard prompts use), so the
     // titlebar Save stays usable for them even when the model itself is clean.
-    const unsaved = documentController.dirty || Boolean(activeResult && !activeResultPersistedInProject);
+    const unsaved = documentController.dirty || Boolean(activeResult && !activeResultPersistedInProject) || addonDataUnsaved;
     $('#saveButton').disabled = !unsaved && currentProjectPath !== null;
     $('.windowTitle i').style.visibility = unsaved ? 'visible' : 'hidden';
     updateSelectionActionControls();
@@ -629,7 +631,7 @@ function initializeWindowControls() {
     $('#maximizeButton').dataset.tooltip = isMac ? 'Enter full screen' : 'Maximize';
     $('#maximizeButton').addEventListener('click', () => window.windowControls.toggleMaximize());
     $('#closeButton').addEventListener('click', async () => {
-        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) &&
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) &&
             !await window.projectFiles.confirmDiscard()) return;
         window.windowControls.close();
     });
@@ -6258,6 +6260,7 @@ async function loadProjectDocument(document, {
     hideAssistantPanel();
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
+    addonDataUnsaved = false;
     clearRenderedModel();
     model.metadata = nextModel.metadata;
     model.runConfigurations = nextModel.runConfigurations;
@@ -8916,7 +8919,7 @@ async function loadOpenedProjectFile(file) {
 async function openProject() {
     if (simulationRunning) return;
     try {
-        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) &&
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) &&
             !await window.projectFiles.confirmDiscard()) return;
         const file = await window.projectFiles.open();
         if (!file) return;
@@ -9005,6 +9008,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         updateDocumentTitle();
         updateEncryptionControls();
         activeResultPersistedInProject = result.includesResults;
+        addonDataUnsaved = false;
         documentController.markSaved();
         $('#statusText').textContent = `${result.encrypted ? 'Encrypted project' : 'Project'} saved${result.includesResults ? ' with simulation results' : ' · model only'}`;
         return true;
@@ -9019,7 +9023,7 @@ async function loadExample(id) {
     if (!id) return;
     try {
         if (simulationRunning) return;
-        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject)) && !await window.projectFiles.confirmDiscard()) return;
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
         const example = await window.projectFiles.loadExample(id);
         await loadProjectDocument(JSON.parse(example.content), {
             fileName: example.suggestedFilename,
@@ -9090,6 +9094,14 @@ window.launcherHost?.onOpenProject(async (payload) => {
 
 // A launcher asks for the data it keeps with this project (its saved session), to restore its window.
 window.launcherHost?.onAddonDataRequest?.((addonId) => projectAddonData[addonId] ?? null);
+
+// A launcher keeps its session with this project (work in its window before any model is built): saved with the
+// project, so it counts as unsaved work until then.
+window.launcherHost?.onKeepAddonData?.((addonId, entry) => {
+    projectAddonData = { ...projectAddonData, [addonId]: entry };
+    addonDataUnsaved = true;
+    updateHistoryControls();
+});
 
 $('#exampleGuideButton').addEventListener('click', () => {
     if (activeExampleId) window.projectFiles.openExampleGuide(activeExampleId);

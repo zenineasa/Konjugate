@@ -10,7 +10,7 @@ import {
     attachAddonData, buildSessionEntry, sessionInputs,
     checkForkTime,
     checkRunLength,
-    applyOverrides, buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
+    addressAllowed, applyOverrides, buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
 } from '../src/launcherHost.mjs';
 
 const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'launcher');
@@ -368,6 +368,18 @@ test('a launcher may ask for project.data and require projectSession', () => {
     manifest.permissions = [...manifest.permissions, 'project.data'];
     manifest.requires = ['projectSession'];
     assert.doesNotThrow(() => validateAddonManifest(manifest));
+});
+
+test('a launcher may require fetchCache and keepSession, and a cached address is checked as a fetched one is', () => {
+    const manifest = launcher();
+    manifest.permissions = [...manifest.permissions, 'project.data', 'network.fetch'];
+    manifest.network = { hosts: ['overpass-api.de'] };
+    manifest.requires = ['fetchCache', 'keepSession'];
+    assert.doesNotThrow(() => validateAddonManifest(manifest));
+    assert.equal(addressAllowed('https://overpass-api.de/api/interpreter?data=x', ['overpass-api.de']), 'https://overpass-api.de/api/interpreter?data=x');
+    assert.throws(() => addressAllowed('https://example.org/x', ['overpass-api.de']), /may not connect to example.org/);
+    assert.throws(() => addressAllowed('http://overpass-api.de/x', ['overpass-api.de']), /Only https/);
+    assert.throws(() => addressAllowed('not an address', ['overpass-api.de']), /not a web address/);
 });
 
 test('the window may choose when a scenario starts, from the run\'s start up to its end', () => {

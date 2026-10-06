@@ -109,6 +109,8 @@ contextBridge.exposeInMainWorld('launcherHost', {
     // A project is being built for this window (onOpenProject follows), or its build failed.
     onOpenProjectPending: (callback) => ipcRenderer.on('launcherOpenProjectPending', () => callback()),
     onOpenProjectAbandoned: (callback) => ipcRenderer.on('launcherOpenProjectAbandoned', () => callback()),
+    // A launcher keeps its session with the open project without opening a model.
+    onKeepAddonData: (callback) => ipcRenderer.on('launcherKeepAddonData', (_event, { addonId, entry }) => callback(addonId, entry)),
     // The host asks for the data a launcher keeps with the open project; the window answers from its own copy.
     onAddonDataRequest: (callback) => ipcRenderer.on('launcherAddonDataRequest', (_event, { requestId, addonId }) => {
         let data = null;

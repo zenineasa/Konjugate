@@ -9,6 +9,15 @@ contextBridge.exposeInMainWorld('windowControls', Object.freeze({
     onMaximizedChange: (callback) => ipcRenderer.on('windowMaximizedChange', (_event, value) => callback(value))
 }));
 
+// The Welcome window's Updates section (see src/updateCoordinator.mjs and docs/updates.md).
+contextBridge.exposeInMainWorld('appUpdate', Object.freeze({
+    status: () => ipcRenderer.invoke('appUpdateStatus'),
+    checkNow: () => ipcRenderer.invoke('appUpdateCheckNow'),
+    skip: (version) => ipcRenderer.invoke('appUpdateSkip', version),
+    copyCommand: () => ipcRenderer.invoke('appUpdateCopyCommand'),
+    onChange: (callback) => ipcRenderer.on('appUpdateStatus', (_event, status) => callback(status))
+}));
+
 contextBridge.exposeInMainWorld('exampleGuide', Object.freeze({
     onContent: (callback) => ipcRenderer.on('exampleGuideContent', (_event, payload) => callback(payload)),
     openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url),

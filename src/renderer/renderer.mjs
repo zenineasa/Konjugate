@@ -646,8 +646,27 @@ function initializeWindowControls() {
 
 initializeWindowControls();
 
+// The Konjugate button shows the version, and a quiet dot when an update is available (see
+// src/updateCoordinator.mjs and docs/updates.md). Absent in the web edition, which has no app to update.
+let runningVersion = '';
+let updateStatus = null;
+function refreshWelcomeButton() {
+    const showBadge = Boolean(updateStatus?.badge);
+    $('#appUpdateBadge').hidden = !showBadge;
+    $('#welcomeButton').dataset.tooltip = showBadge ? `Konjugate ${updateStatus.latest.version} is available` : `Konjugate · version ${runningVersion}`;
+    $('#welcomeButton').ariaLabel = showBadge ? `Konjugate, version ${updateStatus.latest.version} is available` : 'Konjugate';
+}
 window.applicationInfo.get().then(({ version }) => {
-    $('#welcomeButton').dataset.tooltip = `Konjugate · version ${version}`;
+    runningVersion = version;
+    refreshWelcomeButton();
+});
+window.appUpdate?.status().then((status) => {
+    updateStatus = status;
+    refreshWelcomeButton();
+});
+window.appUpdate?.onChange((status) => {
+    updateStatus = status;
+    refreshWelcomeButton();
 });
 $('#welcomeButton').addEventListener('click', () => window.applicationInfo.openWelcome());
 

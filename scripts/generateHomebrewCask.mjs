@@ -111,7 +111,6 @@ cask "konjugate" do
   on_macos do
     url "https://github.com/${repo}/releases/download/v#{version}/Konjugate-#{version}-#{arch}.dmg",
         verified: "github.com/${repo}/"
-    auto_updates true
     depends_on macos: :big_sur
 
     app "Konjugate.app"

@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('windowControls', {
     }
 });
 
+// What the app knows about updates (see src/updateCoordinator.mjs). The window only reads it, asks for
+// a fresh check, skips a version, or copies the command the main process already holds.
+contextBridge.exposeInMainWorld('appUpdate', {
+    status: () => ipcRenderer.invoke('appUpdateStatus'),
+    checkNow: () => ipcRenderer.invoke('appUpdateCheckNow'),
+    skip: (version) => ipcRenderer.invoke('appUpdateSkip', version),
+    copyCommand: () => ipcRenderer.invoke('appUpdateCopyCommand'),
+    onChange: (callback) => ipcRenderer.on('appUpdateStatus', (_event, status) => callback(status))
+});
+
 contextBridge.exposeInMainWorld('applicationInfo', {
     get: () => ipcRenderer.invoke('applicationInfo'),
     openWelcome: () => ipcRenderer.invoke('applicationOpenWelcome'),

@@ -17,9 +17,15 @@ been built or tested against Konjugate's own packaging output yet.
 
 ## Problem
 
-Konjugate has no update mechanism today. A user who installs v0.7.x has to notice a new release
-exists (by revisiting the GitHub Releases page) and manually repeat the whole install flow. There's
-no in-app "a new version is available" signal, no background download, no one-click apply.
+**Update (October 2026):** Konjugate now has a notify-only check — at launch it asks GitHub's
+releases API and, if a newer release with an installer for this platform exists, shows an "Update
+available" dialog that opens the release page. How each install channel (Store, winget, Chocolatey,
+Homebrew, AppImage) is updated, and what that notice should and should not say, is recorded in
+[How Konjugate gets updated](../updates.md). This proposal is about what that notice still does
+not do: it never downloads or installs anything.
+
+Without in-app download-and-install, a user still has to repeat the install flow by hand: no
+background download, no one-click apply.
 
 ## The mechanism: `electron-updater` against GitHub Releases as a static feed
 

@@ -2,6 +2,7 @@
 
 import { convertLatexToMarkup } from '../../node_modules/mathlive/mathlive.min.mjs';
 import { guideKindSuffix } from './guideKind.mjs';
+import { describeCheckedAt, describeUpdateStatus } from '../updatePanel.mjs';
 import { prepareGuideMarkdown } from './markdown.mjs';
 
 const escapeHtml = (value) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -78,6 +79,70 @@ function renderRecommendedAddons(entries) {
     </div>`;
 }
 
+// ---- The Updates section (Welcome window only; see docs/updates.md)
+//
+// Everything it says comes from describeUpdateStatus (src/updatePanel.mjs), which is tested; this only
+// draws it and wires the buttons. The status itself is held by the main process and pushed here
+// whenever it changes, so the section stays right while the window is open.
+let updateStatus = null;
+let checkingForUpdate = false;
+
+function renderUpdatesSection() {
+    const container = document.querySelector('#updatesSection');
+    if (!container) return;
+    if (!updateStatus) {
+        container.hidden = true;
+        return;
+    }
+    container.hidden = false;
+    const model = describeUpdateStatus(updateStatus);
+    const checked = describeCheckedAt(updateStatus.checkedAt, Date.now());
+    const buttons = model.actions.map((action, index) => `<button type="button" class="${action.kind === 'skip' || action.secondary ? 'updatesSecondary' : ''}" data-action-index="${index}">${escapeHtml(action.label)}</button>`).join('');
+    const links = model.links.map((link) => `<a href="${escapeHtml(link.url)}" data-update-link>${escapeHtml(link.label)}</a>`).join(' · ');
+    container.innerHTML = `
+        <div class="updatesHeadline">${escapeHtml(model.headline)}</div>
+        ${model.detail ? `<p class="updatesDetail">${escapeHtml(model.detail)}</p>` : ''}
+        ${model.notice ? `<p class="updatesNotice">${escapeHtml(model.notice)}</p>` : ''}
+        ${model.command ? `<pre class="updatesCommand">${escapeHtml(model.command)}</pre>` : ''}
+        ${buttons ? `<div class="updatesActions">${buttons}</div>` : ''}
+        ${model.hint ? `<p class="updatesHint">${escapeHtml(model.hint)}</p>` : ''}
+        <div class="updatesFooter">
+            ${model.canCheck ? `<button type="button" class="updatesSecondary" data-check ${checkingForUpdate ? 'disabled' : ''}>${checkingForUpdate ? 'Checking…' : 'Check for updates'}</button>` : ''}
+            <span>${links}${checked ? ` · ${escapeHtml(checked)}` : ''}</span>
+        </div>`;
+    container.querySelectorAll('[data-action-index]').forEach((button) => button.addEventListener('click', async () => {
+        const action = model.actions[Number(button.dataset.actionIndex)];
+        if (action.kind === 'link') {
+            window.exampleGuide.openExternal(action.url);
+        } else if (action.kind === 'copy') {
+            button.textContent = await window.appUpdate.copyCommand() ? 'Copied' : 'Copy failed';
+            setTimeout(renderUpdatesSection, 1500);
+        } else if (action.kind === 'skip') {
+            updateStatus = (await window.appUpdate.skip(action.version)) ?? updateStatus;
+            renderUpdatesSection();
+        }
+    }));
+    container.querySelector('[data-check]')?.addEventListener('click', async () => {
+        checkingForUpdate = true;
+        renderUpdatesSection();
+        try {
+            updateStatus = (await window.appUpdate.checkNow()) ?? updateStatus;
+        } finally {
+            checkingForUpdate = false;
+            renderUpdatesSection();
+        }
+    });
+    container.querySelectorAll('[data-update-link]').forEach((link) => link.addEventListener('click', (event) => {
+        event.preventDefault();
+        window.exampleGuide.openExternal(link.href);
+    }));
+}
+
+window.appUpdate.onChange((status) => {
+    updateStatus = status;
+    renderUpdatesSection();
+});
+
 document.querySelector('#minimize').addEventListener('click', () => window.windowControls.minimize());
 document.querySelector('#maximize').addEventListener('click', () => window.windowControls.toggleMaximize());
 document.querySelector('#close').addEventListener('click', () => window.windowControls.close());
@@ -87,7 +152,9 @@ window.exampleGuide.onContent(({ title, version, markdown, cards = [], recommend
     document.title = `${title} · ${suffix}`;
     document.querySelector('#guideTitle').textContent = `${title} · ${suffix}`;
     const versionHeading = version ? `<h1>Welcome to Konjugate v${escapeHtml(version)}</h1>` : '';
-    document.querySelector('#content').innerHTML = versionHeading + renderMarkdown(markdown)
+    // Only the Welcome window carries the Updates section; the other guides share this page.
+    const updatesSection = kind === 'welcome' ? '<section id="updatesSection" class="updatesSection" aria-live="polite" hidden></section>' : '';
+    document.querySelector('#content').innerHTML = versionHeading + updatesSection + renderMarkdown(markdown)
         + renderRecommendedAddons(recommendedAddons)
         + renderCardSection('Get started', cards.filter((card) => card.section === 'video'))
         + renderCardSection('Recent from the blog', cards.filter((card) => card.section === 'post'));
@@ -119,4 +186,10 @@ window.exampleGuide.onContent(({ title, version, markdown, cards = [], recommend
         }
     });
     document.querySelector('#content').scrollTop = 0;
+    if (kind === 'welcome') {
+        window.appUpdate.status().then((status) => {
+            updateStatus = status;
+            renderUpdatesSection();
+        });
+    }
 });

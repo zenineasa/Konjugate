@@ -59,6 +59,11 @@ input, select, textarea { user-select: text; }
 .windowTitle img { width: 18px; height: 18px; flex-shrink: 0; }
 .windowTitle .welcomeButton { padding: 3px 5px; color: #eff8fa; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 12px; font-weight: 700; outline: 0; -webkit-app-region: no-drag; flex-shrink: 0; }
 .windowTitle .welcomeButton:hover, .windowTitle .welcomeButton:focus-visible { background: #121d25; border-color: #263641; }
+/* A quiet dot on the Konjugate button when an update is available (docs/updates.md); the Welcome window
+   it opens has the details. Ringed in the title bar's own color so it reads against the button. */
+.windowTitle .welcomeButton { position: relative; }
+.appUpdateBadge { position: absolute; top: 1px; right: -2px; width: 7px; height: 7px; background: #42c9bc; border-radius: 50%; box-shadow: 0 0 0 2px #081119; }
+.appUpdateBadge[hidden] { display: none; }
 .windowTitle .documentTitle { margin-left: 14px; padding: 3px 5px; color: #82949f; background: transparent; border: 1px solid transparent; border-radius: 4px; font-weight: 450; -webkit-app-region: no-drag; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
 .windowTitle .documentTitle:hover { color: #c4d2d8; background: #121d25; border-color: #263641; }
 .documentTitleInput { width: 170px; height: 25px; margin-left: 14px; padding: 0 5px; color: #d5e2e7; background: #111d25; border: 1px solid #34505c; border-radius: 4px; outline: 0; font-size: 11px; -webkit-app-region: no-drag; }

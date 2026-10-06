@@ -28,7 +28,9 @@ import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries, checkpointIndex } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
-import { findAvailableUpdate } from './updateCheck.mjs';
+import { installSource } from './updateCheck.mjs';
+import { createUpdateCoordinator } from './updateCoordinator.mjs';
+import { createUpdateSkipStore } from './updateSkipStore.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -282,26 +284,46 @@ function openOrFocusProjectFile(path) {
     createProjectWindow(readProjectFilePayload(path).catch((error) => ({ error: error.message })));
 }
 
-async function checkForUpdates(window) {
-    let update;
-    try {
-        update = await findAvailableUpdate(app.getVersion());
-    } catch (error) {
-        console.warn('Update check failed:', error.message);
-        return;
+// What the app knows about updates, and when to ask GitHub again -- see src/updateCoordinator.mjs and
+// docs/updates.md. There is no dialog: a quiet badge on the title bar's Konjugate button and the
+// Updates section of the Welcome window show the result, and the windows are told whenever it changes.
+let updateCoordinator = null;
+
+function broadcastUpdateStatus(status) {
+    for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('appUpdateStatus', status);
     }
-    if (!update || !window || window.isDestroyed()) return;
-    const { response } = await dialog.showMessageBox(window, {
-        type: 'info',
-        title: 'Update available',
-        message: `Konjugate ${update.version} is available.`,
-        detail: `You're running ${app.getVersion()}.`,
-        buttons: ['View Release', 'Later'],
-        defaultId: 0,
-        cancelId: 1
-    });
-    if (response === 0) shell.openExternal(update.url);
 }
+
+async function startUpdateChecks() {
+    updateCoordinator = createUpdateCoordinator({
+        source: installSource(),
+        running: app.getVersion(),
+        appImagePath: process.env.APPIMAGE,
+        skipStore: createUpdateSkipStore({ directory: app.getPath('userData') }),
+        onChange: broadcastUpdateStatus
+    });
+    await updateCoordinator.init();
+    // The launch check. Later ones happen when a window regains focus and the last good answer is a
+    // day old (below), which is what covers an app left running for days.
+    updateCoordinator.maybeCheck();
+}
+
+ipcMain.handle('appUpdateStatus', () => updateCoordinator?.status() ?? null);
+ipcMain.handle('appUpdateCheckNow', () => updateCoordinator?.checkNow() ?? null);
+ipcMain.handle('appUpdateSkip', (_event, version) => {
+    if (typeof version !== 'string' || version === '') return updateCoordinator?.status() ?? null;
+    return updateCoordinator.skip(version);
+});
+// The window never supplies the text: the command comes from the status the main process holds, so a
+// page cannot put anything it likes on the clipboard through this.
+ipcMain.handle('appUpdateCopyCommand', () => {
+    const command = updateCoordinator?.status().command;
+    if (!command) return false;
+    clipboard.writeText(command);
+    return true;
+});
+app.on('browser-window-focus', () => { updateCoordinator?.maybeCheck(); });
 
 async function openGuideWindow(projectWindow, payload) {
     const state = projectWindowState.get(projectWindow);
@@ -2535,7 +2557,7 @@ app.whenReady().then(async () => {
             }
         });
     } else {
-        checkForUpdates(firstWindow);
+        startUpdateChecks().catch((error) => console.warn('Update checks could not start:', error.message));
     }
     if (process.argv.includes('--generate-example-thumbnails')) {
         firstWindow.webContents.once('did-finish-load', async () => {

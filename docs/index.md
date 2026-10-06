@@ -30,6 +30,7 @@ okf_version: "0.2"
 * [Package Registry](registry.md) - Publisher key registration, namespace prefixes, and cryptographic archive signing
 * [Package Manager Distribution](packageManagerDistribution.md) - Packaging and automated distribution for Homebrew, Flathub, and Windows stores
 * [Release Packaging](releasePackaging.md) - Platform packaging and release pipeline for desktop DMGs, EXEs, and AppImages
+* [How Konjugate Gets Updated](updates.md) - Who updates each install channel, what the in-app update notice does, and the Store and AppImage decisions
 
 # Modeling & User Guides
 

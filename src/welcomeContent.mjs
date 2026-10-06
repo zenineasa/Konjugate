@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // Best-effort fetch of recent posts from Konjugate's own blog, for the Welcome window's "Recent
-// from the blog" section. Mirrors src/updateCheck.mjs's findAvailableUpdate() shape (injectable
+// from the blog" section. Mirrors src/updateCheck.mjs's fetchLatestRelease() shape (injectable
 // fetchImpl for testing, timeout-bounded), but never rejects -- any failure (network, timeout, bad
 // status, malformed feed) yields an empty list, so the section is silently absent rather than
 // showing an error, the same posture the update checker already uses for its own network call.

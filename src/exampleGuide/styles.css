@@ -52,3 +52,19 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .recommendedAddonsStatus { margin: 10px 0 0; }
 .recommendedAddonsStatus[hidden] { display: none; }
 .recommendedAddonsStatus button { height: 24px; padding: 0 10px; margin-left: 4px; font-size: 10px; font-weight: 500; vertical-align: baseline; }
+
+/* The Updates section at the top of the Welcome window (docs/updates.md): same family as the
+   recommended-add-ons block, built from colors already used in this file. */
+.updatesSection { margin: 14px 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 6%); border: 1px solid #243944; border-left: 2px solid #42c9bc; border-radius: 7px; }
+.updatesSection[hidden] { display: none; }
+.updatesHeadline { color: #e6f0f2; font-size: 14px; font-weight: 600; }
+.updatesDetail, .updatesNotice, .updatesHint { margin: 6px 0 0; font-size: 11.5px; line-height: 1.6; }
+.updatesNotice { color: #e2b46c; }
+.updatesCommand { margin: 10px 0 0; padding: 9px 12px; color: #83d7cf; font-size: 11.5px; user-select: text; }
+.updatesActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.updatesSection button { height: 28px; padding: 0 13px; color: #09201e; background: #42c9bc; border: 0; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.updatesSection button:hover { background: #59d6ca; }
+.updatesSection button.updatesSecondary { color: #b8ced2; background: transparent; border: 1px solid #2c4350; font-weight: 500; }
+.updatesSection button.updatesSecondary:hover { background: #12252d; }
+.updatesSection button:disabled { color: #6b8a86; background: #1e3532; border-color: transparent; cursor: default; }
+.updatesFooter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #243944; font-size: 11px; color: #778d98; }

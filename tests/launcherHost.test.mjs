@@ -263,6 +263,19 @@ test('a launcher that fetches must list exact host names, and only such a launch
     assert.throws(() => validateAddonManifest({ ...launcher(), network: { hosts: ['example.com'] } }), /only with the network\.fetch permission/);
 });
 
+test('a launcher that opens pages in the browser must list exact host names, and only such a launcher may list them', () => {
+    const withLinks = (mutate) => { const manifest = launcher(); manifest.permissions.push('links.open'); manifest.links = { hosts: ['www.google.com', 'www.openstreetmap.org'] }; mutate(manifest); return manifest; };
+    assert.equal(validateAddonManifest(withLinks(() => {})).kind, 'launcher');
+    for (const hosts of [undefined, [], ['*.google.com'], ['https://google.com'], ['localhost']]) {
+        assert.throws(() => validateAddonManifest(withLinks((manifest) => { manifest.links = hosts === undefined ? undefined : { hosts }; })), /exact host names it may open in links\.hosts/);
+    }
+    assert.throws(() => validateAddonManifest({ ...launcher(), links: { hosts: ['www.google.com'] } }), /only with the links\.open permission/);
+    // The page opened is checked as a fetch is: https, a listed host, no credentials.
+    assert.equal(addressAllowed('https://www.google.com/maps/dir/?api=1&origin=1,2', ['www.google.com']), 'https://www.google.com/maps/dir/?api=1&origin=1,2');
+    assert.throws(() => addressAllowed('http://www.google.com/maps', ['www.google.com']), /Only https/);
+    assert.throws(() => addressAllowed('https://evil.example/maps', ['www.google.com']), /may not connect to evil\.example/);
+});
+
 test('a name for a fetched file cannot carry a path', () => {
     assert.equal(safeFileName('../../etc/passwd'), '.._.._etc_passwd');
     assert.equal(safeFileName('S&P 500'), 'S&P 500');
@@ -311,6 +324,7 @@ test('the run manifest records importer options and overrides only when there ar
 test('a launcher may require features, and one this version does not have is refused with a message', () => {
     const withRequires = (requires) => { const manifest = launcher(); manifest.requires = requires; return manifest; };
     assert.equal(validateAddonManifest(withRequires(['scenarioOverrides', 'runRecord'])).kind, 'launcher');
+    assert.equal(validateAddonManifest(withRequires(['openLink'])).kind, 'launcher');
     assert.equal(validateAddonManifest(withRequires([])).kind, 'launcher');
     assert.throws(() => validateAddonManifest(withRequires(['scenarioOverrides', 'timeTravel'])), /needs timeTravel, which this version of Konjugate does not provide/);
     assert.throws(() => validateAddonManifest(withRequires('runRecord')), /list of names/);

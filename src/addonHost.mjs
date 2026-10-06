@@ -25,8 +25,8 @@ const allowedPermissions = new Set([
 // scenarioForkTime: runScenario accepts the window's own fork time (forkAt).
 // suppliedPerParameter: supplied data may be given per parameter (supplied.byParameter), so one scenario can change
 // several parameters, each for its own entities along its own paths.
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession']);
-const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data']);
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink']);
+const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 
 function safeRelativePath(path, description, extensions) {
@@ -53,12 +53,15 @@ export function validateLauncherManifest(manifest) {
     if (missing.length) throw new Error(`This launcher needs ${missing.join(', ')}, which this version of Konjugate does not provide. Update Konjugate to use it.`);
     // Fetching from the internet is allowed only from hosts the manifest names, so what a launcher can reach is
     // readable before it is installed.
-    const hosts = manifest.network?.hosts;
+    const exactHosts = (list) => Array.isArray(list) && list.length && list.every((host) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host));
     if (permissions.includes('network.fetch')) {
-        if (!Array.isArray(hosts) || !hosts.length || !hosts.every((host) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host))) {
-            throw new Error('A launcher that fetches from the internet must list the exact host names it may reach in network.hosts.');
-        }
+        if (!exactHosts(manifest.network?.hosts)) throw new Error('A launcher that fetches from the internet must list the exact host names it may reach in network.hosts.');
     } else if (manifest.network !== undefined) throw new Error('A launcher may declare network hosts only with the network.fetch permission.');
+    // So is opening a page in the user's browser: only on hosts the manifest names, so where a launcher can send the user
+    // is readable before it is installed too.
+    if (permissions.includes('links.open')) {
+        if (!exactHosts(manifest.links?.hosts)) throw new Error('A launcher that opens pages in the browser must list the exact host names it may open in links.hosts.');
+    } else if (manifest.links !== undefined) throw new Error('A launcher may declare link hosts only with the links.open permission.');
     const contributes = manifest.contributes ?? {};
     const toolstrip = contributes.toolstrip ?? [];
     if (toolstrip.length !== 1 || !commandIdPattern.test(toolstrip[0].commandId ?? '') || !toolstrip[0].label || !toolstrip[0].tooltip ||

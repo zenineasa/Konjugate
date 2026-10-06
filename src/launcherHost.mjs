@@ -376,7 +376,8 @@ export async function runScenarioBranches({ content, config, scenario, intervent
 export function registerLauncherHandlers(deps) {
     const {
         ipcMain, dialog, BrowserWindow, app, screen, currentDir, iconPath, projectWindows, projectWindowState, installCustomWindowState,
-        auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine, fetchImpl = (...args) => globalThis.fetch(...args)
+        auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine, fetchImpl = (...args) => globalThis.fetch(...args),
+        shell = null
     } = deps;
     const workspaces = new Map();
     // Each add-on's cache of what it fetched (addonCache.mjs), made when first used.
@@ -554,6 +555,16 @@ export function registerLauncherHandlers(deps) {
         }
         workspace.imported = null;
         await releaseRuns(workspace);
+        return {};
+    }));
+
+    // Opens a page in the user's browser, on a host the manifest lists in links.hosts, over https: a map's directions
+    // between two sites, say, for the user to read and type back. Nothing comes back to the window.
+    ipcMain.handle('launcherOpenLink', guarded(async ({ addon }, { url }) => {
+        needs(addon, 'links.open');
+        const href = addressAllowed(url, addon.manifest.links?.hosts ?? []);
+        if (!shell) throw new Error('This version of Konjugate cannot open pages in the browser.');
+        await shell.openExternal(href);
         return {};
     }));
 

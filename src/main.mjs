@@ -2362,7 +2362,7 @@ const engineOptions = async () => {
 
 const launcherHost = registerLauncherHandlers({
     ipcMain, dialog, BrowserWindow, app, screen, currentDir, iconPath: appIconPath, projectWindows, projectWindowState, installCustomWindowState,
-    auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine
+    auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine, shell
 });
 
 const cliUsage = 'Usage: konjugate --cli run <project.kjt> --target-time <seconds> '

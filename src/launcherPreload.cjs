@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('konjugateLauncher', Object.freeze({
     chooseFile: (importerId, role) => ipcRenderer.invoke('launcherChooseFile', { importerId, role }),
     clearFile: (importerId, role, name) => ipcRenderer.invoke('launcherClearFile', { importerId, role, name }),
     fetchText: (url) => ipcRenderer.invoke('launcherFetchText', { url }),
+    openLink: (url) => ipcRenderer.invoke('launcherOpenLink', { url }),
     fetchFile: (importerId, role, url, name, options = {}) => ipcRenderer.invoke('launcherFetchFile', { importerId, role, url, name, cache: options.cache, maximumAgeDays: options.maximumAgeDays }),
     cacheInfo: () => ipcRenderer.invoke('launcherCacheInfo'),
     clearCache: () => ipcRenderer.invoke('launcherClearCache'),

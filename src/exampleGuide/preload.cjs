@@ -21,6 +21,14 @@ contextBridge.exposeInMainWorld('appUpdate', Object.freeze({
 contextBridge.exposeInMainWorld('exampleGuide', Object.freeze({
     onContent: (callback) => ipcRenderer.on('exampleGuideContent', (_event, payload) => callback(payload)),
     openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url),
+    // The Welcome window (docs/proposals/welcomeWindow.md). Content that arrives after the window opens
+    // comes as patches; everything the page asks for is an id or nothing -- never a URL or text -- so the
+    // main process decides what is opened or copied.
+    onWelcomePatch: (callback) => ipcRenderer.on('welcomePatch', (_event, patch) => callback(patch)),
+    markEpisodeOpened: (videoId) => ipcRenderer.invoke('welcomeEpisodeOpened', videoId),
+    dismissFeatured: (id) => ipcRenderer.invoke('welcomeDismissFeatured', id),
+    openFeatured: (id) => ipcRenderer.invoke('welcomeOpenFeatured', id),
+    copyBugReportDetails: () => ipcRenderer.invoke('appCopyBugReportDetails'),
     // The Welcome window's one-time recommended-add-ons offer (see docs/extensionsExplorer.md) --
     // entries is exactly the recommendedAddons array this same window was sent in onContent.
     installRecommendedAddons: (entries) => ipcRenderer.invoke('welcomeInstallRecommendedAddons', entries),

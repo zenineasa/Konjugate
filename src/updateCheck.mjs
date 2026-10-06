@@ -3,6 +3,9 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isNewerVersion } from './versionCompare.mjs';
+
+export { isNewerVersion };
 
 const releasesEndpoint = 'https://api.github.com/repos/zenineasa/Konjugate/releases/latest';
 
@@ -13,23 +16,6 @@ const platformAssetPatterns = {
     win32: /\.exe$/i,
     linux: /\.AppImage$/i
 };
-
-function parseVersion(value) {
-    const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(value ?? '');
-    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-// Whether `latest` is a newer version than `running` (both like "1.2.3", with or without a leading
-// "v", compared number by number so 1.10.0 is newer than 1.9.9). False if either is unreadable.
-export function isNewerVersion(latest, running) {
-    const remote = parseVersion(latest);
-    const current = parseVersion(running);
-    if (!remote || !current) return false;
-    for (let index = 0; index < 3; index += 1) {
-        if (remote[index] !== current[index]) return remote[index] > current[index];
-    }
-    return false;
-}
 
 // GitHub's latest release, as { version, url, assetNames }, or a thrown error (no network, a rate
 // limit, a bad status). Says nothing about whether it is newer: that is isNewerVersion's job.

@@ -10,3 +10,4 @@
 * [Component Library](componentLibrary.md) - Declarative library of reusable engineering components and ports
 * [OpenStreetMap Traffic Simulation](openStreetMapTrafficSimulation.md) - Geographic network import and traffic twin simulation
 * [In-App Auto-Updates](autoUpdates.md) - Background update checking and differential updates
+* [Welcome Window](welcomeWindow.md) - The Welcome window as a standing space: the permanent On-Ramp tutorials, a time-limited Featured slot, and the trust rules for promotions

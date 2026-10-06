@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { release as osRelease, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
@@ -31,6 +31,10 @@ import { createProviderToolchainStore, providerExecutionModes } from './provider
 import { installSource } from './updateCheck.mjs';
 import { createUpdateCoordinator } from './updateCoordinator.mjs';
 import { createUpdateSkipStore } from './updateSkipStore.mjs';
+import { formatBugReportDetails } from './bugReport.mjs';
+import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
+import { whatsNewFor } from './welcomeModel.mjs';
+import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion } from './welcomeStateStore.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -388,22 +392,42 @@ function welcomeMarkdownPath() {
 // entry and no app.isPackaged branch -- same as the app icon reference a few lines up.
 const welcomeAssetsDir = join(currentDir, '..', 'assets', 'welcome');
 
-let welcomeVideoCardsCache = null;
-async function welcomeVideoCards() {
-    if (!welcomeVideoCardsCache) {
+// The On-Ramp tutorial series, from the bundled assets/welcome/videos.json: the same episodes, in the
+// same order, every time, whatever the network does. Never rotated or replaced (see
+// docs/proposals/welcomeWindow.md); only adding an episode to that file changes it.
+let welcomeOnRampCache = null;
+async function welcomeOnRamp() {
+    if (!welcomeOnRampCache) {
         const manifest = JSON.parse(await readFile(join(welcomeAssetsDir, 'videos.json'), 'utf8'));
-        // Loaded live from YouTube's own public thumbnail CDN (img-src allows it in
+        // Thumbnails are loaded live from YouTube's own public thumbnail CDN (img-src allows it in
         // exampleGuide/index.html's CSP) rather than a screenshot bundled and committed per video --
         // one less asset to keep in sync by hand every time a new episode is added.
-        welcomeVideoCardsCache = manifest.videos.map((video) => ({
-            section: 'video',
-            title: video.title,
-            url: `https://www.youtube.com/watch?v=${video.videoId}`,
-            thumbnailUrl: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`
-        }));
+        welcomeOnRampCache = {
+            playlistUrl: typeof manifest.playlistUrl === 'string' ? manifest.playlistUrl : null,
+            episodes: manifest.videos.map((video) => ({
+                videoId: video.videoId,
+                title: video.title,
+                url: `https://www.youtube.com/watch?v=${video.videoId}`,
+                thumbnailUrl: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`
+            }))
+        };
     }
-    return welcomeVideoCardsCache;
+    return welcomeOnRampCache;
 }
+
+// Short highlights for a version's "What's new", authored per release in assets/welcome/whatsNew.json
+// ({ "1.2.0": ["...", "..."] }). Optional: without an entry the block is just the release-notes link.
+async function welcomeWhatsNewHighlights(version) {
+    try {
+        const all = JSON.parse(await readFile(join(welcomeAssetsDir, 'whatsNew.json'), 'utf8'));
+        return Array.isArray(all?.[version]) ? all[version] : [];
+    } catch {
+        return [];
+    }
+}
+
+let welcomeStateStoreInstance = null;
+const welcomeState = () => (welcomeStateStoreInstance ??= createWelcomeStateStore({ directory: app.getPath('userData') }));
 
 // A one-time starter-pack offer (see the Recommended add-ons section of docs/extensionsExplorer.md):
 // shown once ever, regardless of what the person does with it -- declining is as final as
@@ -445,24 +469,162 @@ async function recommendedAddonEntries() {
         .map(([prefix, entry]) => ({ prefix, ...entry }));
 }
 
-async function openWelcomeWindow(projectWindow) {
-    const [markdown, videoCards, posts] = await Promise.all([
-        readFile(welcomeMarkdownPath(), 'utf8'),
-        welcomeVideoCards(),
-        fetchRecentBlogPosts()
-    ]);
-    const postCards = posts.map((post) => ({ section: 'post', title: post.title, url: post.link, thumbnailUrl: post.thumbnailUrl }));
-    const recommendedAddons = (await hasOfferedRecommendedAddons()) ? [] : await recommendedAddonEntries();
-    if (recommendedAddons.length) await markRecommendedAddonsOffered();
-    return openGuideWindow(projectWindow, {
-        title: 'Konjugate',
-        version: app.getVersion(),
-        markdown,
-        cards: [...videoCards, ...postCards],
-        recommendedAddons,
-        kind: 'welcome'
-    });
+// ---- The Welcome window's content that comes from the network (docs/proposals/welcomeWindow.md)
+//
+// The Featured slot and "More to watch" come from welcome/featured.json in this repository. The last
+// good copy is kept on disk, so a launch with no network still shows it, and with neither there is
+// simply nothing featured. Images are fetched by this process and handed over as data: URLs, so the
+// page's content-security policy never needs to allow another host.
+const welcomeFeedCachePath = () => join(app.getPath('userData'), 'welcomeFeedCache.json');
+let currentWelcomeFeed = { featured: [], moreToWatch: [], problems: [] };
+
+async function readCachedWelcomeFeed() {
+    try {
+        return parseWelcomeFeed(JSON.parse(await readFile(welcomeFeedCachePath(), 'utf8')));
+    } catch {
+        return parseWelcomeFeed(null);
+    }
 }
+
+async function refreshWelcomeFeed() {
+    const raw = await fetchWelcomeFeed();
+    const feed = parseWelcomeFeed(raw);
+    // A file that is not the feed format is treated as "nothing new", and the cached copy is kept.
+    if (feed.problems.length && !feed.featured.length && !feed.moreToWatch.length && raw?.format !== 'konjugate-welcome-feed') return null;
+    for (const problem of feed.problems) console.warn(`Welcome feed: ${problem}`);
+    const temporaryPath = `${welcomeFeedCachePath()}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(raw));
+    await rename(temporaryPath, welcomeFeedCachePath());
+    return feed;
+}
+
+async function fetchWelcomeImage(url) {
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return { mimeType: identifyRegistryImage(bytes, url), bytes };
+}
+
+// The Featured item as the page needs it: its text, and its image once that has been resolved to a
+// data: URL (null until then). The link itself stays here -- the page asks to open an item by id
+// (welcomeOpenFeatured).
+const featuredPayload = (item, imageUrl = null) => (item ? { id: item.id, kind: item.kind, title: item.title, text: item.text, imageUrl } : null);
+
+// The image, from the on-disk cache or the network, or null. Separate from the payload above so it
+// never holds the window back: it arrives as a patch.
+async function resolveFeaturedImage(item) {
+    const url = item?.image ? welcomeImageUrl(item.image, welcomeFeedUrl()) : null;
+    if (!url) return null;
+    return cachedRegistryImage(`welcome-${createHash('sha256').update(url).digest('hex').slice(0, 16)}`, () => fetchWelcomeImage(url), `Featured image for ${item.id}`);
+}
+
+let welcomeGeneration = 0;
+let whatsNewForThisRun;
+
+// Opens (or refreshes) the Welcome window at once with everything that is local -- the On-Ramp, the
+// footer text, what the person has opened and dismissed, the last good Featured feed -- and then fills
+// in the rest as it arrives (blog posts, the add-on offer, a fresh feed) by sending the open window
+// patches. Nothing here waits on the network before the window appears, so a slow or absent
+// connection can no longer delay it. `automatic` is true for the launch and dock-reactivation opens,
+// which are what a Featured item's launch cap counts; clicking the Konjugate button is not a launch.
+async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
+    const generation = ++welcomeGeneration;
+    const version = app.getVersion();
+    const [markdown, onRamp, state, cachedFeed] = await Promise.all([
+        readFile(welcomeMarkdownPath(), 'utf8'), welcomeOnRamp(), welcomeState().get(), readCachedWelcomeFeed()
+    ]);
+    // What's new is worked out once per run: the first time it is needed it also records the version as
+    // seen, and later opens in the same run (another window, the Konjugate button) show the same block.
+    if (whatsNewForThisRun === undefined) {
+        whatsNewForThisRun = whatsNewFor({ running: version, lastSeen: state.lastSeenVersion, highlights: await welcomeWhatsNewHighlights(version) });
+        if (state.lastSeenVersion !== version) await welcomeState().update((current) => withLastSeenVersion(current, version));
+    }
+    currentWelcomeFeed = cachedFeed;
+
+    let countedFeaturedId = null;
+    const chooseFeatured = async (feed) => {
+        const current = await welcomeState().get();
+        const item = selectFeatured({ items: feed.featured, now: Date.now(), dismissed: current.dismissedFeatured, shown: current.featuredShown });
+        if (item && automatic && countedFeaturedId !== item.id) {
+            countedFeaturedId = item.id;
+            await welcomeState().update((latest) => withFeaturedShown(latest, item.id));
+        }
+        return item;
+    };
+
+    const initialFeatured = await chooseFeatured(cachedFeed);
+    await openGuideWindow(projectWindow, {
+        title: 'Konjugate',
+        version,
+        markdown,
+        kind: 'welcome',
+        generation,
+        onRamp,
+        openedEpisodes: state.openedEpisodes,
+        whatsNew: whatsNewForThisRun,
+        featured: featuredPayload(initialFeatured),
+        moreToWatch: cachedFeed.moreToWatch,
+        posts: [],
+        recommendedAddons: []
+    });
+    const guideWindow = projectWindowState.get(projectWindow)?.exampleGuideWindow;
+    const patch = (partial) => {
+        if (guideWindow && !guideWindow.isDestroyed()) guideWindow.webContents.send('welcomePatch', { generation, ...partial });
+    };
+    const alive = () => Boolean(guideWindow) && !guideWindow.isDestroyed() && generation === welcomeGeneration;
+
+    // Each of these runs on its own and may fail on its own; none is waited for.
+    const sendFeaturedImage = (item) => resolveFeaturedImage(item).then((imageUrl) => {
+        if (imageUrl && alive()) patch({ featured: featuredPayload(item, imageUrl) });
+    }).catch((error) => console.warn('Welcome featured image:', error.message));
+    if (initialFeatured) sendFeaturedImage(initialFeatured);
+    fetchRecentBlogPosts().then((posts) => {
+        patch({ posts: posts.map((post) => ({ title: post.title, url: post.link, thumbnailUrl: post.thumbnailUrl })) });
+    }).catch((error) => console.warn('Welcome blog posts:', error.message));
+    (async () => {
+        if (await hasOfferedRecommendedAddons()) return;
+        const recommendedAddons = await recommendedAddonEntries();
+        // The one-time offer is only spent when it is actually put in front of someone.
+        if (!recommendedAddons.length || !alive()) return;
+        await markRecommendedAddonsOffered();
+        patch({ recommendedAddons });
+    })().catch((error) => console.warn('Welcome add-on offer:', error.message));
+    refreshWelcomeFeed().then(async (feed) => {
+        if (!feed || !alive()) return;
+        currentWelcomeFeed = feed;
+        const featured = await chooseFeatured(feed);
+        patch({ featured: featuredPayload(featured), moreToWatch: feed.moreToWatch });
+        if (featured) sendFeaturedImage(featured);
+    }).catch((error) => console.warn('Welcome feed:', error.message));
+    return true;
+}
+
+// What the Welcome window can ask of the main process. Each takes only an id or nothing: the page never
+// supplies a URL or text, so it cannot make this process open or copy anything of its own choosing.
+ipcMain.handle('welcomeEpisodeOpened', async (_event, videoId) => {
+    const { episodes } = await welcomeOnRamp();
+    if (typeof videoId !== 'string' || !episodes.some((episode) => episode.videoId === videoId)) return false;
+    await welcomeState().update((current) => withEpisodeOpened(current, videoId));
+    return true;
+});
+ipcMain.handle('welcomeDismissFeatured', async (_event, id) => {
+    if (typeof id !== 'string' || !currentWelcomeFeed.featured.some((item) => item.id === id)) return false;
+    await welcomeState().update((current) => withDismissed(current, id));
+    return true;
+});
+ipcMain.handle('welcomeOpenFeatured', (_event, id) => {
+    const item = currentWelcomeFeed.featured.find((candidate) => candidate.id === id);
+    if (!item) return false;
+    shell.openExternal(item.url);
+    return true;
+});
+ipcMain.handle('appCopyBugReportDetails', () => {
+    clipboard.writeText(formatBugReportDetails({
+        version: app.getVersion(), source: installSource(), platform: process.platform, arch: process.arch,
+        osRelease: osRelease(), electron: process.versions.electron, chromium: process.versions.chrome
+    }));
+    return true;
+});
 
 // Same docs/-exclusion-from-packaging reasoning as welcomeMarkdownPath() above -- this doc needs
 // its own extraResource entry in packageElectron.mjs for the same reason welcome.md has one.
@@ -2571,12 +2733,12 @@ app.whenReady().then(async () => {
             }
         });
     }
-    if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(firstWindow);
+    if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(firstWindow, { automatic: true });
 
     app.on('activate', () => {
         if (projectWindows.size === 0) {
             const window = createProjectWindow();
-            if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(window);
+            if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(window, { automatic: true });
         }
     });
 });

@@ -341,42 +341,16 @@ jobs:
     microsoftStoreRelease:
         needs: release
         if: startsWith(github.ref, 'refs/tags/v')
-        runs-on: windows-latest
-        env:
-            MS_STORE_CLIENT_SECRET: ${{ secrets.MS_STORE_CLIENT_SECRET }}
-        steps:
-            # Updates an EXISTING Store listing -- the first submission is made by hand in Partner
-            # Center (listing, privacy policy, age rating, runFullTrust justification), and the
-            # Azure AD app has to be linked to the Partner Center account. Needs the
-            # MSIX_IDENTITY_NAME/MSIX_PUBLISHER variables too, since the build job only produces the
-            # MSIX when they are set. See docs/packageManagerDistribution.md.
-            - name: Skip when the Microsoft Store isn't set up yet
-              if: env.MS_STORE_CLIENT_SECRET == ''
-              run: echo "::notice::MS_STORE_CLIENT_SECRET is not set; skipping the Microsoft Store (see docs/packageManagerDistribution.md)."
-            - uses: actions/download-artifact@v4
-              if: env.MS_STORE_CLIENT_SECRET != ''
-              with:
-                  name: msix-Windows-X64
-                  path: out/msix
-            - uses: microsoft/setup-msstore-cli@v1
-              if: env.MS_STORE_CLIENT_SECRET != ''
-            - name: Submit the MSIX to the Microsoft Store
-              if: env.MS_STORE_CLIENT_SECRET != ''
-              shell: pwsh
-              # A successful publish only means the submission entered Microsoft's certification
-              # review (a few days), not that it is live. The msstore flags below are from its
-              # documentation, not yet exercised against a real submission -- if the first run
-              # rejects one, `msstore publish --help` is the place to check.
-              env:
-                  MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}
-                  MS_STORE_CLIENT_ID: ${{ secrets.MS_STORE_CLIENT_ID }}
-                  MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
-                  MS_STORE_PRODUCT_ID: ${{ secrets.MS_STORE_PRODUCT_ID }}
-              run: |
-                  msstore reconfigure --tenantId $env:MS_STORE_TENANT_ID --sellerId $env:MS_STORE_SELLER_ID --clientId $env:MS_STORE_CLIENT_ID --clientSecret $env:MS_STORE_CLIENT_SECRET
-                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                  msstore publish out/msix/Konjugate-x64.msix --appId $env:MS_STORE_PRODUCT_ID
-                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # The steps live in microsoftStoreSubmit.yml so the same submission can also be started by hand
+        # for any earlier run (see that file). Opt-in by secret, like the other channels: without
+        # MS_STORE_CLIENT_SECRET it only prints a notice.
+        permissions:
+            actions: read
+            contents: read
+        uses: ./.github/workflows/microsoftStoreSubmit.yml
+        with:
+            run-id: ${{ github.run_id }}
+        secrets: inherit
 
     homebrewTapRelease:
         needs: release

@@ -1,0 +1,82 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
+name: Microsoft Store submission
+
+# Submits an MSIX that a Release run already built (its `msix-Windows-X64` artifact, see
+# release.yml's "Build Microsoft Store MSIX" step) to the existing Microsoft Store listing, as a new
+# submission that goes through Microsoft's certification before going live.
+#
+# Two ways in, one set of steps:
+#   - release.yml's microsoftStoreRelease job calls this on every version tag, passing its own run id.
+#   - workflow_dispatch (Actions tab -> Microsoft Store submission -> Run workflow) submits the MSIX of
+#     ANY earlier Release run, given its run id (the number in that run's URL). That is what makes the
+#     submission testable without cutting a release, and lets a failed submission be retried without
+#     rebuilding anything -- re-running a job inside an old run would use that run's old copy of this
+#     file, not the current one.
+#
+# Updates an EXISTING listing only: the app must already be live in the Store (it is -- the first
+# submission was made by hand in Partner Center), and a Microsoft Entra ID application with the
+# Manager role must be linked to the Partner Center account. See docs/packageManagerDistribution.md
+# for the one-time setup and the four secrets. Free apps only: Microsoft's CLI doesn't yet support
+# updating paid ones this way.
+on:
+    workflow_call:
+        inputs:
+            run-id:
+                description: The Release workflow run whose msix-Windows-X64 artifact should be submitted.
+                required: true
+                type: string
+    workflow_dispatch:
+        inputs:
+            run-id:
+                description: The Release run whose MSIX to submit -- the number in that run's URL (.../actions/runs/<number>).
+                required: true
+                type: string
+
+jobs:
+    submit:
+        runs-on: windows-latest
+        permissions:
+            # actions: read lets download-artifact fetch an artifact from a different run.
+            actions: read
+            contents: read
+        env:
+            MS_STORE_CLIENT_SECRET: ${{ secrets.MS_STORE_CLIENT_SECRET }}
+            # Konjugate's Store product id (the 12-character id in its Store URL). It is public, so it is
+            # written here rather than kept as a secret.
+            MS_STORE_PRODUCT_ID: 9P5C9S7DSRPJ
+        steps:
+            - name: Skip when the Microsoft Store isn't set up yet
+              if: env.MS_STORE_CLIENT_SECRET == ''
+              run: echo "::notice::MS_STORE_CLIENT_SECRET is not set; skipping the Microsoft Store (see docs/packageManagerDistribution.md)."
+            - uses: actions/download-artifact@v4
+              if: env.MS_STORE_CLIENT_SECRET != ''
+              with:
+                  name: msix-Windows-X64
+                  path: out/msix
+                  run-id: ${{ inputs.run-id }}
+                  github-token: ${{ github.token }}
+            # The action Microsoft documents for this (it is named for the Store, not for its CLI):
+            # it puts `msstore` on the PATH.
+            - uses: microsoft/microsoft-store-apppublisher@v1.4
+              if: env.MS_STORE_CLIENT_SECRET != ''
+            - name: Configure the Store CLI
+              if: env.MS_STORE_CLIENT_SECRET != ''
+              shell: pwsh
+              env:
+                  MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}
+                  MS_STORE_CLIENT_ID: ${{ secrets.MS_STORE_CLIENT_ID }}
+                  MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
+              run: |
+                  msstore reconfigure --tenantId $env:MS_STORE_TENANT_ID --sellerId $env:MS_STORE_SELLER_ID --clientId $env:MS_STORE_CLIENT_ID --clientSecret $env:MS_STORE_CLIENT_SECRET
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            - name: Submit the MSIX to the Microsoft Store
+              if: env.MS_STORE_CLIENT_SECRET != ''
+              shell: pwsh
+              # This is the form Microsoft's own GitHub Actions guide uses for a pre-built MSIX. It makes
+              # a new submission from the last published one (so the listing text, screenshots and
+              # ratings carry over), attaches this package and commits it. Success means the submission
+              # entered certification (a few days), not that it is live.
+              run: |
+                  msstore publish "$env:GITHUB_WORKSPACE\out\msix\Konjugate-x64.msix" --appId $env:MS_STORE_PRODUCT_ID
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -149,7 +149,7 @@ Konjugate isn't code-signed yet — an active choice while the project is in bet
   xattr -cr /Applications/Konjugate.app
   ```
   Alternatively, open System Settings → Privacy & Security → Open Anyway.
-- **Windows**: if you see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
+- **Windows**: install Konjugate from the [Microsoft Store](https://apps.microsoft.com/detail/9p5c9s7dsrpj) — it is signed by Microsoft, so there is no security warning. If you download the installer from the releases page instead and see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
 
 ## Development
 

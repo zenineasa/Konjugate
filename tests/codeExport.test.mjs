@@ -54,7 +54,7 @@ test('single-node equation model emits the expression, the Euler update and the 
         const source = generateStandaloneProgram(singleNodeSourceTermModel(), kind);
         assert.match(source, /-0\.1/);
         assert.match(source, /derivative\[0\] \+= contribution/);
-        assert.match(source, /time \(s\),Tank — Pressure \(Pa\)/);
+        assert.match(source, kind === 'python' ? /time \(s\),Tank \\u2014 Pressure \(Pa\)/ : /time \(s\),Tank — Pressure \(Pa\)/);
     }
 });
 
@@ -412,4 +412,33 @@ test('a malformed schedule blocks export with the parameter named', () => {
     for (const schedule of [{ interpolation: 'cubic', samples: [[0, 1]] }, { samples: [] }, { samples: [[0, 1], [0, 2]] }, { samples: [[0, Infinity]] }]) {
         assert.throws(() => generateStandaloneProgram(scheduledModel(schedule), 'cpp'), /"Rate"/);
     }
+});
+
+test('the Python header is ASCII however long, so Python 3.9 reads it, and still writes the names as they are', () => {
+    // Python 3.9 refuses a source line of several thousand bytes with a non-ASCII character in it, and the header
+    // names every state on one line, each with a dash between its node and its state.
+    const document = baseDocument();
+    for (let index = 0; index < 400; index += 1) {
+        document.nodes.push({
+            id: id(), name: index ? `Road A → B ${index}` : 'Tank "one" \\ 😀',
+            states: [{ id: id(), name: 'Größe', symbol: 'x', initialValue: 1, unit: 'm³' }], sourceTerms: []
+        });
+    }
+    const python = generateStandaloneProgram(document, 'python');
+    const header = python.split('\n').find((line) => line.includes('output.write("time (s)'));
+    assert.ok(header.length > 8000, 'the header is one long line');
+    for (const line of python.split('\n')) {
+        assert.ok(line.length < 1000 || /^[\x00-\x7f]*$/.test(line), `a long line has a non-ASCII character: ${line.slice(0, 80)}…`);
+    }
+    // Read as Python reads it, the literal is the header Konjugate's own CSV export writes.
+    const literal = header.slice(header.indexOf('"'), header.lastIndexOf('"') + 1);
+    const read = literal.slice(1, -1).replace(/\\(U[0-9a-f]{8}|u[0-9a-f]{4}|n|"|\\)/g, (_, escape) => (
+        escape === 'n' ? '\n' : escape.length > 1 ? String.fromCodePoint(parseInt(escape.slice(1), 16)) : escape));
+    assert.ok(read.startsWith('time (s),"Tank ""one"" \\ 😀 — Größe (m³)",Road A → B 1 — Größe (m³),'), read.slice(0, 80));
+    assert.ok(read.endsWith('Road A → B 399 — Größe (m³)\n'));
+    // The MPI program writes the same header.
+    const mpi = generateStandaloneProgram(document, 'python', { parallelism: 'mpi' });
+    assert.ok(mpi.includes(literal));
+    // C++ reads UTF-8 in a string literal of any length: its header is left as it is.
+    assert.ok(generateStandaloneProgram(document, 'cpp').includes('Road A → B 1 — Größe (m³)'));
 });

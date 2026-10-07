@@ -87,7 +87,7 @@ The mirror direction: a node's `implementation` can reference an *installed* FMU
 python3 exported.py --target-time 10 --output results.csv
 ```
 
-The output CSV uses the same `time (s)`, `NodeName — StateName (unit)` header convention as Konjugate's own "Export results as CSV" button.
+The output CSV uses the same `time (s)`, `NodeName — StateName (unit)` header convention as Konjugate's own "Export results as CSV" button. In the Python program the header's non-ASCII characters (that dash, and any in a node's or a state's name) are written as `\uXXXX` escapes, so the source line is plain ASCII and the CSV it writes is the same: Python 3.9, still the system Python on macOS, refuses a source line of several thousand bytes with a non-ASCII character in it, and the header is one line naming every state.
 
 ## Verifying fidelity against the real engine
 

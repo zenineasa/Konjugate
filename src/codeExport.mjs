@@ -492,6 +492,18 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     return kind === 'cpp' ? generateCpp(model, providers, meta, document) : generatePython(model, providers, meta, document);
 }
 
+// A Python string literal's contents for `text`, in ASCII alone: every other character as a \u or \U escape, which
+// Python reads back as the character itself, so what the program writes is unchanged. The header names every state on
+// one line, and Python 3.9 (still the system Python on macOS) refuses a source line of several thousand bytes with a
+// non-ASCII character in it ("Non-UTF-8 code"), which every header has: the dash between a node's name and a state's.
+function pythonStringContents(text) {
+    return [...text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')].map((character) => {
+        const code = character.codePointAt(0);
+        if (code < 0x80) return character;
+        return code > 0xffff ? `\\U${code.toString(16).padStart(8, '0')}` : `\\u${code.toString(16).padStart(4, '0')}`;
+    }).join('');
+}
+
 function csvHeader(model) {
     const columns = ['time (s)'];
     for (const plan of model.nodePlans) {
@@ -1133,7 +1145,7 @@ function generatePython(model, providers, meta, document) {
         + `# for exactly what is (and is not) reproduced.\n#\n`
         + `${runInstructions('python', meta, '# ')}\n#\n${stateIndexComment(model, '# ')}\n`;
 
-    const escapedHeader = csvHeader(model).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedHeader = pythonStringContents(csvHeader(model));
 
     const outputSetupLines = isMpi ? [
         "    output = open(output_path, 'w') if world_rank == 0 else None",

@@ -1,0 +1,47 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
+name: CLA
+
+# Checks that every contributor to a pull request has signed the current CLA (CLA.md), lets them
+# sign by commenting on the pull request, and records the signature on the `cla-signatures` branch
+# (see .github/scripts/cla.cjs for the details and CONTRIBUTING.md for the contributor-facing side).
+#
+# `pull_request_target` runs with a write token even for pull requests from forks, so this workflow
+# must never check out or run code from the pull request: it checks out the default branch only, and
+# its script only reads the pull request's metadata through the API.
+#
+# For the check to block merging, a branch ruleset on the default branch must require the status
+# check named "CLA" -- that is a repository setting, not something this file can switch on.
+on:
+    pull_request_target:
+        types: [opened, reopened, synchronize]
+    issue_comment:
+        types: [created]
+
+permissions:
+    contents: write
+    issues: write
+    pull-requests: write
+    statuses: write
+
+concurrency:
+    group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+    cancel-in-progress: false
+
+jobs:
+    cla:
+        if: >-
+            github.event_name == 'pull_request_target' ||
+            (github.event.issue.pull_request &&
+            (github.event.comment.body == 'recheck' ||
+            startsWith(github.event.comment.body, 'I have read the Konjugate CLA')))
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.repository.default_branch }}
+                  persist-credentials: false
+            - uses: actions/github-script@v7
+              with:
+                  script: |
+                      await require('./.github/scripts/cla.cjs').run({ github, context, core });

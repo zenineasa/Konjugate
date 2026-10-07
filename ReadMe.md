@@ -261,7 +261,7 @@ The roadmap includes:
 
 The project is currently focused on building a strong foundation.
 
-Ideas, discussions and contributions are welcome.
+Ideas, discussions and contributions are welcome. Contributions require signing a short copyright assignment agreement directly in the pull request; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

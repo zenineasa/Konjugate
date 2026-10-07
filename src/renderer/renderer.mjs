@@ -26,7 +26,7 @@ import {
 } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
-import { eligibleEndpointIds, virtualKeyboardInset } from './viewportLayout.mjs';
+import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
@@ -671,7 +671,7 @@ window.appUpdate?.onChange((status) => {
 $('#welcomeButton').addEventListener('click', () => window.applicationInfo.openWelcome());
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x0a131b, 0.022);
+scene.fog = new THREE.FogExp2(0x0a131b, canvasFog.density);
 
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
 camera.position.set(0, 7.5, 19);
@@ -11752,6 +11752,14 @@ function render(time) {
     lastRenderTime = time;
     if (!updateCameraAnimation(time)) orbitControls.update();
     updateViewCube();
+    // A model seen from far back keeps its shapes: the fog thins with the distance, and the far plane keeps up.
+    const viewDistance = camera.position.distanceTo(orbitControls.target);
+    scene.fog.density = fogDensityFor(viewDistance);
+    const farPlane = farPlaneFor(viewDistance);
+    if (camera.far !== farPlane) {
+        camera.far = farPlane;
+        camera.updateProjectionMatrix();
+    }
 
     relationshipObjects.forEach((relationship) => {
         relationship.line.material.opacity = relationship.definition.id === selectedRelationship?.id

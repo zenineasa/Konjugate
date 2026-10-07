@@ -10,12 +10,12 @@
     <owners>{{developerName}}</owners>
     <projectUrl>{{homepage}}</projectUrl>
     <packageSourceUrl>{{homepage}}/tree/master/packaging/chocolatey</packageSourceUrl>
-    <projectSourceUrl>{{homepage}}</projectSourceUrl>
+    <projectSourceUrl>{{homepage}}/tree/v{{version}}</projectSourceUrl>
     <bugTrackerUrl>{{bugtracker}}</bugTrackerUrl>
     <docsUrl>{{homepage}}/tree/master/docs</docsUrl>
     <licenseUrl>{{homepage}}/blob/master/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <iconUrl>https://raw.githubusercontent.com/zenineasa/Konjugate/master/assets/icon.svg</iconUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/zenineasa/Konjugate@v{{version}}/assets/icon.svg</iconUrl>
     <copyright>Copyright © 2026 {{developerName}}</copyright>
     <tags>konjugate simulation digital-twin engineering graph multiphysics cross-platform</tags>
     <summary>{{summary}}</summary>

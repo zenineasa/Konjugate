@@ -72,7 +72,7 @@ From the next tag on, the job opens the bump PR automatically. Microsoft's bots 
 
 **What to expect:** a successful `choco push` only means the package entered Chocolatey's moderation queue, not that it's live. New packages go through automated checks (VirusTotal scan, install/uninstall test on a clean VM) and then human moderation, which for a first package can take days to weeks with back-and-forth. The unsigned installer can trigger a VirusTotal false positive; a rejection arrives by email and is answered on the package's page, not in CI. After a version has been approved, later versions are validated faster.
 
-`iconUrl` in the nuspec points at `assets/icon.svg` on `master` on GitHub, because the PNG/ICO icons are generated and gitignored. If moderation objects to an SVG icon, commit a PNG and change that URL.
+`iconUrl` in the nuspec points at `assets/icon.svg` through the jsDelivr CDN, pinned to the release tag (`https://cdn.jsdelivr.net/gh/zenineasa/Konjugate@v<version>/assets/icon.svg`), because the PNG/ICO icons are generated and gitignored and because Chocolatey moderation rejects `raw.githubusercontent.com` icon URLs (version 1.1.6 was sent back for that). `projectSourceUrl` points at the tagged source tree so it differs from `projectUrl`, which the moderation guidelines expect.
 
 ## Microsoft Store — live; automatic updates written but not yet run
 

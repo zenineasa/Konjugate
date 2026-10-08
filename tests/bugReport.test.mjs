@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatBugReportDetails } from '../src/bugReport.mjs';
+import { readFile } from 'node:fs/promises';
+import { bugReportSections, bugReportUrl, formatBugReportBody, formatBugReportDetails } from '../src/bugReport.mjs';
 
 test('the details name the version, install source, operating system and Electron', () => {
     assert.equal(formatBugReportDetails({ version: '1.1.8', source: 'store', platform: 'win32', arch: 'x64', osRelease: '10.0.26100', electron: '43.2.0', chromium: '140.0.1' }),
@@ -22,4 +23,25 @@ test('anything missing is "unknown", never "undefined" or an exception', () => {
     assert.match(text, /Konjugate: unknown/);
     assert.match(text, /Installed from: unknown/);
     assert.match(formatBugReportDetails({ version: '  ', source: 'nonsense', platform: 'plan9' }), /Konjugate: unknown\nInstalled from: unknown\nOperating system: plan9 unknown \(unknown\)/);
+});
+
+test('the report body has every section and carries the system details', () => {
+    const details = { version: '1.1.8', source: 'store', platform: 'win32', arch: 'x64', osRelease: '10.0.26100', electron: '43.2.0', chromium: '140.0.1' };
+    const body = formatBugReportBody(details);
+    assert.deepEqual([...body.matchAll(/^## (.+)$/gm)].map((match) => match[1]), bugReportSections);
+    assert.ok(body.endsWith(`## System details\n\n${formatBugReportDetails(details)}\n`));
+});
+
+test('the URL opens the new-issue page with the whole body encoded in it', () => {
+    const details = { version: '1.1.8 & more', source: 'other', platform: 'linux', arch: 'x64', osRelease: '6.1', electron: '1', chromium: '2' };
+    const url = new URL(bugReportUrl('https://github.com/zenineasa/Konjugate/issues/new', details));
+    assert.equal(url.origin + url.pathname, 'https://github.com/zenineasa/Konjugate/issues/new');
+    assert.equal(url.searchParams.get('labels'), 'bug');
+    assert.equal(url.searchParams.get('body'), formatBugReportBody(details));
+    assert.ok(bugReportUrl('https://github.com/zenineasa/Konjugate/issues/new', {}).length < 2000);
+});
+
+test('the GitHub issue template has the same headings as the body the app writes', async () => {
+    const template = await readFile(new URL('../.github/ISSUE_TEMPLATE/bug_report.md', import.meta.url), 'utf8');
+    assert.deepEqual([...template.matchAll(/^## (.+)$/gm)].map((match) => match[1]), bugReportSections);
 });

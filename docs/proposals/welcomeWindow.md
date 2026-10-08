@@ -31,7 +31,7 @@ From top to bottom, with conditional parts only when they apply:
 5. **Learn Konjugate: the On-Ramp** — the six tutorial episodes (below). Permanent.
 6. **More to watch** — other videos, newest first (below).
 7. **Recent from the blog.**
-8. **Community & help:** Discord, Documentation, **Report a problem** (opens the GitHub issues page), and **Copy details for a bug report** (Konjugate version, operating system, install source, Electron and Chromium versions, so a report does not start with "which version?").
+8. **Community & help:** Discord, Documentation, and **Report a problem**, which opens GitHub's new-issue page with the report's sections and the system details (Konjugate version, operating system, install source, Electron and Chromium versions) already filled in through the page's URL parameters, so a report does not start with "which version?".
 9. **A footer:** one line about Konjugate, then "Mozilla Public License 2.0 · © 2026 Zenin Easa Panthakkalakath". The three "About" paragraphs shrink to that one line; the full text stays in the ReadMe.
 
 ## The On-Ramp series is permanent
@@ -70,7 +70,7 @@ One small file in the user data folder, `welcomeState.json`, written atomically 
 
 ## Order of work
 
-1. **Foundations, no new content types:** open instantly and fill in as content arrives; Esc to close; the footer (About and License moved down); the Community & help row with Report a problem and Copy details for a bug report; the compact status line; replace the shields.io badge and fix Privacy.md.
+1. **Foundations, no new content types:** open instantly and fill in as content arrives; Esc to close; the footer (About and License moved down); the Community & help row with Report a problem; the compact status line; replace the shields.io badge and fix Privacy.md.
 2. **On-Ramp polish:** the section heading, the playlist link, the "opened" tick, "Show all" past eight.
 3. **What's new:** the last-seen version, shown once per release.
 4. **Featured and More to watch:** the feed format and where it is hosted, the repository-hosted images, caching and the bundled fallback, dismiss and launch caps, the Sponsored label.

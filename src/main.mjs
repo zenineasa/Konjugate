@@ -31,9 +31,9 @@ import { createProviderToolchainStore, providerExecutionModes } from './provider
 import { installSource } from './updateCheck.mjs';
 import { createUpdateCoordinator } from './updateCoordinator.mjs';
 import { createUpdateSkipStore } from './updateSkipStore.mjs';
-import { formatBugReportDetails } from './bugReport.mjs';
+import { bugReportUrl } from './bugReport.mjs';
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
-import { whatsNewFor } from './welcomeModel.mjs';
+import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
 import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion } from './welcomeStateStore.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
@@ -618,8 +618,8 @@ ipcMain.handle('welcomeOpenFeatured', (_event, id) => {
     shell.openExternal(item.url);
     return true;
 });
-ipcMain.handle('appCopyBugReportDetails', () => {
-    clipboard.writeText(formatBugReportDetails({
+ipcMain.handle('appOpenBugReport', () => {
+    shell.openExternal(bugReportUrl(welcomeLinks.reportProblem, {
         version: app.getVersion(), source: installSource(), platform: process.platform, arch: process.arch,
         osRelease: osRelease(), electron: process.versions.electron, chromium: process.versions.chrome
     }));

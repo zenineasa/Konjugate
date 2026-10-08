@@ -127,10 +127,9 @@ function renderCommunity() {
         <div class="communityRow">
             <a class="communityLink communityDiscord" href="${welcomeLinks.discord}" data-external-link>Join the Discord community</a>
             <a class="communityLink" href="${welcomeLinks.documentation}" data-external-link>Documentation</a>
-            <a class="communityLink" href="${welcomeLinks.reportProblem}" data-external-link>Report a problem</a>
-            <button type="button" class="communityLink" data-copy-details>${welcome.detailsCopied ? 'Copied' : 'Copy details for a bug report'}</button>
+            <button type="button" class="communityLink" data-report-problem>Report a problem</button>
         </div>
-        <p class="communityNote">Reporting a problem? Copy the details and paste them into the report: they say which version and system you have.</p>`;
+        <p class="communityNote">Opens a report on GitHub with your Konjugate version and system already filled in. Nothing is sent until you submit it there.</p>`;
 }
 
 const sectionRenderers = {
@@ -185,12 +184,7 @@ function wireWelcome() {
             renderWelcome();
         }
     });
-    content.querySelector('[data-copy-details]')?.addEventListener('click', async () => {
-        if (!(await window.exampleGuide.copyBugReportDetails())) return;
-        welcome.detailsCopied = true;
-        renderWelcome();
-        setTimeout(() => { welcome.detailsCopied = false; if (welcome) renderWelcome(); }, 1800);
-    });
+    content.querySelector('[data-report-problem]')?.addEventListener('click', () => window.exampleGuide.openBugReport());
     content.querySelector('#restartKonjugate')?.addEventListener('click', () => window.exampleGuide.restart());
     content.querySelector('#installRecommendedAddons')?.addEventListener('click', async () => {
         welcome.recommendedStatus = { phase: 'installing', text: '' };
@@ -295,7 +289,7 @@ window.exampleGuide.onContent((payload) => {
             generation: payload.generation, version: payload.version, markdown,
             onRamp: payload.onRamp, openedEpisodes: payload.openedEpisodes ?? [], onRampExpanded: false,
             whatsNew: payload.whatsNew ?? null, featured: payload.featured ?? null, moreToWatch: payload.moreToWatch ?? [], posts: payload.posts ?? [],
-            recommendedAddons: payload.recommendedAddons ?? [], recommendedStatus: { phase: 'idle', text: '' }, detailsCopied: false
+            recommendedAddons: payload.recommendedAddons ?? [], recommendedStatus: { phase: 'idle', text: '' }
         };
         renderWelcome({ resetScroll: true });
         window.appUpdate.status().then((status) => {

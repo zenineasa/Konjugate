@@ -79,11 +79,11 @@ test('the title bar has the badge inside the Konjugate button, and the Welcome p
 
 test('the Welcome page reaches main only through the IPC channels main handles', async () => {
     const [preload, main] = await Promise.all([read('src/exampleGuide/preload.cjs'), read('src/main.mjs')]);
-    for (const channel of ['welcomeEpisodeOpened', 'welcomeDismissFeatured', 'welcomeOpenFeatured', 'appCopyBugReportDetails', 'welcomePatch']) {
+    for (const channel of ['welcomeEpisodeOpened', 'welcomeDismissFeatured', 'welcomeOpenFeatured', 'appOpenBugReport', 'welcomePatch']) {
         assert.ok(preload.includes(`'${channel}'`), `${channel} is used by the preload`);
         assert.ok(main.includes(`'${channel}'`), `${channel} is handled or sent by main`);
     }
-    for (const method of ['onWelcomePatch', 'markEpisodeOpened', 'dismissFeatured', 'openFeatured', 'copyBugReportDetails']) {
+    for (const method of ['onWelcomePatch', 'markEpisodeOpened', 'dismissFeatured', 'openFeatured', 'openBugReport']) {
         assert.ok(preload.includes(`${method}:`), `${method} is exposed to the page`);
     }
 });

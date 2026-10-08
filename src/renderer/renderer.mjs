@@ -26,6 +26,7 @@ import {
 } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
+import { stateValueText } from './valueFormat.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
@@ -342,7 +343,7 @@ function hydrateProjectDocument(document) {
                 symbol: state.symbol,
                 initialValue: state.initialValue,
                 unit: state.unit ?? '',
-                value: `${state.initialValue}${state.unit ? ` ${state.unit}` : ''}`,
+                value: stateValueText(state.initialValue, state.unit).text, exactValue: stateValueText(state.initialValue, state.unit).exact,
                 className: ''
             }))
         };
@@ -1013,7 +1014,7 @@ function createNodeLabel(definition, geometry) {
     const stateRows = definition.states.map((state) => `
         <div>
             <dt>${escapeHtml(state.label)}</dt>
-            <dd class="${escapeHtml(state.className ?? '')}">${escapeHtml(state.value)}</dd>
+            <dd class="${escapeHtml(state.className ?? '')}" title="${escapeHtml(state.exactValue ?? state.value)}">${escapeHtml(state.value)}</dd>
         </div>
     `).join('');
 
@@ -1828,7 +1829,7 @@ function renderNodeEditorModel(node) {
                 const field = input.dataset.field;
                 target[field === 'name' ? 'label' : field === 'value' ? 'initialValue' : field] =
                     field === 'value' ? Number(input.value) || 0 : input.value.trim();
-                target.value = `${target.initialValue}${target.unit ? ` ${target.unit}` : ''}`;
+                ({ text: target.value, exact: target.exactValue } = stateValueText(target.initialValue, target.unit));
                 if (field === 'symbol') {
                     snapshot.sourceTerms.forEach((term) => {
                         if (term.state === previousSymbol) term.state = target.symbol;
@@ -3356,7 +3357,7 @@ function applyNodeTemplate(template) {
         symbol: state.symbol,
         initialValue: state.initialValue,
         unit: state.unit ?? '',
-        value: `${state.initialValue}${state.unit ? ` ${state.unit}` : ''}`
+        value: stateValueText(state.initialValue, state.unit).text, exactValue: stateValueText(state.initialValue, state.unit).exact
     }));
     componentLibraryPlacementCount += 1;
     const definition = {
@@ -4110,10 +4111,12 @@ function updateDisplayedState(stateId, numericValue) {
     const node = model.nodes.find((candidate) => candidate.states.some((state) => state.id === stateId));
     const state = node?.states.find((candidate) => candidate.id === stateId);
     if (!state) return;
-    state.value = `${Number(numericValue).toPrecision(6)}${state.unit ? ` ${state.unit}` : ''}`;
+    const { text, exact } = stateValueText(numericValue, state.unit);
+    state.value = text;
+    state.exactValue = exact;
     // From the node's own label, which exists before its first frame puts it in the page.
     const value = labelElementOf(nodeObjects.get(node.id), 'node-label-container')?.querySelectorAll('dd')[node.states.indexOf(state)];
-    if (value) value.textContent = state.value;
+    if (value) { value.textContent = state.value; value.title = state.exactValue; }
 }
 
 function projectResultSample(index) {
@@ -10196,7 +10199,7 @@ $('#createNode').addEventListener('click', () => {
         symbol: state.symbol,
         initialValue: Number(state.value) || 0,
         unit: state.unit,
-        value: `${Number(state.value) || 0}${state.unit ? ` ${state.unit}` : ''}`
+        value: stateValueText(Number(state.value) || 0, state.unit).text, exactValue: stateValueText(Number(state.value) || 0, state.unit).exact
     }));
     const symbolToStateId = new Map(resolvedStates.map((state) => [state.symbol, state.id]));
     const definition = {
@@ -10768,7 +10771,7 @@ function hydrateFragmentNode(node) {
             symbol: state.symbol,
             initialValue: state.initialValue,
             unit: state.unit ?? '',
-            value: `${state.initialValue}${state.unit ? ` ${state.unit}` : ''}`,
+            value: stateValueText(state.initialValue, state.unit).text, exactValue: stateValueText(state.initialValue, state.unit).exact,
             className: ''
         }))
     };

@@ -744,6 +744,29 @@ void storedParameterSchedulesDriveTheParameterBeneathLiveControl() {
     require(liveAt(11, {}, {intervention}) == 3 && liveAt(12, {}, {intervention}) == 11, "An intervention takes over from the schedule when it begins.");
 }
 
+// A recorded intervention (a scenario fork's scheduled change) reaches a partition worker: the
+// partitioned backend integrates a node under it exactly as the shared integrateNode does, and
+// differently from the same step with no intervention.
+void partitionRuntimeAppliesActiveParameterSchedules() {
+    using konjugate::ParameterSchedule;
+    const auto plan = scheduledProject("live", "hold");
+    ParameterSchedule intervention;
+    intervention.parameterId = 30;
+    intervention.mode = ParameterSchedule::Mode::piecewise;
+    intervention.samples = {{0, 8}, {100, 8}};
+    konjugate::PartitionRuntime runtime(0, plan, {0});
+    konjugate::InMemoryPartitionTransport transport;
+    const auto execute = [&](std::size_t synchronizationIndex, std::vector<ParameterSchedule> active) {
+        auto future = runtime.submit(transport, synchronizationIndex, {}, 1.0, 5.0, std::chrono::seconds(5), nullptr, std::move(active));
+        transport.publish({1, synchronizationIndex, 0, {{11, 0}}});
+        return future.get().nodes.front().states.front();
+    };
+    const auto expected = konjugate::integrateNode(plan.nodes.front(), plan.initialStates, {}, 5.0, 1.0, nullptr, {intervention}).states.front();
+    require(std::abs(expected - 8) < 1e-12, "The shared integrateNode applies the intervention (dx/dt = 8 for one second).");
+    require(std::abs(execute(1, {intervention}) - expected) < 1e-12, "A partition worker did not apply an active parameter schedule.");
+    require(std::abs(execute(2, {}) - 1) < 1e-12, "Without an intervention a partition worker follows the stored schedule.");
+}
+
 int main() {
     try {
         deterministicReductionUsesTaskSequence();
@@ -767,6 +790,7 @@ int main() {
         partitionTransportWaitsForDelayedMessagesAndRejectsDuplicates();
         partitionTransportReportsMissingMessagesAndWorkerFailures();
         partitionRuntimeReplaysDeterministicallyThroughMessages();
+        partitionRuntimeAppliesActiveParameterSchedules();
         automaticBackendSelectionAccountsForWorkAndCommunication();
         std::cout << "Execution plan tests passed.\n";
         return 0;

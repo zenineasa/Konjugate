@@ -74,7 +74,8 @@ public:
                                                double synchronizationStep,
                                                double simulationTime = 0,
                                                std::chrono::milliseconds receiveTimeout = std::chrono::seconds(5),
-                                               ProviderEvaluator* providerEvaluator = nullptr);
+                                               ProviderEvaluator* providerEvaluator = nullptr,
+                                               std::vector<ParameterSchedule> activeSchedules = {});
 
 private:
     std::size_t partition_;

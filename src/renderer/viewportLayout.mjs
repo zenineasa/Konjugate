@@ -28,3 +28,10 @@ export function fogDensityFor(viewDistance, { density = canvasFog.density, refer
 export function farPlaneFor(viewDistance, minimum = 300) {
     return Number.isFinite(viewDistance) ? Math.max(minimum, viewDistance * 3) : minimum;
 }
+
+// The label a canvas object carries, as its element: found on the object, not in the page. A label enters the page
+// only when a frame is drawn, so one looked up in the page straight after its model opened is not there yet, and a
+// result shown at once (a scenario's fork) had nowhere to write its values.
+export function labelElementOf(object, className) {
+    return object?.children?.find((child) => child.element?.classList?.contains(className))?.element ?? null;
+}

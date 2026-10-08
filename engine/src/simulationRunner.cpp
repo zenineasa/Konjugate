@@ -976,11 +976,11 @@ void runSimulation(const boost::property_tree::ptree& document,
             }
             for (std::size_t index = 0; index < futures.size(); ++index) nodeResults[index] = futures[index].get();
         } else if (!partitionRuntimes.empty()) {
-            // runControl.activeSchedules is deliberately NOT threaded across the partition-worker
-            // IPC boundary here -- a documented scope limit (see integrateNode's own doc comment):
-            // a scheduled parameter intervention has no effect under the partitioned backend today,
-            // only under serial/thread-pool execution.
+            // Each partition worker gets the run's active schedules with the live values, so a
+            // scheduled parameter intervention (a scenario fork's changes) applies under this
+            // backend as it does under serial and thread-pool execution.
             const auto parameterValues = runControl.parameterValues;
+            const auto activeSchedules = runControl.activeSchedules;
             for (std::size_t partition = 0; partition < partitionRuntimes.size(); ++partition) {
                 const auto preparationStartedAt = std::chrono::steady_clock::now();
                 PartitionBoundaryMessage message;
@@ -1004,7 +1004,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             for (auto& runtime : partitionRuntimes) {
                 futures.push_back(runtime->submit(
                     *partitionTransport, step, parameterValues, synchronizationStep, currentTime,
-                    std::chrono::milliseconds(partitionReceiveTimeoutMilliseconds), providerRuntime.get()));
+                    std::chrono::milliseconds(partitionReceiveTimeoutMilliseconds), providerRuntime.get(), activeSchedules));
             }
             for (std::size_t partition = 0; partition < futures.size(); ++partition) {
                 const auto result = futures[partition].get();

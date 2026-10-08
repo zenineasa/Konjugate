@@ -318,10 +318,9 @@ struct NodeIntegrationResult {
 // verbatim by the serial/thread-pool backend (simulationRunner.cpp) and the partitioned backend
 // (partitionRuntime.cpp, which wraps this with its own node index) so the two can never silently
 // diverge on this logic.
-// activeSchedules defaults to {} (no effect on existing callers, including the partitioned
-// backend via partitionRuntime.cpp, which does not thread schedules across its worker-process
-// boundary -- a documented, deliberate scope limit, not an oversight: interventions only affect
-// the serial and thread-pool backends today).
+// activeSchedules defaults to {} (no effect on callers that pass none). Every backend passes the
+// run's active schedules: the partitioned one hands them to each partition worker
+// (partitionRuntime.cpp), so an intervention applies whichever backend a run is given.
 NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const StateValues& synchronizationSnapshot,
                                     const EntityValues& liveParameterValues,

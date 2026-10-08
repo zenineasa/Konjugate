@@ -26,7 +26,7 @@ import {
 } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
-import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, virtualKeyboardInset } from './viewportLayout.mjs';
+import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
@@ -4111,8 +4111,8 @@ function updateDisplayedState(stateId, numericValue) {
     const state = node?.states.find((candidate) => candidate.id === stateId);
     if (!state) return;
     state.value = `${Number(numericValue).toPrecision(6)}${state.unit ? ` ${state.unit}` : ''}`;
-    const label = $(`.node-label-container[data-node="${node.id}"]`);
-    const value = $$('dd', label)[node.states.indexOf(state)];
+    // From the node's own label, which exists before its first frame puts it in the page.
+    const value = labelElementOf(nodeObjects.get(node.id), 'node-label-container')?.querySelectorAll('dd')[node.states.indexOf(state)];
     if (value) value.textContent = state.value;
 }
 

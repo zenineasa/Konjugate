@@ -17,9 +17,10 @@ PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
                                   const EntityValues& liveParameterValues,
                                   double simulationTime,
                                   double synchronizationStep,
-                                  ProviderEvaluator* providerEvaluator = nullptr) {
+                                  ProviderEvaluator* providerEvaluator,
+                                  const std::vector<ParameterSchedule>& activeSchedules) {
     auto result = konjugate::integrateNode(node, synchronizationSnapshot, liveParameterValues,
-                                            simulationTime, synchronizationStep, providerEvaluator);
+                                            simulationTime, synchronizationStep, providerEvaluator, activeSchedules);
     return {nodeIndex, std::move(result.states), result.computeNanoseconds};
 }
 
@@ -72,8 +73,10 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
                                                              double synchronizationStep,
                                                              double simulationTime,
                                                              std::chrono::milliseconds receiveTimeout,
-                                                             ProviderEvaluator* providerEvaluator) {
+                                                             ProviderEvaluator* providerEvaluator,
+                                                             std::vector<ParameterSchedule> activeSchedules) {
     return executor_.submit([this, &transport, synchronizationIndex, parameterValues = std::move(parameterValues),
+                             activeSchedules = std::move(activeSchedules),
                              simulationTime, synchronizationStep, receiveTimeout, providerEvaluator]() mutable {
         const auto waitStartedAt = std::chrono::steady_clock::now();
         auto boundary = transport.receive(partition_, synchronizationIndex, receiveTimeout);
@@ -102,7 +105,8 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
                 }
             }
             result.nodes.push_back(integrateNode(
-                node, nodeIndex, synchronizationSnapshot, parameterValues, simulationTime, synchronizationStep, providerEvaluator));
+                node, nodeIndex, synchronizationSnapshot, parameterValues, simulationTime, synchronizationStep, providerEvaluator,
+                activeSchedules));
         }
         return result;
     });

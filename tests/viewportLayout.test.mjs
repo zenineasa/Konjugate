@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, virtualKeyboardInset } from '../src/renderer/viewportLayout.mjs';
+import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from '../src/renderer/viewportLayout.mjs';
 
 test('virtualKeyboardInset reserves only visible keyboard space', () => {
     assert.equal(virtualKeyboardInset(900, { top: 620 }, true), 280);
@@ -44,4 +44,15 @@ test('the far plane keeps three times the viewing distance, and never less than 
     assert.equal(farPlaneFor(400), 1200);
     assert.equal(farPlaneFor(5000), 15000);
     assert.equal(farPlaneFor(NaN), 300);
+});
+
+test('a canvas object\'s label is found on the object, drawn into the page yet or not, and is null where there is none', () => {
+    const element = (...names) => ({ classList: { contains: (name) => names.includes(name) } });
+    const label = element('node-label-container');
+    const object = { children: [{ isMesh: true }, { element: element('edge-label') }, { element: label }] };
+    assert.equal(labelElementOf(object, 'node-label-container'), label);
+    assert.equal(labelElementOf({ children: [{ isMesh: true }] }, 'node-label-container'), null);
+    // A node not on the canvas (a result naming a state whose node is not drawn) is no error.
+    assert.equal(labelElementOf(undefined, 'node-label-container'), null);
+    assert.equal(labelElementOf({}, 'node-label-container'), null);
 });

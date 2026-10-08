@@ -25,7 +25,10 @@ const allowedPermissions = new Set([
 // scenarioForkTime: runScenario accepts the window's own fork time (forkAt).
 // suppliedPerParameter: supplied data may be given per parameter (supplied.byParameter), so one scenario can change
 // several parameters, each for its own entities along its own paths.
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink']);
+// scenarioEveryBackend: a scenario's changes apply whichever execution backend the engine chooses for the model. Up to
+// 1.1.10 the partitioned backend ignored them, so a fork of a model the planner partitioned was its baseline again; a
+// launcher whose results are read as "nothing changed" can refuse such a version.
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 

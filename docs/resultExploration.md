@@ -175,6 +175,8 @@ Live changes should be recorded as events rather than transient UI mutations. An
 
 Interventions appear as markers or tracks on the timeline. A child branch keeps the parent event history before its fork and owns a distinct future event sequence.
 
+An intervention applies whichever execution backend runs the model: serial, thread pool or partitioned. Each partition worker receives the run's active schedules with its live values. (Up to 1.1.10 the partitioned backend ignored them, so a fork's changes did nothing on a model the planner chose to partition; `tests/engine/engineCompatibility.mjs` now compares the three.)
+
 The engine applies accepted interventions at global synchronization boundaries. The UI distinguishes a requested intervention from one acknowledged and applied by the engine.
 
 ## Playback rate and simulation pacing

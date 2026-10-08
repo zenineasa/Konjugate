@@ -514,6 +514,29 @@ await assert.rejects(() => scheduledRun.scheduleParameterValue('not-live', { mod
 const scheduledResult = await scheduledRun.completion;
 assert.equal(scheduledResult.lifecycle, 'completed');
 
+// A recorded intervention applies whichever backend runs the model: serial, thread pool and
+// partitioned end in the same states, and not in those of a run with no intervention. (The
+// partitioned backend once left its workers without the schedules, so a fork's changes did nothing
+// on any model the planner chose to partition.)
+const finalStatesUnder = async (backend, intervene) => {
+    const run = await startEngineRun(JSON.stringify(scheduledProject), {
+        name: `Scheduled ${backend}`, targetTime: 1, globalTimeStep: 0.01, outputInterval: 0.1,
+        pacing: { mode: 'realTime', simulationSecondsPerWallSecond: 1 },
+        execution: { backend, workerThreads: 2, partitionCount: 2 }
+    }, { ...engineOptions });
+    if (intervene) await run.scheduleParameterValue(scheduledParameter.id, { mode: 'step', startTime: 0.5, targetValue: Number(scheduledParameter.value) * 3 });
+    const result = await run.completion;
+    assert.equal(result.lifecycle, 'completed');
+    assert.equal(result.execution.backend, backend);
+    return result.states;
+};
+const unchangedStates = await finalStatesUnder('serial', false);
+const changedStates = await finalStatesUnder('serial', true);
+assert.notDeepEqual(changedStates, unchangedStates, 'the intervention changes where the run ends');
+for (const backend of ['threadPool', 'partitioned']) {
+    assert.deepEqual(await finalStatesUnder(backend, true), changedStates, `the ${backend} backend applies a scheduled intervention as the serial one does`);
+}
+
 let resolveStoppedProgress;
 const stoppedProgress = new Promise((resolve) => { resolveStoppedProgress = resolve; });
 const stoppedRun = await startEngineRun(example, {

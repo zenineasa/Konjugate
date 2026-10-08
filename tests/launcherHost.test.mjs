@@ -325,6 +325,7 @@ test('a launcher may require features, and one this version does not have is ref
     const withRequires = (requires) => { const manifest = launcher(); manifest.requires = requires; return manifest; };
     assert.equal(validateAddonManifest(withRequires(['scenarioOverrides', 'runRecord'])).kind, 'launcher');
     assert.equal(validateAddonManifest(withRequires(['openLink'])).kind, 'launcher');
+    assert.equal(validateAddonManifest(withRequires(['scenarioEveryBackend'])).kind, 'launcher');
     assert.equal(validateAddonManifest(withRequires([])).kind, 'launcher');
     assert.throws(() => validateAddonManifest(withRequires(['scenarioOverrides', 'timeTravel'])), /needs timeTravel, which this version of Konjugate does not provide/);
     assert.throws(() => validateAddonManifest(withRequires('runRecord')), /list of names/);

@@ -1,4 +1,11 @@
 export default async function importData({ files, helpers, options }) {
+    // A binary file comes as bytes: what was read of it goes back as text files of the other roles.
+    const binary = files.find((file) => file.data);
+    if (binary) {
+        const total = binary.data.reduce((sum, byte) => sum + byte, 0);
+        const derived = options?.derive ?? [{ role: 'data', name: 'from-extract.csv', text: `bytes,sum\n${binary.data.length},${total}\n`, source: binary.name }];
+        return { ok: true, data: { bytes: binary.data.length, isBytes: binary.data instanceof Uint8Array, text: binary.text ?? null }, derived, report: { errors: [], warnings: [], summary: {} } };
+    }
     const text = files.find((file) => file.role === 'data')?.text ?? '';
     if (text.startsWith('boom')) throw new Error('boom');
     if (text.startsWith('hang')) await new Promise(() => {});

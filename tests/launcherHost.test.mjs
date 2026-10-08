@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
+    checkedDerived, maximumBinaryInputBytes,
     attachAddonData, buildSessionEntry, sessionInputs,
     checkForkTime,
     checkRunLength,
@@ -410,4 +411,42 @@ test('a launcher may require parameterSchedules', () => {
     const manifest = launcher();
     manifest.requires = ['parameterSchedules'];
     assert.doesNotThrow(() => validateAddonManifest(manifest));
+});
+
+test('an importer may take a large file as bytes and return text files derived from it, which are checked', async () => {
+    const importer = { entry: 'echoImporter.mjs', files: [{ role: 'data', label: 'Data', multiple: true }, { role: 'notes', label: 'Notes' }, { role: 'extract', label: 'Extract', binary: true }] };
+    const run = (options) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'extract', name: 'region.bin', data: Uint8Array.from([1, 2, 3, 250]) }], options, timeoutMilliseconds: 5000 });
+    const result = await run();
+    assert.deepEqual(result.data, { bytes: 4, isBytes: true, text: null });
+    assert.deepEqual(result.derived, [{ role: 'data', name: 'from-extract.csv', text: 'bytes,sum\n4,256\n', source: 'region.bin' }]);
+    // Only of its own roles that are not binary, as text, each named once, a single-file role once.
+    await assert.rejects(() => run({ derive: [{ role: 'extract', name: 'x.bin', text: 'x' }] }), /only of its own roles that are not binary/);
+    await assert.rejects(() => run({ derive: [{ role: 'elsewhere', name: 'x.csv', text: 'x' }] }), /only of its own roles/);
+    await assert.rejects(() => run({ derive: [{ role: 'data', name: 'x.csv', text: 7 }] }), /must be text/);
+    await assert.rejects(() => run({ derive: [{ role: 'data', name: 'x.csv', text: 'a' }, { role: 'data', name: 'x.csv', text: 'b' }] }), /two files where one is taken/);
+    await assert.rejects(() => run({ derive: [{ role: 'notes', name: 'a.txt', text: 'a' }, { role: 'notes', name: 'b.txt', text: 'b' }] }), /two files where one is taken/);
+    assert.equal((await run({ derive: [{ role: 'data', name: 'a.csv', text: 'a' }, { role: 'data', name: 'b.csv', text: 'b' }, { role: 'notes', name: '../n.txt', text: 'n' }] })).derived[2].name, '.._n.txt');
+    assert.throws(() => checkedDerived(importer, [{ role: 'data', name: 'big.csv', text: 'x'.repeat(11 * 1024 * 1024) }]), /larger than the 10 MB limit/);
+    assert.throws(() => checkedDerived(importer, Array.from({ length: 65 }, (_unused, index) => ({ role: 'data', name: `${index}.csv`, text: 'x' }))), /up to 64 files/);
+    assert.ok(maximumBinaryInputBytes >= 600 * 1024 * 1024, 'a region\'s extract fits');
+});
+
+test('a binary file role is one optional file with no sample, and is not kept with a session', () => {
+    const withFile = (file) => { const manifest = launcher(); manifest.contributes.importers[0].files.push({ role: 'extract', label: 'Extract', accept: ['pbf'], ...file }); return manifest; };
+    assert.equal(validateAddonManifest(withFile({ binary: true })).kind, 'launcher');
+    assert.throws(() => validateAddonManifest(withFile({ binary: 'yes' })), /binary must be true or false/);
+    assert.throws(() => validateAddonManifest(withFile({ binary: true, multiple: true })), /one optional file with no sample/);
+    assert.throws(() => validateAddonManifest(withFile({ binary: true, required: true })), /one optional file with no sample/);
+    assert.throws(() => validateAddonManifest(withFile({ binary: true, sample: 'samples/x.pbf' })), /one optional file with no sample/);
+    const manifest = launcher();
+    manifest.requires = ['binaryInputs'];
+    assert.equal(validateAddonManifest(manifest).kind, 'launcher');
+    const entry = buildSessionEntry({ addon: { version: '1' }, window: {}, inputs: [
+        { role: 'extract', name: 'region.osm.pbf', path: '/somewhere/region.osm.pbf', binary: true, bytes: 500 * 1024 * 1024, sample: false },
+        { role: 'roads', name: 'roads-1.json', text: '{"elements":[]}', encoding: 'utf-8', sha256: 'a', bytes: 15, source: 'region.osm.pbf' }
+    ] });
+    assert.deepEqual(entry.inputs.map((input) => input.name), ['roads-1.json']);
+    // What was derived says what it was read from, and says so again when the session is restored.
+    assert.equal(entry.inputs[0].source, 'region.osm.pbf');
+    assert.equal(sessionInputs(entry, [{ files: [{ role: 'roads', multiple: true }, { role: 'extract', binary: true }] }])[0].file.source, 'region.osm.pbf');
 });

@@ -6,7 +6,7 @@
 // a file's contents, or the model: it names declared ids, and this module does the work.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -15,6 +15,10 @@ import { encodeProjectFile } from './projectFile.mjs';
 import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './addonCache.mjs';
 
 const maximumInputBytes = 10 * 1024 * 1024;
+// A binary input (a file role declared `binary`): one large file the importer reads as bytes and turns into text
+// files of its other roles. It is read from disk when the importer runs and is never kept in memory or in a session.
+export const maximumBinaryInputBytes = 1024 * 1024 * 1024;
+const maximumDerivedFiles = 64;
 // Long enough for an importer that builds a large region (routing every lane over a city's roads takes tens of seconds,
 // more on a busy machine); short enough that one that hangs is still stopped.
 const importerTimeoutMilliseconds = 120000;
@@ -101,11 +105,16 @@ export const safeFileName = (name) => String(name ?? '').replace(/[^\p{L}\p{N} .
 
 // Runs a declared importer over the given files ([{ role, name, text }]) in a worker thread with a time
 // limit, and checks the shape of what comes back before anyone uses it.
-export function runImporter({ addonDirectory, importer, files, options = {}, timeoutMilliseconds = importerTimeoutMilliseconds }) {
+// A file of a binary role comes as { role, name, data } (a Uint8Array, handed over to the worker, not copied): an
+// importer given one gets more time and memory, by its size.
+export function runImporter({ addonDirectory, importer, files, options = {}, timeoutMilliseconds = null }) {
+    const binaryBytes = files.reduce((total, file) => total + (file.data?.byteLength ?? 0), 0);
+    timeoutMilliseconds ??= importerTimeoutMilliseconds + Math.ceil(binaryBytes / (1024 * 1024)) * 500;
     return new Promise((resolvePromise, reject) => {
         const worker = new Worker(new URL('./importerWorker.mjs', import.meta.url), {
             workerData: { entry: importer.entry, packageRoot: addonDirectory, files, options },
-            resourceLimits: { maxOldGenerationSizeMb: 512 }
+            transferList: files.filter((file) => file.data).map((file) => file.data.buffer),
+            resourceLimits: { maxOldGenerationSizeMb: binaryBytes ? 1536 : 512 }
         });
         const timer = setTimeout(() => {
             worker.terminate();
@@ -121,9 +130,35 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
             // (for example run an analysis) before the model can be built.
             if (result.ok && result.data === undefined && (!Array.isArray(result.document?.nodes) || !Array.isArray(result.document?.edges))) return reject(new Error('The importer reported success without a model.'));
             if (result.data !== undefined && JSON.stringify(result.data).length > maximumImporterDataBytes) return reject(new Error('The importer returned more data than a window may receive.'));
+            try {
+                if (result.derived !== undefined) result.derived = checkedDerived(importer, result.derived);
+            } catch (error) {
+                return reject(error);
+            }
             resolvePromise(result);
         });
         worker.once('error', (error) => { clearTimeout(timer); reject(new Error(`The importer failed: ${error.message}`)); });
+    });
+}
+
+// The text files an importer derived from what it was given (`derived: [{ role, name, text }]`), checked: each is of
+// a role the importer declares that is not binary, and no larger than a chosen file may be. They take the place of
+// the files of their roles, and of the binary files they were read from. Throws a message naming what is wrong.
+export function checkedDerived(importer, derived) {
+    if (!Array.isArray(derived) || derived.length > maximumDerivedFiles) throw new Error(`An importer may derive up to ${maximumDerivedFiles} files.`);
+    const roles = new Map(importer.files.map((file) => [file.role, file]));
+    const names = new Set();
+    return derived.map((item) => {
+        const file = roles.get(item?.role);
+        if (!file || file.binary) throw new Error('An importer may derive files only of its own roles that are not binary.');
+        if (typeof item.text !== 'string') throw new Error('A derived file must be text.');
+        if (Buffer.byteLength(item.text) > maximumInputBytes) throw new Error(`A derived file is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
+        const name = safeFileName(item.name);
+        if (!name) throw new Error('A derived file needs a name.');
+        const key = `${file.role}::${name}`;
+        if (names.has(key) || (!file.multiple && [...names].some((other) => other.startsWith(`${file.role}::`)))) throw new Error('An importer derived two files where one is taken.');
+        names.add(key);
+        return { role: file.role, name, text: item.text, ...(typeof item.source === 'string' ? { source: item.source.slice(0, 200) } : {}) };
     });
 }
 
@@ -135,8 +170,11 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
 export function buildSessionEntry({ addon, window, inputs, savedAt = new Date().toISOString() }) {
     const windowText = JSON.stringify(window ?? null);
     if (windowText.length > maximumSessionWindowBytes) throw new Error('The window\'s session is larger than the host keeps.');
-    const kept = inputs.map(({ role, name, text, encoding, url, retrievedAt, sha256: hash, bytes, sample }) => ({
-        role, name, text, encoding: encoding ?? 'utf-8', sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}), ...(sample ? { sample: true } : {})
+    // A binary input is not kept: what was derived from it is.
+    const kept = inputs.filter((input) => !input.binary).map(({ role, name, text, encoding, url, retrievedAt, sha256: hash, bytes, sample, source }) => ({
+        role, name, text, encoding: encoding ?? 'utf-8', sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}), ...(sample ? { sample: true } : {}),
+        // A derived file says what it was read from (the binary file's name).
+        ...(source ? { source } : {})
     }));
     if (kept.reduce((total, input) => total + (input.text?.length ?? 0), 0) > maximumSessionInputBytes) {
         throw new Error(`The data this session was built from is larger than the ${maximumSessionInputBytes / 1024 / 1024} MB a project keeps.`);
@@ -160,7 +198,7 @@ export function sessionInputs(entry, importers) {
         .filter((input) => roles.has(input.role) && typeof input.text === 'string' && typeof input.name === 'string')
         .map((input) => ({ key: multiple.has(input.role) ? `${input.role}::${input.name}` : input.role, file: {
             role: input.role, name: input.name, text: input.text, encoding: input.encoding ?? 'utf-8', sha256: input.sha256 ?? sha256(input.text),
-            bytes: input.bytes ?? Buffer.byteLength(input.text), sample: Boolean(input.sample), ...(input.url ? { url: input.url, retrievedAt: input.retrievedAt } : {}), restored: true
+            bytes: input.bytes ?? Buffer.byteLength(input.text), sample: Boolean(input.sample), ...(input.url ? { url: input.url, retrievedAt: input.retrievedAt } : {}), ...(typeof input.source === 'string' ? { source: input.source } : {}), restored: true
         } }));
 }
 
@@ -483,7 +521,7 @@ export function registerLauncherHandlers(deps) {
             network: { hosts: manifest.network?.hosts ?? [] },
             importers: (contributes.importers ?? []).map(({ importerId, name, guide, files }) => ({
                 importerId, name, guide: guide ?? null,
-                files: files.map(({ role, label, required = false, description = '', accept = ['csv'], sample, multiple = false }) => ({ role, label, required, description, accept, multiple, hasSample: Boolean(sample) }))
+                files: files.map(({ role, label, required = false, description = '', accept = ['csv'], sample, multiple = false, binary = false }) => ({ role, label, required, description, accept, multiple, binary, hasSample: Boolean(sample) }))
             })),
             scenarios: (contributes.scenarios ?? []).map(({ scenarioId, name, description, forkAt, runTime, choose, effects, interventions }) => ({ scenarioId, name, description, forkAt, runTime, choose: choose ?? null, effects: effects ?? [], interventions: (interventions ?? []).map(({ parameter, target, value, fractionOfMaximum, at, duration }) => ({ parameter, target, value: value ?? null, fractionOfMaximum: fractionOfMaximum ?? null, at: at ?? 0, duration: duration ?? 0 })) })),
             pages: (contributes.pages ?? []).map(({ pageId, label }) => ({ pageId, label })),
@@ -492,7 +530,7 @@ export function registerLauncherHandlers(deps) {
                 const chosen = {};
                 const multiple = new Set((contributes.importers ?? []).flatMap((importer) => importer.files.filter((file) => file.multiple).map((file) => file.role)));
                 for (const file of workspace.pending.values()) {
-                    const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: Boolean(file.url) };
+                    const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: Boolean(file.url), ...(file.binary ? { binary: true } : {}), ...(file.source ? { derivedFrom: file.source } : {}) };
                     if (multiple.has(file.role)) (chosen[file.role] ??= []).push(summary);
                     else chosen[file.role] = summary;
                 }
@@ -516,6 +554,14 @@ export function registerLauncherHandlers(deps) {
         });
         if (chosen.canceled || !chosen.filePaths.length) return { chosen: false };
         const paths = file.multiple ? chosen.filePaths : chosen.filePaths.slice(0, 1);
+        if (file.binary) {
+            // Noted, not read: it is read from disk when the importer runs. Choosing it changes no other input until then.
+            const { size } = await stat(paths[0]);
+            if (size > maximumBinaryInputBytes) throw new Error(`${basename(paths[0])} is larger than the ${maximumBinaryInputBytes / 1024 / 1024} MB limit.`);
+            dropRole(workspace, file);
+            workspace.pending.set(pendingKey(file, basename(paths[0])), { role, name: basename(paths[0]), path: paths[0], binary: true, bytes: size, sample: false });
+            return { chosen: true, name: basename(paths[0]), names: [basename(paths[0])], bytes: size };
+        }
         const read = [];
         for (const path of paths) {
             const bytes = await readFile(path);
@@ -635,7 +681,7 @@ export function registerLauncherHandlers(deps) {
         let changed = 0;
         const missing = [];
         for (const [key, file] of workspace.pending) {
-            if (file.sample || (!file.path && !file.url)) continue;
+            if (file.sample || file.binary || (!file.path && !file.url)) continue;
             let bytes;
             try { bytes = file.url ? await fetchAllowed({ url: file.url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` }) : await readFile(file.path); } catch { missing.push(file.name); continue; }
             if (bytes.length > maximumInputBytes) throw new Error(`${file.name} is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
@@ -665,9 +711,33 @@ export function registerLauncherHandlers(deps) {
         const missing = importer.files.filter((file) => file.required && !chosenRoles.has(file.role));
         if (missing.length) throw new Error(`Choose ${missing.map((file) => file.label).join(' and ')} first.`);
         const roles = new Set(importer.files.map((file) => file.role));
-        const files = [...workspace.pending.values()].filter((file) => roles.has(file.role)).map(({ role, name, text, encoding }) => ({ role, name, text, encoding }));
         if (JSON.stringify(options ?? {}).length > maximumOptionsBytes) throw new Error('The options are larger than the host accepts.');
+        const files = [];
+        for (const file of workspace.pending.values()) {
+            if (!roles.has(file.role)) continue;
+            if (!file.binary) { files.push({ role: file.role, name: file.name, text: file.text, encoding: file.encoding }); continue; }
+            // A binary input is read now, into memory of its own, and handed over to the importer.
+            let bytes;
+            try { bytes = await readFile(file.path); } catch { throw new Error(`${file.name} could not be read: it may have been moved. Choose it again.`); }
+            if (bytes.length > maximumBinaryInputBytes) throw new Error(`${file.name} is larger than the ${maximumBinaryInputBytes / 1024 / 1024} MB limit.`);
+            // A large file comes in memory of its own, which is handed over as it is; a small one is copied out of the pool.
+            const data = bytes.byteOffset === 0 && bytes.buffer.byteLength === bytes.length ? new Uint8Array(bytes.buffer) : Uint8Array.from(bytes);
+            files.push({ role: file.role, name: file.name, data });
+        }
         const result = await runImporter({ addonDirectory: addon.addonDirectory, importer, files, options: options ?? {} });
+        // What the importer derived takes the place of the files of those roles, and of the binary files it read.
+        if (result.ok && result.derived?.length) {
+            for (const [key, item] of workspace.pending) if (item.binary) workspace.pending.delete(key);
+            for (const role of new Set(result.derived.map((item) => item.role))) dropRole(workspace, { role });
+            for (const item of result.derived) {
+                const file = importer.files.find((candidate) => candidate.role === item.role);
+                const bytes = Buffer.from(item.text, 'utf8');
+                workspace.pending.set(pendingKey(file, item.name), { role: item.role, name: item.name, text: item.text, encoding: 'utf-8', sha256: sha256(bytes), bytes: bytes.length, sample: false, ...(item.source ? { source: item.source } : {}) });
+            }
+            workspace.imported = null;
+            await releaseRuns(workspace);
+            if (!result.document) return { imported: false, report: result.report, data: result.data, derived: result.derived.map(({ role, name, text }) => ({ role, name, bytes: Buffer.byteLength(text) })) };
+        }
         // A first step that returns only data leaves any earlier model alone and builds none.
         if (result.ok && !result.document) return { imported: false, report: result.report, data: result.data };
         await releaseRuns(workspace);
@@ -830,7 +900,7 @@ export function registerLauncherHandlers(deps) {
         await releaseRuns(workspace);
         return {
             session: entry.window ?? null, savedAt: entry.savedAt ?? null, addonVersion: entry.addonVersion ?? null,
-            inputs: inputs.map(({ file }) => ({ role: file.role, name: file.name, bytes: file.bytes, ...(file.url ? { url: file.url, retrievedAt: file.retrievedAt } : {}) }))
+            inputs: inputs.map(({ file }) => ({ role: file.role, name: file.name, bytes: file.bytes, ...(file.url ? { url: file.url, retrievedAt: file.retrievedAt } : {}), ...(file.source ? { derivedFrom: file.source } : {}) }))
         };
     }));
 

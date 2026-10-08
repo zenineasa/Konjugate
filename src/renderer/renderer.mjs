@@ -27,6 +27,7 @@ import {
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { stateValueText } from './valueFormat.mjs';
+import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
@@ -461,6 +462,11 @@ const labelModes = { nodes: 'compact', edges: 'compact' };
 let hoveredNodeId = null;
 let hoveredRelationshipId = null;
 let labelSystemReady = false;
+// The node labels left out because they would overlap another (labelDeclutter.mjs), on a model too large to show
+// them all: by node id. A label that must stay is never among them.
+const declutteredNodeIds = new Set();
+const nodeLabelSizes = new Map();
+const labelProbe = new THREE.Vector3();
 let hoverFrame = null;
 // Handles are pushed into nodePickTargets (not a separate DragControls instance) -- DragControls'
 // internal _selected/_hovered/_plane state is module-scope, not per-instance, so two concurrent
@@ -10371,6 +10377,9 @@ function setLabelDetail(detail, mode) {
     button.classList.toggle('active', mode === 'expanded');
     button.setAttribute('aria-label', `${labelNoun[detail]} labels: ${labelModeText[mode]}. Click to make them ${labelModeText[next]}.`);
     button.title = `${labelNoun[detail]} labels: ${labelModeText[mode]} · click for ${labelModeText[next]}`;
+    button.dataset.baseTitle = button.title;
+    // A label's size changes with its detail: measured again as each is next shown.
+    if (detail === 'nodes') nodeLabelSizes.clear();
     const capital = `${detail[0].toUpperCase()}${detail.slice(1)}`;
     canvas.classList.toggle(`show${capital}Details`, mode === 'expanded');
     canvas.classList.toggle(detail === 'nodes' ? 'hideNodeLabels' : 'hideEdgeLabels', mode === 'hidden');
@@ -10417,13 +10426,65 @@ function bundleLabelAllowed(overlay) {
     return labelModes.edges !== 'hidden' || overlay.element.classList.contains('pinned') || overlay.element.classList.contains('peek');
 }
 function refreshLabelObjectVisibility() {
-    nodeObjects.forEach((object) => {
+    nodeObjects.forEach((object, id) => {
         const label = object.children.find((child) => child.element?.classList.contains('node-label-container'));
         if (!label) return;
         const classes = label.element.classList;
-        label.visible = labelModes.nodes !== 'hidden' || classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding') || Boolean(activeEndpointPick);
+        const mustStay = classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding') || Boolean(activeEndpointPick);
+        label.visible = mustStay || (labelModes.nodes !== 'hidden' && !declutteredNodeIds.has(id));
     });
     relationshipBundleObjects.forEach((overlay) => { overlay.anchor.visible = (overlay.baseVisible ?? true) && bundleLabelAllowed(overlay); });
+}
+
+// Works out again which node labels to leave out, from where they fall on screen now: called a few times a second,
+// since the camera moving is what changes it. A model of up to `declutterAbove` nodes keeps every label, as does
+// picking an endpoint, where the labels are what is picked.
+function refreshLabelDeclutter() {
+    // Said on the Nodes control, so shapes without a name are no puzzle.
+    const say = () => {
+        const button = $('[data-detail="nodes"]');
+        const base = button.dataset.baseTitle ?? button.title;
+        button.title = declutteredNodeIds.size ? `${base} · ${declutteredNodeIds.size} left out where they would overlap: zoom in, or point at a shape` : base;
+        canvas.dataset.labelsLeftOut = String(declutteredNodeIds.size);
+    };
+    const clear = () => {
+        if (!declutteredNodeIds.size) return;
+        declutteredNodeIds.clear();
+        refreshLabelObjectVisibility();
+        updateHoverTracking();
+        say();
+    };
+    if (nodeObjects.size <= declutterAbove || labelModes.nodes === 'hidden' || activeEndpointPick) { clear(); return; }
+    const width = labelRenderer.domElement.clientWidth;
+    const height = labelRenderer.domElement.clientHeight;
+    if (!width || !height) return;
+    const degree = new Map();
+    model.relationships.forEach((relationship) => {
+        for (const end of [relationship.source, relationship.target]) degree.set(end, (degree.get(end) ?? 0) + 1);
+    });
+    const labels = [];
+    nodeObjects.forEach((object, id) => {
+        const label = object.children.find((child) => child.element?.classList.contains('node-label-container'));
+        if (!label) return;
+        const element = label.element;
+        // A label left out has no size to measure: its last, or a card's usual.
+        if (element.offsetWidth) nodeLabelSizes.set(id, [element.offsetWidth, element.offsetHeight]);
+        const [labelWidth, labelHeight] = nodeLabelSizes.get(id) ?? [170, 38];
+        label.getWorldPosition(labelProbe).project(camera);
+        if (labelProbe.z > 1 || Math.abs(labelProbe.x) > 1.5 || Math.abs(labelProbe.y) > 1.5) return;
+        const classes = element.classList;
+        labels.push({
+            id, left: (labelProbe.x * 0.5 + 0.5) * width, top: (-labelProbe.y * 0.5 + 0.5) * height - labelHeight / 2, width: labelWidth, height: labelHeight,
+            priority: degree.get(id) ?? 0, shown: !declutteredNodeIds.has(id),
+            keep: classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding')
+        });
+    });
+    const hidden = declutterLabels(labels);
+    if (hidden.size === declutteredNodeIds.size && [...hidden].every((id) => declutteredNodeIds.has(id))) return;
+    declutteredNodeIds.clear();
+    hidden.forEach((id) => declutteredNodeIds.add(id));
+    refreshLabelObjectVisibility();
+    say();
 }
 
 // Marks the labels that must stay visible whatever the mode: whatever is hovered, and the label of the
@@ -10444,7 +10505,7 @@ function updateLabelPeek() {
 // the only thing that says what it is. Only tracked while something is hidden, and only when the pointer
 // is not dragging.
 function hoverTrackingNeeded() {
-    return labelModes.nodes === 'hidden' || labelModes.edges === 'hidden';
+    return labelModes.nodes === 'hidden' || labelModes.edges === 'hidden' || declutteredNodeIds.size > 0;
 }
 function updateHoverTracking() {
     if (hoverTrackingNeeded()) return;
@@ -10459,7 +10520,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     hoverFrame = requestAnimationFrame(() => {
         hoverFrame = null;
         setPointerFromEvent(event);
-        const node = labelModes.nodes === 'hidden' ? rootNodeFromIntersection(firstIntersection(nodePickTargets)) : null;
+        const node = labelModes.nodes === 'hidden' || declutteredNodeIds.size ? rootNodeFromIntersection(firstIntersection(nodePickTargets)) : null;
         // A relationship's label sits on top of the line it names, so it is revealed on hover only while
         // that group is hidden; otherwise it would intercept the click the user is about to make.
         const relationship = !node && labelModes.edges === 'hidden' ? firstIntersection(relationshipPickTargets)?.object.userData.definition : null;
@@ -11772,6 +11833,7 @@ function render(time) {
 
     if (time - lastLabelRefresh > 250) {
         lastLabelRefresh = time;
+        refreshLabelDeclutter();
         if (labelModes.nodes === 'hidden' || labelModes.edges === 'hidden') refreshLabelObjectVisibility();
     }
     renderer.render(scene, camera);

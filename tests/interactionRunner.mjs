@@ -4206,8 +4206,10 @@ export async function runInteractionTests(driver) {
         await waitFor(exampleWindow, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Plugin tank'`, 'Selecting the plugin example did not populate the preview.');
         await evaluate(exampleWindow, `document.querySelector('#examplesExplorerLoad').click()`);
         await waitFor(exampleWindow, `document.querySelector('.documentTitle').textContent === 'pluginTank'`, 'The plugin example did not load.');
-        assert.equal(await evaluate(exampleWindow, `document.querySelectorAll('.node-label-container').length`), 1);
-        assert.match(await evaluate(exampleWindow, `document.querySelector('#statusText').textContent`), /unsaved copy/i);
+        // The status says so once the example's guide has opened, a moment after the title is set.
+        await waitFor(exampleWindow, `/unsaved copy/i.test(document.querySelector('#statusText').textContent)`, 'The plugin example was not said to be an unsaved copy.');
+        // A label enters the page when the canvas next draws a frame, which is after the title is set.
+        await waitFor(exampleWindow, `document.querySelectorAll('.node-label-container').length === 1`, 'The plugin example did not show its one node.');
         await closeWhenValidated(exampleWindow);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; a plugin directory is written to the desktop userData' });
 
@@ -4275,6 +4277,40 @@ export async function runInteractionTests(driver) {
         await evaluate(largeWindow, `document.querySelector('[data-detail="edges"]').click()`);
         assert.equal(await evaluate(largeWindow, `document.querySelector('[data-detail="edges"]').dataset.mode`), 'compact');
         await closeWhenValidated(largeWindow);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('a model of many nodes leaves out the node labels that would overlap, and says how many', async () => {
+        // Forty nodes a fifth of a unit apart: their labels, cards of a fixed size on screen, would lie over each other.
+        const crowded = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, edges: [],
+            nodes: Array.from({ length: 40 }, (_unused, index) => ({
+                id: 1 + index * 2, name: `Site ${index + 1}`, position: [(index % 8) * 0.2, 0, Math.floor(index / 8) * 0.2], sourceTerms: [],
+                appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2 + index * 2, name: 'Level', symbol: 'level', initialValue: 0 }]
+            }))
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-crowded-'));
+        const crowdedPath = join(directory, 'crowded.kjt');
+        await writeFile(crowdedPath, await encodeProjectFile(JSON.stringify(crowded)));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(crowdedPath);
+        const crowdedWindow = await driver.waitForNewHandle(before);
+        await waitFor(crowdedWindow, `document.querySelectorAll('.node-label-container').length === 40`, 'The crowded project did not load.');
+        await waitFor(crowdedWindow, `Number(document.querySelector('#canvas').dataset.labelsLeftOut) > 0`, 'No label was left out of a crowded canvas.', 5000);
+        const leftOut = Number(await evaluate(crowdedWindow, `document.querySelector('#canvas').dataset.labelsLeftOut`));
+        assert.ok(leftOut >= 10 && leftOut < 40, `${leftOut} of 40 labels left out`);
+        await waitFor(crowdedWindow, `[...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').length === ${40 - leftOut}`, 'The labels left out are still drawn.', 3000);
+        // Those written do not lie over each other.
+        const overlapping = await evaluate(crowdedWindow, `(() => {
+            const boxes = [...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').map((label) => label.querySelector('.objectLabel').getBoundingClientRect());
+            let count = 0;
+            for (let a = 0; a < boxes.length; a += 1) for (let b = a + 1; b < boxes.length; b += 1) {
+                if (boxes[a].left < boxes[b].right && boxes[b].left < boxes[a].right && boxes[a].top < boxes[b].bottom && boxes[b].top < boxes[a].bottom) count += 1;
+            }
+            return count;
+        })()`);
+        assert.equal(overlapping, 0, 'No two written labels overlap.');
+        assert.match(await evaluate(crowdedWindow, `document.querySelector('[data-detail="nodes"]').title`), new RegExp(`${leftOut} left out where they would overlap`));
+        await closeWhenValidated(crowdedWindow);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);

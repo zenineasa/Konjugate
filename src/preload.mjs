@@ -210,7 +210,9 @@ contextBridge.exposeInMainWorld('aiProviders', {
         error.code = result.error?.code;
         throw error;
     },
-    cancelRequest: (requestUuid) => ipcRenderer.invoke('aiCancelRequest', requestUuid)
+    cancelRequest: (requestUuid) => ipcRenderer.invoke('aiCancelRequest', requestUuid),
+    // What a request in flight is doing: stage, attempt and the latest of the model's own output.
+    onProgress: (callback) => ipcRenderer.on('aiProgress', (_event, progress) => callback(progress))
 });
 
 contextBridge.exposeInMainWorld('addons', {

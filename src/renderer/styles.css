@@ -532,6 +532,19 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantChange dl div { display: grid; grid-template-columns: 72px 1fr; gap: 6px; }
 .assistantChange dt { overflow: hidden; color: #617681; text-overflow: ellipsis; white-space: nowrap; }
 .assistantChange dd { overflow-wrap: anywhere; margin: 0; color: #899da6; }
+.assistantProgress { margin: 12px; padding: 9px; background: rgb(66 201 188 / 6%); border: 1px solid rgb(66 201 188 / 22%); border-radius: 4px; }
+.assistantProgress[hidden] { display: none; }
+.assistantProgressHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.assistantProgressHeader strong { color: #c3d6dc; font-size: 9px; font-weight: 600; }
+.assistantProgressHeader button { flex: none; height: 24px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.assistantProgressHeader button:hover { color: #dce9ee; background: #17232c; border-color: #3d5562; }
+.assistantProgressHeader button:focus-visible { outline: none; border-color: #4c8e8a; box-shadow: 0 0 0 2px rgb(66 201 188 / 12%); }
+.assistantProgressNote { margin-top: 6px; color: #8aa0aa; font-size: 8px; line-height: 1.5; }
+.assistantProgressNote[hidden] { display: none; }
+.assistantProgress details { margin-top: 8px; }
+.assistantProgress summary { color: #70a9c8; font-size: 8px; cursor: pointer; }
+.assistantProgress h3 { margin: 8px 0 3px; color: #8aa0aa; font-size: 8px; font-weight: 600; }
+.assistantProgress pre { max-height: 140px; margin: 0; padding: 6px; overflow: auto; color: #a9bcc4; background: rgb(0 0 0 / 22%); border-radius: 3px; font-size: 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistantError { margin: 12px; padding: 9px; color: #d99096; background: rgb(134 52 62 / 12%); border: 1px solid #633942; border-radius: 4px; font-size: 8px; }
 .assistantPanel footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 7px; padding: 10px 12px; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
 .assistantPanel footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: 8px; }

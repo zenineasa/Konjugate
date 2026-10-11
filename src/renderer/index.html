@@ -436,7 +436,7 @@
                         <label><span>Endpoint</span><input id="assistantConfigurationEndpoint" type="url" autocomplete="off" required></label>
                         <label><span>Model</span><span class="configurationModelControl"><span class="configurationModelField"><select id="assistantConfigurationModel"><option value="">Discover available models</option><option value="__custom__">Custom model ID…</option></select><button id="discoverAssistantModels" type="button">Discover</button></span><input id="assistantCustomModel" autocomplete="off" placeholder="Enter a model ID" hidden></span></label>
                         <label id="assistantCredentialField"><span>API key <small id="assistantCredentialHint">Stored only when this configuration is saved</small></span><input id="assistantConfigurationCredential" type="password" autocomplete="new-password"></label>
-                        <label><span>Timeout (seconds)</span><input id="assistantConfigurationTimeout" type="number" min="1" max="600" value="60" required></label>
+                        <label><span>Timeout (seconds) <small>Counts silence from the model, not total time</small></span><input id="assistantConfigurationTimeout" type="number" min="1" max="600" value="60" required></label>
                     </fieldset>
                     <div class="assistantConfigurationStatus" id="assistantConfigurationStatus" role="status"></div>
                 </section>
@@ -535,6 +535,16 @@
                 <textarea id="assistantPrompt" rows="4" placeholder="Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K."></textarea>
                 <div><select id="assistantConfiguration" aria-label="Assistant model configuration"></select><button id="manageAssistantConfigurations" class="assistantManageConfigurations" type="button" aria-label="Manage model configurations">⚙</button><button id="generateAssistantProposal" class="doneButton" type="submit">Generate proposal</button></div>
             </form>
+            <section id="assistantProgress" class="assistantProgress" aria-live="polite" hidden>
+                <div class="assistantProgressHeader"><strong id="assistantProgressHeadline"></strong><button id="cancelAssistantRequest" type="button">Cancel</button></div>
+                <p id="assistantProgressNote" class="assistantProgressNote" hidden></p>
+                <details id="assistantProgressDetails">
+                    <summary>What the model is doing</summary>
+                    <section id="assistantProgressThinkingSection" hidden><h3>Thinking</h3><pre id="assistantProgressThinking"></pre></section>
+                    <section id="assistantProgressOutputSection" hidden><h3>Output so far</h3><pre id="assistantProgressOutput"></pre></section>
+                    <p id="assistantProgressQuiet" class="assistantProgressNote">Nothing has arrived from the model yet.</p>
+                </details>
+            </section>
             <div id="assistantEmpty" class="assistantEmpty">
                 <span aria-hidden="true">✦</span>
                 <strong>Your model remains unchanged</strong>

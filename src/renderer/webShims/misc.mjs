@@ -137,7 +137,8 @@ export const aiProviders = {
     generateProposal: async () => {
         throw new Error('AI-assisted authoring is not available in the web edition yet.');
     },
-    cancelRequest: async () => {}
+    cancelRequest: async () => {},
+    onProgress: () => {}
 };
 
 export const addons = {

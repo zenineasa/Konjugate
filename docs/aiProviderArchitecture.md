@@ -132,6 +132,16 @@ Network errors, authentication errors, insecure endpoints and timeouts are not r
 
 A clarification response is not repaired against the operation schema — it isn't an operation proposal to begin with, and asking again isn't a malformed-output condition. The registry returns it as soon as its own light shape check (a non-empty question, and string suggestions if present) passes.
 
+## Streaming, progress and timeouts
+
+Every adapter asks its provider to stream the reply (server-sent events for the OpenAI-compatible providers and Gemini, newline-delimited JSON for Ollama) and falls back to reading a plain JSON body when the server does not stream. `src/aiStreaming.mjs` reads the stream; each adapter reports what arrives through an `onEvent` callback as `{ type: 'thinking' | 'output' | 'activity', text }`. The adapter still returns one complete proposal, and the registry still validates it as a whole: streaming changes what can be seen and when a request is judged stuck, not what is accepted.
+
+Reasoning is shown only where the provider sends it: `reasoning_content` or `reasoning` on OpenAI-compatible streams, `message.thinking` from Ollama, and parts marked `thought` from Gemini (which sends none unless asked, and Konjugate does not ask, because models without thinking support reject the option). The model's output, which is the proposal JSON as it is written, is always available.
+
+The registry turns those events into a progress snapshot (attempt, stage, character count, and bounded tails of the reasoning and the output) and passes it to the optional `onProgress` callback. The main process sends the latest snapshot to the panel a few times a second over `aiProgress`; the panel shows it as plain text, never HTML.
+
+A configuration's timeout is how long the model may stay silent, not how long a request may take. `src/aiRequestTiming.mjs` restarts that clock on every progress snapshot, including the start of each repair attempt, so a model that keeps producing output is never cut off by it and a repair does not share one deadline with the attempts before it. A fixed maximum of 20 minutes for the whole request still ends one that never finishes. The silence timeout reports `requestTimedOut` with a message that says which limit was reached.
+
 ## Conversation history
 
 The renderer keeps a bounded window of the last five exchanges, each a compact `{ request, outcome }` summary rather than the full proposal JSON, and sends it with every `generateProposal` call as `history`. Adapters fold it in however suits their API: `openAICompatibleProvider` expands it into real alternating `user`/`assistant` messages ahead of the current turn; `ollamaProvider` and `geminiProvider`, which only ever send one text blob, prepend a `CONVERSATION SO FAR:` block instead. The local demonstration provider, having no real language understanding, only ever falls back to history when the plain request alone can't be resolved (an ambiguous target, a missing value, an unrecognized shape) — trying the request exactly as typed first keeps an unrelated, already self-sufficient new request from being derailed by an earlier turn's own numbers or names.
@@ -180,7 +190,7 @@ Provider changes must preserve these invariants:
 4. Provider output is treated as untrusted data.
 5. No proposal mutates the active model before host and native validation. A clarification response never reaches that path at all.
 6. The user explicitly approves the final proposal.
-7. Cancellation and timeouts release request state.
+7. Cancellation and timeouts release request state, and progress text is shown as text.
 8. Draft testing does not persist configuration fields or credentials.
 
 ## Testing

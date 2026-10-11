@@ -102,6 +102,12 @@ The assistant workflow is:
 
 Invalid intermediate proposals are never applied. Authentication failures, connection failures and timeouts remain visible because repeating the same request cannot normally correct them.
 
+## While the assistant works
+
+The panel shows what is happening: waiting for the model, whether it is thinking or writing the proposal (with a character count), checking the proposal, and, when the first attempt was rejected, which attempt this is and why the model was asked again. **What the model is doing** opens the model's reasoning, where the provider shares it, and the proposal text as it is written. **Cancel** stops the request at any time.
+
+A model's timeout counts silence: the request is stopped only when nothing has arrived from the model for that many seconds, so a slow model that keeps writing is not cut off, and a repair attempt starts a fresh clock. A request is also stopped after 20 minutes in total. If a model needs a long time to load or to start answering, raise the timeout in its configuration.
+
 ## Reviewing a proposal
 
 Review the assistant's assumptions as engineering decisions, not merely explanatory text. Inspect referenced nodes and edges where available. Pay particular attention to:
@@ -124,7 +130,7 @@ Confirm that Ollama is installed and running, then test `http://127.0.0.1:11434`
 
 ### The request timed out
 
-Increase the configuration timeout or choose a faster model. Local models may take longer on their first request while loading into memory.
+The model sent nothing for the configuration's timeout. Increase the timeout or choose a faster model. Local models may take longer on their first request while loading into memory.
 
 ### The proposal could not be repaired
 

@@ -131,3 +131,48 @@ test('provider registry forwards conversation history to the provider', async ()
     });
     assert.deepEqual(receivedHistory, history);
 });
+
+test('provider registry publishes progress: each attempt, the model\'s reasoning and output, validation and why it repaired', async () => {
+    const snapshots = [];
+    const registry = createAIProviderRegistry([{
+        id: 'streaming', name: 'Streaming', generateProposal: async ({ repair, onEvent }) => {
+            onEvent({ type: 'thinking', text: 'Considering' });
+            onEvent({ type: 'output', text: '{"a":' });
+            onEvent({ type: 'activity' });
+            if (!repair) return { proposalVersion: 2, operations: [] };
+            return { proposalVersion: 1, operations: [{ kind: 'addNode', ref: 'fixedNode', name: 'Fixed node' }] };
+        }
+    }]);
+    await registry.generate({
+        configuration: { provider: 'streaming' }, context: { nodes: [] }, request: 'Build it', onProgress: (progress) => snapshots.push(progress)
+    });
+    assert.deepEqual([...new Set(snapshots.map((progress) => progress.attempt))], [1, 2]);
+    assert.ok(snapshots.every((progress) => progress.attempts === 3));
+    assert.equal(snapshots[0].phase, 'sending');
+    const firstValidation = snapshots.find((progress) => progress.phase === 'validating');
+    assert.equal(firstValidation.attempt, 1);
+    assert.equal(firstValidation.thinking, 'Considering');
+    assert.equal(firstValidation.outputCharacters, 5);
+    const secondAttempt = snapshots.find((progress) => progress.attempt === 2);
+    assert.equal(secondAttempt.thinking, '');
+    assert.equal(secondAttempt.outputCharacters, 0);
+    assert.match(secondAttempt.repairReason, /proposalVersion/);
+});
+
+test('provider registry keeps progress text bounded and redacts the credential from repair reasons', async () => {
+    const snapshots = [];
+    const registry = createAIProviderRegistry([{
+        id: 'chatty', name: 'Chatty', generateProposal: async ({ onEvent }) => {
+            for (let index = 0; index < 100; index += 1) onEvent({ type: 'thinking', text: 'x'.repeat(1000) });
+            const error = new Error('Bad output containing secret-key');
+            error.code = 'invalidProposalJson';
+            throw error;
+        }
+    }]);
+    await assert.rejects(() => registry.generate({
+        configuration: { provider: 'chatty' }, credential: 'secret-key', context: { nodes: [] }, request: 'x', onProgress: (progress) => snapshots.push(progress)
+    }));
+    assert.ok(snapshots.every((progress) => progress.thinking.length <= 8000));
+    assert.ok(snapshots.some((progress) => progress.repairReason.includes('[redacted]')));
+    assert.ok(!snapshots.some((progress) => progress.repairReason.includes('secret-key')));
+});

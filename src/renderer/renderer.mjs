@@ -26,6 +26,7 @@ import {
 } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
+import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
@@ -6358,6 +6359,7 @@ function showAssistantPanel() {
 function hideAssistantPanel() {
     assistantGenerationController?.abort();
     assistantGenerationController = null;
+    stopAssistantProgress();
     $('#assistantPanel').hidden = true;
     $('#assistantButton').ariaExpanded = 'false';
 }
@@ -7886,6 +7888,61 @@ function renderAssistantGenerationError(message) {
     updateAssistantCollapsedStatus('Request needs attention');
 }
 
+// What the panel shows while a request is under way: the registry's latest progress snapshot (stage,
+// attempt, the model's reasoning and output so far) and a once-a-second elapsed-time tick. Everything
+// is set as text, never HTML: it includes what the model wrote.
+let assistantProgressRequestUuid = null;
+let assistantProgressSnapshot = null;
+let assistantProgressStartedAt = 0;
+let assistantProgressTimer = null;
+
+function setAssistantProgressText(preId, sectionId, text) {
+    const pre = $(preId);
+    $(sectionId).hidden = !text;
+    if (pre.textContent === text) return;
+    pre.textContent = text;
+    pre.scrollTop = pre.scrollHeight;
+}
+
+function renderAssistantProgress() {
+    const panel = $('#assistantProgress');
+    panel.hidden = !assistantProgressRequestUuid;
+    if (!assistantProgressRequestUuid) return;
+    const { headline, notes } = describeAssistantProgress(assistantProgressSnapshot, (Date.now() - assistantProgressStartedAt) / 1000);
+    $('#assistantProgressHeadline').textContent = headline;
+    $('#assistantProgressNote').hidden = notes.length === 0;
+    $('#assistantProgressNote').textContent = notes.join(' ');
+    const thinking = assistantProgressSnapshot?.thinking ?? '';
+    const output = assistantProgressSnapshot?.output ?? '';
+    setAssistantProgressText('#assistantProgressThinking', '#assistantProgressThinkingSection', thinking);
+    setAssistantProgressText('#assistantProgressOutput', '#assistantProgressOutputSection', output);
+    $('#assistantProgressQuiet').hidden = Boolean(thinking || output);
+    updateAssistantCollapsedStatus(headline);
+}
+
+function startAssistantProgress(requestUuid) {
+    clearInterval(assistantProgressTimer);
+    assistantProgressRequestUuid = requestUuid;
+    assistantProgressSnapshot = null;
+    assistantProgressStartedAt = Date.now();
+    assistantProgressTimer = setInterval(renderAssistantProgress, 1000);
+    renderAssistantProgress();
+}
+
+function stopAssistantProgress() {
+    clearInterval(assistantProgressTimer);
+    assistantProgressTimer = null;
+    assistantProgressRequestUuid = null;
+    assistantProgressSnapshot = null;
+    renderAssistantProgress();
+}
+
+window.aiProviders.onProgress((progress) => {
+    if (progress.requestUuid !== assistantProgressRequestUuid) return;
+    assistantProgressSnapshot = progress;
+    renderAssistantProgress();
+});
+
 async function requestAssistantProposal() {
     if (activeResult) return { valid: false, error: 'Close simulation results before preparing model changes.' };
     assistantGenerationController?.abort();
@@ -7900,6 +7957,7 @@ async function requestAssistantProposal() {
     button.disabled = true;
     button.textContent = 'Preparing…';
     updateAssistantCollapsedStatus('Preparing proposal…');
+    startAssistantProgress(requestUuid);
     $('#assistantEmpty').hidden = false;
     $('#assistantProposal').hidden = true;
     $('#assistantClarification').hidden = true;
@@ -7921,12 +7979,16 @@ async function requestAssistantProposal() {
         pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`);
         return await previewAssistantProposal(response);
     } catch (error) {
-        if (controller.signal.aborted || error.name === 'AbortError') return { valid: false, cancelled: true };
+        if (controller.signal.aborted || error.name === 'AbortError') {
+            if (assistantGenerationController === controller) updateAssistantCollapsedStatus('Request cancelled');
+            return { valid: false, cancelled: true };
+        }
         renderAssistantGenerationError(error.message);
         return { valid: false, error: error.message };
     } finally {
         if (assistantGenerationController === controller) {
             assistantGenerationController = null;
+            stopAssistantProgress();
             button.disabled = false;
             button.textContent = pendingAssistantProposal ? 'Revise proposal'
                 : !$('#assistantClarification').hidden ? 'Answer'
@@ -7935,6 +7997,7 @@ async function requestAssistantProposal() {
     }
 }
 
+$('#cancelAssistantRequest').addEventListener('click', () => assistantGenerationController?.abort());
 $('#assistantButton').addEventListener('click', () => {
     if ($('#assistantPanel').hidden) showAssistantPanel();
     else hideAssistantPanel();

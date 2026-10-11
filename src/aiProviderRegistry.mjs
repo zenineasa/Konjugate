@@ -4,6 +4,10 @@ import { generateAssistantProposal, localAssistantProvider } from './assistantPr
 import { AssistantProposalError, validateAssistantClarification, validateAssistantProposal } from './assistantOperations.mjs';
 
 const maximumRepairAttempts = 2;
+const thinkingTailCharacters = 8000;
+const outputTailCharacters = 2000;
+const repairReasonCharacters = 300;
+const tail = (text, limit) => (text.length > limit ? text.slice(text.length - limit) : text);
 
 export class AIProviderRegistryError extends Error {
     constructor(message, code = 'providerError') {
@@ -36,21 +40,40 @@ export function createAIProviderRegistry(providers = [localAssistantProvider]) {
             if (!provider.listModels) return [];
             return provider.listModels({ configuration, credential, signal });
         },
-        async generate({ configuration, credential, context, request, history, signal }) {
+        async generate({ configuration, credential, context, request, history, signal, onProgress }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
+            // What the panel shows while this runs: which attempt, what stage, and the latest of what the
+            // model is saying. Every publish also tells the caller the request is alive.
+            const progress = { attempt: 0, attempts: maximumRepairAttempts + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', repairReason: '' };
+            const publish = () => onProgress?.({ ...progress });
+            const redact = (text) => (credential ? text.replaceAll(credential, '[redacted]') : text);
+            const onEvent = (event) => {
+                if (event.type === 'thinking') {
+                    progress.phase = 'receiving';
+                    progress.thinking = tail(progress.thinking + event.text, thinkingTailCharacters);
+                } else if (event.type === 'output') {
+                    progress.phase = 'receiving';
+                    progress.outputCharacters += event.text.length;
+                    progress.output = tail(progress.output + event.text, outputTailCharacters);
+                }
+                publish();
+            };
             try {
                 let repair = null;
                 for (let attempt = 0; attempt <= maximumRepairAttempts; attempt += 1) {
                     let response;
+                    Object.assign(progress, { attempt: attempt + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '' });
+                    publish();
                     try {
                         response = await generateAssistantProposal(provider, {
-                            configuration, credential, context, request, history, repair, signal
+                            configuration, credential, context, request, history, repair, signal, onEvent
                         });
                     } catch (error) {
                         const recoverableOutputError = ['invalidProposalJson', 'invalidProviderResponse'].includes(error.code);
                         if (!recoverableOutputError || attempt === maximumRepairAttempts) throw error;
                         repair = { error: error.message, proposal: null };
+                        progress.repairReason = redact(error.message).slice(0, repairReasonCharacters);
                         continue;
                     }
                     if (JSON.stringify(response).length > 1_000_000) {
@@ -64,12 +87,15 @@ export function createAIProviderRegistry(providers = [localAssistantProvider]) {
                         validateAssistantClarification(response);
                         return response;
                     }
+                    progress.phase = 'validating';
+                    publish();
                     try {
                         validateAssistantProposal(response);
                         return response;
                     } catch (error) {
                         if (!(error instanceof AssistantProposalError) || attempt === maximumRepairAttempts) throw error;
                         repair = { error: error.message, proposal: response };
+                        progress.repairReason = redact(error.message).slice(0, repairReasonCharacters);
                     }
                 }
             } catch (error) {

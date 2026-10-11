@@ -32,6 +32,7 @@ import { installSource } from './updateCheck.mjs';
 import { createUpdateCoordinator } from './updateCoordinator.mjs';
 import { createUpdateSkipStore } from './updateSkipStore.mjs';
 import { bugReportUrl } from './bugReport.mjs';
+import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } from './aiRequestTiming.mjs';
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
 import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion } from './welcomeStateStore.mjs';
@@ -2304,23 +2305,41 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
     activeAIRequests.get(key)?.controller.abort();
     const resolved = await aiConfigurationStore.resolve(configurationUuid);
     const controller = new AbortController();
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-    }, resolved.configuration.timeoutSeconds * 1000);
+    let expiredBecause = null;
+    // The configuration's timeout is how long the model may stay silent, not how long the whole request
+    // may take: every sign of life (see the registry's progress) restarts it, and each repair attempt
+    // starts a fresh one. A hard maximum still ends a request that never finishes.
+    const watchdog = createRequestWatchdog({
+        idleSeconds: resolved.configuration.timeoutSeconds,
+        onExpire: (reason) => {
+            expiredBecause = reason;
+            controller.abort();
+        }
+    });
+    const progressToPanel = createLatestThrottle((progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('aiProgress', { requestUuid, ...progress });
+    }, 120);
     activeAIRequests.set(key, { owner: event.sender, controller });
     try {
-        const proposal = await aiProviderRegistry.generate({ ...resolved, context, request: request.trim(), history, signal: controller.signal });
+        const proposal = await aiProviderRegistry.generate({
+            ...resolved, context, request: request.trim(), history, signal: controller.signal,
+            onProgress: (progress) => {
+                watchdog.touch();
+                progressToPanel.push(progress);
+            }
+        });
         return { ok: true, proposal };
     } catch (error) {
-        const message = timedOut
-            ? `The model did not respond within ${resolved.configuration.timeoutSeconds} seconds. Increase the timeout in this model configuration or choose a faster model.`
-            : error.name === 'AbortError' ? 'Proposal generation was cancelled.' : error.message;
-        const code = timedOut ? 'requestTimedOut' : error.name === 'AbortError' ? 'requestCancelled' : error.code ?? 'providerError';
+        const message = expiredBecause === 'idle'
+            ? `The model sent nothing for ${resolved.configuration.timeoutSeconds} seconds. This timeout counts silence, not total time: increase it in this model configuration, or choose a faster model.`
+            : expiredBecause === 'maximum'
+                ? `The request was stopped after ${maximumRequestSeconds / 60} minutes in total.`
+                : error.name === 'AbortError' ? 'Proposal generation was cancelled.' : error.message;
+        const code = expiredBecause ? 'requestTimedOut' : error.name === 'AbortError' ? 'requestCancelled' : error.code ?? 'providerError';
         return { ok: false, error: { message, code } };
     } finally {
-        clearTimeout(timeout);
+        watchdog.stop();
+        progressToPanel.stop();
         if (activeAIRequests.get(key)?.controller === controller) activeAIRequests.delete(key);
     }
 });

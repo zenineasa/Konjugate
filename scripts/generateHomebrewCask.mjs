@@ -33,7 +33,9 @@ const releaseUrl = requestedTag
     ? `https://api.github.com/repos/${repo}/releases/tags/${requestedTag}`
     : `https://api.github.com/repos/${repo}/releases/latest`;
 
-const releaseResponse = await fetch(releaseUrl, { headers: { Accept: 'application/vnd.github+json' } });
+const apiHeaders = { Accept: 'application/vnd.github+json' };
+if (process.env.GITHUB_TOKEN) apiHeaders.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+const releaseResponse = await fetch(releaseUrl, { headers: apiHeaders });
 if (!releaseResponse.ok) {
     throw new Error(`Could not fetch release metadata from ${releaseUrl}: ${releaseResponse.status} ${releaseResponse.statusText}`);
 }

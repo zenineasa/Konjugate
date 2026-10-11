@@ -313,6 +313,7 @@ jobs:
         runs-on: windows-latest
         env:
             CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+            GITHUB_TOKEN: ${{ github.token }}
         steps:
             - name: Skip when Chocolatey isn't set up yet
               if: env.CHOCOLATEY_API_KEY == ''
@@ -332,6 +333,7 @@ jobs:
               run: |
                   npm install --no-save js-yaml
                   node scripts/generateChocolateyPackage.mjs "${{ github.ref_name }}"
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                   choco pack out/chocolatey/konjugate.nuspec --outputdirectory out/chocolatey
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                   $nupkg = Get-ChildItem out/chocolatey/konjugate.*.nupkg | Select-Object -First 1
@@ -383,6 +385,7 @@ jobs:
               if: env.HOMEBREW_TAP_TOKEN != ''
               env:
                   TAG: ${{ github.ref_name }}
+                  GITHUB_TOKEN: ${{ github.token }}
               # The generator downloads the just-published DMGs and AppImage and hashes them, so the
               # cask's checksums are those of exactly what users download.
               run: |

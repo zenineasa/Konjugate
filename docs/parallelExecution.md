@@ -20,9 +20,13 @@ Execution settings belong to the active run configuration. In the application:
 
 1. Stop the current simulation if one is running.
 2. Close the results view to return to model-editing mode.
-3. Select **Run configuration** using the gear button beside **Run**.
+3. Select **Run**. The dialog that opens holds the target time, the numerics (global timestep and output interval) and an **Execution** section.
 4. Under **Execution**, select a backend and worker limit.
-5. Select **Apply**, then start a new run.
+5. Select **Start** to run, or **Save settings** to store the settings with the model without running.
+
+**Run** opens this dialog even when the model has errors, so a rejected run configuration (an output interval that is not a multiple of the timestep, for instance) can be corrected there with **Save settings**; **Start** stays disabled until the model is valid. Selecting a run-configuration error in the validation panel opens the dialog too.
+
+Starting a run saves the dialog's numerics and execution settings to the model's active run configuration, so the command line and code export use them too. When a result is continued (**Extend simulation** or **Continue**) or forked, the same dialog opens with the settings that result ran with, and changes apply to that run only; the model's own run configuration is left alone. Changing the timestep there gives one result that changes step size at that point: samples before it keep the old step, and the result's summary and stability checks describe the latest segment. Changing only the execution settings never changes the numerics.
 
 The backend cannot be changed during an active run. A completed or stopped result records the backend that produced it, so changing the run configuration affects only the next run. The execution button in the bottom result bar opens a summary of the recorded decision and its measurements.
 

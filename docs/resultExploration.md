@@ -127,8 +127,9 @@ A typical workflow is:
 1. Scrub to a global synchronization time.
 2. Open the transport bar's branches menu and choose `Fork at <time>`.
 3. Select or edit parameter interventions after that time.
-4. Continue execution from the engine checkpoint.
-5. Compare the child branch with its parent or another branch.
+4. Optionally change the global timestep or output interval for the branch, for example a smaller step to check that a result holds up. The branch runs with its own numerics; the parent and the model's saved run configuration are unchanged.
+5. Continue execution from the engine checkpoint.
+6. Compare the child branch with its parent or another branch.
 
 Branches form a result tree rather than overwriting one another:
 
@@ -195,7 +196,7 @@ A pacing cap is a maximum, not a guarantee; expensive models may advance more sl
 
 During a paced run, confirmed samples stream to the UI, the transport cursor advances, and node labels update at output intervals. Cancellation and pausing are sent as live protobuf control-stream commands rather than renderer delays or a file-based mechanism — see [Engine job protocol](jobProtocol.md).
 
-The implemented execution lifecycle is `running ↔ paused`, followed by either `completed` or `stopped`. Stop captures the current synchronization boundary and retains a partial result. The current UI can continue a stopped result from its latest checkpoint. Earlier-checkpoint restart and branch navigation remain part of the proposed branching phase rather than the live transport.
+The implemented execution lifecycle is `running ↔ paused`, followed by either `completed` or `stopped`. Stop captures the current synchronization boundary and retains a partial result. The current UI can continue a stopped or completed result from its latest checkpoint, and the launch dialog lets the continuation use a different timestep or output interval; the single result then has two step sizes, and its summary describes the latest. Earlier-checkpoint restart and branch navigation remain part of the proposed branching phase rather than the live transport.
 
 ## Proposed result-session model
 

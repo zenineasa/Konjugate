@@ -159,31 +159,6 @@
         </form>
     </dialog>
 
-    <dialog id="runConfigurationDialog" class="passwordDialog runConfigurationDialog">
-        <form method="dialog">
-            <span class="contextKicker">Simulation</span>
-            <strong>Run configuration</strong>
-            <p>Configure the global synchronization step. Individual nodes can substep within it.</p>
-            <label><span>Name</span><input id="runConfigurationName" autocomplete="off" required></label>
-            <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
-            <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
-            <section class="executionConfiguration">
-                <span class="configurationSectionTitle">Execution</span>
-                <label><span>Backend</span><select id="runExecutionBackend"><option value="automatic">Automatic</option><option value="serial">Serial</option><option value="threadPool">Thread pool</option><option value="partitioned">Partitioned</option></select></label>
-                <label><span>Worker limit</span><input id="runWorkerThreads" type="number" min="1" max="256" step="1" required></label>
-                <details id="runExecutionAdvanced" class="executionAdvanced">
-                    <summary>Advanced execution</summary>
-                    <label><span>Partitioner</span><select id="runPartitionAlgorithm"><option value="automatic">Automatic (prefer METIS)</option><option value="metisKway">METIS k-way</option><option value="communicationAwareGreedy">Built-in greedy</option></select></label>
-                    <label><span>Partition count</span><input id="runPartitionCount" type="number" min="1" max="256" step="1" required></label>
-                    <label><span>Communication bias</span><input id="runPartitionCommunicationBias" type="number" min="0" step="any" required></label>
-                    <label><span>Parallel work threshold</span><input id="runAutomaticParallelThreshold" type="number" min="1" max="1000000" step="1" required></label>
-                    <label><span>Maximum automatic cut fraction</span><input id="runAutomaticMaximumPartitionCutFraction" type="number" min="0" max="1" step="0.01" required></label>
-                </details>
-            </section>
-            <div class="passwordError" id="runConfigurationError" role="alert"></div>
-            <footer><button id="runConfigurationCancel" type="button">Cancel</button><button id="applyRunConfiguration" class="doneButton" type="submit">Apply</button></footer>
-        </form>
-    </dialog>
 
     <dialog id="shapeLibraryDialog" class="passwordDialog shapeLibraryDialog">
         <form method="dialog">
@@ -409,12 +384,28 @@
             <strong>Start run</strong>
             <p id="runLaunchDescription">Run from the model's initial state.</p>
             <label><span>Run until simulation time (s)</span><input id="runTargetTime" type="number" min="0" step="any" value="1" required></label>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">Numerics</span>
+                <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
+                <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
+                <p id="runConfigurationScope" class="runConfigurationScope"></p>
+            </section>
             <label class="runModeSwitch"><span><b><span id="runModeName">Offline</span> simulation</b><small id="runModeDescription">Run at maximum speed without wall-clock synchronization.</small></span><input id="runOnlineMode" type="checkbox" role="switch" aria-label="Use online simulation mode"></label>
             <label id="runPacingModeField" hidden><span>Online pacing</span><select id="runPacingMode"><option value="realTime">Real time</option><option value="limitedRatio">Custom rate</option></select></label>
             <label id="runPacingRatioField" hidden><span>Simulation seconds / wall second</span><input id="runPacingRatio" type="number" min="0.01" step="any" value="1" required></label>
             <label class="runModeSwitch"><span><b>Stability monitoring</b><small>Watch for numerical instability while this run executes.</small></span><input id="runStabilityMonitoring" type="checkbox" role="switch" aria-label="Monitor numerical stability during this run" checked></label>
+            <details id="runExecutionAdvanced" class="executionAdvanced">
+                <summary>Execution</summary>
+                <label><span>Backend</span><select id="runExecutionBackend"><option value="automatic">Automatic</option><option value="serial">Serial</option><option value="threadPool">Thread pool</option><option value="partitioned">Partitioned</option></select></label>
+                <label><span>Worker limit</span><input id="runWorkerThreads" type="number" min="1" max="256" step="1" required></label>
+                <label><span>Partitioner</span><select id="runPartitionAlgorithm"><option value="automatic">Automatic (prefer METIS)</option><option value="metisKway">METIS k-way</option><option value="communicationAwareGreedy">Built-in greedy</option></select></label>
+                <label><span>Partition count</span><input id="runPartitionCount" type="number" min="1" max="256" step="1" required></label>
+                <label><span>Communication bias</span><input id="runPartitionCommunicationBias" type="number" min="0" step="any" required></label>
+                <label><span>Parallel work threshold</span><input id="runAutomaticParallelThreshold" type="number" min="1" max="1000000" step="1" required></label>
+                <label><span>Maximum automatic cut fraction</span><input id="runAutomaticMaximumPartitionCutFraction" type="number" min="0" max="1" step="0.01" required></label>
+            </details>
             <div class="passwordError" id="runLaunchError" role="alert"></div>
-            <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
+            <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="saveRunConfiguration" type="button">Save settings</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
         </form>
     </dialog>
 
@@ -497,7 +488,6 @@
             <button data-detail="nodes" type="button" title="Node labels: compact">Nodes<i class="detailMode" aria-hidden="true"></i></button>
             <button data-detail="edges" type="button" title="Relationship labels: compact">Edges<i class="detailMode" aria-hidden="true"></i></button>
         </div>
-        <button id="runConfigurationButton" class="squareTool" type="button" aria-label="Run configuration" data-tooltip="Run configuration">⚙</button>
         <button id="runButton" class="runButton" type="button" title="A simulation engine is not configured" disabled><span>▶</span> Run</button>
     </nav>
 

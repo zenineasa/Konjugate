@@ -633,20 +633,22 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.aiProviderCredentials && 'the credential-vault/provider-adapter architecture (window.aiProviders) has no web-edition equivalent' });
 
     await run('run configuration and node substeps are editable', async () => {
-        await evaluate(window, `document.querySelector('#runConfigurationButton').click()`);
+        // The numerics and execution settings live in the Run dialog; "Save settings" stores them with the
+        // model without starting a run.
+        await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available to open the run settings.', 10000);
+        await evaluate(window, `document.querySelector('#runButton').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#runExecutionBackend').value`), 'automatic');
         assert.equal(await evaluate(window, `document.querySelector('#runExecutionAdvanced').open`), false);
         await evaluate(window, `(() => {
-            document.querySelector('#runConfigurationName').value = 'Fast response';
             document.querySelector('#runGlobalTimeStep').value = '0.02';
             document.querySelector('#runOutputInterval').value = '0.1';
             document.querySelector('#runWorkerThreads').value = '2';
             document.querySelector('#runPartitionAlgorithm').value = 'automatic';
             document.querySelector('#runPartitionCount').value = '2';
             document.querySelector('#runPartitionCommunicationBias').value = '4';
-            document.querySelector('#applyRunConfiguration').click();
+            document.querySelector('#saveRunConfiguration').click();
         })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#runConfigurationDialog').open`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#runLaunchDialog').open`), false);
         assert.equal(await evaluate(window, `document.querySelectorAll('#runPartitionAlgorithm option').length`), 3);
         // Applying the run configuration revalidates the model, which can rebuild the canvas labels: wait for
         // the node's label, then for its editor, rather than assuming both are there at once.
@@ -3635,15 +3637,15 @@ export async function runInteractionTests(driver) {
         // A known, explicit run configuration -- not load-bearing for instability itself (see
         // above), just kept deterministic rather than depending on whatever default the app
         // happens to launch new projects with.
-        await evaluate(diagnosticWindow, `document.querySelector('#runConfigurationButton').click()`);
-        await waitFor(diagnosticWindow, `document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not open.');
+        await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before the run settings could be opened.', 10000);
+        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
         await evaluate(diagnosticWindow, `(() => {
-            document.querySelector('#runConfigurationName').value = 'Stability UI check';
             document.querySelector('#runGlobalTimeStep').value = '0.1';
             document.querySelector('#runOutputInterval').value = '0.1';
-            document.querySelector('#applyRunConfiguration').click();
+            document.querySelector('#saveRunConfiguration').click();
         })()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not close.');
+        await waitFor(diagnosticWindow, `!document.querySelector('#runLaunchDialog').open`, 'Run dialog did not close.');
 
         await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
         await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
@@ -3735,15 +3737,15 @@ export async function runInteractionTests(driver) {
         await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
-        await evaluate(diagnosticWindow, `document.querySelector('#runConfigurationButton').click()`);
-        await waitFor(diagnosticWindow, `document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not open.');
+        await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#runButton').disabled`, 'Model validation did not settle before the run settings could be opened.', 10000);
+        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
         await evaluate(diagnosticWindow, `(() => {
-            document.querySelector('#runConfigurationName').value = 'Attribution check';
             document.querySelector('#runGlobalTimeStep').value = '0.1';
             document.querySelector('#runOutputInterval').value = '0.1';
-            document.querySelector('#applyRunConfiguration').click();
+            document.querySelector('#saveRunConfiguration').click();
         })()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not close.');
+        await waitFor(diagnosticWindow, `!document.querySelector('#runLaunchDialog').open`, 'Run dialog did not close.');
 
         await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Model validation did not settle.', 10000);
         await evaluate(diagnosticWindow, `document.querySelector('#validationSummary').click()`);
@@ -3802,15 +3804,15 @@ export async function runInteractionTests(driver) {
         await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
-        await evaluate(diagnosticWindow, `document.querySelector('#runConfigurationButton').click()`);
-        await waitFor(diagnosticWindow, `document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not open.');
+        await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#runButton').disabled`, 'Model validation did not settle before the run settings could be opened.', 10000);
+        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
         await evaluate(diagnosticWindow, `(() => {
-            document.querySelector('#runConfigurationName').value = 'Monitoring toggle check';
             document.querySelector('#runGlobalTimeStep').value = '0.1';
             document.querySelector('#runOutputInterval').value = '0.1';
-            document.querySelector('#applyRunConfiguration').click();
+            document.querySelector('#saveRunConfiguration').click();
         })()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#runConfigurationDialog').open`, 'Run configuration dialog did not close.');
+        await waitFor(diagnosticWindow, `!document.querySelector('#runLaunchDialog').open`, 'Run dialog did not close.');
 
         await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
         await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);

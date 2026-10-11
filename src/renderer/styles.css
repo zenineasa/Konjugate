@@ -319,6 +319,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .componentLibraryHint { margin: 0 14px 14px; padding: 8px 9px; color: #9fb0b8; background: #0f1c24; border: 1px solid #263b45; border-radius: 5px; font-size: 8px; }
 .executionConfiguration { margin-top: 13px; padding-top: 11px; border-top: 1px solid #263a44; }
 .configurationSectionTitle { display: block; color: #8aa0aa; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+.runConfigurationScope { margin-top: 8px; color: #718690; font-size: 8px; line-height: 1.5; }
 .executionAdvanced { margin-top: 11px; padding: 8px 9px; background: #0a161d; border: 1px solid #263b45; border-radius: 5px; }
 .executionAdvanced summary { color: #8499a3; font-size: 8px; cursor: pointer; user-select: none; }
 .executionAdvanced[open] summary { margin-bottom: 8px; color: #b8cbd1; }

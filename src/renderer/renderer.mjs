@@ -27,6 +27,7 @@ import {
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
+import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
@@ -516,7 +517,10 @@ let runLaunchSettings = {
     targetTime: 1,
     online: false,
     pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 },
-    stabilityMonitoring: true
+    stabilityMonitoring: true,
+    // Numerics and execution chosen for this one run when it continues or forks a result: the model's
+    // saved run configuration is left as it is. Null for an ordinary run, whose choices are saved.
+    configurationOverride: null
 };
 let pendingRestart = null;
 // A fork is structurally distinct from pendingRestart's "continue in place" flow: a fork must
@@ -3950,6 +3954,10 @@ function updateModelStatus() {
 function navigateToValidationIssue(item) {
     $('#validationPanel').hidden = true;
     $('#validationSummary').ariaExpanded = 'false';
+    if (item.location.kind === 'runConfiguration') {
+        openRunDialog();
+        return;
+    }
     // A resolved attributed parameter (see resolveAttributedParameter in modelValidator.cpp) is a
     // strictly more useful destination than the issue's own generic `location` -- jump straight to
     // it instead, focusing the row's value input specifically rather than its first (Name) field.
@@ -3994,6 +4002,19 @@ function updateValidationStatus() {
     scheduleEngineValidation();
 }
 
+// Resolves when the model's validation has settled. Waiters are released only by the latest validation
+// (a superseded one returns early), so what they then read from currentValidation is current.
+let validationWaiters = [];
+function validationSettled() {
+    if ($('#validationSummary').dataset.validationSource === 'engine') return Promise.resolve();
+    return new Promise((resolve) => validationWaiters.push(resolve));
+}
+function releaseValidationWaiters() {
+    const waiters = validationWaiters;
+    validationWaiters = [];
+    waiters.forEach((resolve) => resolve());
+}
+
 function scheduleEngineValidation(projectDocument = null) {
     const revision = ++validationRevision;
     clearTimeout(engineValidationTimer);
@@ -4005,6 +4026,7 @@ function scheduleEngineValidation(projectDocument = null) {
             if (result.cancelled || revision !== validationRevision) return;
             if (!result.available) {
                 renderValidationFailure('The C++ validation engine is unavailable. Build the engine before editing or running models.');
+                releaseValidationWaiters();
                 return;
             }
             currentValidation = {
@@ -4014,12 +4036,22 @@ function scheduleEngineValidation(projectDocument = null) {
             };
             $('#validationSummary').dataset.validationSource = 'engine';
             renderValidationStatus();
+            releaseValidationWaiters();
         } catch (error) {
             if (revision !== validationRevision) return;
             console.error('C++ model validation failed.', error);
             renderValidationFailure(`The C++ validation engine failed: ${error.message}`);
+            releaseValidationWaiters();
         }
     }, 180);
+}
+
+// Run opens the Run dialog, so model errors do not disable it: they only stop Start, inside the dialog
+// (see openRunDialog), and the dialog is where a rejected run configuration is corrected. It is
+// disabled when there is nothing to set up: a result is on screen, a run is going, or validation is
+// still pending or unavailable.
+function runButtonDisabled() {
+    return Boolean(activeResult) || simulationRunning || $('#validationSummary').dataset.validationSource !== 'engine';
 }
 
 function renderValidationPending() {
@@ -4058,8 +4090,8 @@ function renderValidationStatus() {
     summary.classList.toggle('warning', !errors && warnings > 0);
     $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
         : warnings ? `${warnings} model ${warnings === 1 ? 'warning' : 'warnings'}` : 'Model valid';
-    $('#runButton').disabled = Boolean(activeResult) || errors > 0 || simulationRunning;
-    $('#runButton').title = errors ? 'Resolve model errors before running' : 'Run simulation';
+    $('#runButton').disabled = runButtonDisabled();
+    $('#runButton').title = errors ? 'Run settings (resolve model errors before starting)' : 'Run simulation';
 
     const severityByEntity = new Map();
     currentValidation.issues.forEach((item) => {
@@ -4209,8 +4241,7 @@ function setResultModeLocked(locked) {
     $('[data-tool="move"]').disabled = locked;
     $('[data-tool="rotate"]').disabled = locked;
     $('[data-tool="scale"]').disabled = locked;
-    $('#runConfigurationButton').disabled = locked;
-    $('#runButton').disabled = locked || simulationRunning || !currentValidation.valid;
+    $('#runButton').disabled = locked || runButtonDisabled();
     $('#exportCsvButton').disabled = !locked;
     transformControls.detach();
     if (locked) {
@@ -5453,7 +5484,8 @@ $('#continueRun').addEventListener('click', () => {
         samples: structuredClone(activeResult.samples.slice(0, -1)),
         checkpoints: structuredClone(activeResult.checkpoints.slice(0, -1))
     };
-    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, checkpoint.time + model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId).globalTimeStep);
+    const continueSource = fillRunConfigurationFields({ continuing: true });
+    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, checkpoint.time + continueSource.globalTimeStep);
     $('#runLaunchDescription').textContent = `Continue from ${formatResultTime(checkpoint.time)}.`;
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
@@ -5508,8 +5540,8 @@ function openForkLaunchDialog() {
             Number(owners.find(({ parameter }) => parameter.id === parameterId)?.parameter.value) !== entry.value)
         .map(([parameterId, entry]) => ({ parameterId, entry }));
     pendingRestart = null;
-    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
-    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, pendingFork.checkpoint.time + configuration.globalTimeStep);
+    const forkSource = fillRunConfigurationFields({ continuing: true });
+    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, pendingFork.checkpoint.time + forkSource.globalTimeStep);
     $('#runLaunchDescription').textContent = `Fork from ${formatResultTime(pendingFork.checkpoint.time)}${pendingFork.overrides.length ? ' with parameter changes' : ''}.`;
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
@@ -5679,7 +5711,7 @@ async function startSimulation() {
     const previousResultSessionId = activeEngineJobId;
     const forkingFromSessionId = pendingFork ? previousResultSessionId : null;
     try {
-        const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+        const configuration = { ...activeRunConfiguration(), ...runLaunchSettings.configurationOverride };
         const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(serializeProjectDocument()))), {
             ...configuration,
             targetTime: runLaunchSettings.targetTime,
@@ -5721,15 +5753,20 @@ async function startSimulation() {
         $('#runButton').title = error.message;
         simulationRunning = false;
         pendingFork = null;
-        $('#runButton').disabled = Boolean(activeResult) || !currentValidation.valid;
+        $('#runButton').disabled = runButtonDisabled();
         if (currentValidation.valid) $('#runButton').title = 'Run simulation';
     }
 }
 
-$('#runButton').addEventListener('click', () => {
-    if (simulationRunning || !currentValidation.valid) return;
+// The Run dialog for an ordinary run. Opens whatever the model's state, so a run configuration the
+// validator rejects (an output interval that is not a multiple of the timestep, say) can be corrected
+// here: Save settings always works; only Start waits for the model to be valid. An error in the
+// validation panel also opens it (see navigateToValidationIssue).
+function openRunDialog() {
+    if (simulationRunning || activeResult) return;
     pendingRestart = null;
     pendingFork = null;
+    fillRunConfigurationFields({ continuing: false });
     $('#runLaunchDescription').textContent = "Run from the model's initial state.";
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
@@ -5737,10 +5774,10 @@ $('#runButton').addEventListener('click', () => {
     $('#runPacingRatio').value = runLaunchSettings.pacing.simulationSecondsPerWallSecond;
     $('#runStabilityMonitoring').checked = runLaunchSettings.stabilityMonitoring;
     updateRunModeFields();
-    $('#runLaunchError').textContent = '';
+    $('#runLaunchError').textContent = currentValidation.valid ? '' : 'The model has errors. Settings can be saved now; a run can start once the errors are fixed.';
     $('#runLaunchDialog').showModal();
-});
-
+}
+$('#runButton').addEventListener('click', openRunDialog);
 $('#runLaunchCancel').addEventListener('click', () => $('#runLaunchDialog').close());
 function updateRunModeFields() {
     const online = $('#runOnlineMode').checked;
@@ -5755,29 +5792,106 @@ $('#runOnlineMode').addEventListener('change', updateRunModeFields);
 $('#runPacingMode').addEventListener('change', (event) => {
     $('#runPacingRatioField').hidden = !$('#runOnlineMode').checked || event.target.value !== 'limitedRatio';
 });
-$('#runLaunchDialog form').addEventListener('submit', (event) => {
+// The numerics and execution fields of the Run dialog. A fresh run starts from, and saves to, the model's
+// active run configuration. Continuing or forking a result starts from what that result ran with (so a
+// second extension defaults to the timestep the first one chose) and applies to that run only.
+function activeRunConfiguration() {
+    return model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+}
+
+function fillRunConfigurationFields({ continuing }) {
+    const saved = activeRunConfiguration();
+    const source = continuing && activeResult
+        ? { ...saved, globalTimeStep: activeResult.globalTimeStep ?? saved.globalTimeStep, outputInterval: activeResult.outputInterval ?? saved.outputInterval }
+        : saved;
+    $('#runGlobalTimeStep').value = source.globalTimeStep;
+    $('#runOutputInterval').value = source.outputInterval;
+    const execution = normalizeExecutionConfiguration(source.execution);
+    $('#runExecutionBackend').value = execution.backend;
+    $('#runWorkerThreads').value = execution.workerThreads;
+    $('#runPartitionAlgorithm').value = execution.partitionAlgorithm;
+    $('#runPartitionCount').value = execution.partitionCount;
+    $('#runPartitionCommunicationBias').value = execution.partitionCommunicationBias;
+    $('#runAutomaticParallelThreshold').value = execution.automaticParallelThreshold;
+    $('#runAutomaticMaximumPartitionCutFraction').value = execution.automaticMaximumPartitionCutFraction;
+    updateExecutionConfigurationFields();
+    $('#runConfigurationScope').textContent = continuing
+        ? 'Applies from this point on, to this run only; the model keeps its own settings. A different timestep gives one result that changes step size here.'
+        : 'Saved with the model, and used by the command line and code export.';
+    $('#saveRunConfiguration').hidden = continuing;
+    $('#startRun').disabled = !continuing && !currentValidation.valid;
+    return source;
+}
+
+function readRunConfigurationFields() {
+    return {
+        globalTimeStep: Number($('#runGlobalTimeStep').value),
+        outputInterval: Number($('#runOutputInterval').value),
+        execution: {
+            backend: $('#runExecutionBackend').value,
+            partitionAlgorithm: $('#runPartitionAlgorithm').value,
+            workerThreads: Number($('#runWorkerThreads').value),
+            partitionCount: Number($('#runPartitionCount').value),
+            partitionCommunicationBias: Number($('#runPartitionCommunicationBias').value),
+            automaticParallelThreshold: Number($('#runAutomaticParallelThreshold').value),
+            automaticMaximumPartitionCutFraction: Number($('#runAutomaticMaximumPartitionCutFraction').value)
+        }
+    };
+}
+
+// Saves the dialog's numerics to the model's active run configuration, as one undoable step, when they
+// changed. Only ever used for an ordinary run: a result on screen keeps the model locked.
+function saveRunConfigurationFields(values) {
+    const before = structuredClone(activeRunConfiguration());
+    const after = { ...before, ...structuredClone(values) };
+    if (JSON.stringify(before) === JSON.stringify(after)) return false;
+    applyRunConfiguration(after);
+    recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
+    return true;
+}
+
+$('#saveRunConfiguration').addEventListener('click', () => {
+    if (activeResult || pendingFork || pendingRestart) return;
+    const values = readRunConfigurationFields();
+    const problem = validateRunConfigurationValues(values);
+    if (problem) {
+        $('#runLaunchError').textContent = problem;
+        return;
+    }
+    saveRunConfigurationFields(values);
+    $('#runLaunchDialog').close();
+});
+$('#runLaunchDialog form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+    const continuing = Boolean(pendingFork || pendingRestart);
+    const values = readRunConfigurationFields();
     const targetTime = Number($('#runTargetTime').value);
     const online = $('#runOnlineMode').checked;
     const pacingMode = online ? $('#runPacingMode').value : 'fastest';
     const pacingRatio = pacingMode === 'realTime' ? 1 : Number($('#runPacingRatio').value);
     const startTime = pendingFork?.checkpoint.time ?? pendingRestart?.checkpoint.time ?? 0;
-    // The tolerance absorbs floating-point error: a fork or restart at the final sample defaults
-    // the target to startTime + globalTimeStep, and that difference can land a hair below the step.
-    const timeTolerance = configuration.globalTimeStep * 1e-9;
-    if (!(targetTime > startTime) || targetTime - startTime < configuration.globalTimeStep - timeTolerance ||
+    const problem = validateRunConfigurationValues(values);
+    if (problem) {
+        $('#runLaunchError').textContent = problem;
+        return;
+    }
+    if (!targetTimeIsReachable(targetTime, startTime, values.globalTimeStep) ||
         (pacingMode === 'limitedRatio' && (!(pacingRatio > 0) || !Number.isFinite(pacingRatio)))) {
         $('#runLaunchError').textContent = `Target time must be at least one global timestep after ${formatResultTime(startTime)}; limited pacing requires a positive ratio.`;
         return;
     }
+    const configurationChanged = !continuing && saveRunConfigurationFields(values);
     runLaunchSettings = {
         targetTime,
         online,
         pacing: { mode: pacingMode, simulationSecondsPerWallSecond: pacingRatio },
-        stabilityMonitoring: $('#runStabilityMonitoring').checked
+        stabilityMonitoring: $('#runStabilityMonitoring').checked,
+        configurationOverride: continuing ? values : null
     };
     $('#runLaunchDialog').close();
+    // Saving new numerics revalidates the model; a run must not start on settings that validation has
+    // not yet accepted (startSimulation then declines, and the status line shows the errors).
+    if (configurationChanged) await validationSettled();
     startSimulation();
 });
 
@@ -5801,7 +5915,7 @@ window.engine.onError(({ jobId, message }) => {
     $('#runButton').title = message;
     if (!activeResult) {
         activeEngineJobId = null;
-        $('#runButton').disabled = !currentValidation.valid;
+        $('#runButton').disabled = runButtonDisabled();
     }
 });
 
@@ -5823,66 +5937,8 @@ function updateExecutionConfigurationFields() {
     $('#runAutomaticMaximumPartitionCutFraction').disabled = backend !== 'automatic';
 }
 
-$('#runConfigurationButton').addEventListener('click', () => {
-    if (activeResult) return;
-    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
-    $('#runConfigurationName').value = configuration.name;
-    $('#runGlobalTimeStep').value = configuration.globalTimeStep;
-    $('#runOutputInterval').value = configuration.outputInterval;
-    const execution = normalizeExecutionConfiguration(configuration.execution);
-    $('#runExecutionBackend').value = execution.backend;
-    $('#runWorkerThreads').value = execution.workerThreads;
-    $('#runPartitionAlgorithm').value = execution.partitionAlgorithm;
-    $('#runPartitionCount').value = execution.partitionCount;
-    $('#runPartitionCommunicationBias').value = execution.partitionCommunicationBias;
-    $('#runAutomaticParallelThreshold').value = execution.automaticParallelThreshold;
-    $('#runAutomaticMaximumPartitionCutFraction').value = execution.automaticMaximumPartitionCutFraction;
-    updateExecutionConfigurationFields();
-    $('#runConfigurationError').textContent = '';
-    $('#runConfigurationDialog').showModal();
-});
 $('#runExecutionBackend').addEventListener('change', updateExecutionConfigurationFields);
 $('#runPartitionAlgorithm').addEventListener('change', updateExecutionConfigurationFields);
-$('#runConfigurationCancel').addEventListener('click', () => $('#runConfigurationDialog').close());
-$('#runConfigurationDialog form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    if (activeResult) return;
-    const before = structuredClone(model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId));
-    const after = {
-        ...before,
-        name: $('#runConfigurationName').value.trim() || 'Untitled',
-        globalTimeStep: Number($('#runGlobalTimeStep').value),
-        outputInterval: Number($('#runOutputInterval').value),
-        execution: {
-            backend: $('#runExecutionBackend').value,
-            partitionAlgorithm: $('#runPartitionAlgorithm').value,
-            workerThreads: Number($('#runWorkerThreads').value),
-            partitionCount: Number($('#runPartitionCount').value),
-            partitionCommunicationBias: Number($('#runPartitionCommunicationBias').value),
-            automaticParallelThreshold: Number($('#runAutomaticParallelThreshold').value),
-            automaticMaximumPartitionCutFraction: Number($('#runAutomaticMaximumPartitionCutFraction').value)
-        }
-    };
-    const outputRatio = after.outputInterval / after.globalTimeStep;
-    const execution = after.execution;
-    const validExecution = Number.isInteger(execution.workerThreads) && execution.workerThreads >= 1 && execution.workerThreads <= 256 &&
-        Number.isInteger(execution.partitionCount) && execution.partitionCount >= 1 && execution.partitionCount <= 256 &&
-        Number.isFinite(execution.partitionCommunicationBias) && execution.partitionCommunicationBias >= 0 &&
-        Number.isInteger(execution.automaticParallelThreshold) && execution.automaticParallelThreshold >= 1 &&
-        execution.automaticParallelThreshold <= 1000000 &&
-        Number.isFinite(execution.automaticMaximumPartitionCutFraction) &&
-        execution.automaticMaximumPartitionCutFraction >= 0 && execution.automaticMaximumPartitionCutFraction <= 1;
-    if (!(after.globalTimeStep > 0) || !(after.outputInterval > 0) || after.outputInterval < after.globalTimeStep ||
-        Math.abs(outputRatio - Math.round(outputRatio)) > 1e-9 || !validExecution) {
-        $('#runConfigurationError').textContent = validExecution
-            ? 'Use positive values; output interval must be an integer multiple of the global timestep.'
-            : 'Execution values must be within their displayed bounds.';
-        return;
-    }
-    applyRunConfiguration(after);
-    recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
-    $('#runConfigurationDialog').close();
-});
 
 function toolchainFields(kind) {
     const prefix = kind === 'python' ? 'toolchainPython' : 'toolchainCpp';

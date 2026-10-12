@@ -19,7 +19,7 @@ test('validation is its own stage', () => {
 });
 
 test('a repair attempt names its attempt and why the last proposal was rejected', () => {
-    const { headline, notes } = describeAssistantProgress({ attempt: 2, attempts: 3, phase: 'sending', repairReason: 'Unknown symbol x.' }, 20);
+    const { headline, notes } = describeAssistantProgress({ attempt: 2, attempts: 3, phase: 'sending', repairReason: 'Unknown symbol x.' }, 20, 2);
     assert.match(headline, /^Attempt 2 of 3: Waiting for the model…/);
     assert.deepEqual(notes, ['The previous proposal was rejected, so the model was asked again: Unknown symbol x.']);
     assert.deepEqual(describeAssistantProgress({ attempt: 1, repairReason: 'stale' }, 1).notes, []);
@@ -32,4 +32,30 @@ test('progress reaches the panel over a channel main sends and the preload liste
     assert.ok(main.includes("send('aiProgress'"));
     assert.ok(preload.includes("ipcRenderer.on('aiProgress'"));
     assert.match(shim, /onProgress: \(\) => \{\}/);
+});
+
+test('closing the assistant panel cancels the request without dropping the controller its cleanup depends on', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const renderer = await readFile(new URL('../src/renderer/renderer.mjs', import.meta.url), 'utf8');
+    const hide = renderer.slice(renderer.indexOf('function hideAssistantPanel()'), renderer.indexOf('function visibleModelInspector'));
+    assert.match(hide, /assistantGenerationController\?\.abort\(\)/);
+    assert.ok(!/assistantGenerationController = null/.test(hide), 'the request cleanup only restores the button for the current controller');
+    const request = renderer.slice(renderer.indexOf('async function requestAssistantProposal()'), renderer.indexOf("$('#cancelAssistantRequest')"));
+    assert.match(request, /if \(assistantGenerationController === controller\) \{[\s\S]*button\.disabled = false/);
+});
+
+test('a long silence before the first word says that waiting is normal, and goes away once something arrives', () => {
+    const quiet = describeAssistantProgress({ phase: 'sending' }, 14).notes;
+    assert.deepEqual(quiet, []);
+    const waiting = describeAssistantProgress({ phase: 'sending' }, 15).notes;
+    assert.equal(waiting.length, 1);
+    assert.match(waiting[0], /Still waiting for the first reply.*stopped only if nothing arrives/);
+    assert.deepEqual(describeAssistantProgress({ phase: 'receiving', thinking: 'Hmm' }, 90).notes, []);
+    assert.deepEqual(describeAssistantProgress({ phase: 'receiving', outputCharacters: 10 }, 90).notes, []);
+    assert.deepEqual(describeAssistantProgress({ phase: 'validating', outputCharacters: 10 }, 90).notes, []);
+});
+
+test('the wait for a first reply is judged per attempt, so a repair attempt does not start out "still waiting"', () => {
+    assert.deepEqual(describeAssistantProgress({ attempt: 2, attempts: 3, phase: 'sending' }, 120, 3).notes, []);
+    assert.equal(describeAssistantProgress({ attempt: 2, attempts: 3, phase: 'sending' }, 120, 30).notes.length, 1);
 });

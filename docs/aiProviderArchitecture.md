@@ -58,6 +58,14 @@ The registry also:
 
 Ollama uses portable JSON mode because its structured-output schema converter does not accept every construct in Konjugate's Draft 2020-12 operation schema. The complete schema remains in the prompt and the host remains the validation authority.
 
+**What each provider's documentation says, and what the adapters do about it** (checked against the providers' own pages in October 2026):
+
+- **OpenAI.** Schema mode (`response_format: json_schema`) is documented to need the schema's root to be an object and not `anyOf`; the operation schema's root is a `oneOf` of two shapes, and the documentation does not say what `strict: false` does with that. So the adapter asks for schema mode first and, if OpenAI answers HTTP 400 about the schema or `response_format`, asks again once in plain JSON mode. The host validates against the full schema either way.
+- **NVIDIA.** The documentation supports `response_format: json_object` and streaming, and recommends `nvext.guided_json` for schema-constrained output. The adapter uses plain JSON mode and does not send `nvext`.
+- **Hugging Face.** The chat-completion API takes `json_object` or `json_schema` and streams server-sent events with a bearer token; which of those a given model's provider honours varies. The adapter uses plain JSON mode.
+- **Gemini.** The key goes in `x-goog-api-key` (which is what the adapter sends), and `streamGenerateContent?alt=sse` streams. Google has been retiring standard API keys for the Gemini API: unrestricted ones are rejected, with an HTTP 401 whose text talks about OAuth, and new keys made in Google AI Studio are the kind it accepts. A 401 from Gemini therefore carries a hint to create a new key. Reasoning summaries come from `generationConfig.thinkingConfig.includeThoughts`; the adapter does not send it, because models without thinking support can refuse the field, so Gemini shows no reasoning.
+- **Ollama.** `/api/chat` streams newline-delimited JSON by default, takes `format: "json"`, and puts reasoning in `message.thinking` only when the `think` option is enabled. The adapter does not send `think`, for the same reason, so reasoning appears only for models that produce it by default.
+
 ### Main-process boundary
 
 `src/main.mjs` owns configuration resolution, credentials, timeouts, provider calls and active-request cancellation. The preload exposes narrow IPC methods rather than raw network or credential access.
@@ -128,7 +136,7 @@ Provider output is untrusted. When a proposal is malformed or fails structural v
 
 The provider must return a complete replacement proposal, not a patch or explanation. Repair attempts are bounded to prevent unending requests, unexpected cost and repeated low-quality output.
 
-Network errors, authentication errors, insecure endpoints and timeouts are not repaired by the model. They require an environmental or configuration change.
+Only output the model itself got wrong is repaired: JSON that does not parse (`invalidProposalJson`), no text at all (`emptyProviderOutput`), or a proposal the validator rejects. Network errors, authentication errors, insecure endpoints, timeouts and malformed transport (a non-JSON HTTP body or stream, `invalidProviderResponse`) are not repaired by the model. They require an environmental or configuration change.
 
 A clarification response is not repaired against the operation schema — it isn't an operation proposal to begin with, and asking again isn't a malformed-output condition. The registry returns it as soon as its own light shape check (a non-empty question, and string suggestions if present) passes.
 
@@ -196,3 +204,5 @@ Provider changes must preserve these invariants:
 ## Testing
 
 Provider adapters use mocked fetch implementations in `tests/aiRemoteProviders.test.mjs`. Registry dispatch, validation, repair and redaction are covered in `tests/aiProviderRegistry.test.mjs`. Secure configuration behavior is covered in `tests/aiConfigurationStore.test.mjs`. The Electron interaction suite verifies configuration management and proposal review across the IPC boundary.
+
+The mocked tests cannot show that a provider's real behaviour still matches them. `KONJUGATE_AI_KEY=... node scripts/checkAIProvider.mjs <provider> <model>` sends one request through the same registry and adapter code to the real service and reports what it saw: whether the request was accepted, whether the reply streamed, whether the provider sent reasoning, how many attempts it took, and whether the proposal passed validation. The key comes from the environment, never an argument, and is never printed.

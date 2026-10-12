@@ -22,7 +22,7 @@ function baseUrl(configuration) {
     return url.href.replace(/\/$/, '');
 }
 
-async function responseOk(fetchImpl, url, options = {}) {
+async function responseOk(fetchImpl, url, options = {}, { unauthorizedHint = '' } = {}) {
     let response;
     try { response = await fetchImpl(url, options); } catch (error) {
         if (error.name === 'AbortError') throw error;
@@ -32,7 +32,10 @@ async function responseOk(fetchImpl, url, options = {}) {
         const text = await response.text();
         let detail = text.slice(0, 500);
         try { detail = JSON.parse(text).error?.message ?? JSON.parse(text).message ?? detail; } catch { /* use bounded text */ }
-        throw new AssistantProviderError(`The AI provider returned HTTP ${response.status}${detail ? `: ${detail}` : '.'}`, 'providerHttpError');
+        const hint = response.status === 401 && unauthorizedHint ? ` ${unauthorizedHint}` : '';
+        const failure = new AssistantProviderError(`The AI provider returned HTTP ${response.status}${detail ? `: ${detail}` : '.'}${hint}`, 'providerHttpError');
+        failure.status = response.status;
+        throw failure;
     }
     return response;
 }
@@ -41,9 +44,14 @@ async function jsonBody(response) {
     try { return JSON.parse(await response.text()); } catch { throw new AssistantProviderError('The AI provider returned invalid JSON.', 'invalidProviderResponse'); }
 }
 
-async function responseJson(fetchImpl, url, options = {}) {
-    return jsonBody(await responseOk(fetchImpl, url, options));
+async function responseJson(fetchImpl, url, options = {}, hints = {}) {
+    return jsonBody(await responseOk(fetchImpl, url, options, hints));
 }
+
+// Google is retiring standard API keys for the Gemini API: unrestricted ones are already refused, and the
+// refusal reads like an OAuth problem, which sends people looking in the wrong place. New keys made in
+// Google AI Studio are the kind it accepts.
+const geminiUnauthorizedHint = 'If the key was made some time ago, Google may no longer accept it: it is phasing out standard API keys for the Gemini API (unrestricted ones are already refused). Create a new key in Google AI Studio and enter it in this configuration.';
 
 const maximumOutputCharacters = 2_000_000;
 
@@ -59,8 +67,8 @@ function streamError(chunk) {
 // can show what is happening and the idle clock can see the model is alive; one that answers with a
 // plain JSON body (a proxy that buffers, an older server) still works, reporting everything at the end.
 // `fromChunk` and `fromWhole` read one provider's own shapes and return { output, thinking }.
-async function generateText(fetchImpl, url, options, { protocol, fromChunk, fromWhole }, onEvent) {
-    const response = await responseOk(fetchImpl, url, options);
+async function generateText(fetchImpl, url, options, { protocol, fromChunk, fromWhole, unauthorizedHint }, onEvent) {
+    const response = await responseOk(fetchImpl, url, options, { unauthorizedHint });
     let output = '';
     if (!isStreamingResponse(response)) {
         const whole = await jsonBody(response);
@@ -111,7 +119,7 @@ function historyText(history) {
 }
 
 function parseProposal(text) {
-    if (typeof text !== 'string') throw new AssistantProviderError('The AI provider did not return proposal text.', 'invalidProviderResponse');
+    if (typeof text !== 'string') throw new AssistantProviderError('The AI provider did not return proposal text.', 'emptyProviderOutput');
     const normalized = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     try { return JSON.parse(normalized); } catch { throw new AssistantProviderError('The AI provider returned malformed proposal JSON.', 'invalidProposalJson'); }
 }
@@ -137,10 +145,9 @@ function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false }
         async generateProposal({ configuration, credential, context, request, history, repair, signal, fetchImpl, operationSchema, onEvent }) {
             requireCredential(credential, name);
             if (!configuration.model) throw new AssistantProviderError('Select a model before generating a proposal.', 'modelRequired');
-            const responseFormat = schemaResponse
-                ? { type: 'json_schema', json_schema: { name: 'konjugate_proposal', strict: false, schema: operationSchema } }
-                : { type: 'json_object' };
-            const text = await generateText(fetchImpl, `${baseUrl({ ...configuration, provider: id, endpoint: configuration.endpoint || endpoint })}/v1/chat/completions`, {
+            const url = `${baseUrl({ ...configuration, provider: id, endpoint: configuration.endpoint || endpoint })}/v1/chat/completions`;
+            const prompt = proposalPrompt(operationSchema, context, request, repair);
+            const attempt = (responseFormat) => generateText(fetchImpl, url, {
                 method: 'POST', signal,
                 headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -148,7 +155,7 @@ function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false }
                     messages: [
                         { role: 'system', content: 'You are the Konjugate modelling assistant. Return only JSON matching the supplied schema -- either a proposal or, if the request is ambiguous or missing information, a clarification.' },
                         ...historyMessages(history),
-                        { role: 'user', content: proposalPrompt(operationSchema, context, request, repair) }
+                        { role: 'user', content: prompt }
                     ],
                     response_format: responseFormat,
                     stream: true
@@ -165,6 +172,18 @@ function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false }
                     return { output: message.content, thinking: message.reasoning_content ?? message.reasoning ?? '' };
                 }
             }, onEvent);
+            const schemaFormat = { type: 'json_schema', json_schema: { name: 'konjugate_proposal', strict: false, schema: operationSchema } };
+            let text;
+            try {
+                text = await attempt(schemaResponse ? schemaFormat : { type: 'json_object' });
+            } catch (error) {
+                // OpenAI's schema mode has rules of its own about the schema (its documentation says the root must
+                // be an object and not anyOf, while this proposal schema is a oneOf of two shapes). If the schema is
+                // what it refused, ask again in plain JSON mode, which every provider here supports: the host
+                // validates the proposal against the full schema either way.
+                if (!schemaResponse || error.status !== 400 || !/response_format|json_schema|schema/i.test(error.message)) throw error;
+                text = await attempt({ type: 'json_object' });
+            }
             return parseProposal(text);
         }
     };
@@ -208,7 +227,7 @@ function geminiProvider() {
             requireCredential(credential, 'Google Gemini');
             const result = await responseJson(fetchImpl, `${baseUrl({ ...configuration, provider: 'gemini' })}/v1beta/models`, {
                 headers: { 'x-goog-api-key': credential }, signal
-            });
+            }, { unauthorizedHint: geminiUnauthorizedHint });
             return (result.models ?? []).filter((model) => model.supportedGenerationMethods?.includes('generateContent'))
                 .map((model) => ({ id: model.name.replace(/^models\//, ''), name: model.displayName ?? model.name }));
         },
@@ -232,7 +251,7 @@ function geminiProvider() {
                     contents: [{ parts: [{ text: historyText(history) + proposalPrompt(operationSchema, context, request, repair) }] }],
                     generationConfig: { responseMimeType: 'application/json' }
                 })
-            }, { protocol: 'sse', fromChunk: fromParts, fromWhole: fromParts }, onEvent);
+            }, { protocol: 'sse', fromChunk: fromParts, fromWhole: fromParts, unauthorizedHint: geminiUnauthorizedHint }, onEvent);
             return parseProposal(text);
         }
     };

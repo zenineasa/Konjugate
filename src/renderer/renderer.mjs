@@ -6414,9 +6414,11 @@ function showAssistantPanel() {
 }
 
 function hideAssistantPanel() {
+    // Cancels the request but leaves its controller in place: requestAssistantProposal's own cleanup runs
+    // when the cancellation lands, and only does its job (re-enabling the button, stopping the progress
+    // display) for the controller that is still current. Dropping the controller here made it skip that,
+    // leaving the button disabled on "Preparing…" when the panel was reopened.
     assistantGenerationController?.abort();
-    assistantGenerationController = null;
-    stopAssistantProgress();
     $('#assistantPanel').hidden = true;
     $('#assistantButton').ariaExpanded = 'false';
 }
@@ -7965,7 +7967,9 @@ function renderAssistantProgress() {
     const panel = $('#assistantProgress');
     panel.hidden = !assistantProgressRequestUuid;
     if (!assistantProgressRequestUuid) return;
-    const { headline, notes } = describeAssistantProgress(assistantProgressSnapshot, (Date.now() - assistantProgressStartedAt) / 1000);
+    const attemptStartedAt = assistantProgressSnapshot?.attemptStartedAt ?? assistantProgressStartedAt;
+    const { headline, notes } = describeAssistantProgress(
+        assistantProgressSnapshot, (Date.now() - assistantProgressStartedAt) / 1000, (Date.now() - attemptStartedAt) / 1000);
     $('#assistantProgressHeadline').textContent = headline;
     $('#assistantProgressNote').hidden = notes.length === 0;
     $('#assistantProgressNote').textContent = notes.join(' ');

@@ -190,3 +190,56 @@ test('cancelling aborts a stream that is mid-read', async () => {
     setTimeout(() => controller.abort(), 10);
     await assert.rejects(() => pending, (error) => error.name === 'AbortError');
 });
+
+test('an HTML error page is transport trouble; a reply with no text is the model\'s empty output', async () => {
+    const html = provider('openAi', async () => new Response('<html>502 Bad Gateway</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }));
+    await assert.rejects(() => html.generateProposal(input('openAi')), (error) => error.code === 'invalidProviderResponse');
+    const empty = provider('openAi', async () => jsonResponse({ choices: [{ message: { content: null } }] }));
+    await assert.rejects(() => empty.generateProposal(input('openAi')), (error) => error.code === 'emptyProviderOutput');
+    const silentStream = provider('ollama', async () => streamed(['{"done":true}\n'], 'application/x-ndjson'));
+    await assert.rejects(() => silentStream.generateProposal(input('ollama')), (error) => error.code === 'emptyProviderOutput');
+});
+
+test('OpenAI falls back to plain JSON mode once when it refuses the schema, and not for other failures', async () => {
+    const formats = [];
+    const text = JSON.stringify(proposal);
+    const adapter = provider('openAi', async (url, options) => {
+        const format = JSON.parse(options.body).response_format;
+        formats.push(format.type);
+        if (format.type === 'json_schema') {
+            return jsonResponse({ error: { message: "Invalid schema for response_format 'konjugate_proposal': schema must be a JSON Schema of 'type: \"object\"'." } }, 400);
+        }
+        return jsonResponse({ choices: [{ message: { content: text } }] });
+    });
+    assert.deepEqual(await adapter.generateProposal(input('openAi')), proposal);
+    assert.deepEqual(formats, ['json_schema', 'json_object']);
+
+    // A 400 about something else (a bad model name) is the user's to fix, not retried in another mode.
+    const badModel = [];
+    const wrongModel = provider('openAi', async (url, options) => {
+        badModel.push(JSON.parse(options.body).response_format.type);
+        return jsonResponse({ error: { message: 'The model `nope` does not exist.' } }, 400);
+    });
+    await assert.rejects(() => wrongModel.generateProposal(input('openAi')), /does not exist/);
+    assert.deepEqual(badModel, ['json_schema']);
+
+    // Other providers already use plain JSON mode, so there is nothing to fall back from.
+    const nvidiaCalls = [];
+    const nvidia = provider('nvidia', async (url, options) => {
+        nvidiaCalls.push(JSON.parse(options.body).response_format.type);
+        return jsonResponse({ error: { message: 'Invalid schema' } }, 400);
+    });
+    await assert.rejects(() => nvidia.generateProposal(input('nvidia')), /HTTP 400/);
+    assert.deepEqual(nvidiaCalls, ['json_object']);
+});
+
+test('a Gemini 401 explains that Google is retiring standard API keys, and other providers\' 401 do not say so', async () => {
+    const unauthorized = () => jsonResponse({ error: { message: 'Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential.' } }, 401);
+    const gemini = provider('gemini', async () => unauthorized());
+    for (const call of [() => gemini.generateProposal(input('gemini')), () => gemini.listModels(input('gemini'))]) {
+        await assert.rejects(call, (error) => /HTTP 401/.test(error.message) && /Expected OAuth 2/.test(error.message)
+            && /phasing out standard API keys/.test(error.message) && /Google AI Studio/.test(error.message) && error.status === 401);
+    }
+    const openAi = provider('openAi', async () => unauthorized());
+    await assert.rejects(() => openAi.generateProposal(input('openAi')), (error) => /HTTP 401/.test(error.message) && !/AI Studio/.test(error.message));
+});

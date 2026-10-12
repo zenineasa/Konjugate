@@ -176,3 +176,18 @@ test('provider registry keeps progress text bounded and redacts the credential f
     assert.ok(snapshots.some((progress) => progress.repairReason.includes('[redacted]')));
     assert.ok(!snapshots.some((progress) => progress.repairReason.includes('secret-key')));
 });
+
+test('provider registry does not retry transport trouble, but does retry output the model got wrong', async () => {
+    const attempts = { transport: 0, empty: 0 };
+    const failing = (counter, code) => createAIProviderRegistry([{
+        id: 'flaky', name: 'Flaky', generateProposal: async () => {
+            attempts[counter] += 1;
+            throw Object.assign(new Error(`failed with ${code}`), { code });
+        }
+    }]);
+    const run = (registry) => registry.generate({ configuration: { provider: 'flaky' }, context: { nodes: [] }, request: 'Build it' });
+    await assert.rejects(() => run(failing('transport', 'invalidProviderResponse')), /invalidProviderResponse/);
+    assert.equal(attempts.transport, 1, 'a gateway error page is not retried');
+    await assert.rejects(() => run(failing('empty', 'emptyProviderOutput')), /emptyProviderOutput/);
+    assert.equal(attempts.empty, 3, 'an empty reply is retried like malformed JSON');
+});

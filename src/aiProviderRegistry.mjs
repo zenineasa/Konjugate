@@ -45,7 +45,7 @@ export function createAIProviderRegistry(providers = [localAssistantProvider]) {
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             // What the panel shows while this runs: which attempt, what stage, and the latest of what the
             // model is saying. Every publish also tells the caller the request is alive.
-            const progress = { attempt: 0, attempts: maximumRepairAttempts + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', repairReason: '' };
+            const progress = { attempt: 0, attempts: maximumRepairAttempts + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', repairReason: '', attemptStartedAt: Date.now() };
             const publish = () => onProgress?.({ ...progress });
             const redact = (text) => (credential ? text.replaceAll(credential, '[redacted]') : text);
             const onEvent = (event) => {
@@ -63,14 +63,18 @@ export function createAIProviderRegistry(providers = [localAssistantProvider]) {
                 let repair = null;
                 for (let attempt = 0; attempt <= maximumRepairAttempts; attempt += 1) {
                     let response;
-                    Object.assign(progress, { attempt: attempt + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '' });
+                    Object.assign(progress, { attempt: attempt + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', attemptStartedAt: Date.now() });
                     publish();
                     try {
                         response = await generateAssistantProposal(provider, {
                             configuration, credential, context, request, history, repair, signal, onEvent
                         });
                     } catch (error) {
-                        const recoverableOutputError = ['invalidProposalJson', 'invalidProviderResponse'].includes(error.code);
+                        // Only what the model itself got wrong is worth asking it to fix: JSON that does not parse, or
+                        // no text at all. Transport trouble (a gateway's HTML error page, a stream that is not a
+                        // stream, `invalidProviderResponse`) is not the model's doing, and a retry would only repeat
+                        // it, at the cost of another request, with a correction note about something it never wrote.
+                        const recoverableOutputError = ['invalidProposalJson', 'emptyProviderOutput'].includes(error.code);
                         if (!recoverableOutputError || attempt === maximumRepairAttempts) throw error;
                         repair = { error: error.message, proposal: null };
                         progress.repairReason = redact(error.message).slice(0, repairReasonCharacters);

@@ -28,6 +28,7 @@ import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
+import { describeOutdated, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
@@ -9412,6 +9413,39 @@ let discoverSelectedPrefix = null;
 // docs/extensionsExplorer.md's Update checking note). Populated in the background on dialog open, same
 // as discoverEntries above -- a failure here just means no update information this session.
 let packageUpdates = new Map();
+// True while "Update all" is installing, so a second click, or the detail pane's own Update, cannot start
+// another install alongside it.
+let updatingAll = false;
+
+function installedOutdated() {
+    return outdatedEntries(extensionsEntries ?? [], (packageId) => updateInfoFor(packageId));
+}
+
+// The strip, the Updates tab and the per-tab counts: the title bar badge's number made findable. They are
+// functions of the same two things as the list (what is installed, and what the update check found), so
+// they are redrawn whenever the list is.
+function renderExtensionsUpdates() {
+    const outdated = installedOutdated();
+    // Everything got updated while its tab was open: there is nothing left for that tab to show.
+    if (extensionsTab === 'updates' && outdated.length === 0) {
+        extensionsTab = 'addon';
+        extensionsSelectedKey = null;
+    }
+    const counts = outdatedCountsByType(outdated);
+    $$('#extensionsTabs .extensionsTab').forEach((tab) => {
+        const type = tab.dataset.extensionsTab;
+        const count = type === 'updates' ? outdated.length : counts[type] ?? 0;
+        const badge = tab.querySelector('.extensionsTabCount');
+        badge.hidden = count === 0;
+        badge.textContent = String(count);
+        if (type === 'updates') tab.hidden = outdated.length === 0;
+        tab.classList.toggle('active', type === extensionsTab);
+    });
+    $('#extensionsUpdatesStrip').hidden = extensionsMode !== 'installed' || outdated.length === 0;
+    $('#extensionsUpdatesSummary').textContent = describeOutdated(outdated);
+    $('#extensionsUpdatesShow').hidden = extensionsTab === 'updates';
+    $('#extensionsUpdateAll').disabled = updatingAll;
+}
 
 function extensionsPackageKey(entry) {
     return `${entry.packageType}:${entry.packageId}:${entry.version}`;
@@ -9426,7 +9460,8 @@ function showExtensionsNotice(message, type = null) {
 }
 
 function renderExtensionsResults() {
-    const matches = extensionsEntries.filter((entry) => entry.packageType === extensionsTab);
+    renderExtensionsUpdates();
+    const matches = extensionsTab === 'updates' ? installedOutdated() : extensionsEntries.filter((entry) => entry.packageType === extensionsTab);
     $('#extensionsResults').replaceChildren(...matches.map((entry) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -9435,13 +9470,17 @@ function renderExtensionsResults() {
         button.classList.toggle('selected', extensionsPackageKey(entry) === extensionsSelectedKey);
         button.classList.toggle('disabledItem', !entry.enabled);
         const update = updateInfoFor(entry.packageId);
-        const meta = `${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}${entry.enabled ? '' : ' · Disabled'}${update ? ` · Update to ${escapeHtml(update.latestVersion)} available` : ''}`;
+        button.classList.toggle('hasUpdate', Boolean(update) && extensionsTab !== 'updates');
+        const meta = extensionsTab === 'updates' && update
+            ? `${escapeHtml(installedTypeLabels[entry.packageType] ?? entry.packageType)} · ${escapeHtml(entry.version)} → <span class="extensionsItemUpdate">${escapeHtml(update.latestVersion)}</span>${entry.enabled ? '' : ' · Disabled'}`
+            : `${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}${entry.enabled ? '' : ' · Disabled'}${update ? ` · <span class="extensionsItemUpdate">Update to ${escapeHtml(update.latestVersion)} available</span>` : ''}`;
         const description = registryDescriptionFor(entry.packageId);
         // FMUs are imported files with no registry entry to borrow an image from, so they keep the
         // plain text-only item rather than a column of identical placeholders.
         const hasThumb = entry.packageType !== 'fmu';
         button.classList.toggle('extensionsItemWithThumb', hasThumb);
         button.innerHTML = (hasThumb ? extensionsThumbHtml(entry.name) : '')
+            + (update && extensionsTab !== 'updates' ? '<i class="extensionsUpdatePill">Update available</i>' : '')
             + `<b>${escapeHtml(entry.name)}</b>`
             + (description ? `<p class="extensionsItemDescription">${escapeHtml(description)}</p>` : '')
             + `<span class="extensionsItemMeta">${meta}</span>`;
@@ -9449,7 +9488,8 @@ function renderExtensionsResults() {
         return button;
     }));
     $('#extensionsEmpty').textContent = extensionsTab === 'addon' ? 'No add-ons are installed.'
-        : extensionsTab === 'plugin' ? 'No plugins are installed.' : 'No FMUs are imported.';
+        : extensionsTab === 'plugin' ? 'No plugins are installed.'
+            : extensionsTab === 'updates' ? 'Everything is up to date.' : 'No FMUs are imported.';
     $('#extensionsEmpty').hidden = matches.length > 0;
 }
 
@@ -9484,7 +9524,7 @@ function renderExtensionsDetail() {
     // Reset here rather than only in the click handler's error path -- after a successful update
     // this button is hidden with its "Updating…"/disabled state still set, and would otherwise
     // reappear that way for the next outdated package selected.
-    $('#extensionsUpdate').disabled = false;
+    $('#extensionsUpdate').disabled = updatingAll;
     $('#extensionsUpdate').textContent = 'Update';
     if (update) $('#extensionsDetailUpdateNote').textContent = `Version ${update.latestVersion} is available (currently ${update.installedVersion}).`;
     $('#extensionsToggleEnabled').textContent = entry.enabled ? 'Disable' : 'Enable';
@@ -9867,8 +9907,11 @@ async function openExtensionsDialog() {
         return;
     }
     extensionsMode = 'installed';
-    extensionsTab = 'addon';
-    extensionsSelectedKey = null;
+    // The title bar badge says there are updates; opening the dialog from it lands on them, with the first
+    // one selected so its detail and Update button are already showing.
+    const firstOutdated = installedOutdated()[0];
+    extensionsTab = firstOutdated ? 'updates' : 'addon';
+    extensionsSelectedKey = firstOutdated ? extensionsPackageKey(firstOutdated) : null;
     discoverSelectedPrefix = null;
     $('#extensionsRestartNotice').hidden = true;
     $('#extensionsDiscoverStale').hidden = true;
@@ -9909,9 +9952,54 @@ $$('.extensionsModes .extensionsTab').forEach((modeButton) => modeButton.addEven
     $('#extensionsDomains').hidden = extensionsMode !== 'discover';
     extensionsSelectedKey = null;
     discoverSelectedPrefix = null;
-    if (extensionsMode === 'discover') loadDiscoverRegistry();
+    if (extensionsMode === 'discover') { renderExtensionsUpdates(); loadDiscoverRegistry(); }
     else { renderExtensionsResults(); renderExtensionsDetail(); }
 }));
+
+$('#extensionsUpdatesShow').addEventListener('click', () => {
+    extensionsTab = 'updates';
+    extensionsSelectedKey = null;
+    renderExtensionsResults();
+    renderExtensionsDetail();
+});
+
+$('#extensionsUpdateAll').addEventListener('click', async () => {
+    const plan = updatePlan(packageUpdates);
+    if (updatingAll || !plan.length) return;
+    updatingAll = true;
+    const button = $('#extensionsUpdateAll');
+    button.disabled = true;
+    $('#extensionsUpdate').disabled = true;
+    const outcomes = [];
+    try {
+        await ensureDiscoverRegistry();
+        // One registry entry at a time, each installed whole (a bundle's packages update in lockstep).
+        // A failure is recorded and the rest carry on: one broken download must not strand the others.
+        for (const [index, step] of plan.entries()) {
+            button.textContent = `Updating ${index + 1} of ${plan.length}…`;
+            try {
+                const registryEntry = discoverEntries.find((candidate) => candidate.prefix === step.prefix);
+                if (!registryEntry) throw new Error(`${step.prefix} is no longer listed in the registry.`);
+                const results = await window.extensions.installFromRegistry(registryEntry, discoverRegistry);
+                outcomes.push({ ...step, results: results.map((result) => ({ packageId: result.packageId, version: result.version })) });
+            } catch (error) {
+                outcomes.push({ ...step, error: error.message });
+            }
+        }
+    } catch (error) {
+        outcomes.push(...plan.slice(outcomes.length).map((step) => ({ ...step, error: error.message })));
+    } finally {
+        updatingAll = false;
+        button.textContent = 'Update all';
+        await refreshExtensionsList().catch(() => {});
+        if (!extensionsEntries.some((entry) => extensionsPackageKey(entry) === extensionsSelectedKey)) extensionsSelectedKey = null;
+        await ensurePackageUpdates().catch(() => {});
+        renderExtensionsResults();
+        renderExtensionsDetail();
+        const summary = summarizeUpdateAll(outcomes);
+        if (summary.message) showExtensionsNotice(summary.message, summary.severity);
+    }
+});
 
 $$('#extensionsTabs .extensionsTab').forEach((tab) => tab.addEventListener('click', () => {
     extensionsTab = tab.dataset.extensionsTab;
@@ -9993,7 +10081,7 @@ $('#extensionsDiscoverDetailContent').addEventListener('click', (event) => {
 $('#extensionsUpdate').addEventListener('click', async () => {
     const entry = extensionsEntries.find((candidate) => extensionsPackageKey(candidate) === extensionsSelectedKey);
     const update = entry && updateInfoFor(entry.packageId);
-    if (!update) return;
+    if (!update || updatingAll) return;
     const button = $('#extensionsUpdate');
     button.disabled = true;
     button.textContent = 'Updating…';

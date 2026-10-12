@@ -224,10 +224,19 @@
                 <button type="button" class="extensionsTab active" data-extensions-mode="installed" role="tab">Installed</button>
                 <button type="button" class="extensionsTab" data-extensions-mode="discover" role="tab">Discover</button>
             </div>
+            <!-- What the title bar badge counts, spelled out and actionable: which packages are outdated
+                 and one button to update them all (see docs/extensionsExplorer.md's Update checking note).
+                 Shown in Installed mode only, on whichever tab is open, while any update is known. -->
+            <div id="extensionsUpdatesStrip" class="extensionsUpdatesStrip" role="status" hidden>
+                <span id="extensionsUpdatesSummary"></span>
+                <button id="extensionsUpdatesShow" type="button" class="extensionsToggleButton">Show</button>
+                <button id="extensionsUpdateAll" type="button" class="extensionsToggleButton extensionsUpdateAllButton">Update all</button>
+            </div>
             <div class="extensionsTabs" role="tablist" id="extensionsTabs">
-                <button type="button" class="extensionsTab active" data-extensions-tab="addon" role="tab">Add-ons</button>
-                <button type="button" class="extensionsTab" data-extensions-tab="plugin" role="tab">Plugins</button>
-                <button type="button" class="extensionsTab" data-extensions-tab="fmu" role="tab">FMUs</button>
+                <button type="button" class="extensionsTab active" data-extensions-tab="addon" role="tab">Add-ons<span class="extensionsTabCount" hidden></span></button>
+                <button type="button" class="extensionsTab" data-extensions-tab="plugin" role="tab">Plugins<span class="extensionsTabCount" hidden></span></button>
+                <button type="button" class="extensionsTab" data-extensions-tab="fmu" role="tab">FMUs<span class="extensionsTabCount" hidden></span></button>
+                <button type="button" class="extensionsTab" id="extensionsUpdatesTab" data-extensions-tab="updates" role="tab" hidden>Updates<span class="extensionsTabCount" hidden></span></button>
             </div>
             <div class="shapeLibraryDomains" id="extensionsDomains" role="tablist" hidden></div>
             <p id="extensionsRestartNotice" class="assistantConfigurationStatus" role="status" hidden></p>

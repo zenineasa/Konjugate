@@ -242,6 +242,22 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 }
 .extensionsItemMeta { display: block; margin-top: 2px; color: #647984; font-size: 7px; }
 #extensionsRestartNotice { margin-top: 8px; }
+.extensionsUpdatesStrip { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 7px 10px; color: #9fd6d0; background: rgb(66 201 188 / 7%); border: 1px solid #2d484c; border-radius: 5px; font-size: 8px; }
+.extensionsUpdatesStrip[hidden] { display: none; }
+.extensionsUpdatesStrip > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.extensionsUpdatesStrip button { flex-shrink: 0; height: 24px; }
+.extensionsUpdatesStrip button[hidden] { display: none; }
+.extensionsUpdatesStrip .extensionsUpdateAllButton { color: #09201e; background: var(--accent, #42c9bc); border-color: transparent; font-weight: 700; }
+.extensionsUpdatesStrip .extensionsUpdateAllButton:hover { color: #09201e; background: var(--accent-bright, #6ce0d5); }
+.extensionsUpdatesStrip button:disabled { opacity: .55; cursor: default; }
+.extensionsTabCount { margin-left: 5px; padding: 0 5px; color: #06201d; background: #82cfc8; border-radius: 999px; font-size: 7px; font-weight: 700; letter-spacing: 0; }
+.extensionsTabCount[hidden] { display: none; }
+.extensionsTab.active .extensionsTabCount { color: var(--accent, #42c9bc); background: #09201e; }
+.extensionsItem { position: relative; }
+.extensionsItem.hasUpdate { border-color: #2f5b59; }
+.extensionsItem.hasUpdate > b { padding-right: 96px; }
+.extensionsUpdatePill { position: absolute; top: 8px; right: 8px; padding: 2px 7px; color: #06201d; background: #82cfc8; border-radius: 999px; font-size: 6.5px; font-style: normal; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.extensionsItemUpdate { color: #82cfc8; font-weight: 600; }
 .extensionsRestartPendingNotice { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding: 8px 10px; color: #d6a35f; background: rgb(214 163 95 / 8%); border: 1px solid #4a3f2e; border-radius: 5px; font-size: 8px; }
 .extensionsRestartPendingNotice[hidden] { display: none; }
 .extensionsRestartPendingNotice .extensionsToggleButton { flex-shrink: 0; color: #d6a35f; border-color: #4a3f2e; }

@@ -61,6 +61,15 @@ async function waitFor(window, expression, message, timeout = 5000) {
     throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}`);
 }
 
+// Run opens the Run dialog, and is disabled while the model is being (re)validated, as it is after any edit.
+// Clicking a disabled button does nothing, so wait for it first, then for the dialog itself: a test that
+// goes on to fill and submit the dialog would otherwise be working on one that never opened.
+async function openRunDialog(window) {
+    await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available to open the Run dialog.', 15000);
+    await evaluate(window, `document.querySelector('#runButton').click()`);
+    await waitFor(window, `document.querySelector('#runLaunchDialog').open`, 'The Run dialog did not open.');
+}
+
 // Closing a window mid-validation cancels its engine process; let validation settle first.
 async function closeWhenValidated(window, timeout = 10000) {
     await waitFor(window, `!document.querySelector('#validationSummary')?.classList.contains('pending')`, 'Model validation did not settle before closing the window.', timeout);
@@ -224,7 +233,9 @@ export async function runInteractionTests(driver) {
     const addonMissing = (addonId, repository) => !installedAddons.has(addonId) && `needs the ${addonId} add-on -- build ../${repository} (npm run build) or set KONJUGATE_INTERACTION_ADDONS`;
     let passedCount = 0;
     let skippedCount = 0;
+    const only = process.env.KONJUGATE_INTERACTION_ONLY;
     const run = async (name, task, { skip } = {}) => {
+        if (only && !name.includes(only)) return;
         if (skip) {
             console.log(`○ ${name} (skipped: ${skip})`);
             skippedCount += 1;
@@ -636,7 +647,7 @@ export async function runInteractionTests(driver) {
         // The numerics and execution settings live in the Run dialog; "Save settings" stores them with the
         // model without starting a run.
         await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available to open the run settings.', 10000);
-        await evaluate(window, `document.querySelector('#runButton').click()`);
+        await openRunDialog(window);
         assert.equal(await evaluate(window, `document.querySelector('#runExecutionBackend').value`), 'automatic');
         assert.equal(await evaluate(window, `document.querySelector('#runExecutionAdvanced').open`), false);
         await evaluate(window, `(() => {
@@ -712,7 +723,7 @@ export async function runInteractionTests(driver) {
     await run('Run invokes the C++ simulation and displays state results', async () => {
         assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
-        await evaluate(window, `document.querySelector('#runButton').click()`);
+        await openRunDialog(window);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1.5'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
         await waitFor(window, `!document.querySelector('#resultTransport').hidden && document.querySelector('.resultMode small').textContent === 'Running · model locked'`, 'C++ simulation did not enter its running state.', 10000);
         assert.equal(await evaluate(window, `!document.querySelector('#simulationPacing').hidden && document.querySelector('#resultPlaybackRate').hidden`), true);
@@ -2463,7 +2474,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#createEdge').click()`);
         await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the Pose link edge did not close the builder.');
 
-        await evaluate(window, `document.querySelector('#runButton').click()`);
+        await openRunDialog(window);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
         await waitFor(window, `document.querySelector('.resultMode b').textContent === 'Results'`, 'Offline run did not complete.', 15000);
     });
@@ -3495,7 +3506,7 @@ export async function runInteractionTests(driver) {
 
         // A real ~10 wall-clock-second run under realTime pacing, matching the reported repro
         // exactly, rather than the near-instantaneous runs the rest of this suite uses.
-        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await openRunDialog(diagnosticWindow);
         await evaluate(diagnosticWindow, `(() => { document.querySelector('#runTargetTime').value = '10'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
         await waitFor(diagnosticWindow, `document.querySelector('.resultMode small').textContent === 'Running · model locked'`, 'C++ simulation did not enter its running state in the diagnostic window.', 10000);
 
@@ -3638,7 +3649,7 @@ export async function runInteractionTests(driver) {
         // above), just kept deterministic rather than depending on whatever default the app
         // happens to launch new projects with.
         await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before the run settings could be opened.', 10000);
-        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await openRunDialog(diagnosticWindow);
         await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
         await evaluate(diagnosticWindow, `(() => {
             document.querySelector('#runGlobalTimeStep').value = '0.1';
@@ -3648,7 +3659,7 @@ export async function runInteractionTests(driver) {
         await waitFor(diagnosticWindow, `!document.querySelector('#runLaunchDialog').open`, 'Run dialog did not close.');
 
         await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
-        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await openRunDialog(diagnosticWindow);
         await evaluate(diagnosticWindow, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
         // Not just .resultMode b's textContent: that field's own default HTML already reads
         // "Results" before any run has ever happened, so checking it alone can pass instantly
@@ -3738,7 +3749,7 @@ export async function runInteractionTests(driver) {
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#runButton').disabled`, 'Model validation did not settle before the run settings could be opened.', 10000);
-        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await openRunDialog(diagnosticWindow);
         await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
         await evaluate(diagnosticWindow, `(() => {
             document.querySelector('#runGlobalTimeStep').value = '0.1';
@@ -3805,7 +3816,7 @@ export async function runInteractionTests(driver) {
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#runButton').disabled`, 'Model validation did not settle before the run settings could be opened.', 10000);
-        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await openRunDialog(diagnosticWindow);
         await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
         await evaluate(diagnosticWindow, `(() => {
             document.querySelector('#runGlobalTimeStep').value = '0.1';
@@ -3815,7 +3826,7 @@ export async function runInteractionTests(driver) {
         await waitFor(diagnosticWindow, `!document.querySelector('#runLaunchDialog').open`, 'Run dialog did not close.');
 
         await waitFor(diagnosticWindow, `!document.querySelector('#runButton').disabled`, 'Model validation did not complete before Run could be started.', 10000);
-        await evaluate(diagnosticWindow, `document.querySelector('#runButton').click()`);
+        await openRunDialog(diagnosticWindow);
         await evaluate(diagnosticWindow, `(() => {
             document.querySelector('#runTargetTime').value = '1';
             document.querySelector('#runStabilityMonitoring').checked = false;
@@ -3939,7 +3950,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `document.querySelector('#termEquationDiagnostics').textContent`), 'Valid expression · MathJSON ready');
 
         // Run and check both time-dependent rates switched where they should.
-        await evaluate(opened, `document.querySelector('#runButton').click()`);
+        await openRunDialog(opened);
         await evaluate(opened, `(() => { document.querySelector('#runTargetTime').value = '5'; document.querySelector('#startRun').click(); })()`);
         await waitFor(opened, `document.querySelector('.resultMode b').textContent === 'Results'`, 'The run did not complete.', 15000);
         await waitFor(opened, `Number(document.querySelector('#resultTimeline').max) === 5 && Number(document.querySelector('#resultTimeline').value) === 5`, 'The results did not load to the end of the run.', 15000);
@@ -4296,7 +4307,11 @@ export async function runInteractionTests(driver) {
         const before = driver.allHandles();
         await driver.simulateOsFileOpen(crowdedPath);
         const crowdedWindow = await driver.waitForNewHandle(before);
-        await waitFor(crowdedWindow, `document.querySelectorAll('.node-label-container').length === 40`, 'The crowded project did not load.');
+        // Loaded means all forty labels are accounted for: drawn, or left out. Not "forty label elements exist":
+        // a label is added to the page the first time it is drawn, so one left out before its first frame (the
+        // left-out pass runs on its own timer, and can come first in a new window) never gets an element at all.
+        await waitFor(crowdedWindow, `[...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').length
+            + Number(document.querySelector('#canvas').dataset.labelsLeftOut ?? 0) === 40`, 'The crowded project did not load.');
         await waitFor(crowdedWindow, `Number(document.querySelector('#canvas').dataset.labelsLeftOut) > 0`, 'No label was left out of a crowded canvas.', 5000);
         const leftOut = Number(await evaluate(crowdedWindow, `document.querySelector('#canvas').dataset.labelsLeftOut`));
         assert.ok(leftOut >= 10 && leftOut < 40, `${leftOut} of 40 labels left out`);

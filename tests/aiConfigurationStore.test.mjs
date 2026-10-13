@@ -15,8 +15,12 @@ const uuidFactory = () => {
     let index = 10;
     return () => `00000000-0000-4000-8000-${String(index++).padStart(12, '0')}`;
 };
-const memoryVault = ({ available = true, plainText = false } = {}) => ({
-    status: async () => ({ available, plainText, backend: plainText ? 'basic_text' : 'test' }),
+const memoryVault = ({ available = true, plainText = false, onStatus = () => {} } = {}) => ({
+    kind: () => ({ plainText, backend: plainText ? 'basic_text' : 'test' }),
+    status: async () => {
+        onStatus();
+        return { available, plainText, backend: plainText ? 'basic_text' : 'test' };
+    },
     encrypt: async (value) => Buffer.from(`encrypted:${value}`),
     decrypt: async (value) => Buffer.from(value).toString().replace(/^encrypted:/, '')
 });
@@ -95,4 +99,35 @@ test('Electron credential vault reports plaintext Linux backends', async () => {
     };
     const vault = createElectronCredentialVault(safeStorage, 'linux');
     assert.deepEqual(await vault.status(), { available: true, backend: 'basic_text', plainText: true });
+});
+
+test('listing configurations never asks the operating system to unlock secure storage; saving a key does', async () => {
+    let asked = 0;
+    await withStore(async (store) => {
+        await store.list();
+        const listed = await store.list();
+        assert.equal(asked, 0, 'listing must not call status()');
+        assert.deepEqual(listed.credentialStorage, { backend: 'test', plainText: false });
+        await store.save({ name: 'Hosted', provider: 'openAi' }, 'secret-key');
+        assert.equal(asked, 1, 'saving a key checks that secure storage is available');
+    }, memoryVault({ onStatus: () => { asked += 1; } }));
+});
+
+test('Electron credential vault describes its storage without touching the Keychain, and asks only in status()', async () => {
+    let probes = 0;
+    const safeStorage = {
+        isEncryptionAvailable: () => { probes += 1; return true; },
+        getSelectedStorageBackend: () => 'gnome_libsecret',
+        encryptString: (value) => Buffer.from(value),
+        decryptString: (value) => value.toString()
+    };
+    const darwin = createElectronCredentialVault(safeStorage, 'darwin');
+    assert.deepEqual(darwin.kind(), { backend: 'darwin', plainText: false });
+    const linux = createElectronCredentialVault(safeStorage, 'linux');
+    assert.deepEqual(linux.kind(), { backend: 'gnome_libsecret', plainText: false });
+    assert.equal(probes, 0, 'kind() must not call isEncryptionAvailable');
+    assert.deepEqual(await darwin.status(), { available: true, backend: 'darwin', plainText: false });
+    assert.equal(probes, 1);
+    const plain = createElectronCredentialVault({ ...safeStorage, getSelectedStorageBackend: () => 'basic_text' }, 'linux');
+    assert.deepEqual(plain.kind(), { backend: 'basic_text', plainText: true });
 });

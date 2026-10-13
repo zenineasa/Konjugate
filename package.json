@@ -72,11 +72,11 @@
         "clean": "make clean"
     },
     "devDependencies": {
-        "@electron/packager": "^20.0.4",
-        "electron": "^43.2.0",
-        "js-yaml": "^5.4.2",
-        "playwright": "^1.63.0",
-        "protobufjs-cli": "^2.7.0"
+        "@electron/packager": "^20.3.0",
+        "electron": "^43.7.9",
+        "js-yaml": "^5.4.3",
+        "playwright": "^1.64.0",
+        "protobufjs-cli": "^2.7.1"
     },
     "engines": {
         "node": ">=24.19.0"
@@ -93,7 +93,7 @@
         "mathlive": "^0.110.0",
         "occt-import-js": "^0.0.23",
         "plotly.js-dist-min": "^3.7.0",
-        "protobufjs": "^8.8.0",
+        "protobufjs": "^8.8.1",
         "pyodide": "^314.0.7",
         "scrypt-js": "^3.0.1",
         "three": "^0.185.1"

@@ -97,7 +97,7 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
             return {
                 activeConfigurationUuid: state.activeConfigurationUuid,
                 configurations: state.configurations.map(publicConfiguration),
-                credentialStorage: await credentialVault.status()
+                credentialStorage: credentialVault.kind()
             };
         },
         async save(input, credential) {
@@ -168,13 +168,16 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
 }
 
 export function createElectronCredentialVault(safeStorage, platform = process.platform) {
+    const kind = () => {
+        const backend = platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function'
+            ? safeStorage.getSelectedStorageBackend() : platform;
+        return { backend, plainText: backend === 'basic_text' };
+    };
     return Object.freeze({
-        async status() {
-            const available = safeStorage.isEncryptionAvailable();
-            const backend = platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function'
-                ? safeStorage.getSelectedStorageBackend() : platform;
-            return { available, backend, plainText: backend === 'basic_text' };
-        },
+        kind,
+        // Whether the operating system will actually unlock its store. On macOS this reads the Keychain item
+        // and can prompt, so it is asked only when a key is about to be saved, not when configurations are listed.
+        async status() { return { available: safeStorage.isEncryptionAvailable(), ...kind() }; },
         async encrypt(value) { return safeStorage.encryptString(value); },
         async decrypt(value) { return safeStorage.decryptString(Buffer.from(value)); }
     });

@@ -28,7 +28,10 @@ delete environment.ELECTRON_RUN_AS_NODE;
 const userDataDirectory = await mkdtemp(join(tmpdir(), 'konjugate-packaged-interaction-'));
 environment.KONJUGATE_INTERACTION_USER_DATA = userDataDirectory;
 environment.KONJUGATE_INTERACTION_INSTALLED_ADDONS = (await installInteractionAddons(rootDirectory, userDataDirectory)).join(',');
-const child = spawn(executable, ['--interaction-test', '--disable-gpu', '--enable-unsafe-swiftshader'], {
+// --use-mock-keychain: listing model configurations asks Electron's safeStorage whether encryption is
+// available, which on macOS looks up (or creates) an item in the login Keychain and prompts for access.
+// The tests do not need the real Keychain, so Chromium's mock one keeps them from asking.
+const child = spawn(executable, ['--interaction-test', '--disable-gpu', '--enable-unsafe-swiftshader', '--use-mock-keychain'], {
     cwd: rootDirectory,
     env: environment,
     stdio: 'inherit'

@@ -32,8 +32,10 @@ const allowedPermissions = new Set([
 // return derived text files that take its place among the inputs.
 // multipleBinaryInputs: a binary role may also be `multiple`, its files given to the importer together.
 // importProgress: an importer may say how far it has got (helpers.progress), and the window hears it with onProgress.
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress']);
-const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open']);
+// storedFiles: a launcher with files.store keeps large files for the user (downloaded, or brought in from disk) and
+// gives them to its importer as binary inputs (addonFileStore.mjs).
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress', 'storedFiles']);
+const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open', 'files.store']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 
 function safeRelativePath(path, description, extensions) {

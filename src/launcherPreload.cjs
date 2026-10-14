@@ -59,5 +59,15 @@ contextBridge.exposeInMainWorld('konjugateLauncher', Object.freeze({
     restoreSession: () => ipcRenderer.invoke('launcherRestoreSession'),
     exportResults: (scenarioId, options) => ipcRenderer.invoke('launcherExportResults', { scenarioId, ...options }),
     openPage: (pageId) => ipcRenderer.invoke('launcherOpenPage', { pageId }),
-    onProgress: (callback) => ipcRenderer.on('launcherProgress', (_event, progress) => callback(progress))
+    onProgress: (callback) => ipcRenderer.on('launcherProgress', (_event, progress) => callback(progress)),
+    // Large files kept for the user (with files.store): listed, brought in from disk, downloaded from a declared host,
+    // described, removed, and given to the importer as a binary role's files.
+    storedFiles: () => ipcRenderer.invoke('launcherStoredFiles'),
+    storeFiles: (details, options = {}) => ipcRenderer.invoke('launcherStoreFiles', { details, accept: options?.accept ?? null, title: options?.title ?? null }),
+    downloadFile: (url, options = {}) => ipcRenderer.invoke('launcherDownloadFile', { url, ...options }),
+    cancelDownload: (downloadId) => ipcRenderer.invoke('launcherCancelDownload', { downloadId }),
+    fileSize: (url) => ipcRenderer.invoke('launcherFileSize', { url }),
+    describeStoredFile: (id, details) => ipcRenderer.invoke('launcherDescribeStoredFile', { id, details }),
+    removeStoredFile: (id) => ipcRenderer.invoke('launcherRemoveStoredFile', { id }),
+    useStoredFiles: (importerId, role, ids) => ipcRenderer.invoke('launcherUseStoredFiles', { importerId, role, ids })
 }));

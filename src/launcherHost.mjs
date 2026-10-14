@@ -13,6 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { startEngineRun } from './engineAdapter.mjs';
 import { encodeProjectFile } from './projectFile.mjs';
 import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './addonCache.mjs';
+import { addonFilesDirectory, createFileStore } from './addonFileStore.mjs';
 
 const maximumInputBytes = 10 * 1024 * 1024;
 // A binary input (a file role declared `binary`): one large file the importer reads as bytes and turns into text
@@ -30,6 +31,24 @@ export function binaryChoice(chosen, role) {
     const total = chosen.reduce((sum, item) => sum + item.size, 0);
     if (total > maximumBinaryTotalBytes) throw new Error(`These files come to ${Math.round(total / 1024 / 1024).toLocaleString('en')} MB, more than the ${maximumBinaryTotalBytes / 1024 / 1024} MB they may come to together.`);
     return chosen.map(({ path, size }) => ({ role, name: basename(path), path, binary: true, bytes: size, sample: false }));
+}
+// The kinds of file a window asks to keep, named by their endings (["osm.pbf"]): checked, the open dialog's filter (which
+// goes by a name's last extension only, so "osm.pbf" offers .pbf files) and a check of each file chosen by its whole
+// ending, in any case, so a file the dialog let through all the same is refused before anything is copied. No kinds
+// named, any file is kept, as before.
+export function storedFileKinds(accept) {
+    if (accept === undefined || accept === null) return { filters: [], check: () => {} };
+    if (!Array.isArray(accept) || !accept.length || accept.length > 8 || !accept.every((ending) => typeof ending === 'string' && /^[a-z0-9]{1,12}(\.[a-z0-9]{1,12}){0,2}$/i.test(ending))) {
+        throw new Error('A window names the files it keeps as up to 8 endings, such as ["osm.pbf"].');
+    }
+    const endings = accept.map((ending) => `.${ending.toLowerCase()}`);
+    const named = endings.length === 1 ? endings[0] : `${endings.slice(0, -1).join(', ')} or ${endings.at(-1)}`;
+    return {
+        filters: [{ name: named, extensions: [...new Set(accept.map((ending) => ending.split('.').at(-1).toLowerCase()))] }],
+        check(path) {
+            if (!endings.some((ending) => basename(path).toLowerCase().endsWith(ending))) throw new Error(`${basename(path)} was not kept: only ${named} files are kept here.`);
+        }
+    };
 }
 const maximumDerivedFiles = 64;
 // Long enough for an importer that builds a large region (routing every lane over a city's roads takes tens of seconds,
@@ -717,6 +736,97 @@ export function registerLauncherHandlers(deps) {
         needs(addon, 'network.fetch');
         await cacheFor(addon).clear();
         return {};
+    }));
+
+    // ---- large files kept for the user (addonFileStore.mjs) ----------------------------------------------------------
+    const stores = new Map();
+    const storeFor = (addon) => {
+        const id = addon.manifest.addonId;
+        if (!stores.has(id)) stores.set(id, createFileStore({ directory: addonFilesDirectory(app.getPath('userData'), id) }));
+        return stores.get(id);
+    };
+    // A window sees an entry without the path its bytes are at.
+    const shown = ({ path, ...entry }) => entry;
+    const downloads = new Map(); // a window's download id -> its AbortController
+    ipcMain.handle('launcherStoredFiles', guarded(async ({ addon }) => {
+        needs(addon, 'files.store');
+        const store = storeFor(addon);
+        return { files: await store.list(), bytes: await store.usage() };
+    }));
+    // Brings files in from the user's disk, as copies: chosen in a dialog (any number, of the kinds the window names when
+    // it names them), kept as the user's own.
+    ipcMain.handle('launcherStoreFiles', guarded(async ({ addon, state }, { details = {}, accept = null, title = null }) => {
+        needs(addon, 'files.store');
+        const kinds = storedFileKinds(accept);
+        const chosen = await dialog.showOpenDialog(state.launcherWindow, { title: typeof title === 'string' && title.trim() ? title.trim().slice(0, 80) : 'Files to keep', properties: ['openFile', 'multiSelections'], filters: kinds.filters });
+        if (chosen.canceled || !chosen.filePaths.length) return { files: [] };
+        for (const path of chosen.filePaths) kinds.check(path);
+        const store = storeFor(addon);
+        const files = [];
+        for (const path of chosen.filePaths) {
+            try { files.push(await store.putCopy({ path, details })); } catch (error) { throw new Error(error.code ? unreadableFile(basename(path), error) : error.message); }
+        }
+        return { files };
+    }));
+    // Downloads a file from a host the manifest declares, into the store, saying how far it has got.
+    ipcMain.handle('launcherDownloadFile', guarded(async ({ addon, state }, { url, name = null, server = null, checksumUrl = null, details = {}, downloadId = null }) => {
+        needs(addon, 'files.store');
+        needs(addon, 'network.fetch');
+        const controller = new AbortController();
+        if (typeof downloadId === 'string') downloads.set(downloadId, controller);
+        let last = 0;
+        const onProgress = ({ done, total }) => {
+            const now = Date.now();
+            if (now - last < 200 && done !== total) return;
+            last = now;
+            if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', { stage: 'download', downloadId, done, total });
+        };
+        try {
+            const entry = await storeFor(addon).download({ url, name, server, checksumUrl, details, hosts: addon.manifest.network?.hosts ?? [], onProgress, signal: controller.signal, fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
+            return { file: entry };
+        } finally {
+            if (typeof downloadId === 'string') downloads.delete(downloadId);
+        }
+    }));
+    // How large a file is before it is downloaded: asked of the server, at a declared host.
+    ipcMain.handle('launcherFileSize', guarded(async ({ addon }, { url }) => {
+        needs(addon, 'files.store');
+        needs(addon, 'network.fetch');
+        return { bytes: await storeFor(addon).size({ url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` }) };
+    }));
+    ipcMain.handle('launcherCancelDownload', guarded(async ({ addon }, { downloadId }) => {
+        needs(addon, 'files.store');
+        downloads.get(downloadId)?.abort();
+        return {};
+    }));
+    ipcMain.handle('launcherDescribeStoredFile', guarded(async ({ addon }, { id, details }) => {
+        needs(addon, 'files.store');
+        return { file: await storeFor(addon).describe(id, details) };
+    }));
+    ipcMain.handle('launcherRemoveStoredFile', guarded(async ({ addon }, { id }) => {
+        needs(addon, 'files.store');
+        await storeFor(addon).remove(id);
+        return {};
+    }));
+    // Stored files as a binary role's files, in place of any chosen: read when the importer is next asked to.
+    ipcMain.handle('launcherUseStoredFiles', guarded(async ({ addon, workspace }, { importerId, role, ids }) => {
+        needs(addon, 'files.store');
+        needs(addon, 'data.import');
+        const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
+        const file = declared(importer.files, 'role', role, 'file role');
+        if (!file.binary) throw new Error('Stored files are given to a binary file role.');
+        if (!Array.isArray(ids) || !ids.length || (!file.multiple && ids.length > 1)) throw new Error('Name the stored files to use.');
+        const store = storeFor(addon);
+        const entries = [];
+        for (const id of ids) {
+            const entry = await store.get(id);
+            if (!entry) throw new Error('A stored file named is no longer kept.');
+            entries.push(entry);
+        }
+        const pending = binaryChoice(entries.map((entry) => ({ path: entry.path, size: entry.bytes })), role);
+        dropRole(workspace, file);
+        pending.forEach((item, index) => workspace.pending.set(pendingKey(file, `${entries[index].id}-${entries[index].name}`), { ...item, name: entries[index].name, stored: entries[index].id }));
+        return { files: entries.map(shown) };
     }));
 
     // Reads the chosen files from disk again, for data that another program keeps up to date. Sample files are

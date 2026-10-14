@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
-    binaryChoice, checkedDerived, checkedProgress, importerInputs, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
+    binaryChoice, checkedDerived, storedFileKinds, checkedProgress, importerInputs, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
     attachAddonData, buildSessionEntry, sessionInputs,
     checkForkTime,
     checkRunLength,
@@ -490,4 +490,26 @@ test('an importer says how far it has got, and the host passes it on checked, ap
     assert.deepEqual(checkedProgress({ done: 7, total: 4, message: 'x'.repeat(300) }), { done: 4, total: 4, message: 'x'.repeat(200) });
     assert.equal(checkedProgress({ done: 1, total: 0 }), null);
     assert.equal(checkedProgress(null), null);
+});
+
+test('a launcher may keep files for the user with files.store, and require storedFiles', () => {
+    const manifest = launcher();
+    manifest.permissions = [...manifest.permissions, 'files.store'];
+    manifest.requires = ['storedFiles', 'importProgress'];
+    assert.equal(validateAddonManifest(manifest).kind, 'launcher');
+});
+
+test('a window keeping files names their endings: the dialog offers those, and another file is refused before any is copied', () => {
+    const maps = storedFileKinds(['osm.pbf']);
+    assert.deepEqual(maps.filters, [{ name: '.osm.pbf', extensions: ['pbf'] }]);
+    maps.check('/maps/switzerland-261013.osm.pbf');
+    maps.check('/maps/SWITZERLAND.OSM.PBF');
+    assert.throws(() => maps.check('/maps/switzerland-latest-free.shp.zip'), /switzerland-latest-free\.shp\.zip was not kept: only \.osm\.pbf files are kept here\.$/);
+    // The dialog goes by the last extension, so a .pbf of another kind gets through it, and is refused here.
+    assert.throws(() => maps.check('/maps/tiles.vector.pbf'), /not kept/);
+    assert.deepEqual(storedFileKinds(['csv', 'txt']).filters, [{ name: '.csv or .txt', extensions: ['csv', 'txt'] }]);
+    // None named: any file, as before.
+    assert.deepEqual(storedFileKinds(null).filters, []);
+    storedFileKinds(undefined).check('/anything.bin');
+    for (const wrong of [[], ['.osm.pbf'], ['osm/pbf'], 'pbf', [1]]) assert.throws(() => storedFileKinds(wrong), /up to 8 endings/);
 });

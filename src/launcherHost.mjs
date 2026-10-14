@@ -18,6 +18,19 @@ const maximumInputBytes = 10 * 1024 * 1024;
 // A binary input (a file role declared `binary`): one large file the importer reads as bytes and turns into text
 // files of its other roles. It is read from disk when the importer runs and is never kept in memory or in a session.
 export const maximumBinaryInputBytes = 1024 * 1024 * 1024;
+// And all of a role's binary files together: they are in the importer's memory at once.
+export const maximumBinaryTotalBytes = 2 * 1024 * 1024 * 1024;
+
+// The binary files chosen for a role ([{ path, size }]), checked: each within the limit for one, and all within the
+// limit together. Returns them as pending inputs. Throws a message naming the file, or the total, that is too large.
+export function binaryChoice(chosen, role) {
+    for (const { path, size } of chosen) {
+        if (size > maximumBinaryInputBytes) throw new Error(`${basename(path)} is larger than the ${maximumBinaryInputBytes / 1024 / 1024} MB limit.`);
+    }
+    const total = chosen.reduce((sum, item) => sum + item.size, 0);
+    if (total > maximumBinaryTotalBytes) throw new Error(`These files come to ${Math.round(total / 1024 / 1024).toLocaleString('en')} MB, more than the ${maximumBinaryTotalBytes / 1024 / 1024} MB they may come to together.`);
+    return chosen.map(({ path, size }) => ({ role, name: basename(path), path, binary: true, bytes: size, sample: false }));
+}
 const maximumDerivedFiles = 64;
 // Long enough for an importer that builds a large region (routing every lane over a city's roads takes tens of seconds,
 // more on a busy machine); short enough that one that hangs is still stopped.
@@ -139,6 +152,16 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
         });
         worker.once('error', (error) => { clearTimeout(timer); reject(new Error(`The importer failed: ${error.message}`)); });
     });
+}
+
+// Why a chosen file could not be read, in words a user can act on: gone, not allowed (macOS keeps Desktop, Documents
+// and Downloads private until the user allows an app in), or another reason, named.
+export function unreadableFile(name, error) {
+    if (error?.code === 'ENOENT') return `${name} could not be read: it is no longer where it was chosen. Choose it again.`;
+    if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+        return `${name} could not be read: Konjugate is not allowed to read that folder. ${process.platform === 'darwin' ? 'On macOS, allow it under System Settings, Privacy & Security, Files and Folders, or move the file to a folder it may read, and choose it again.' : 'Allow it to read the folder, or move the file where it may, and choose it again.'}`;
+    }
+    return `${name} could not be read (${error?.code ?? error?.message ?? 'unknown reason'}). Choose it again.`;
 }
 
 // The text files an importer derived from what it was given (`derived: [{ role, name, text }]`), checked: each is of
@@ -555,12 +578,12 @@ export function registerLauncherHandlers(deps) {
         if (chosen.canceled || !chosen.filePaths.length) return { chosen: false };
         const paths = file.multiple ? chosen.filePaths : chosen.filePaths.slice(0, 1);
         if (file.binary) {
-            // Noted, not read: it is read from disk when the importer runs. Choosing it changes no other input until then.
-            const { size } = await stat(paths[0]);
-            if (size > maximumBinaryInputBytes) throw new Error(`${basename(paths[0])} is larger than the ${maximumBinaryInputBytes / 1024 / 1024} MB limit.`);
+            // Noted, not read: read from disk when the importer runs. Choosing changes no other input until then. Those
+            // chosen together replace the role's earlier ones.
+            const entries = binaryChoice(await Promise.all(paths.map(async (path) => ({ path, size: (await stat(path)).size }))), role);
             dropRole(workspace, file);
-            workspace.pending.set(pendingKey(file, basename(paths[0])), { role, name: basename(paths[0]), path: paths[0], binary: true, bytes: size, sample: false });
-            return { chosen: true, name: basename(paths[0]), names: [basename(paths[0])], bytes: size };
+            for (const entry of entries) workspace.pending.set(pendingKey(file, entry.name), entry);
+            return { chosen: true, name: entries[0].name, names: entries.map((entry) => entry.name), bytes: entries.reduce((sum, entry) => sum + entry.bytes, 0) };
         }
         const read = [];
         for (const path of paths) {
@@ -718,7 +741,7 @@ export function registerLauncherHandlers(deps) {
             if (!file.binary) { files.push({ role: file.role, name: file.name, text: file.text, encoding: file.encoding }); continue; }
             // A binary input is read now, into memory of its own, and handed over to the importer.
             let bytes;
-            try { bytes = await readFile(file.path); } catch { throw new Error(`${file.name} could not be read: it may have been moved. Choose it again.`); }
+            try { bytes = await readFile(file.path); } catch (error) { throw new Error(unreadableFile(file.name, error)); }
             if (bytes.length > maximumBinaryInputBytes) throw new Error(`${file.name} is larger than the ${maximumBinaryInputBytes / 1024 / 1024} MB limit.`);
             // A large file comes in memory of its own, which is handed over as it is; a small one is copied out of the pool.
             const data = bytes.byteOffset === 0 && bytes.buffer.byteLength === bytes.length ? new Uint8Array(bytes.buffer) : Uint8Array.from(bytes);

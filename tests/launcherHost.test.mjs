@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
-    checkedDerived, maximumBinaryInputBytes,
+    binaryChoice, checkedDerived, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
     attachAddonData, buildSessionEntry, sessionInputs,
     checkForkTime,
     checkRunLength,
@@ -431,13 +431,24 @@ test('an importer may take a large file as bytes and return text files derived f
     assert.ok(maximumBinaryInputBytes >= 600 * 1024 * 1024, 'a region\'s extract fits');
 });
 
-test('a binary file role is one optional file with no sample, and is not kept with a session', () => {
+test('a binary file role is optional, with no sample, may take several files within a limit, and is not kept with a session', () => {
+    let manifestWith;
     const withFile = (file) => { const manifest = launcher(); manifest.contributes.importers[0].files.push({ role: 'extract', label: 'Extract', accept: ['pbf'], ...file }); return manifest; };
     assert.equal(validateAddonManifest(withFile({ binary: true })).kind, 'launcher');
     assert.throws(() => validateAddonManifest(withFile({ binary: 'yes' })), /binary must be true or false/);
-    assert.throws(() => validateAddonManifest(withFile({ binary: true, multiple: true })), /one optional file with no sample/);
-    assert.throws(() => validateAddonManifest(withFile({ binary: true, required: true })), /one optional file with no sample/);
-    assert.throws(() => validateAddonManifest(withFile({ binary: true, sample: 'samples/x.pbf' })), /one optional file with no sample/);
+    assert.equal(validateAddonManifest(withFile({ binary: true, multiple: true })).kind, 'launcher', 'several, for a city whose map comes in two extracts');
+    assert.throws(() => validateAddonManifest(withFile({ binary: true, required: true })), /optional, with no sample/);
+    assert.throws(() => validateAddonManifest(withFile({ binary: true, sample: 'samples/x.pbf' })), /optional, with no sample/);
+    // Each within the limit for one, and together within the limit for all: they are in the importer's memory at once.
+    const mb = 1024 * 1024;
+    assert.deepEqual(binaryChoice([{ path: '/maps/switzerland.osm.pbf', size: 548 * mb }, { path: '/maps/nord-ovest.osm.pbf', size: 593 * mb }], 'extract').map((entry) => [entry.name, entry.binary, entry.bytes]),
+        [['switzerland.osm.pbf', true, 548 * mb], ['nord-ovest.osm.pbf', true, 593 * mb]]);
+    assert.throws(() => binaryChoice([{ path: '/maps/europe.osm.pbf', size: 1100 * mb }], 'extract'), /europe\.osm\.pbf is larger than the 1024 MB limit\.$/);
+    assert.throws(() => binaryChoice([{ path: '/a.osm.pbf', size: 900 * mb }, { path: '/b.osm.pbf', size: 900 * mb }, { path: '/c.osm.pbf', size: 900 * mb }], 'extract'), /These files come to 2,700 MB, more than the 2048 MB they may come to together\.$/);
+    assert.equal(maximumBinaryTotalBytes, 2048 * mb);
+    manifestWith = launcher();
+    manifestWith.requires = ['multipleBinaryInputs'];
+    assert.equal(validateAddonManifest(manifestWith).kind, 'launcher');
     const manifest = launcher();
     manifest.requires = ['binaryInputs'];
     assert.equal(validateAddonManifest(manifest).kind, 'launcher');
@@ -449,4 +460,11 @@ test('a binary file role is one optional file with no sample, and is not kept wi
     // What was derived says what it was read from, and says so again when the session is restored.
     assert.equal(entry.inputs[0].source, 'region.osm.pbf');
     assert.equal(sessionInputs(entry, [{ files: [{ role: 'roads', multiple: true }, { role: 'extract', binary: true }] }])[0].file.source, 'region.osm.pbf');
+});
+
+test('a chosen file that cannot be read says why: gone, not allowed, or the reason given', () => {
+    assert.equal(unreadableFile('a.osm.pbf', { code: 'ENOENT' }), 'a.osm.pbf could not be read: it is no longer where it was chosen. Choose it again.');
+    assert.match(unreadableFile('a.osm.pbf', { code: 'EPERM' }), /^a\.osm\.pbf could not be read: Konjugate is not allowed to read that folder\. /);
+    assert.match(unreadableFile('a.osm.pbf', { code: 'EACCES' }), /not allowed to read that folder/);
+    assert.equal(unreadableFile('a.osm.pbf', { code: 'EIO' }), 'a.osm.pbf could not be read (EIO). Choose it again.');
 });

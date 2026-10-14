@@ -30,7 +30,8 @@ const allowedPermissions = new Set([
 // launcher whose results are read as "nothing changed" can refuse such a version.
 // binaryInputs: an importer file role may be binary (a large file given to the importer as bytes), and an importer may
 // return derived text files that take its place among the inputs.
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs']);
+// multipleBinaryInputs: a binary role may also be `multiple`, its files given to the importer together.
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 
@@ -91,10 +92,11 @@ export function validateLauncherManifest(manifest) {
         for (const file of files) {
             if (!file.label) throw new Error('A launcher importer file needs a label.');
             if (file.multiple !== undefined && typeof file.multiple !== 'boolean') throw new Error('A launcher importer file\'s multiple must be true or false.');
-            // A binary role takes one large file as bytes (a map extract, say), which the importer reads once and turns
+            // A binary role takes large files as bytes (a map extract, say; several, with `multiple`, as for a city on a
+            // border whose map comes in one extract for each country), which the importer reads once and turns
             // into text files of its other roles: it has no sample and is not kept with a session.
             if (file.binary !== undefined && typeof file.binary !== 'boolean') throw new Error('A launcher importer file\'s binary must be true or false.');
-            if (file.binary && (file.multiple || file.sample !== undefined || file.required)) throw new Error('A binary importer file is one optional file with no sample.');
+            if (file.binary && (file.sample !== undefined || file.required)) throw new Error('A binary importer file is optional, with no sample.');
             for (const sample of file.sample === undefined ? [] : [file.sample].flat()) safeRelativePath(sample, 'importer sample', null);
             if (Array.isArray(file.sample) && !file.multiple) throw new Error('Only a file role that accepts several files can list several samples.');
         }

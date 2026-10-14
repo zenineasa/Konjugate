@@ -31,7 +31,8 @@ const allowedPermissions = new Set([
 // binaryInputs: an importer file role may be binary (a large file given to the importer as bytes), and an importer may
 // return derived text files that take its place among the inputs.
 // multipleBinaryInputs: a binary role may also be `multiple`, its files given to the importer together.
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs']);
+// importProgress: an importer may say how far it has got (helpers.progress), and the window hears it with onProgress.
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 

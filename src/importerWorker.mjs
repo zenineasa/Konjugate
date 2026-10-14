@@ -18,7 +18,16 @@ import { reconcileEquationBindings, validateEquationLatex } from './equationMode
 const { entry, packageRoot, files, options } = workerData;
 const root = resolve(packageRoot);
 
+// Progress is passed on at most a few times a second: an importer may call this on every block of a large file.
+let lastProgress = 0;
 const helpers = {
+    // The importer saying how far it has got: `done` of `total`, and what it is doing. The window shows it.
+    progress({ done, total, message = '' } = {}) {
+        const now = Date.now();
+        if (done < total && now - lastProgress < 200) return;
+        lastProgress = now;
+        parentPort.postMessage({ progress: { done, total, message } });
+    },
     reconcileEquationBindings,
     validateEquationLatex,
     // Builds a model from Konjugate's own construction operations (the ones its assistant and its causal-inference

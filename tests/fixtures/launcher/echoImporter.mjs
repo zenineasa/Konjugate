@@ -8,6 +8,11 @@ export default async function importData({ files, helpers, options }) {
     }
     const text = files.find((file) => file.role === 'data')?.text ?? '';
     if (text.startsWith('boom')) throw new Error('boom');
+    if (text.startsWith('progress')) {
+        for (let done = 0; done <= 4; done += 1) { helpers.progress({ done, total: 4, message: `part ${done}` }); await new Promise((resolve) => setTimeout(resolve, 250)); }
+        helpers.progress({ done: 'nonsense', total: 4 });
+        return { ok: true, data: { reported: true }, report: { errors: [], warnings: [], summary: {} } };
+    }
     if (text.startsWith('hang')) await new Promise(() => {});
     if (text.startsWith('bad')) return { nope: true };
     if (text.startsWith('data-only')) return { ok: true, data: { received: options?.stage ?? null, files: files.length }, report: { errors: [], warnings: [], summary: {} } };

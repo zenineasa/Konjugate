@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
-    binaryChoice, checkedDerived, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
+    binaryChoice, checkedDerived, checkedProgress, importerInputs, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
     attachAddonData, buildSessionEntry, sessionInputs,
     checkForkTime,
     checkRunLength,
@@ -467,4 +467,27 @@ test('a chosen file that cannot be read says why: gone, not allowed, or the reas
     assert.match(unreadableFile('a.osm.pbf', { code: 'EPERM' }), /^a\.osm\.pbf could not be read: Konjugate is not allowed to read that folder\. /);
     assert.match(unreadableFile('a.osm.pbf', { code: 'EACCES' }), /not allowed to read that folder/);
     assert.equal(unreadableFile('a.osm.pbf', { code: 'EIO' }), 'a.osm.pbf could not be read (EIO). Choose it again.');
+});
+
+test('binary files are given to an importer only for a run that asks for them, and stay chosen for the next', () => {
+    const pending = [
+        { role: 'roads', name: 'roads-extract-1.json', text: '{}' },
+        { role: 'extract', name: 'switzerland.osm.pbf', path: '/maps/switzerland.osm.pbf', binary: true, bytes: 548 },
+        { role: 'extract', name: 'nord-ovest.osm.pbf', path: '/maps/nord-ovest.osm.pbf', binary: true, bytes: 593 },
+        { role: 'elsewhere', name: 'x.csv', text: '' }
+    ];
+    const roles = new Set(['roads', 'extract']);
+    assert.deepEqual(importerInputs(pending, roles, { step: 'roads' }).map((file) => file.name), ['roads-extract-1.json'], 'a step that does not read them is not handed a gigabyte');
+    assert.deepEqual(importerInputs(pending, roles, { step: 'extract', useBinaryFiles: true }).map((file) => file.name), ['roads-extract-1.json', 'switzerland.osm.pbf', 'nord-ovest.osm.pbf']);
+    assert.deepEqual(importerInputs(pending, roles).map((file) => file.name), ['roads-extract-1.json']);
+});
+
+test('an importer says how far it has got, and the host passes it on checked, apart from its result', async () => {
+    const heard = [];
+    const result = await runImporter({ addonDirectory: fixtureDirectory, importer: { entry: 'echoImporter.mjs' }, files: [{ role: 'data', name: 'data.csv', text: 'progress' }], timeoutMilliseconds: 5000, onProgress: (progress) => heard.push(progress) });
+    assert.deepEqual(result.data, { reported: true });
+    assert.deepEqual(heard.map((item) => [item.done, item.total, item.message]), [[0, 4, 'part 0'], [1, 4, 'part 1'], [2, 4, 'part 2'], [3, 4, 'part 3'], [4, 4, 'part 4']], 'what is not a number is not passed on');
+    assert.deepEqual(checkedProgress({ done: 7, total: 4, message: 'x'.repeat(300) }), { done: 4, total: 4, message: 'x'.repeat(200) });
+    assert.equal(checkedProgress({ done: 1, total: 0 }), null);
+    assert.equal(checkedProgress(null), null);
 });

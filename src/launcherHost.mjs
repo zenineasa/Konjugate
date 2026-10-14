@@ -116,11 +116,21 @@ export const safeFileName = (name) => String(name ?? '').replace(/[^\p{L}\p{N} .
 
 // ---- importers --------------------------------------------------------------------------------------
 
+// What an importer says of its progress, made safe to show: `done` of `total` (numbers, done within 0 and total) and
+// a short message. Null when it says nothing usable.
+export function checkedProgress(progress) {
+    const total = Number(progress?.total);
+    const done = Number(progress?.done);
+    if (!(total > 0) || !Number.isFinite(done)) return null;
+    return { done: Math.min(total, Math.max(0, done)), total, message: typeof progress.message === 'string' ? progress.message.slice(0, 200) : '' };
+}
+
 // Runs a declared importer over the given files ([{ role, name, text }]) in a worker thread with a time
 // limit, and checks the shape of what comes back before anyone uses it.
 // A file of a binary role comes as { role, name, data } (a Uint8Array, handed over to the worker, not copied): an
 // importer given one gets more time and memory, by its size.
-export function runImporter({ addonDirectory, importer, files, options = {}, timeoutMilliseconds = null }) {
+// `onProgress` hears what the importer says of its progress (helpers.progress): { done, total, message }, checked.
+export function runImporter({ addonDirectory, importer, files, options = {}, timeoutMilliseconds = null, onProgress = null }) {
     const binaryBytes = files.reduce((total, file) => total + (file.data?.byteLength ?? 0), 0);
     timeoutMilliseconds ??= importerTimeoutMilliseconds + Math.ceil(binaryBytes / (1024 * 1024)) * 500;
     return new Promise((resolvePromise, reject) => {
@@ -133,7 +143,13 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
             worker.terminate();
             reject(new Error(`The importer did not finish within ${timeoutMilliseconds / 1000} seconds.`));
         }, timeoutMilliseconds);
-        worker.once('message', (message) => {
+        worker.on('message', (message) => {
+            // Progress, while it works: passed on, checked, and never taken for the result.
+            if (message?.progress) {
+                const progress = checkedProgress(message.progress);
+                if (progress && onProgress) onProgress(progress);
+                return;
+            }
             clearTimeout(timer);
             worker.terminate();
             if (!message.ok) return reject(new Error(`The importer failed: ${message.message}`));
@@ -162,6 +178,13 @@ export function unreadableFile(name, error) {
         return `${name} could not be read: Konjugate is not allowed to read that folder. ${process.platform === 'darwin' ? 'On macOS, allow it under System Settings, Privacy & Security, Files and Folders, or move the file to a folder it may read, and choose it again.' : 'Allow it to read the folder, or move the file where it may, and choose it again.'}`;
     }
     return `${name} could not be read (${error?.code ?? error?.message ?? 'unknown reason'}). Choose it again.`;
+}
+
+// The inputs an importer is given for a run: those of its roles, and binary files only when the run asks for them
+// (`options.useBinaryFiles`). A binary file is read from disk for each run it is given to, and may be a gigabyte: the
+// steps that do not read it (most of them) do not wait for it or hold it.
+export function importerInputs(pending, roles, options = {}) {
+    return [...pending].filter((file) => roles.has(file.role) && (!file.binary || options?.useBinaryFiles === true));
 }
 
 // The text files an importer derived from what it was given (`derived: [{ role, name, text }]`), checked: each is of
@@ -727,7 +750,7 @@ export function registerLauncherHandlers(deps) {
         return { edges: result.report.edges ?? [], selfTerms: result.report.selfTerms ?? [] };
     }));
 
-    ipcMain.handle('launcherRunImport', guarded(async ({ addon, workspace }, { importerId, options = {} }) => {
+    ipcMain.handle('launcherRunImport', guarded(async ({ addon, workspace, state }, { importerId, options = {} }) => {
         needs(addon, 'data.import');
         const importer = declared(addon.manifest.contributes?.importers, 'importerId', importerId, 'importer');
         const chosenRoles = new Set([...workspace.pending.values()].map((file) => file.role));
@@ -736,8 +759,7 @@ export function registerLauncherHandlers(deps) {
         const roles = new Set(importer.files.map((file) => file.role));
         if (JSON.stringify(options ?? {}).length > maximumOptionsBytes) throw new Error('The options are larger than the host accepts.');
         const files = [];
-        for (const file of workspace.pending.values()) {
-            if (!roles.has(file.role)) continue;
+        for (const file of importerInputs(workspace.pending.values(), roles, options)) {
             if (!file.binary) { files.push({ role: file.role, name: file.name, text: file.text, encoding: file.encoding }); continue; }
             // A binary input is read now, into memory of its own, and handed over to the importer.
             let bytes;
@@ -747,10 +769,12 @@ export function registerLauncherHandlers(deps) {
             const data = bytes.byteOffset === 0 && bytes.buffer.byteLength === bytes.length ? new Uint8Array(bytes.buffer) : Uint8Array.from(bytes);
             files.push({ role: file.role, name: file.name, data });
         }
-        const result = await runImporter({ addonDirectory: addon.addonDirectory, importer, files, options: options ?? {} });
-        // What the importer derived takes the place of the files of those roles, and of the binary files it read.
+        // The importer's progress, to the window that asked: a long read (a map extract of a gigabyte) is not a silence.
+        const onProgress = (progress) => { if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', { stage: 'import', importerId, ...progress }); };
+        const result = await runImporter({ addonDirectory: addon.addonDirectory, importer, files, options: options ?? {}, onProgress });
+        // What the importer derived takes the place of the files of those roles. The binary files stay chosen (noted, not
+        // held), to be read again for another step that asks for them: a larger area of the same map, say.
         if (result.ok && result.derived?.length) {
-            for (const [key, item] of workspace.pending) if (item.binary) workspace.pending.delete(key);
             for (const role of new Set(result.derived.map((item) => item.role))) dropRole(workspace, { role });
             for (const item of result.derived) {
                 const file = importer.files.find((candidate) => candidate.role === item.role);

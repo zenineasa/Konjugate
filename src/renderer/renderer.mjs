@@ -9247,10 +9247,11 @@ window.launcherHost?.onOpenProject(async (payload) => {
 // A launcher asks for the data it keeps with this project (its saved session), to restore its window.
 window.launcherHost?.onAddonDataRequest?.((addonId) => projectAddonData[addonId] ?? null);
 
-// A launcher keeps its session with this project (work in its window before any model is built): saved with the
-// project, so it counts as unsaved work until then.
+// A launcher keeps its session with this project (work in its window before any model is built), or a result
+// visualizer its own data (null removes it): saved with the project, so it counts as unsaved work until then.
 window.launcherHost?.onKeepAddonData?.((addonId, entry) => {
-    projectAddonData = { ...projectAddonData, [addonId]: entry };
+    const { [addonId]: _previous, ...others } = projectAddonData;
+    projectAddonData = entry === null ? others : { ...others, [addonId]: entry };
     addonDataUnsaved = true;
     updateHistoryControls();
 });

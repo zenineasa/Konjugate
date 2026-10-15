@@ -15,8 +15,17 @@ const allowedPermissions = new Set([
     'simulation.status.read',
     'simulation.pacing.read',
     'simulation.pacing.control',
-    'results.export'
+    'results.export',
+    'project.data',
+    'settings.store'
 ]);
+
+// Optional behaviours a result visualizer may depend on, listed in its `requires` as a launcher lists its own: a
+// version of Konjugate that does not know one refuses the visualizer.
+// projectData: with project.data, getProjectData and setProjectData keep the visualizer's own data with the project.
+// addonSettings: with settings.store, getSettings and setSettings keep its settings for the user, in every project.
+export const visualizerFeatures = new Set(['projectData', 'addonSettings']);
+export const maximumVisualizerDataBytes = 1024 * 1024;
 
 // Optional behaviours a launcher may depend on. A launcher lists the ones it needs in `requires`, and a version of Konjugate that does not
 // know one of them refuses the launcher, rather than ignoring the entry and running it without what it needs.
@@ -150,6 +159,10 @@ export function validateAddonManifest(manifest) {
     if (!permissions.every((permission) => allowedPermissions.has(permission))) {
         throw new Error('The visualizer requests an unsupported permission.');
     }
+    const requires = manifest.requires ?? [];
+    if (!Array.isArray(requires) || !requires.every((feature) => typeof feature === 'string')) throw new Error('A visualizer\'s requires must be a list of names.');
+    const missing = requires.filter((feature) => !visualizerFeatures.has(feature));
+    if (missing.length) throw new Error(`This visualizer needs ${missing.join(', ')}, which this version of Konjugate does not provide. Update Konjugate to use it.`);
     const contributions = manifest.contributes?.toolstrip ?? [];
     if (contributions.length !== 1) throw new Error('A version 1 result visualizer must contribute exactly one toolstrip command.');
     const commandIds = new Set();
@@ -227,6 +240,20 @@ export function publicVisualizerContext(session) {
         selectedNodeId: session.selectedNodeId,
         time: session.time
     };
+}
+
+// What a result visualizer keeps with the project (docs/projectSchema.md, `addonData`): its own data, as the window
+// gave it. Throws a message a user can act on.
+export function buildVisualizerDataEntry({ addon, data, savedAt = new Date().toISOString() }) {
+    const text = JSON.stringify(data ?? null);
+    if (new TextEncoder().encode(text).length > maximumVisualizerDataBytes) throw new Error(`A visualizer may keep at most ${maximumVisualizerDataBytes / 1024 / 1024} MB with a project.`);
+    return { version: 1, addonVersion: addon.version, savedAt, data: JSON.parse(text) };
+}
+
+// The visualizer's data from its entry, or null when the project keeps none (or an entry this version cannot read).
+export function visualizerDataFromEntry(entry) {
+    if (entry?.version !== 1 || !('data' in entry)) return null;
+    return { data: structuredClone(entry.data), savedAt: entry.savedAt ?? null, addonVersion: entry.addonVersion ?? null };
 }
 
 export function readSignalSeries(session, signalIds, { startTime = 0, endTime = Infinity, maxPoints = 4000 } = {}) {

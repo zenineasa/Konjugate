@@ -14,6 +14,7 @@ import { startEngineRun } from './engineAdapter.mjs';
 import { encodeProjectFile } from './projectFile.mjs';
 import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './addonCache.mjs';
 import { addonFilesDirectory, createFileStore } from './addonFileStore.mjs';
+import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 
 const maximumInputBytes = 10 * 1024 * 1024;
 // A binary input (a file role declared `binary`): one large file the importer reads as bytes and turns into text
@@ -1022,33 +1023,16 @@ export function registerLauncherHandlers(deps) {
         needs(addon, 'project.data');
         if (projectWindow.isDestroyed()) throw new Error('The project window has been closed.');
         const entry = buildSessionEntry({ addon: addon.manifest, window: session, inputs: [...workspace.pending.values()] });
-        projectWindow.webContents.send('launcherKeepAddonData', { addonId: addon.manifest.addonId, entry });
+        keepAddonData(projectWindow, addon.manifest.addonId, entry);
         return {};
     }));
-
-    // The project window holds the open project, so the host asks it for this launcher's entry.
-    let nextAddonDataRequest = 1;
-    function requestAddonData(projectWindow, addonId) {
-        return new Promise((resolvePromise) => {
-            const requestId = nextAddonDataRequest++;
-            const timer = setTimeout(() => { ipcMain.removeListener('launcherAddonDataReply', listener); resolvePromise(null); }, addonDataRequestMilliseconds);
-            function listener(event, reply) {
-                if (event.sender !== projectWindow.webContents || reply?.requestId !== requestId) return;
-                clearTimeout(timer);
-                ipcMain.removeListener('launcherAddonDataReply', listener);
-                resolvePromise(reply.data ?? null);
-            }
-            ipcMain.on('launcherAddonDataReply', listener);
-            projectWindow.webContents.send('launcherAddonDataRequest', { requestId, addonId });
-        });
-    }
 
     // Restores the session this launcher kept with the open project: its input files become the pending files again
     // (so its importer can run as before, offline), and the window gets back the state it saved.
     ipcMain.handle('launcherRestoreSession', guarded(async ({ addon, workspace, projectWindow }) => {
         needs(addon, 'project.data');
         if (projectWindow.isDestroyed()) throw new Error('The project window has been closed.');
-        const entry = await requestAddonData(projectWindow, addon.manifest.addonId);
+        const entry = await requestAddonData({ ipcMain, projectWindow, addonId: addon.manifest.addonId, timeoutMilliseconds: addonDataRequestMilliseconds });
         const inputs = sessionInputs(entry, addon.manifest.contributes?.importers);
         if (!inputs) return { session: null };
         workspace.pending.clear();

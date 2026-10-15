@@ -2546,6 +2546,77 @@ export async function runInteractionTests(driver) {
         assert.equal(await poseWindow.isDestroyed(), true);
     }, { skip: (!driver.capabilities.addons && 'the Pose Visualizer add-on has no web-edition equivalent') || addonMissing('konjugate.poseVisualizer', 'konjugate-posevisualizer') });
 
+    await run('Pose Visualizer add-on keeps body mappings with the project and naming conventions for the user', async () => {
+        const toolstripCommand = `document.querySelector('.addonTool[data-addon-id="konjugate.poseVisualizer"][data-command-id="openPoseVisualizer"]')`;
+        const openPoseWindow = async () => {
+            const before = driver.allHandles();
+            await evaluate(window, `${toolstripCommand}.click()`);
+            const handle = await driver.waitForNewHandle(before);
+            await waitFor(handle, `Boolean(document.querySelector('.konjugateAddonTitlebar'))`, 'The Pose Visualizer window did not open.');
+            return handle;
+        };
+        const closePoseWindow = async (handle) => {
+            await closeWhenValidated(handle);
+            for (let attempt = 0; attempt < 100 && !(await handle.isDestroyed()); attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+        };
+        const row = (entityId) => `document.querySelector('.bodyRow:has(.bodyOption[data-entity-id="${entityId}"])')`;
+        const hints = `[...document.querySelectorAll('.bodyOption small')].map((hint) => hint.textContent)`;
+        const bodyIds = (await evaluate(window, `window.__debugTransform.allNodeIds()`)).filter((id) => id !== firstBodyId);
+
+        let poseWindow = await openPoseWindow();
+        const consoleMessages = await captureConsoleMessages(poseWindow, async () => {
+            await waitFor(poseWindow, `document.querySelectorAll('.bodyOption').length === 2`, 'Pose Visualizer did not detect both free body nodes.');
+            const secondBodyId = await evaluate(poseWindow, `Number([...document.querySelectorAll('.bodyOption')].map((option) => option.dataset.entityId).find((id) => Number(id) !== ${firstBodyId}))`);
+            assert.ok(bodyIds.includes(secondBodyId));
+
+            // Without Konjugate's own names, neither node is a body ...
+            await evaluate(poseWindow, `document.querySelector('#conventions .conventionRow input').click()`);
+            await waitFor(poseWindow, `document.querySelectorAll('.bodyOption').length === 0`, 'Turning off the default convention did not remove its bodies.');
+            assert.equal(await evaluate(poseWindow, `document.querySelector('.sceneWorkspace').classList.contains('hasBodies')`), false);
+            // ... until a convention of the user's own finds a 2-DOF body in each.
+            await evaluate(poseWindow, `document.querySelector('#newConvention').click()`);
+            await evaluate(poseWindow, `(() => {
+                const form = document.querySelector('#conventionForm');
+                form.elements.name.value = 'Planar';
+                form.elements.x.value = 'x';
+                form.elements.y.value = 'y';
+                form.requestSubmit();
+            })()`);
+            await waitFor(poseWindow, `document.querySelectorAll('.bodyOption').length === 2`, 'A new convention did not find its bodies.');
+            assert.deepEqual(await evaluate(poseWindow, hints), ['x, y', 'x, y']);
+
+            // A role mapped by hand for one node: the first free body also turns about z.
+            await evaluate(poseWindow, `${row(firstBodyId)}.querySelector('.iconButton').click()`);
+            await evaluate(poseWindow, `(() => {
+                const select = ${row(firstBodyId)}.querySelector('select[aria-label^="Yaw"]');
+                select.value = [...select.options].find((option) => option.textContent.startsWith('yaw')).value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            await waitFor(poseWindow, `${row(firstBodyId)}?.querySelector('small').textContent === 'x, y, yaw'`, 'Mapping yaw by hand did not reach the body.');
+            // And the other node is no body at all, but can be added back.
+            await evaluate(poseWindow, `${row(secondBodyId)}.querySelector('.iconButton').click()`);
+            await evaluate(poseWindow, `[...${row(secondBodyId)}.querySelectorAll('.editorActions button')].find((button) => button.textContent === 'Remove body').click()`);
+            await waitFor(poseWindow, `document.querySelectorAll('.bodyOption').length === 1`, 'Removing a body did not take it out of the scene.');
+            assert.equal(await evaluate(poseWindow, `[...document.querySelector('#addBody').options].some((option) => option.value === '${secondBodyId}')`), true);
+        });
+        assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
+        await closePoseWindow(poseWindow);
+
+        // Reopened, the window has both back: the convention from the user's settings, the mapping and the removal from the project.
+        poseWindow = await openPoseWindow();
+        await waitFor(poseWindow, `document.querySelectorAll('.bodyOption').length === 1`, 'The project did not keep the removed body out.');
+        assert.deepEqual(await evaluate(poseWindow, hints), ['x, y, yaw']);
+        assert.deepEqual(await evaluate(poseWindow, `[...document.querySelectorAll('#conventions .conventionRow')].map((entry) => [entry.querySelector('b').textContent, entry.querySelector('input').checked])`), [['Konjugate', false], ['Planar', true]]);
+
+        // Put the user's settings back as they were for the rest of the suite.
+        await evaluate(poseWindow, `document.querySelector('#conventions .conventionRow input').click()`);
+        await evaluate(poseWindow, `document.querySelector('#conventions .conventionRow:nth-child(2) button[aria-label^="Delete"]').click()`);
+        await waitFor(poseWindow, `document.querySelectorAll('#conventions .conventionRow').length === 1`, 'Deleting the convention did not remove it.');
+        await closePoseWindow(poseWindow);
+    }, { skip: (!driver.capabilities.addons && 'the Pose Visualizer add-on has no web-edition equivalent') || addonMissing('konjugate.poseVisualizer', 'konjugate-posevisualizer') });
+
     await run('closing results and removing the free-body nodes cleans up the pose scenario', async () => {
         await evaluate(window, `document.querySelector('#closeResults').click()`);
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');

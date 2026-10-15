@@ -16,11 +16,13 @@ import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
 import { matchRunConfiguration, parseCliFlags } from './cliArgs.mjs';
 import {
+    buildVisualizerDataEntry,
     createVisualizerSession,
     publicToolstripContributions,
     publicVisualizerContext,
     readSignalSeries,
-    validateAddonManifest
+    validateAddonManifest,
+    visualizerDataFromEntry
 } from './addonHost.mjs';
 import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
@@ -50,6 +52,8 @@ import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exam
 import { validateComponentTemplate } from './componentTemplate.mjs';
 import { registerLauncherHandlers } from './launcherHost.mjs';
 import { addonCacheDirectory } from './addonCache.mjs';
+import { createAddonSettingsStore } from './addonSettingsStore.mjs';
+import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { normalizeShapeLibraryEntry } from './shapeLibraryCatalog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
@@ -1092,6 +1096,44 @@ ipcMain.handle('visualizerExportCsv', async (event, { suggestedFilename, csv }) 
     return { path, fileName: basename(path) };
 });
 
+// A visualizer with project.data keeps its own data with the project (docs/projectSchema.md, `addonData`), held by the
+// project window it was opened from, so it is saved and opened with that project.
+function visualizerWithPermission(event, permission) {
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, permission)) {
+        throw new Error(`The visualizer was not granted ${permission}.`);
+    }
+    return { projectWindow, manifest: state.visualizerManifest };
+}
+
+ipcMain.handle('visualizerGetProjectData', async (event) => {
+    const { projectWindow, manifest } = visualizerWithPermission(event, 'project.data');
+    const entry = await requestAddonData({ ipcMain, projectWindow, addonId: manifest.addonId });
+    return visualizerDataFromEntry(entry) ?? { data: null, savedAt: null, addonVersion: null };
+});
+
+ipcMain.handle('visualizerSetProjectData', (event, { data }) => {
+    const { projectWindow, manifest } = visualizerWithPermission(event, 'project.data');
+    keepAddonData(projectWindow, manifest.addonId, data === null || data === undefined ? null : buildVisualizerDataEntry({ addon: manifest, data }));
+    return {};
+});
+
+// And with settings.store, settings of its own kept for the user, the same in every project.
+let addonSettingsInstance = null;
+const addonSettings = () => (addonSettingsInstance ??= createAddonSettingsStore({ userData: app.getPath('userData') }));
+
+ipcMain.handle('visualizerGetSettings', (event) => {
+    const { manifest } = visualizerWithPermission(event, 'settings.store');
+    return addonSettings().get(manifest.addonId);
+});
+
+ipcMain.handle('visualizerSetSettings', async (event, { settings }) => {
+    const { manifest } = visualizerWithPermission(event, 'settings.store');
+    await addonSettings().set(manifest.addonId, settings ?? null);
+    return {};
+});
+
 ipcMain.on('windowMaximizeToggle', (event) => {
     const targetWindow = getWindowFromEvent(event);
     if (!targetWindow) return;
@@ -1468,6 +1510,7 @@ ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, vers
     // An add-on's cache goes with its last installed version (a reinstall or an update keeps it).
     if (packageType === 'addon' && !(await listInstalledPackages(join(app.getPath('userData'), 'packages'))).some((entry) => entry.packageType === 'addon' && entry.packageId === packageId)) {
         await rm(addonCacheDirectory(app.getPath('userData'), packageId), { recursive: true, force: true }).catch(() => {});
+        await addonSettings().remove(packageId).catch(() => {});
     }
     await discoverAddons();
     await discoverComponentLibrary();

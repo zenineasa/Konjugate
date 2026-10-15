@@ -135,6 +135,8 @@ Permissions are declared explicitly. Unknown permissions cause the manifest to b
 | `simulation.pacing.read` | Receive the active simulation pacing mode and ratio. |
 | `simulation.pacing.control` | Request a pacing change for the active engine job. |
 | `results.export` | Save signal samples to a CSV file the user chooses. |
+| `project.data` | Keep data with the open project: for a result visualizer, `getProjectData()` and `setProjectData(data)` (below); for a launcher, its session. |
+| `settings.store` | Result visualizer only. Keep settings for the user, the same in every project, with `getSettings()` and `setSettings(settings)` (below). |
 | `network.fetch` | Launcher only. Fetch a file from the internet into an importer file role (or a page of text, up to 1 MB, for the window to show, such as a symbol search), only over https, only from the exact host names listed in the manifest's `network.hosts`, with a size and time limit. The address and time of each fetch are recorded in the run manifest. |
 | `links.open` | Launcher only. Open a page in the user's browser with `openLink(url)`, only over https and only on the exact host names listed in the manifest's `links.hosts` (with `requires: ["openLink"]`): directions between two places on a map, say, for the user to read. Nothing comes back to the window. |
 | `files.store` | Launcher only. Keep large files for the user in Konjugate's own data folder (with `requires: ["storedFiles"]`): `storedFiles()` lists them (each `{ id, name, bytes, storedAt, origin, details }`, `origin` saying whether it was downloaded, from which server and address, or brought in by the user, and under what name), `storeFiles(details, { accept, title })` brings files in from disk as copies (`accept` the endings it keeps, such as `['osm.pbf']`: the dialog offers only those, by their last extension, and a file of another ending is refused before anything is copied; no `accept`, any file), `downloadFile(url, { name, server, checksumUrl, details, downloadId })` downloads one from a host in `network.hosts` (with `network.fetch`), streamed to disk, its progress heard by `onProgress` as `{ stage: 'download', downloadId, done, total }`, cancelled with `cancelDownload(downloadId)`, its size asked beforehand with `fileSize(url)` (bytes, or null when the server does not say), and kept only when whole and matching a published MD5 when one is named; `describeStoredFile(id, details)` adds the add-on's details (16 KB at most), `removeStoredFile(id)` removes one, and `useStoredFiles(importerId, role, ids)` gives stored files to a binary role as if chosen. A window never sees a stored file's path, and nothing is removed but by the user. |
@@ -380,11 +382,25 @@ loadSession();
 
 This example intentionally uses no framework. Canvas, WebGL, SVG, and locally packaged plotting libraries are all possible inside the add-on window.
 
+### Keeping data: `getProjectData()`, `setProjectData(data)`, `getSettings()`, `setSettings(settings)`
+
+A visualizer can keep what the user set up in it, in two places:
+
+- With `project.data` (and `requires: ["projectData"]`), with the project. `setProjectData(data)` gives the project any JSON (up to 1 MB) under the visualizer's id in its `addonData` ([Project schema](projectSchema.md)); the project counts as unsaved until the user saves it, and `null` removes it. `getProjectData()` answers `{ data, savedAt, addonVersion }`, with `data: null` when the project keeps none. Use it for what belongs to one model: which signals play which role, say. Refer to nodes and states by their numeric ids, which last as long as the project does.
+- With `settings.store` (and `requires: ["addonSettings"]`), for the user. `setSettings(settings)` keeps any JSON (up to 256 KB) in Konjugate's own data folder, one file per add-on, and `getSettings()` answers it, or `null`. Use it for preferences that hold in every project. Settings are kept across reinstalls and updates, and removed with the add-on's last installed version.
+
+```js
+const { data } = await window.konjugateVisualizer.getProjectData();
+await window.konjugateVisualizer.setProjectData({ ...data, roles: chosenRoles });
+```
+
+A version of Konjugate that does not know these permissions refuses the visualizer; one that knows the permissions but not a feature named in `requires` says which feature is missing.
+
 ## Domain-specific visualizers
 
 The version 1 catalogue supplies state identity, name, symbol, unit, and owning node. It does not yet prescribe semantic roles such as longitude, X position, heading, quaternion component, or coordinate frame.
 
-A domain-specific add-on should therefore let the user map signals to its required roles. For example, a vehicle viewer might request mappings for X, Y, Z, and heading, then store that configuration within its own storage when such storage is supported. Do not infer durable meaning solely from a mutable display name.
+A domain-specific add-on should therefore let the user map signals to its required roles. For example, a vehicle viewer might request mappings for X, Y, Z, and heading, and keep that mapping with the project by signal id (`setProjectData`, above). Do not infer durable meaning solely from a mutable display name.
 
 Semantic quantity and coordinate-frame metadata are candidates for a later API version. They should remain domain-agnostic and optional.
 
@@ -402,7 +418,7 @@ An importer's file role may be `binary: true` (with `requires: ["binaryInputs"]`
 - Treat unknown fields returned by the host as additive and ignore them safely.
 - Use numeric ID fields for identity and display fields only for presentation.
 - Expect result datasets to become larger than can be copied into one renderer.
-- Keep add-on state separate from the Konjugate model unless a future namespaced persistence API is explicitly provided.
+- Keep add-on state out of the Konjugate model: keep it with the project through `project.data`, or for the user through `settings.store`.
 - Avoid depending on the bundled Results Analysis add-on or other Konjugate implementation files.
 
-Future API versions may add richer semantic metadata, streaming and live-run subscriptions, namespaced persistence, additional contribution points, and installation or trust management. None of those capabilities are part of version 1.
+Future API versions may add richer semantic metadata, streaming and live-run subscriptions, additional contribution points, and installation or trust management. None of those capabilities are part of version 1.

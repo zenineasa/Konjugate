@@ -3,11 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    buildVisualizerDataEntry,
     createVisualizerSession,
+    maximumVisualizerDataBytes,
     publicToolstripContributions,
     publicVisualizerContext,
     readSignalSeries,
-    validateVisualizerManifest
+    validateVisualizerManifest,
+    visualizerDataFromEntry
 } from '../src/addonHost.mjs';
 
 const manifest = {
@@ -93,4 +96,24 @@ test('reads only requested signal ranges and downsamples host-side', () => {
     assert.equal(series.samples[0].time, 2);
     assert.equal(series.samples.at(-1).time, 8);
     assert.ok(series.samples.every((sample) => sample.value === sample.time * 2));
+});
+
+test('a visualizer may keep data with the project and settings for the user, and may require them', () => {
+    const keeping = { ...manifest, permissions: ['results.read', 'project.data', 'settings.store'], requires: ['projectData', 'addonSettings'] };
+    assert.deepEqual(validateVisualizerManifest(keeping), keeping);
+    assert.throws(() => validateVisualizerManifest({ ...keeping, requires: ['projectData', 'somethingNewer'] }), /needs somethingNewer, which this version of Konjugate does not provide/);
+    assert.throws(() => validateVisualizerManifest({ ...keeping, requires: 'projectData' }), /requires must be a list of names/);
+    // Launcher-only permissions stay launcher-only.
+    assert.throws(() => validateVisualizerManifest({ ...manifest, permissions: ['files.store'] }), /unsupported permission/);
+});
+
+test('a visualizer\'s data is kept as a versioned entry, and read back from one', () => {
+    const entry = buildVisualizerDataEntry({ addon: { version: '1.2.0' }, data: { bodies: [{ entityId: 4 }] }, savedAt: '2026-10-15T00:00:00.000Z' });
+    assert.deepEqual(entry, { version: 1, addonVersion: '1.2.0', savedAt: '2026-10-15T00:00:00.000Z', data: { bodies: [{ entityId: 4 }] } });
+    assert.deepEqual(visualizerDataFromEntry(entry), { data: { bodies: [{ entityId: 4 }] }, savedAt: '2026-10-15T00:00:00.000Z', addonVersion: '1.2.0' });
+    assert.equal(visualizerDataFromEntry(null), null);
+    assert.equal(visualizerDataFromEntry({ version: 2, data: {} }), null);
+    // A launcher's entry under the same id is not a visualizer's.
+    assert.equal(visualizerDataFromEntry({ version: 1, window: {}, inputs: [] }), null);
+    assert.throws(() => buildVisualizerDataEntry({ addon: { version: '1' }, data: 'x'.repeat(maximumVisualizerDataBytes) }), /at most 1 MB/);
 });

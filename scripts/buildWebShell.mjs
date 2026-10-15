@@ -19,11 +19,16 @@ import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName } from '../src/exampleCatalog.mjs';
 import { validateComponentTemplate } from '../src/componentTemplate.mjs';
 import { stripFrontmatter } from '../src/exampleGuide/markdown.mjs';
+import { WEB_EDITION_IMAGE, webEditionHead, webEditionNoscript, webEditionRootPage } from './webEditionMetadata.mjs';
 
 const threads = process.argv[2] === 'threads';
 const srcDirectory = join(rootDirectory, 'src');
 const outputDirectory = join(rootDirectory, 'out', threads ? 'webShellThreads' : 'webShell');
 const engineWebDirectory = join(rootDirectory, 'out', threads ? 'engineWebThreads' : 'engineWeb');
+// Public address of the deployed web edition, used for the canonical link and link-preview tags (see
+// webEditionMetadata.mjs). Override with KONJUGATE_WEB_URL when hosting somewhere else; it must end with a slash.
+const webEditionUrl = process.env.KONJUGATE_WEB_URL ?? 'https://web.konjugate.com/';
+if (!/^https?:\/\/.+\/$/.test(webEditionUrl)) throw new Error(`KONJUGATE_WEB_URL must be an http(s) URL ending with a slash, not "${webEditionUrl}".`);
 
 if (!await pathExists(join(engineWebDirectory, 'konjugateEngine.js'))) {
     throw new Error(`The web engine is not built. Run npm run build:web${threads ? ':threads' : ''} first.`);
@@ -106,6 +111,13 @@ html = html.replace(
     '    <script type="module" src="renderer.mjs"></script>'
 );
 html = html.replaceAll('../../', '../');
+// Search and link-preview metadata: a descriptive title, description, canonical and Open Graph tags in the head, and a
+// plain-text fallback in the body, so a crawler that does not run this canvas application still has something to index.
+html = html.replace('<title>Konjugate</title>', webEditionHead({ url: webEditionUrl }));
+html = html.replace('<body>\n', `<body>\n    ${webEditionNoscript()}\n`);
+if (!html.includes('og:image') || !html.includes('<noscript>')) {
+    throw new Error('Web edition metadata transform failed -- src/renderer/index.html\'s <title> or <body> may have changed shape since this script was written.');
+}
 if (!html.includes('webShims/index.mjs') || !html.includes('data-web-edition') || !html.includes('protobufjsMinimalShim')) {
     throw new Error('index.html transform failed -- src/renderer/index.html may have changed shape since this script was written.');
 }
@@ -146,12 +158,10 @@ await writeFile(join(outputDirectory, 'renderer', 'index.html'), html);
 // real HTTP 302 on "/". A bare static host (GitHub Pages included) has no such redirect and just
 // 404s at the root, which is exactly what happened the first time this got deployed there. Ship a
 // root index.html that redirects client-side instead, so the root URL works on any static host.
-await writeFile(join(outputDirectory, 'index.html'),
-    '<!doctype html>\n' +
-    '<html lang="en"><head><meta charset="utf-8">\n' +
-    '<meta http-equiv="refresh" content="0; url=renderer/index.html">\n' +
-    '<script>location.replace(\'renderer/index.html\');</script>\n' +
-    '</head><body></body></html>\n');
+await writeFile(join(outputDirectory, 'index.html'), webEditionRootPage({ url: webEditionUrl }));
+// The link-preview image the metadata above points at: the README's application screenshot.
+await mkdir(join(outputDirectory, 'assets'), { recursive: true });
+await cp(join(rootDirectory, 'assets', 'ForReadme', 'konjugateAppScreenshot.png'), join(outputDirectory, WEB_EDITION_IMAGE.path));
 
 await mkdir(join(outputDirectory, 'engine'), { recursive: true });
 await cp(join(engineWebDirectory, 'konjugateEngine.js'), join(outputDirectory, 'engine', 'konjugateEngine.js'));

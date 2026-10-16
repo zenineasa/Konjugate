@@ -10,6 +10,8 @@ export const WEB_EDITION_TITLE = 'Konjugate web edition: build dynamic systems a
 export const WEB_EDITION_DESCRIPTION = 'Open-source visual modelling and simulation in your browser. Components hold state, relationships define how they interact, and results unfold over time.';
 export const WEB_EDITION_IMAGE_ALT = 'The Konjugate web edition showing a system modelled as a graph of components and relationships';
 export const WEB_EDITION_SITE_URL = 'https://konjugate.com/';
+// The browser-tab icon, copied from assets/icons/favicon.ico to the root of the build (where browsers look for it by default).
+export const WEB_EDITION_FAVICON = 'favicon.ico';
 // The screenshot the README already uses, copied into the build as assets/social-preview.png.
 export const WEB_EDITION_IMAGE = { path: 'assets/social-preview.png', width: 1920, height: 1080 };
 
@@ -17,10 +19,18 @@ const escapeHtml = (text) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;
 
 // `url` is the public address of the root page (it ends with a slash). The same tags go on the app page and on the root
 // redirect page, so whichever one a crawler or link-preview bot reads carries them, and both name the root as canonical.
-export function webEditionHead({ url, indent = '    ' }) {
+// `assetPrefix` is the path from the page being written to the root of the site ('' for the root page, '../' for the app page),
+// which is how the icon links reach the files at the root and under assets/. The icons are served from the site itself: the page's
+// Content-Security-Policy allows images only from its own origin, so an icon on another site would be blocked, and browsers
+// ask for /favicon.ico at the root when a page declares nothing, which a static host answers with a 404.
+export function webEditionHead({ url, indent = '    ', assetPrefix = '' }) {
     const imageUrl = new URL(WEB_EDITION_IMAGE.path, url).href;
     const tags = [
         `<title>${escapeHtml(WEB_EDITION_TITLE)}</title>`,
+        `<link rel="icon" href="${assetPrefix}${WEB_EDITION_FAVICON}" sizes="any">`,
+        `<link rel="icon" type="image/png" sizes="32x32" href="${assetPrefix}assets/icons/favicon32.png">`,
+        `<link rel="icon" type="image/png" sizes="16x16" href="${assetPrefix}assets/icons/favicon16.png">`,
+        `<link rel="apple-touch-icon" href="${assetPrefix}assets/icons/appleTouchIcon.png">`,
         `<meta name="description" content="${escapeHtml(WEB_EDITION_DESCRIPTION)}">`,
         `<link rel="canonical" href="${escapeHtml(url)}">`,
         '<meta property="og:type" content="website">',

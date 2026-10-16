@@ -31,6 +31,7 @@ const mimeTypes = {
     '.wasm': 'application/wasm',
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
+    '.ico': 'image/x-icon',
     '.kjt': 'application/octet-stream',
     '.md': 'text/markdown; charset=utf-8'
 };

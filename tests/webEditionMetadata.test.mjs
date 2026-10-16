@@ -26,6 +26,22 @@ test('the head carries a title, description, canonical link and Open Graph and T
     assert.equal((head.match(/<title>/g) ?? []).length, 1);
 });
 
+test('the head declares the tab icon, resolved from the page that carries it', () => {
+    const root = webEditionHead({ url });
+    assert.match(root, /<link rel="icon" href="favicon\.ico" sizes="any">/);
+    assert.match(root, /<link rel="icon" type="image\/png" sizes="32x32" href="assets\/icons\/favicon32\.png">/);
+    assert.match(root, /<link rel="icon" type="image\/png" sizes="16x16" href="assets\/icons\/favicon16\.png">/);
+    assert.match(root, /<link rel="apple-touch-icon" href="assets\/icons\/appleTouchIcon\.png">/);
+    const app = webEditionHead({ url, assetPrefix: '../' });
+    assert.match(app, /<link rel="icon" href="\.\.\/favicon\.ico" sizes="any">/);
+    assert.match(app, /href="\.\.\/assets\/icons\/favicon32\.png"/);
+    assert.ok(!/href="https?:/.test(app.replace(/<link rel="canonical"[^>]*>/, '')), 'icons come from the site itself, never another origin (the page\'s CSP blocks them)');
+});
+
+test('the root page carries the icon links too', () => {
+    assert.match(webEditionRootPage({ url }), /<link rel="icon" href="favicon\.ico" sizes="any">/);
+});
+
 test('the image address follows the base URL, including a path prefix', () => {
     assert.match(webEditionHead({ url: 'https://example.org/konjugate/' }), /og:image" content="https:\/\/example\.org\/konjugate\/assets\/social-preview\.png"/);
 });

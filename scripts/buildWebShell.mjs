@@ -19,7 +19,7 @@ import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName } from '../src/exampleCatalog.mjs';
 import { validateComponentTemplate } from '../src/componentTemplate.mjs';
 import { stripFrontmatter } from '../src/exampleGuide/markdown.mjs';
-import { WEB_EDITION_IMAGE, webEditionHead, webEditionNoscript, webEditionRootPage } from './webEditionMetadata.mjs';
+import { WEB_EDITION_FAVICON, WEB_EDITION_IMAGE, webEditionHead, webEditionNoscript, webEditionRootPage } from './webEditionMetadata.mjs';
 
 const threads = process.argv[2] === 'threads';
 const srcDirectory = join(rootDirectory, 'src');
@@ -113,7 +113,7 @@ html = html.replace(
 html = html.replaceAll('../../', '../');
 // Search and link-preview metadata: a descriptive title, description, canonical and Open Graph tags in the head, and a
 // plain-text fallback in the body, so a crawler that does not run this canvas application still has something to index.
-html = html.replace('<title>Konjugate</title>', webEditionHead({ url: webEditionUrl }));
+html = html.replace('<title>Konjugate</title>', webEditionHead({ url: webEditionUrl, assetPrefix: '../' }));
 html = html.replace('<body>\n', `<body>\n    ${webEditionNoscript()}\n`);
 if (!html.includes('og:image') || !html.includes('<noscript>')) {
     throw new Error('Web edition metadata transform failed -- src/renderer/index.html\'s <title> or <body> may have changed shape since this script was written.');
@@ -159,8 +159,10 @@ await writeFile(join(outputDirectory, 'renderer', 'index.html'), html);
 // 404s at the root, which is exactly what happened the first time this got deployed there. Ship a
 // root index.html that redirects client-side instead, so the root URL works on any static host.
 await writeFile(join(outputDirectory, 'index.html'), webEditionRootPage({ url: webEditionUrl }));
-// The link-preview image the metadata above points at: the README's application screenshot.
+// The tab icon at the root of the site, where browsers ask for /favicon.ico by default, and the link-preview image the metadata
+// above points at (the README's application screenshot). The rest of the icons the metadata links to are copied with assets/.
 await mkdir(join(outputDirectory, 'assets'), { recursive: true });
+await cp(join(rootDirectory, 'assets', 'icons', 'favicon.ico'), join(outputDirectory, WEB_EDITION_FAVICON));
 await cp(join(rootDirectory, 'assets', 'ForReadme', 'konjugateAppScreenshot.png'), join(outputDirectory, WEB_EDITION_IMAGE.path));
 
 await mkdir(join(outputDirectory, 'engine'), { recursive: true });

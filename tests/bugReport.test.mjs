@@ -14,7 +14,7 @@ test('every install source and platform has a readable name', () => {
     const base = { version: '1', arch: 'arm64', osRelease: '25.0.0', electron: '1', chromium: '2' };
     assert.match(formatBugReportDetails({ ...base, source: 'homebrew', platform: 'darwin' }), /Installed from: Homebrew\nOperating system: macOS 25\.0\.0 \(arm64\)/);
     assert.match(formatBugReportDetails({ ...base, source: 'appimage', platform: 'linux' }), /Installed from: AppImage\nOperating system: Linux/);
-    assert.match(formatBugReportDetails({ ...base, source: 'other', platform: 'win32' }), /an installer, a DMG, winget, Chocolatey or a build from source/);
+    assert.match(formatBugReportDetails({ ...base, source: 'other', platform: 'win32' }), /an installer, a DMG, Chocolatey or a build from source/);
 });
 
 test('anything missing is "unknown", never "undefined" or an exception', () => {

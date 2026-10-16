@@ -1,8 +1,8 @@
 ---
 type: Guide
 title: Package manager distribution
-description: Automated packaging and distribution workflows for winget, Chocolatey, the Microsoft Store, Homebrew Cask, Snap, and Flathub.
-tags: [distribution, winget, chocolatey, microsoft-store, homebrew, flatpak, release]
+description: Automated packaging and distribution workflows for Chocolatey, the Microsoft Store, Homebrew Cask, Snap, and Flathub (winget is paused).
+tags: [distribution, chocolatey, microsoft-store, homebrew, flatpak, release]
 status: partially_implemented
 ---
 
@@ -10,11 +10,11 @@ status: partially_implemented
 
 # Package manager distribution
 
-Konjugate's release pipeline (`.github/workflows/release.yml`) already builds an unsigned DMG/EXE/AppImage on every `v*` tag and publishes them to a GitHub Release — see [releasePackaging.md](releasePackaging.md). This document covers the next layer: getting those same builds discoverable through Homebrew Cask, winget, Chocolatey, the Microsoft Store, Snap, and Flathub.
+Konjugate's release pipeline (`.github/workflows/release.yml`) already builds an unsigned DMG/EXE/AppImage on every `v*` tag and publishes them to a GitHub Release — see [releasePackaging.md](releasePackaging.md). This document covers the next layer: getting those same builds discoverable through Homebrew Cask, Chocolatey, the Microsoft Store, Snap, and Flathub. winget is paused (see below).
 
 Two decisions shape everything below, both made deliberately: Konjugate ships **unsigned** for now (no Apple Developer ID, no Windows code-signing certificate — revisit once there's real traction), and none of the channels here cost anything to register on or publish through, so nothing is being skipped for budget reasons.
 
-**Current status:** winget, Chocolatey and Konjugate's own Homebrew tap have CI jobs in `release.yml` (`wingetRelease`, `chocolateyRelease`, `homebrewTapRelease`) that run on every `v*` tag but are opt-in by secret — with `WINGET_TOKEN` / `CHOCOLATEY_API_KEY` / `HOMEBREW_TAP_TOKEN` unset, the job skips its real step with a notice instead of failing, so a release never goes red for a channel that isn't set up yet. Each needs a one-time human setup step first (see their sections). The official Homebrew Cask and Snap are deferred with no job (the Cask is blocked by notarization and notability requirements; Snap by a missing store credential and an untested `snapcraft.yaml`), and Flathub is blocked by its own project-maturity and AI-content policies (see its section) — revisit once those no longer apply.
+**Current status:** Chocolatey and Konjugate's own Homebrew tap have CI jobs in `release.yml` (`chocolateyRelease`, `homebrewTapRelease`) that run on every `v*` tag but are opt-in by secret — with `CHOCOLATEY_API_KEY` / `HOMEBREW_TAP_TOKEN` unset, the job skips its real step with a notice instead of failing, so a release never goes red for a channel that isn't set up yet. Each needs a one-time human setup step first (see their sections). The official Homebrew Cask and Snap are deferred with no job (the Cask is blocked by notarization and notability requirements; Snap by a missing store credential and an untested `snapcraft.yaml`), and Flathub is blocked by its own project-maturity and AI-content policies (see its section) — revisit once those no longer apply.
 
 ## Shared app metadata
 
@@ -44,11 +44,17 @@ The generated file's own `<releases>` entry and screenshot URL version tag are s
 1. **Notarized, signed macOS binaries.** Homebrew Cask requires distributed macOS binaries to be signed and notarized with an Apple Developer ID and pass Gatekeeper — the `xattr -cr` workaround in the cask's own `caveats` (needed because Konjugate ships unsigned today, see [releasePackaging.md](releasePackaging.md)) is exactly the kind of thing official casks aren't allowed to paper over. Resolved once Konjugate has a real Apple Developer ID and notarized builds — see this doc's intro note on signing.
 2. **Notability.** New casks need roughly 75 GitHub stars or 30 forks/watchers. Konjugate isn't there yet.
 
-Neither is a one-time setup step the way winget's/Snap's credentials are — both take real time (getting an Apple Developer ID and notarizing builds, growing the project's traction) rather than an afternoon of account setup. That's why, unlike winget and Snap, **there is no `homebrewCaskBump` job in `release.yml`** — a job that can only ever fail until both of these are true would just be permanent CI noise. Revisit this section once both are met.
+Neither is a one-time setup step the way Snap's credentials are — both take real time (getting an Apple Developer ID and notarizing builds, growing the project's traction) rather than an afternoon of account setup. That's why, unlike winget and Snap, **there is no `homebrewCaskBump` job in `release.yml`** — a job that can only ever fail until both of these are true would just be permanent CI noise. Revisit this section once both are met.
 
 What's kept, ready for when that's true:
 - `scripts/generateHomebrewCask.mjs` (`npm run homebrew:generate-cask`) generates `distribution/homebrew/konjugate.rb` (gitignored) from the latest published release — both macOS DMGs and the Linux AppImage, via the same `on_macos`/`on_linux` + `app_image` pattern real casks like `cursor.rb`/`warp.rb` use (confirmed Homebrew Cask has real Linux support, not just macOS).
 - Once notarization + notability are both true, the submission flow is: run the generator, fork `Homebrew/homebrew-cask`, copy the output to `Casks/k/konjugate.rb`, and follow their real PR checklist (`brew audit --cask --new`, `brew style --fix`, a real local install/uninstall cycle, plus their mandatory AI-usage disclosure if a tool helped draft it — see `docs.brew.sh/Responsible-AI-Usage`). Re-add a `homebrewCaskBump` job to `release.yml` (mirroring `wingetRelease`'s shape, using `eugenesvk/action-homebrew-bump-cask`) once that first PR is merged.
+
+## winget (paused)
+
+winget is not a release target at the moment. The first manifest submitted to `microsoft/winget-pkgs` was taking too long for Microsoft's moderators to approve to plan around, so the `wingetRelease` job in `release.yml` is commented out (not deleted), and so is the setup described below. winget users, if any, update with the plain download. To bring it back: get a first manifest merged into `microsoft/winget-pkgs`, set the `WINGET_TOKEN` secret, uncomment the `wingetRelease` job, restore the winget row in [updates.md](updates.md) and the winget wording of the update hint in `src/updatePanel.mjs`, and uncomment the section below.
+
+<!-- The winget section as it was, kept for when winget is restored:
 
 ## winget
 
@@ -61,6 +67,8 @@ What's kept, ready for when that's true:
 4. Generate a **classic** PAT with `public_repo` scope, stored as this repo's `WINGET_TOKEN` secret.
 
 From the next tag on, the job opens the bump PR automatically. Microsoft's bots validate it and the merge is outside this project's control, so a new version appears in winget some hours or days after the release, not instantly. The installer is unsigned, so reviewers' Defender scan occasionally flags a false positive that needs a manual resubmission.
+
+-->
 
 ## Chocolatey
 

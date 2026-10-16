@@ -22,14 +22,17 @@ It asks GitHub's releases API for the latest release every launch, and again whe
 | --- | --- | --- | --- |
 | Microsoft Store | The Store, automatically | Up to three business days of certification, then about 15 minutes | **Not shown** |
 | Windows installer from GitHub | The user downloads the new `-setup.exe`; it upgrades in place | None | Shown |
-| winget | `winget upgrade Konjugate.Konjugate` | The bump pull request has to be merged by Microsoft's moderators: hours to days | Shown |
 | Chocolatey | `choco upgrade konjugate` | Moderation: days to weeks for a first version, faster afterwards | Shown |
 | macOS DMG from GitHub | The user downloads the new DMG | None | Shown |
 | Homebrew tap (macOS) | `brew upgrade --cask konjugate` | Minutes (the release workflow commits the new cask) | Shown with that command and a **Copy Command** button |
 | AppImage from GitHub | The user downloads the new AppImage, or updates it in place with AppImageUpdate (below) | None | Shown with the `appimageupdatetool` command for that file and a **Copy Command** button |
 | Homebrew on Linux (AppImage cask) | `brew upgrade --cask konjugate` | Minutes | Shown with the `brew` command, not the AppImage one |
 
-Two things follow from the table. The update appears the moment a GitHub release exists, which is before winget, Chocolatey and the Store have the new version. And the app cannot tell a winget, Chocolatey or Homebrew install from a manual one, so those users see "View Release" and can reasonably ignore it.
+<!-- winget is paused (see packageManagerDistribution.md). Restore this row in the table above when it is back:
+| winget | `winget upgrade Konjugate.Konjugate` | The bump pull request has to be merged by Microsoft's moderators: hours to days | Shown |
+-->
+
+Two things follow from the table. The update appears the moment a GitHub release exists, which is before Chocolatey and the Store have the new version. And the app cannot tell a Chocolatey or Homebrew install from a manual one, so those users see "View Release" and can reasonably ignore it.
 
 ## Decision 1: Store installs are told the Store handles it
 
@@ -51,7 +54,7 @@ Not measured: how small the delta download actually is. An Electron app is mostl
 
 For a Homebrew install the right action is `brew upgrade --cask konjugate`, and following the plain download link instead (a DMG) leaves Homebrew believing the old version is installed. So when the app can tell it was installed by Homebrew, the Updates section shows the command, with **Copy Command**, and a link to what's new, and no download button. The app tells by looking for the cask's folder in Homebrew's Caskroom (`/opt/homebrew/Caskroom/konjugate`, `/usr/local/Caskroom/konjugate`, the Linux prefixes, and `$HOMEBREW_PREFIX` when set — it usually is not for an app launched from Finder, so fixed paths are needed). A Linux cask install is also an AppImage, and Homebrew wins: `brew upgrade` is the right way to update it. The tap's cask is updated by the release workflow within minutes, so the command works almost as soon as the notice appears, and the notice says Homebrew can lag by a few minutes.
 
-**Not done for Chocolatey or winget.** Chocolatey installs are detectable (the package folder `%ChocolateyInstall%\lib\konjugate`), but a new version can sit in moderation for days, so "run `choco upgrade konjugate`" would send people to a command that says there is nothing to upgrade. winget leaves nothing the app can detect and has the same lag. Both are served by the plain download plus the package-manager hint line.
+**Not done for Chocolatey.** Chocolatey installs are detectable (the package folder `%ChocolateyInstall%\lib\konjugate`), but a new version can sit in moderation for days, so "run `choco upgrade konjugate`" would send people to a command that says there is nothing to upgrade. It is served by the plain download plus the package-manager hint line. (winget, which is paused, would have been treated the same way: it leaves nothing the app can detect and has the same lag.)
 
 ## The update experience
 
@@ -63,7 +66,7 @@ Konjugate first told people about updates with a native dialog shown at every la
 1. **A badge on the title bar's Konjugate button** (`#welcomeButton`), in the style of the Extensions button's existing update badge. It appears once a check finds a newer version that has not been skipped or snoozed, with the tooltip "Konjugate 1.1.9 is available". Nothing else happens: no dialog, no sound, no focus change.
 2. **An "Updates" section at the top of the Welcome window,** which that button opens from anywhere (so it is always reachable, including after the launch Welcome window has been closed or skipped). It shows the running version and one of: "You're up to date", "Konjugate 1.1.9 is available", "Updates are delivered by the Microsoft Store" (Store installs, which never get a badge), or "Couldn't check for updates" with the reason. It always has a **Check for updates** button and an **All releases** link to the GitHub releases page.
 
-**What the available-update section offers, by install source.** Always a link to what's new (the release page). Then: Homebrew — `brew upgrade --cask konjugate` with **Copy Command**. AppImage — the `appimageupdatetool '<real path>'` command with **Copy Command**, and a download link as the alternative. Everything else — a **Download** button (the release page), plus one line for people who installed with a package manager: "Installed with winget or Chocolatey? Update there instead: `winget upgrade Konjugate.Konjugate` · `choco upgrade konjugate` (new versions can take a few days to appear there)". That hint is how winget and Chocolatey users are served without detecting them: the primary action stays the plain download, and a lagging channel is never the main advice. Last, **Skip this version**.
+**What the available-update section offers, by install source.** Always a link to what's new (the release page). Then: Homebrew — `brew upgrade --cask konjugate` with **Copy Command**. AppImage — the `appimageupdatetool '<real path>'` command with **Copy Command**, and a download link as the alternative. Everything else — a **Download** button (the release page), plus one line for people who installed with a package manager: "Installed with Chocolatey? Update there instead: `choco upgrade konjugate` (new versions can take a few days to appear there)". That hint is how Chocolatey users are served without detecting them: the primary action stays the plain download, and a lagging channel is never the main advice. Last, **Skip this version**.
 
 **What each control does.** *Skip this version* is remembered for that version number, across restarts; the badge disappears and stays gone until a newer version is found. There is deliberately no "remind me later": the badge is quiet, so there is nothing to be reminded of. *Check for updates* ignores the skip, asks GitHub now, and shows the result in place; it is the only thing that reaches GitHub on demand. A failed automatic check is silent (no network, a rate limit), but a failed manual check says so.
 
@@ -78,7 +81,7 @@ Konjugate first told people about updates with a native dialog shown at every la
 ## Known issues found while writing this
 
 - **The Homebrew cask used to declare `auto_updates true`,** copied from official-cask conventions, although Konjugate does not update itself. As I understand Homebrew's behaviour, such casks are left out of a plain `brew upgrade` and `brew outdated` unless the user adds `--greedy`, so users could have missed updates. The line is removed from the template in `scripts/generateHomebrewCask.mjs` (both flavors); the tap's published cask loses it with the next release.
-- **winget and Chocolatey are not told apart from a manual install.** Those users see the plain GitHub link (decision 3 explains why they get no command). Accepted for now.
+- **Chocolatey is not told apart from a manual install.** Those users see the plain GitHub link (decision 3 explains why they get no command). Accepted for now.
 
 ## Status
 

@@ -285,26 +285,32 @@ jobs:
     # Re-add a job for either (see this file's git history, commit c40e5ee, for the exact
     # configuration) once its blocker is cleared.
 
-    wingetRelease:
-        needs: release
-        if: startsWith(github.ref, 'refs/tags/v')
-        runs-on: ubuntu-latest
-        env:
-            WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-        steps:
-            # winget-releaser only BUMPS an existing package -- its own action.yml checks that the
-            # PackageIdentifier already exists in microsoft/winget-pkgs and errors out if not. So
-            # WINGET_TOKEN must only be added after the first, manually submitted manifest has been
-            # merged upstream.
-            - name: Skip when winget isn't set up yet
-              if: env.WINGET_TOKEN == ''
-              run: echo "::notice::WINGET_TOKEN is not set; skipping winget (see docs/packageManagerDistribution.md)."
-            - uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
-              if: env.WINGET_TOKEN != ''
-              with:
-                  identifier: Konjugate.Konjugate
-                  installers-regex: '-setup\.exe$'
-                  token: ${{ secrets.WINGET_TOKEN }}
+    # winget is PAUSED: the first manifest submitted to microsoft/winget-pkgs was taking too long to be approved by Microsoft's
+    # moderators to plan around, so this job is commented out rather than deleted. winget-releaser only bumps a package that
+    # already exists in winget-pkgs, so restore it (uncomment the job below, and the winget section of
+    # docs/packageManagerDistribution.md and the winget lines of docs/updates.md and src/updatePanel.mjs) only after the first
+    # manifest has been merged and WINGET_TOKEN is set.
+    #
+    # wingetRelease:
+    #     needs: release
+    #     if: startsWith(github.ref, 'refs/tags/v')
+    #     runs-on: ubuntu-latest
+    #     env:
+    #         WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    #     steps:
+    #         # winget-releaser only BUMPS an existing package -- its own action.yml checks that the
+    #         # PackageIdentifier already exists in microsoft/winget-pkgs and errors out if not. So
+    #         # WINGET_TOKEN must only be added after the first, manually submitted manifest has been
+    #         # merged upstream.
+    #         - name: Skip when winget isn't set up yet
+    #           if: env.WINGET_TOKEN == ''
+    #           run: echo "::notice::WINGET_TOKEN is not set; skipping winget (see docs/packageManagerDistribution.md)."
+    #         - uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
+    #           if: env.WINGET_TOKEN != ''
+    #           with:
+    #               identifier: Konjugate.Konjugate
+    #               installers-regex: '-setup\.exe$'
+    #               token: ${{ secrets.WINGET_TOKEN }}
 
     chocolateyRelease:
         needs: release

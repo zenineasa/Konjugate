@@ -287,12 +287,12 @@ test('available, AppImage: the updater command, a download, and the note that th
     assert.equal(noCommand.actions[0].secondary, false, 'with no command, the download is the main action');
 });
 
-test('available, anything else: a plain download, and the winget/Chocolatey hint instead of a primary action', () => {
+test('available, anything else: a plain download, and the Chocolatey hint instead of a primary action', () => {
     const model = describeUpdateStatus(availableStatus());
     assert.deepEqual(actionLabels(model), ['Download 1.2.0', 'Skip this version']);
     assert.equal(model.actions[0].url, 'https://example.test/release');
     assert.ok(!model.actions[0].secondary, 'the download is the main action here');
-    assert.match(model.hint, /winget upgrade Konjugate\.Konjugate/);
+    assert.doesNotMatch(model.hint, /winget/, 'winget is paused: there is no package to upgrade');
     assert.match(model.hint, /choco upgrade konjugate/);
     assert.match(model.hint, /few days/);
 });

@@ -9,7 +9,9 @@ export const allReleasesUrl = 'https://github.com/zenineasa/Konjugate/releases';
 
 const homebrewLagNote = 'Homebrew can take a few minutes after a release to offer the new version.';
 const appImageToolNote = "It needs AppImageUpdate's command-line tool (appimageupdatetool), a separate download that is not installed by default. Gear Lever and AppImageLauncher can do the same from their menus.";
-const packageManagerHint = 'Installed with winget or Chocolatey? Update there instead: winget upgrade Konjugate.Konjugate  ·  choco upgrade konjugate  (new versions can take a few days to appear there).';
+// winget is paused (see .github/workflows/release.yml), so only Chocolatey is mentioned. When winget is restored, the line to bring
+// back is: 'Installed with winget or Chocolatey? Update there instead: winget upgrade Konjugate.Konjugate  ·  choco upgrade konjugate  (new versions can take a few days to appear there).'
+const packageManagerHint = 'Installed with Chocolatey? Update there instead: choco upgrade konjugate  (new versions can take a few days to appear there).';
 
 // Turns the status the main process holds into what the window shows: a headline, optional detail
 // and hint text, buttons, and links. Plain data, so the wording and the choice of actions per install

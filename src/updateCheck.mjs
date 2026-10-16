@@ -69,7 +69,7 @@ export function isHomebrewCask({ platform = process.platform, home, env, exists 
 
 // How this copy of Konjugate was installed, as far as the app can tell: 'store' (Microsoft Store /
 // MSIX), 'homebrew' (a Homebrew cask), 'appimage' (running from an AppImage), or 'other' (an
-// installer, a DMG, winget, Chocolatey -- none of which leave anything the app can tell apart). Electron
+// installer, a DMG, Chocolatey -- none of which leave anything the app can tell apart). Electron
 // sets process.windowsStore for a Store app, and the AppImage runtime sets APPIMAGE to the file it is
 // running. Homebrew is checked before the AppImage: a Linux cask install is an AppImage too, but
 // `brew upgrade` is the right way to update it.

@@ -8,7 +8,7 @@ const installLabels = {
     store: 'Microsoft Store',
     homebrew: 'Homebrew',
     appimage: 'AppImage',
-    other: 'an installer, a DMG, winget, Chocolatey or a build from source'
+    other: 'an installer, a DMG, Chocolatey or a build from source'
 };
 const platformNames = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
 const known = (value) => (typeof value === 'string' && value.trim() !== '' ? value.trim() : 'unknown');

@@ -30,7 +30,7 @@ async function readJson(path, description) {
     }
 }
 
-async function resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys) {
+async function resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys, incompatiblePluginKeys = {}) {
     if (!pluginDirectory) throw new PluginResolutionError('Plugin execution requires an installed plugin directory.', 'PLUGIN_DIRECTORY_MISSING');
     const pluginId = implementation.pluginId;
     const version = implementation.pluginVersion;
@@ -39,6 +39,11 @@ async function resolvePluginSource(implementation, pluginDirectory, disabledPlug
     }
     if (disabledPluginKeys.includes(packageKey('plugin', pluginId, version))) {
         throw new PluginResolutionError(`Plugin ${pluginId} is disabled. Enable it from Extensions before running this model.`, 'PLUGIN_DISABLED');
+    }
+    // `incompatiblePluginKeys` maps a plugin's key to why this Konjugate cannot run it (docs/proposals/packageCompatibility.md).
+    const incompatibility = incompatiblePluginKeys[packageKey('plugin', pluginId, version)];
+    if (incompatibility) {
+        throw new PluginResolutionError(`Plugin ${pluginId} ${version} ${incompatibility} Update or reinstall it from Extensions before running this model.`, 'PLUGIN_INCOMPATIBLE');
     }
     const pluginRoot = resolve(pluginDirectory, 'plugins', pluginId, version);
     if (!pluginRoot.startsWith(`${resolve(pluginDirectory, 'plugins')}${sep}`)) {
@@ -63,13 +68,13 @@ async function resolvePluginSource(implementation, pluginDirectory, disabledPlug
     return { ...implementation, kind: contribution.runtime, providerApiVersion: contribution.apiVersion, source: sourcePath };
 }
 
-export async function resolveInstalledPlugins(content, { pluginDirectory, disabledPluginKeys = [] } = {}) {
+export async function resolveInstalledPlugins(content, { pluginDirectory, disabledPluginKeys = [], incompatiblePluginKeys = {} } = {}) {
     const document = typeof content === 'string' ? JSON.parse(content) : structuredClone(content);
     let changed = false;
     const resolveImplementation = async (implementation) => {
         if (implementation?.kind !== 'plugin') return implementation;
         changed = true;
-        return resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys);
+        return resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys, incompatiblePluginKeys);
     };
     for (const node of document.nodes ?? []) {
         for (const term of node.sourceTerms ?? []) term.implementation = await resolveImplementation(term.implementation);

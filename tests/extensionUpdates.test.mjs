@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { describeOutdated, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from '../src/renderer/extensionUpdates.mjs';
+import { describeOutdated, heldBackSentence, heldBackText, incompatibleEntries, incompatibleText, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from '../src/renderer/extensionUpdates.mjs';
 
 const entries = [
     { packageId: 'a.one', name: 'Alpha', packageType: 'addon' },
@@ -71,4 +71,36 @@ test('a release tagged newer than its package is reported as nothing updated, wi
 
 test('nothing planned gives an empty, harmless summary', () => {
     assert.deepEqual(summarizeUpdateAll([]), { message: '', severity: null, updatedCount: 0 });
+});
+
+test('a release this Konjugate cannot use is named with what it needs, and an unusable one is not mentioned', () => {
+    assert.equal(heldBackText({ version: '1.5.0', required: '1.2.0', reason: 'app-version' }), '1.5.0 needs Konjugate 1.2.0');
+    assert.equal(heldBackText({ version: '2.0.0', required: 2, reason: 'api-version' }), '2.0.0 needs a newer Konjugate');
+    assert.equal(heldBackText({ version: '1.9.0', required: null, reason: 'invalid' }), null);
+    assert.equal(heldBackText(null), null);
+    assert.equal(heldBackText(undefined), null);
+});
+
+test('an incompatible installed package says what it needs and what is running', () => {
+    assert.equal(incompatibleText({ required: '1.2.0', running: '1.1.9' }), 'Needs Konjugate 1.2.0 or later; this is Konjugate 1.1.9.');
+    assert.equal(incompatibleText(null), null);
+    assert.deepEqual(incompatibleEntries([{ packageId: 'a' }, { packageId: 'b', incompatible: { required: '1.2.0', running: '1.1.0' } }]).map((entry) => entry.packageId), ['b']);
+});
+
+test('an install that skipped a newer release says so, and one that did not stays quiet', () => {
+    assert.equal(heldBackSentence([{ packageId: 'a' }]), '');
+    assert.equal(heldBackSentence([]), '');
+    assert.equal(
+        heldBackSentence([{ packageId: 'a' }, { packageId: 'b', heldBack: { version: '1.5.0', required: '1.2.0', reason: 'app-version' } }]),
+        'The newest release, 1.5.0 needs Konjugate 1.2.0, so an earlier release was installed.'
+    );
+    assert.equal(heldBackSentence([{ packageId: 'a', heldBack: { version: '1.9.0', required: null, reason: 'invalid' } }]), '');
+});
+
+test('a held-back entry is a note and never an update: it has nothing outdated, so it is not in the plan or the badge', () => {
+    const updates = new Map([
+        ['held', { latestVersion: null, outdated: [], heldBack: { version: '1.5.0', required: '1.2.0', reason: 'app-version' }, heldBackPackages: ['h.addon'] }],
+        ['real', { latestVersion: '1.4.2', outdated: [{ packageId: 'r.addon' }], heldBack: { version: '1.5.0', required: '1.2.0', reason: 'app-version' }, heldBackPackages: ['r.addon'] }]
+    ]);
+    assert.deepEqual(updatePlan(updates), [{ prefix: 'real', latestVersion: '1.4.2' }]);
 });

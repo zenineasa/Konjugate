@@ -280,8 +280,12 @@
                              checking note) -- a GitHub Releases API check against this package's own
                              registry entry, not a version number stored in the registry itself. -->
                         <p id="extensionsDetailUpdateNote" class="examplesExplorerDetailEmpty" hidden></p>
+                        <!-- Compatibility (docs/proposals/packageCompatibility.md): why an installed package is not loaded, or
+                             that a newer release needs a newer Konjugate. -->
+                        <p id="extensionsDetailCompatibilityNote" class="examplesExplorerDetailEmpty" hidden></p>
                         </div>
                         <footer class="extensionsDetailFooter">
+                            <button id="extensionsInstallCompatible" type="button" class="doneButton" hidden>Install compatible version</button>
                             <button id="extensionsUpdate" type="button" class="doneButton" hidden>Update</button>
                             <button id="extensionsToggleEnabled" type="button" class="extensionsToggleButton">Disable</button>
                             <button id="extensionsUninstall" type="button" class="extensionsDangerButton">Uninstall</button>

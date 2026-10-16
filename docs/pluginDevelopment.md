@@ -106,7 +106,7 @@ Generate the example package from the repository root with:
 npm run package:examples
 ```
 
-This writes `out/examples/helloProvider.kjp` alongside the add-on example package `out/examples/helloWorld.kja`. The output directory is generated and ignored; the package source and manifest remain the reviewable artifacts.
+This writes `out/examples/helloProvider.kjp`, which declares the version of Konjugate it was built with as its `minimumKonjugateVersion`. The Hello World add-on example is in its own repository, [Konjugate-HelloWorld](https://github.com/zenineasa/Konjugate-HelloWorld), and builds its own `.kja` there. The output directory is generated and ignored; the package source and manifest remain the reviewable artifacts.
 
 The current package archive tests and plugin resolver tests cover:
 

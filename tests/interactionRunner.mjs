@@ -4198,6 +4198,85 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(bundleWindow);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated window; no web-edition equivalent' });
 
+    await run('an installed package that needs a newer Konjugate is not loaded, is explained in Extensions, and does not count as an update', async () => {
+        // docs/proposals/packageCompatibility.md: two packages that need a Konjugate far newer than any, and a compatible control.
+        const packagesDirectory = join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages');
+        const plant = async (type, id, name, files, minimumKonjugateVersion) => {
+            const directory = join(packagesDirectory, `${type}s`, id, '1.0.0');
+            await mkdir(directory, { recursive: true });
+            await writeFile(join(directory, 'package.json'), JSON.stringify({
+                format: 'konjugate-package', formatVersion: 1, packageType: type, packageId: id, name, version: '1.0.0',
+                ...(minimumKonjugateVersion ? { minimumKonjugateVersion } : {}), contents: { manifest: `${type}.json` }
+            }));
+            for (const [file, content] of Object.entries(files)) await writeFile(join(directory, file), typeof content === 'string' ? content : JSON.stringify(content));
+        };
+        const template = (id) => ({ id, kind: 'node', name: id, domains: ['showcase'], description: 'A test node.', states: [{ symbol: 'level', label: 'Level', initialValue: 1 }] });
+        const pluginManifest = (id, componentId) => ({ pluginId: id, name: id, version: '1.0.0', apiVersion: 1, permissions: [], contributes: [{ kind: 'component', componentId, apiVersion: 1, entry: `${componentId}.json` }] });
+        await plant('addon', 'example.futureTool', 'Future Tool', {
+            'addon.json': {
+                addonId: 'example.futureTool', name: 'Future Tool', version: '1.0.0', apiVersion: 1, kind: 'resultVisualizer', entry: 'index.html', permissions: ['results.read'],
+                contributes: { toolstrip: [{ commandId: 'open', label: 'Open', tooltip: 'Open Future Tool', symbol: 'F', when: 'resultsActive', contexts: ['resultSession'] }] }
+            },
+            'index.html': '<!doctype html>'
+        }, '999.0.0');
+        await plant('plugin', 'example.futurePlugin', 'Future Plugin', { 'plugin.json': pluginManifest('example.futurePlugin', 'futureNode'), 'futureNode.json': template('futureNode') }, '999.0.0');
+        await plant('plugin', 'example.currentPlugin', 'Current Plugin', { 'plugin.json': pluginManifest('example.currentPlugin', 'currentNode'), 'currentNode.json': template('currentNode') });
+
+        // The main process reports the incompatible ones, with what they need, and never as enabled.
+        const listed = await evaluate(window, `window.extensions.list().then((all) => all.filter((entry) => entry.packageId.startsWith('example.future') || entry.packageId === 'example.currentPlugin').map((entry) => ({ id: entry.packageId, enabled: entry.enabled, incompatible: entry.incompatible ?? null })))`);
+        const byId = Object.fromEntries(listed.map((entry) => [entry.id, entry]));
+        assert.equal(byId['example.futureTool'].enabled, false);
+        assert.equal(byId['example.futureTool'].incompatible.required, '999.0.0');
+        assert.match(byId['example.futureTool'].incompatible.running, /^\d+\.\d+\.\d+/);
+        assert.equal(byId['example.futurePlugin'].enabled, false);
+        assert.equal(byId['example.currentPlugin'].enabled, true);
+        assert.equal(byId['example.currentPlugin'].incompatible, null);
+
+        // The Extensions dialog explains it and offers the way out; it is not an update.
+        await evaluate(window, `document.querySelector('#extensionsButton').click()`);
+        await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'The Extensions dialog did not open.');
+        // The dialog remembers its last tab from earlier scenarios, so choose the one this scenario needs.
+        await evaluate(window, `document.querySelector('[data-extensions-tab="addon"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-package-key="addon:example.futureTool:1.0.0"]'))`, 'The incompatible add-on was not listed.');
+        const row = `document.querySelector('[data-package-key="addon:example.futureTool:1.0.0"]')`;
+        assert.equal(await evaluate(window, `${row}.classList.contains('isIncompatible')`), true);
+        assert.equal(await evaluate(window, `${row}.querySelector('.extensionsIncompatiblePill').textContent`), 'Incompatible');
+        assert.match(await evaluate(window, `${row}.querySelector('.extensionsItemMeta').textContent`), /Needs Konjugate 999\.0\.0 or later; this is Konjugate \d+\.\d+\.\d+/);
+        // Other installed add-ons may have updates of their own; what matters is that this package is not offered one.
+        assert.equal(await evaluate(window, `Boolean(${row}.querySelector('.extensionsUpdatePill'))`), false, 'an incompatible package is not an update');
+        assert.equal(await evaluate(window, `${row}.classList.contains('hasUpdate')`), false);
+        assert.doesNotMatch(await evaluate(window, `${row}.querySelector('.extensionsItemMeta').textContent`), /Disabled/, 'it is incompatible, which is not something the user disabled');
+        await evaluate(window, `${row}.click()`);
+        await waitFor(window, `!document.querySelector('#extensionsDetailCompatibilityNote').hidden`, 'The compatibility note was not shown.');
+        assert.match(await evaluate(window, `document.querySelector('#extensionsDetailCompatibilityNote').textContent`), /Needs Konjugate 999\.0\.0 or later.*It is not loaded\. Installing a compatible version replaces it\./);
+        assert.equal(await evaluate(window, `document.querySelector('#extensionsInstallCompatible').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#extensionsToggleEnabled').hidden`), true, 'an incompatible package cannot be enabled');
+        assert.equal(await evaluate(window, `document.querySelector('#extensionsUpdate').hidden`), true);
+
+        // A package that is not in the registry has no other release to install, and says so plainly.
+        await evaluate(window, `document.querySelector('#extensionsInstallCompatible').click()`);
+        await waitFor(window, `/Could not install a compatible version/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'The failed install was not reported.');
+        assert.match(await evaluate(window, `document.querySelector('#extensionsRestartNotice').textContent`), /not in the registry|registry/i);
+        assert.equal(await evaluate(window, `document.querySelector('#extensionsInstallCompatible').disabled`), false, 'the button is usable again after a failure');
+
+        // The compatible plugin is listed as usual, with nothing wrong with it.
+        await evaluate(window, `document.querySelector('[data-extensions-tab="plugin"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-package-key="plugin:example.currentPlugin:1.0.0"]'))`, 'The compatible plugin was not listed.');
+        assert.equal(await evaluate(window, `document.querySelector('[data-package-key="plugin:example.currentPlugin:1.0.0"]').classList.contains('isIncompatible')`), false);
+        assert.equal(await evaluate(window, `document.querySelector('[data-package-key="plugin:example.futurePlugin:1.0.0"]').classList.contains('isIncompatible')`), true);
+        await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+
+        // And what a package contributes only loads if it is compatible.
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        const libraryWindow = await driver.waitForNewHandle(before);
+        await waitFor(libraryWindow, `document.querySelector('.documentTitle')`, 'The component library test window did not finish loading.');
+        await evaluate(libraryWindow, `document.querySelector('#componentLibraryButton').click()`);
+        await waitFor(libraryWindow, `document.querySelector('[data-template-id="currentNode"]')`, 'The compatible plugin\'s node template did not appear.');
+        assert.equal(await evaluate(libraryWindow, `Boolean(document.querySelector('[data-template-id="futureNode"]'))`), false, 'the incompatible plugin\'s template must not load');
+        await closeWhenValidated(libraryWindow);
+    }, { skip: !driver.capabilities.multiWindow && 'packages are installed on disk by the desktop app; the web edition has none' });
+
     await run('a node template places source terms with their own and shared parameters, as one undoable step', async () => {
         const pluginDirectory = join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages', 'plugins', 'example.stockpile', '0.1.0');
         await mkdir(pluginDirectory, { recursive: true });

@@ -80,7 +80,7 @@ contextBridge.exposeInMainWorld('extensions', {
     setEnabled: (packageType, packageId, version, enabled) => ipcRenderer.invoke('packageSetEnabled', { packageType, packageId, version, enabled }),
     // The Explorer's "Discover" side (see docs/extensionsExplorer.md).
     discoverRegistry: () => ipcRenderer.invoke('packageDiscoverRegistry'),
-    installFromRegistry: (entry, namespaces) => ipcRenderer.invoke('packageInstallFromRegistry', { entry, namespaces }),
+    installFromRegistry: (entry, namespaces, release = null) => ipcRenderer.invoke('packageInstallFromRegistry', { entry, namespaces, release }),
     // An entry's image as a data: URL, or null (see the packageRegistryImage handler in src/main.mjs).
     registryImage: (prefix) => ipcRenderer.invoke('packageRegistryImage', prefix),
     // An entry's screenshots (downloaded on demand, not bundled) and its video links (opened in the

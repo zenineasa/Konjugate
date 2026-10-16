@@ -53,6 +53,24 @@ test('rejects a plugin reference whose package key is disabled', async () => {
     }
 });
 
+test('rejects a plugin that needs a newer Konjugate, saying so', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'konjugate-plugin-'));
+    try {
+        await installFixture(root);
+        const incompatiblePluginKeys = { 'plugin:example.helloProvider:0.1.0': 'needs Konjugate 1.2.0 or later; this is Konjugate 1.1.0.' };
+        await assert.rejects(
+            resolveInstalledPlugins(model, { pluginDirectory: root, incompatiblePluginKeys }),
+            (error) => error instanceof PluginResolutionError && error.code === 'PLUGIN_INCOMPATIBLE'
+                && error.message === 'Plugin example.helloProvider 0.1.0 needs Konjugate 1.2.0 or later; this is Konjugate 1.1.0. Update or reinstall it from Extensions before running this model.'
+        );
+        // Another version of the same plugin is unaffected.
+        const resolved = JSON.parse(await resolveInstalledPlugins(model, { pluginDirectory: root, incompatiblePluginKeys: { 'plugin:example.helloProvider:9.9.9': 'needs Konjugate 9.0.0 or later; this is Konjugate 1.1.0.' } }));
+        assert.equal(resolved.nodes[0].sourceTerms[0].implementation.kind, 'python');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test('leaves models without plugin references unchanged', async () => {
     const content = JSON.stringify({ ...model, nodes: [], edges: [] });
     assert.equal(await resolveInstalledPlugins(content, { pluginDirectory: '/unused' }), content);

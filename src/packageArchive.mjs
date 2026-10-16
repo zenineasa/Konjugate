@@ -5,6 +5,7 @@ import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { validateAddonManifest } from './addonHost.mjs';
+import { compareVersions } from './versionCompare.mjs';
 
 export const packageArchiveFormat = 'konjugate-package';
 export const packageArchiveVersion = 1;
@@ -22,17 +23,42 @@ const packageIdPattern = /^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/;
 // may reserve just the first one -- "example" covering "example.*" -- hence "*" here, not "+".
 const namespacePrefixPattern = /^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)*$/;
 const versionPattern = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
+// minimumKonjugateVersion (docs/proposals/packageCompatibility.md): exactly three numbers, like Konjugate's own version.
+const minimumKonjugateVersionPattern = /^\d+\.\d+\.\d+$/;
+// The add-on and plugin API version this Konjugate supports. A package declaring a higher one comes from a newer
+// Konjugate; it is reported as incompatible, not as invalid.
+const supportedApiVersion = 1;
 const maximumArchiveBytes = 64 * 1024 * 1024;
 const maximumFileCount = 5000;
 const maximumFileBytes = 64 * 1024 * 1024;
 const maximumExpandedBytes = 256 * 1024 * 1024;
 
 export class PackageArchiveError extends Error {
-    constructor(message, code) {
+    // `details` carries structured facts for the two incompatibility codes, INCOMPATIBLE_APP_VERSION
+    // ({ required, running }) and UNSUPPORTED_API_VERSION ({ required }), so callers can choose another release
+    // instead of parsing the message.
+    constructor(message, code, details = null) {
         super(message);
         this.name = 'PackageArchiveError';
         this.code = code;
+        if (details) this.details = details;
     }
+}
+
+// Whether a package can run on this Konjugate, judged by the minimumKonjugateVersion in its package.json. Absent means no
+// requirement. `appVersion` is Konjugate's own version; unreadable or missing means there is nothing to compare against,
+// and the package is allowed.
+export function packageCompatibility(packageManifest, appVersion) {
+    const required = packageManifest?.minimumKonjugateVersion;
+    if (!required || !appVersion) return { compatible: true };
+    return compareVersions(required, appVersion, { threeParts: true }) === 1
+        ? { compatible: false, reason: 'app-version', required, running: appVersion }
+        : { compatible: true };
+}
+
+function firstUnsupportedApiVersion(contributionManifest) {
+    const versions = [contributionManifest.apiVersion, ...(Array.isArray(contributionManifest.contributes) ? contributionManifest.contributes.map((item) => item?.apiVersion) : [])];
+    return versions.find((value) => Number.isInteger(value) && value > supportedApiVersion) ?? null;
 }
 
 function packageManifestPath(packageType) {
@@ -51,6 +77,9 @@ function validatePackageManifest(manifest, expectedType = null) {
     }
     if (manifest.contents?.manifest !== packageManifestPath(manifest.packageType)) {
         throw new PackageArchiveError('The package manifest points to an invalid contribution manifest.', 'INVALID_MANIFEST');
+    }
+    if (manifest.minimumKonjugateVersion !== undefined && !minimumKonjugateVersionPattern.test(manifest.minimumKonjugateVersion)) {
+        throw new PackageArchiveError('minimumKonjugateVersion must be a three-part version such as "1.2.0".', 'INVALID_MANIFEST');
     }
     return structuredClone(manifest);
 }
@@ -111,11 +140,38 @@ function inspectEntries(archive) {
     return files;
 }
 
-export function inspectPackageArchive(archive, { extension = null } = {}) {
+// What a release's compatibility depends on, read without judging the package: its identity and minimum Konjugate version
+// (package.json), and the highest add-on or plugin API version its contribution manifest asks for beyond the one this
+// Konjugate supports (null if none). Registry release selection uses this to decide whether a downloaded candidate suits
+// the running app, and to match a downloaded archive to the package a registry entry declares, neither of which should
+// fail just because the package comes from a newer Konjugate. Throws PackageArchiveError for an archive that is broken.
+export function readPackageCompatibilityFacts(archive, { extension = null } = {}) {
     const files = inspectEntries(archive);
     const packageManifest = validatePackageManifest(decodeJson(files, 'package.json', 'INVALID_MANIFEST'), extension === '.kja' ? 'addon' : extension === '.kjp' ? 'plugin' : null);
+    const contributionManifest = decodeJson(files, packageManifest.contents.manifest, 'MISSING_MANIFEST');
+    return { packageManifest, unsupportedApiVersion: firstUnsupportedApiVersion(contributionManifest) };
+}
+
+// Compatibility (docs/proposals/packageCompatibility.md) is reported with two distinct codes, never as a generic invalid
+// manifest: UNSUPPORTED_API_VERSION if the package uses an add-on or plugin API version this Konjugate does not have
+// (always checked), and INCOMPATIBLE_APP_VERSION if it needs a newer Konjugate than `appVersion` (checked only when the
+// caller passes Konjugate's own version, which tests and bundled packages leave out).
+export function inspectPackageArchive(archive, { extension = null, appVersion = null } = {}) {
+    const files = inspectEntries(archive);
+    const packageManifest = validatePackageManifest(decodeJson(files, 'package.json', 'INVALID_MANIFEST'), extension === '.kja' ? 'addon' : extension === '.kjp' ? 'plugin' : null);
+    const label = `${packageManifest.name} ${packageManifest.version}`;
+    const compatibility = packageCompatibility(packageManifest, appVersion);
+    if (!compatibility.compatible) {
+        throw new PackageArchiveError(`${label} needs Konjugate ${compatibility.required} or later; this is Konjugate ${compatibility.running}.`, 'INCOMPATIBLE_APP_VERSION',
+            { required: compatibility.required, running: compatibility.running, packageManifest });
+    }
     const contributionPath = packageManifest.contents.manifest;
     const contributionManifest = decodeJson(files, contributionPath, 'MISSING_MANIFEST');
+    const unsupportedApi = firstUnsupportedApiVersion(contributionManifest);
+    if (unsupportedApi !== null) {
+        throw new PackageArchiveError(`${label} uses ${packageManifest.packageType === 'addon' ? 'add-on' : 'plugin'} API version ${unsupportedApi}, which this version of Konjugate does not support.`,
+            'UNSUPPORTED_API_VERSION', { required: unsupportedApi, packageManifest });
+    }
     if (packageManifest.packageType === 'addon') {
         try {
             validateAddonManifest(contributionManifest);
@@ -171,9 +227,9 @@ export function inspectPackageArchive(archive, { extension = null } = {}) {
 // update leaves the old version on disk next to the new one -- both then get discovered and loaded,
 // and the update check keeps reporting the old one as outdated. Only removed after the new version
 // has been written successfully, so a failed install never leaves the package missing entirely.
-export async function installPackageArchive(archive, { extension, directory, overwrite = false, replaceOtherVersions = false } = {}) {
+export async function installPackageArchive(archive, { extension, directory, overwrite = false, replaceOtherVersions = false, appVersion = null } = {}) {
     if (!directory) throw new PackageArchiveError('A package installation directory is required.', 'INVALID_DESTINATION');
-    const inspected = inspectPackageArchive(archive, { extension });
+    const inspected = inspectPackageArchive(archive, { extension, appVersion });
     const { packageManifest, files } = inspected;
     const target = safeInstallPath(directory, packageManifest.packageType, packageManifest.packageId, packageManifest.version);
     if (!overwrite) {
@@ -235,6 +291,7 @@ export async function listInstalledPackages(directory) {
                     results.push({
                         packageType, packageId: packageManifest.packageId, name: packageManifest.name,
                         version: packageManifest.version, source: 'installed',
+                        minimumKonjugateVersion: packageManifest.minimumKonjugateVersion ?? null,
                         permissions: contributionManifest.permissions ?? [],
                         manifest: contributionManifest, installPath
                     });

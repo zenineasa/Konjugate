@@ -62,3 +62,33 @@ export function summarizeUpdateAll(outcomes) {
         updatedCount: updated.length
     };
 }
+
+// ---- Compatibility (docs/proposals/packageCompatibility.md) ----
+//
+// A newer release can exist that the running Konjugate cannot use. The update check reports it as `heldBack`
+// ({ version, required, reason }) beside, never inside, the list of outdated packages, so it is a note and never a badge
+// count. An installed package the running Konjugate cannot load is `incompatible` ({ required, running }).
+
+// "1.5.0 needs Konjugate 1.2.0" -- null when there is nothing useful to say (an unusable release is not worth mentioning).
+export function heldBackText(heldBack) {
+    if (!heldBack) return null;
+    if (heldBack.reason === 'app-version' && heldBack.required) return `${heldBack.version} needs Konjugate ${heldBack.required}`;
+    if (heldBack.reason === 'api-version') return `${heldBack.version} needs a newer Konjugate`;
+    return null;
+}
+
+export function incompatibleText(incompatible) {
+    return incompatible ? `Needs Konjugate ${incompatible.required} or later; this is Konjugate ${incompatible.running}.` : null;
+}
+
+// The sentence to add to an install or update notice when the newest release was passed over for an earlier one that this
+// Konjugate can use. `results` are the install results; each may carry `heldBack`. Empty when nothing was held back.
+export function heldBackSentence(results) {
+    const text = heldBackText(results.find((result) => result.heldBack)?.heldBack);
+    return text ? `The newest release, ${text}, so an earlier release was installed.` : '';
+}
+
+// The installed packages this Konjugate cannot load, in list order.
+export function incompatibleEntries(entries) {
+    return entries.filter((entry) => entry.incompatible);
+}

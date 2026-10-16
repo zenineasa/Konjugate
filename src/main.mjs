@@ -44,8 +44,9 @@ import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
 import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
-import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
-import { fetchLatestReleaseVersion, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, isNewerVersion, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
+import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
+import { isNewerPackageVersion } from './versionCompare.mjs';
+import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
 import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
@@ -165,6 +166,41 @@ let extensionStateStore = null;
 // both already take effect immediately) and never cleared except by an actual restart, since
 // that's what makes it true again. Broadcast to every open window, not just the one the install
 // happened in, since a restart affects the whole app.
+// ---- Package compatibility (docs/proposals/packageCompatibility.md)
+//
+// An installed package can need a newer Konjugate than the one running (after the app is downgraded, or when a package was put
+// in place by hand). Such a package is not loaded: it is left out of discovery like a disabled one, listed as incompatible, and
+// offered a compatible release. Returns a Map of packageKey -> { compatible: false, reason, required, running }.
+async function incompatiblePackages() {
+    const appVersion = app.getVersion();
+    const installed = await listInstalledPackages(join(app.getPath('userData'), 'packages'));
+    const incompatible = new Map();
+    for (const pkg of installed) {
+        const verdict = packageCompatibility({ minimumKonjugateVersion: pkg.minimumKonjugateVersion }, appVersion);
+        if (!verdict.compatible) incompatible.set(packageKey(pkg.packageType, pkg.packageId, pkg.version), verdict);
+    }
+    return incompatible;
+}
+// Disabled and incompatible packages together: the keys discovery and plugin resolution must not load.
+async function unavailablePackageKeys() {
+    return [...await extensionStateStore.list(), ...(await incompatiblePackages()).keys()];
+}
+
+// What is known about each published release of each registry package (its minimum Konjugate version and API versions, never a
+// verdict about this app), kept on disk so a release that is too new is not downloaded again at every start. See registryClient.mjs.
+let releaseFactsCachePromise = null;
+function releaseFactsCache() {
+    releaseFactsCachePromise ??= (async () => {
+        const file = join(app.getPath('userData'), 'packages', 'releaseFacts.json');
+        const initial = await readFile(file, 'utf8').then((text) => JSON.parse(text)).catch(() => ({}));
+        return createReleaseFactsCache({
+            initial: initial && typeof initial === 'object' && !Array.isArray(initial) ? initial : {},
+            onChange: (facts) => { mkdir(dirname(file), { recursive: true }).then(() => writeFile(file, JSON.stringify(facts))).catch(() => {}); }
+        });
+    })();
+    return releaseFactsCachePromise;
+}
+
 let packageRestartPending = false;
 function markPackageRestartPending() {
     packageRestartPending = true;
@@ -873,6 +909,7 @@ async function discoverAddons() {
     // matching discoverComponentLibrary()'s equivalent two-level walk for plugins below.
     const packagedAddonRoot = join(app.getPath('userData'), 'packages', 'addons');
     const addonIds = await readdir(packagedAddonRoot, { withFileTypes: true }).catch(() => []);
+    const incompatible = await incompatiblePackages();
     for (const idEntry of addonIds) {
         if (!idEntry.isDirectory()) continue;
         const versions = await readdir(join(packagedAddonRoot, idEntry.name), { withFileTypes: true }).catch(() => []);
@@ -881,6 +918,8 @@ async function discoverAddons() {
             const addonDirectory = join(packagedAddonRoot, idEntry.name, versionEntry.name);
             try {
                 const manifest = validateAddonManifest(JSON.parse(await readFile(join(addonDirectory, 'addon.json'), 'utf8')));
+                // Needs a newer Konjugate than this one: not loaded, but still listed (see packageList) so it can be replaced.
+                if (incompatible.has(packageKey('addon', manifest.addonId, manifest.version))) continue;
                 if (addonRegistry.has(manifest.addonId)) throw new Error(`Duplicate add-on ID: ${manifest.addonId}.`);
                 addonRegistry.set(manifest.addonId, { addonDirectory, manifest });
             } catch (error) {
@@ -1205,7 +1244,7 @@ async function discoverPluginExamples() {
     const found = new Map();
     const bundled = new Set(await exampleFiles());
     const pluginRoot = join(app.getPath('userData'), 'packages', 'plugins');
-    const disabledKeys = await extensionStateStore.list();
+    const disabledKeys = await unavailablePackageKeys();
     const insidePlugin = (directory, relativePath) => {
         const resolvedPath = resolve(directory, relativePath);
         return resolvedPath.startsWith(`${resolve(directory)}${sep}`) ? resolvedPath : null;
@@ -1351,7 +1390,7 @@ async function discoverComponentLibrary() {
     }
     const pluginRoot = join(app.getPath('userData'), 'packages', 'plugins');
     const pluginIds = await readdir(pluginRoot, { withFileTypes: true }).catch(() => []);
-    const disabledKeys = await extensionStateStore.list();
+    const disabledKeys = await unavailablePackageKeys();
     for (const pluginIdEntry of pluginIds) {
         if (!pluginIdEntry.isDirectory()) continue;
         const pluginVersions = await readdir(join(pluginRoot, pluginIdEntry.name), { withFileTypes: true }).catch(() => []);
@@ -1450,7 +1489,8 @@ ipcMain.handle('packageInstall', async (event) => {
     const extension = lowerPath.endsWith('.kja') ? '.kja' : lowerPath.endsWith('.kjp') ? '.kjp' : null;
     if (!extension) throw new Error('Only .kja add-ons, .kjp plugins and .fmu files can be installed.');
     const archive = await readFile(path);
-    const inspected = inspectPackageArchive(archive, { extension });
+    // Refused before the review dialog if this Konjugate cannot run it (needs a newer Konjugate, or a newer add-on/plugin API).
+    const inspected = inspectPackageArchive(archive, { extension, appVersion: app.getVersion() });
     const permissions = inspected.contributionManifest.permissions ?? [];
     const detail = [
         `${inspected.packageManifest.name} ${inspected.packageManifest.version}`,
@@ -1470,7 +1510,8 @@ ipcMain.handle('packageInstall', async (event) => {
     if (confirmation.response !== 1) return null;
     const installed = await installPackageArchive(archive, {
         extension,
-        directory: join(app.getPath('userData'), 'packages')
+        directory: join(app.getPath('userData'), 'packages'),
+        appVersion: app.getVersion()
     });
     await discoverAddons();
     markPackageRestartPending();
@@ -1492,9 +1533,16 @@ ipcMain.handle('packageList', async () => {
             source: 'bundled', permissions: manifest.permissions ?? [], manifest, installPath: null,
             enabled: !disabledKeys.includes(packageKey('addon', manifest.addonId, manifest.version))
         }));
-    const installed = (await listInstalledPackages(join(app.getPath('userData'), 'packages'))).map((entry) => ({
-        ...entry, enabled: !disabledKeys.includes(packageKey(entry.packageType, entry.packageId, entry.version))
-    }));
+    const incompatible = await incompatiblePackages();
+    const installed = (await listInstalledPackages(join(app.getPath('userData'), 'packages'))).map((entry) => {
+        const key = packageKey(entry.packageType, entry.packageId, entry.version);
+        const verdict = incompatible.get(key);
+        // An incompatible package is never loaded, so it is never enabled whatever its toggle says.
+        return {
+            ...entry, enabled: !verdict && !disabledKeys.includes(key),
+            ...(verdict ? { incompatible: { required: verdict.required, running: verdict.running } } : {})
+        };
+    });
     const fmus = (await listInstalledFmus(join(app.getPath('userData'), 'packages'))).map((entry) => ({
         ...entry, enabled: !disabledKeys.includes(packageKey('fmu', entry.packageId, entry.version))
     }));
@@ -1728,11 +1776,15 @@ async function trustedRegistryNamespaces(rendererNamespaces) {
     }
 }
 
-ipcMain.handle('packageInstallFromRegistry', async (_event, { entry, namespaces }) => {
+// `release` (optional) names one release tag to install instead of the newest compatible one, for rolling back.
+ipcMain.handle('packageInstallFromRegistry', async (_event, { entry, namespaces, release = null }) => {
     const results = await installFromRegistryEntry(entry, {
         namespaces: await trustedRegistryNamespaces(namespaces),
         directory: join(app.getPath('userData'), 'packages'),
-        overwrite: true
+        overwrite: true,
+        appVersion: app.getVersion(),
+        factsCache: await releaseFactsCache(),
+        release
     });
     await discoverAddons();
     await discoverComponentLibrary();
@@ -1750,7 +1802,8 @@ ipcMain.handle('welcomeInstallRecommendedAddons', async (_event, entries) => {
     const results = [];
     for (const entry of entries) {
         results.push(...await installFromRegistryEntry(entry, {
-            namespaces, directory: join(app.getPath('userData'), 'packages'), overwrite: true
+            namespaces, directory: join(app.getPath('userData'), 'packages'), overwrite: true,
+            appVersion: app.getVersion(), factsCache: await releaseFactsCache()
         }));
     }
     await discoverAddons();
@@ -1778,15 +1831,20 @@ async function checkPackageUpdates() {
             .map((declared) => installed.find((pkg) => pkg.packageId === declared.packageId))
             .filter(Boolean);
         if (!installedMatches.length) continue;
-        const latest = await fetchLatestReleaseVersion(entry.downloadUrl);
-        if (!latest) continue;
-        const outdated = installedMatches.filter((pkg) => isNewerVersion(latest.version, pkg.version));
-        if (outdated.length) {
-            updates.push({
-                prefix, latestVersion: latest.version, releaseUrl: latest.url,
-                outdated: outdated.map((pkg) => ({ packageId: pkg.packageId, installedVersion: pkg.version }))
-            });
-        }
+        const check = await checkEntryUpdate(entry, installedMatches.map((pkg) => pkg.version), {
+            appVersion: app.getVersion(), factsCache: await releaseFactsCache()
+        });
+        if (check.status === 'unknown' || check.status === 'current') continue;
+        // `outdated` lists the installed packages a compatible newer release would update, and is empty for an entry that is only
+        // held back (a newer release exists but needs a newer Konjugate): that is a note, not an update, so it never reaches the
+        // badge, Update all or the Updates tab, all of which count `outdated`.
+        const outdated = check.status === 'update' ? installedMatches.filter((pkg) => isNewerPackageVersion(check.latest.version, pkg.version)) : [];
+        updates.push({
+            prefix, latestVersion: check.latest?.version ?? null, releaseUrl: check.latest?.url ?? null,
+            outdated: outdated.map((pkg) => ({ packageId: pkg.packageId, installedVersion: pkg.version })),
+            ...(check.heldBack ? { heldBack: check.heldBack } : {}),
+            heldBackPackages: check.heldBack ? installedMatches.map((pkg) => pkg.packageId) : []
+        });
     }
     return updates;
 }
@@ -2403,12 +2461,17 @@ const engineOptions = async () => {
     const { executionMode } = await providerToolchainStore.get();
     const packagesDirectory = join(app.getPath('userData'), 'packages');
     const disabledExtensionKeys = await extensionStateStore.list();
+    // A plugin that needs a newer Konjugate is never run: a model that references it gets the reason, not a missing-file error.
+    const incompatiblePluginKeys = Object.fromEntries([...(await incompatiblePackages())]
+        .filter(([key]) => key.startsWith('plugin:'))
+        .map(([key, verdict]) => [key, `needs Konjugate ${verdict.required} or later; this is Konjugate ${verdict.running}.`]));
     return {
         applicationPath: app.getAppPath(),
         resourcesPath: process.resourcesPath,
         packaged: app.isPackaged,
         pluginDirectory: packagesDirectory,
         disabledPluginKeys: disabledExtensionKeys,
+        incompatiblePluginKeys,
         // Same root and the same disabled-key list as plugins above -- packageKey()'s type
         // prefix ("fmu:"/"plugin:"/...) is what keeps one shared disabled-extension list
         // unambiguous across every installed package kind.

@@ -28,7 +28,7 @@ import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
-import { describeOutdated, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
+import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
@@ -9476,9 +9476,13 @@ function renderExtensionsResults() {
         button.classList.toggle('disabledItem', !entry.enabled);
         const update = updateInfoFor(entry.packageId);
         button.classList.toggle('hasUpdate', Boolean(update) && extensionsTab !== 'updates');
+        button.classList.toggle('isIncompatible', Boolean(entry.incompatible));
+        const heldBack = entry.incompatible ? null : heldBackInfoFor(entry.packageId);
+        const compatibilityMeta = entry.incompatible ? ` · <span class="extensionsItemIncompatible">${escapeHtml(incompatibleText(entry.incompatible))}</span>`
+            : heldBack ? ` · <span class="extensionsItemHeldBack">${escapeHtml(heldBackText(heldBack.heldBack))}</span>` : '';
         const meta = extensionsTab === 'updates' && update
-            ? `${escapeHtml(installedTypeLabels[entry.packageType] ?? entry.packageType)} · ${escapeHtml(entry.version)} → <span class="extensionsItemUpdate">${escapeHtml(update.latestVersion)}</span>${entry.enabled ? '' : ' · Disabled'}`
-            : `${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}${entry.enabled ? '' : ' · Disabled'}${update ? ` · <span class="extensionsItemUpdate">Update to ${escapeHtml(update.latestVersion)} available</span>` : ''}`;
+            ? `${escapeHtml(installedTypeLabels[entry.packageType] ?? entry.packageType)} · ${escapeHtml(entry.version)} → <span class="extensionsItemUpdate">${escapeHtml(update.latestVersion)}</span>${entry.enabled || entry.incompatible ? '' : ' · Disabled'}`
+            : `${escapeHtml(entry.version)} · ${entry.source === 'bundled' ? 'Bundled' : 'Installed'}${entry.enabled || entry.incompatible ? '' : ' · Disabled'}${update ? ` · <span class="extensionsItemUpdate">Update to ${escapeHtml(update.latestVersion)} available</span>` : ''}${compatibilityMeta}`;
         const description = registryDescriptionFor(entry.packageId);
         // FMUs are imported files with no registry entry to borrow an image from, so they keep the
         // plain text-only item rather than a column of identical placeholders.
@@ -9486,6 +9490,7 @@ function renderExtensionsResults() {
         button.classList.toggle('extensionsItemWithThumb', hasThumb);
         button.innerHTML = (hasThumb ? extensionsThumbHtml(entry.name) : '')
             + (update && extensionsTab !== 'updates' ? '<i class="extensionsUpdatePill">Update available</i>' : '')
+            + (entry.incompatible ? '<i class="extensionsIncompatiblePill">Incompatible</i>' : '')
             + `<b>${escapeHtml(entry.name)}</b>`
             + (description ? `<p class="extensionsItemDescription">${escapeHtml(description)}</p>` : '')
             + `<span class="extensionsItemMeta">${meta}</span>`;
@@ -9506,7 +9511,7 @@ function renderExtensionsDetail() {
     if (!entry) return;
     $('#extensionsDetailBadge').textContent = entry.source === 'bundled' ? 'Bundled' : 'Installed';
     $('#extensionsDetailBadge').classList.toggle('bundled', entry.source === 'bundled');
-    $('#extensionsDetailEnabledBadge').hidden = entry.enabled;
+    $('#extensionsDetailEnabledBadge').hidden = entry.enabled || Boolean(entry.incompatible);   // an incompatible package is not "disabled": the compatibility note explains it
     const selectedKey = extensionsSelectedKey;
     showExtensionsDetailImage($('#extensionsDetailImage'), registryEntryFor(entry.packageId), () => extensionsSelectedKey === selectedKey);
     $('#extensionsDetailTitle').textContent = entry.name;
@@ -9532,6 +9537,19 @@ function renderExtensionsDetail() {
     $('#extensionsUpdate').disabled = updatingAll;
     $('#extensionsUpdate').textContent = 'Update';
     if (update) $('#extensionsDetailUpdateNote').textContent = `Version ${update.latestVersion} is available (currently ${update.installedVersion}).`;
+    // Compatibility (docs/proposals/packageCompatibility.md): an installed package this Konjugate cannot load is explained and can be
+    // replaced with a release it can; a newer release that needs a newer Konjugate is mentioned, quietly, and is not an update.
+    const heldBack = entry.incompatible ? null : heldBackInfoFor(entry.packageId);
+    const compatibilityNote = entry.incompatible
+        ? `${incompatibleText(entry.incompatible)} It is not loaded. Installing a compatible version replaces it.`
+        : heldBack ? `Version ${heldBackText(heldBack.heldBack)}, so it is not offered as an update. Updating Konjugate makes it available.` : '';
+    $('#extensionsDetailCompatibilityNote').hidden = !compatibilityNote;
+    $('#extensionsDetailCompatibilityNote').textContent = compatibilityNote;
+    const installCompatible = $('#extensionsInstallCompatible');
+    installCompatible.hidden = !entry.incompatible;
+    installCompatible.disabled = false;
+    installCompatible.textContent = 'Install compatible version';
+    $('#extensionsToggleEnabled').hidden = Boolean(entry.incompatible);
     $('#extensionsToggleEnabled').textContent = entry.enabled ? 'Disable' : 'Enable';
     $('#extensionsUninstall').hidden = entry.source === 'bundled';
 }
@@ -9567,6 +9585,15 @@ function updateInfoFor(packageId) {
     for (const [prefix, update] of packageUpdates) {
         const outdated = update.outdated.find((item) => item.packageId === packageId);
         if (outdated) return { prefix, latestVersion: update.latestVersion, releaseUrl: update.releaseUrl, installedVersion: outdated.installedVersion };
+    }
+    return null;
+}
+
+// { prefix, heldBack } for packageId if a newer release exists that this Konjugate cannot use (see
+// docs/proposals/packageCompatibility.md), else null. A note, never an update: it is not counted in the badge, the Updates tab or Update all.
+function heldBackInfoFor(packageId) {
+    for (const [prefix, update] of packageUpdates) {
+        if (update.heldBack && (update.heldBackPackages ?? []).includes(packageId) && heldBackText(update.heldBack)) return { prefix, heldBack: update.heldBack };
     }
     return null;
 }
@@ -10065,9 +10092,10 @@ $('#extensionsDiscoverInstall').addEventListener('click', async () => {
         renderDiscoverDetail();
         const summary = results.map((result) => `${result.packageId} ${result.version} (${verificationLabel[result.verification.status] ?? result.verification.status})`).join(', ');
         const hasInvalid = results.some((r) => r.verification?.status === 'invalid');
+        const heldBack = heldBackSentence(results);
         showExtensionsNotice(
-            `Installed ${summary}. Restart Konjugate to activate it.`,
-            hasInvalid ? 'warning' : null
+            `Installed ${summary}.${heldBack ? ` ${heldBack}` : ''} Restart Konjugate to activate it.`,
+            hasInvalid || heldBack ? 'warning' : null
         );
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`, 'error');
@@ -10120,11 +10148,41 @@ $('#extensionsUpdate').addEventListener('click', async () => {
             return;
         }
         const summary = results.map((result) => `${result.packageId} ${result.version}`).join(', ');
-        showExtensionsNotice(`Updated ${summary}. Restart Konjugate to activate it.`);
+        const heldBack = heldBackSentence(results);
+        showExtensionsNotice(`Updated ${summary}.${heldBack ? ` ${heldBack}` : ''} Restart Konjugate to activate it.`);
     } catch (error) {
         button.disabled = false;
         button.textContent = 'Update';
         showExtensionsNotice(`Update failed: ${error.message}`, 'error');
+    }
+});
+
+// "Install compatible version" for an installed package this Konjugate cannot load: the registry install picks the newest release
+// this Konjugate can use and replaces the installed version with it (docs/proposals/packageCompatibility.md).
+$('#extensionsInstallCompatible').addEventListener('click', async () => {
+    const entry = extensionsEntries.find((candidate) => extensionsPackageKey(candidate) === extensionsSelectedKey);
+    if (!entry?.incompatible) return;
+    const button = $('#extensionsInstallCompatible');
+    button.disabled = true;
+    button.textContent = 'Installing…';
+    try {
+        await ensureDiscoverRegistry();
+        const registryEntry = registryEntryFor(entry.packageId);
+        if (!registryEntry) throw new Error('This package is not in the registry, so there is no other release to install. Install a compatible .kja or .kjp file, or uninstall it.');
+        const results = await window.extensions.installFromRegistry(registryEntry, discoverRegistry);
+        const replaced = results.find((result) => result.packageId === entry.packageId);
+        if (replaced) extensionsSelectedKey = `${replaced.packageType}:${replaced.packageId}:${replaced.version}`;
+        await refreshExtensionsList();
+        await ensurePackageUpdates().catch(() => {});
+        renderExtensionsResults();
+        renderExtensionsDetail();
+        const summary = results.map((result) => `${result.packageId} ${result.version}`).join(', ');
+        const heldBack = heldBackSentence(results);
+        showExtensionsNotice(`Installed ${summary}.${heldBack ? ` ${heldBack}` : ''} Restart Konjugate to activate it.`, heldBack ? 'warning' : null);
+    } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Install compatible version';
+        showExtensionsNotice(`Could not install a compatible version: ${error.message}`, 'error');
     }
 });
 

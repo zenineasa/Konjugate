@@ -52,7 +52,21 @@ The shared `package.json` must contain:
 - `name` and semantic-like `version`;
 - `contents.manifest`: `addon.json` or `plugin.json`.
 
+It may also contain `minimumKonjugateVersion`: the lowest Konjugate this package has been tested on, as exactly three numbers (`"1.2.0"`). See Compatibility below.
+
 The package ID must match the ID in the contribution manifest. For add-ons, `addon.json` is also checked by the existing version 1 add-on validator before anything is installed.
+
+## Compatibility
+
+A package declares what it needs from Konjugate in two places. The `apiVersion` in `addon.json` or `plugin.json` (and in each plugin contribution) is the add-on or plugin interface the package was written against, and this Konjugate supports version 1. `minimumKonjugateVersion` in `package.json` is the lowest Konjugate release the package has been tested on. Use it whenever the package depends on something added after Konjugate 1.0: a project-document feature (for example `setsValue` source terms or subsystems), an engine capability, or a field added to the add-on bridge within an existing `apiVersion`. Additive changes land inside an existing `apiVersion`, so only the minimum version tells an older Konjugate that it cannot run the package. Set it to the lowest version you actually tested, not the version you happen to build on. A package without it states no requirement. There is no maximum version: a package that works on a newer Konjugate should be left to, and a breaking change is signalled by a new `apiVersion`, not by an upper bound.
+
+What Konjugate does with it:
+
+- **Installing** a package that needs a newer Konjugate, or a newer `apiVersion`, is refused before anything is written, with a message naming both versions: "Example 1.5.0 needs Konjugate 1.2.0 or later; this is Konjugate 1.1.9." This applies to installing from a file and from the registry.
+- **Installing from the registry** picks the newest release of the package that the running Konjugate can use, not simply the latest. See [Registry](registry.md).
+- **An installed package that needs a newer Konjugate than the one running**, for example after Konjugate was downgraded, is not loaded. Its add-on does not appear, its plugin's components, examples and providers are unavailable (a model that references its provider is told why), and Extensions lists it as incompatible with an "Install compatible version" action.
+
+A malformed `minimumKonjugateVersion` (anything but three numbers, such as `"1.2"` or `"latest"`) makes the package invalid.
 
 ## Safety checks
 

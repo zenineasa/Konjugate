@@ -15,6 +15,7 @@ import {
     listInstalledPackages,
     loadNamespaceRegistry,
     PackageArchiveError,
+    packageCompatibility,
     signPackageArchive,
     uninstallPackage,
     verifyPackageArchive
@@ -573,4 +574,108 @@ test('a package signed under a prefix loaded from a real registry directory veri
         const signed = signPackageArchive(addonArchive(), { privateKey: pem(privateKey, 'pkcs8'), prefix: 'example' });
         assert.equal(verifyPackageArchive(signed, { namespaces }).status, 'verified');
     });
+});
+
+// ---- Compatibility (docs/proposals/packageCompatibility.md) ----------------------------------------------------------
+
+const thrownCode = (action) => {
+    try { action(); } catch (error) { return error; }
+    assert.fail('Expected the call to throw.');
+};
+
+test('minimumKonjugateVersion is optional, and must be three numbers when present', () => {
+    assert.equal(inspectPackageArchive(addonArchive(), { extension: '.kja' }).packageManifest.minimumKonjugateVersion, undefined);
+    assert.equal(inspectPackageArchive(addonArchive({ minimumKonjugateVersion: '1.2.0' }), { extension: '.kja' }).packageManifest.minimumKonjugateVersion, '1.2.0');
+    for (const bad of ['1.2', 'latest', 12, '1.2.3-beta', '1.2.3.4', '', ' 1.2.3', null]) {
+        const error = thrownCode(() => addonArchive({ minimumKonjugateVersion: bad }));
+        assert.equal(error.code, 'INVALID_MANIFEST', JSON.stringify(bad));
+        assert.match(error.message, /minimumKonjugateVersion/);
+    }
+});
+
+test('a package that needs a newer Konjugate is reported as incompatible, with both versions', () => {
+    const archive = addonArchive({ minimumKonjugateVersion: '1.2.0' });
+    const error = thrownCode(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: '1.1.15' }));
+    assert.equal(error instanceof PackageArchiveError, true);
+    assert.equal(error.code, 'INCOMPATIBLE_APP_VERSION');
+    assert.equal(error.message, 'Hello World 0.1.0 needs Konjugate 1.2.0 or later; this is Konjugate 1.1.15.');
+    assert.equal(error.details.required, '1.2.0');
+    assert.equal(error.details.running, '1.1.15');
+    assert.equal(error.details.packageManifest.version, '0.1.0', 'the manifest travels with the error so a caller can name the release');
+});
+
+test('the minimum is inclusive, numeric rather than textual, and not judged without an app version', () => {
+    const archive = addonArchive({ minimumKonjugateVersion: '1.10.0' });
+    assert.doesNotThrow(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: '1.10.0' }));
+    assert.doesNotThrow(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: '2.0.0' }));
+    assert.equal(thrownCode(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: '1.9.9' })).code, 'INCOMPATIBLE_APP_VERSION');
+    assert.doesNotThrow(() => inspectPackageArchive(archive, { extension: '.kja' }));
+    assert.doesNotThrow(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: 'not a version' }), 'an unreadable app version leaves nothing to compare');
+});
+
+test('a pre-release of the minimum version is older than the minimum', () => {
+    const archive = addonArchive({ minimumKonjugateVersion: '1.2.0' });
+    assert.equal(thrownCode(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: '1.2.0-beta.1' })).code, 'INCOMPATIBLE_APP_VERSION');
+});
+
+test('packageCompatibility judges a manifest directly', () => {
+    assert.deepEqual(packageCompatibility({}, '1.0.0'), { compatible: true });
+    assert.deepEqual(packageCompatibility({ minimumKonjugateVersion: '1.0.0' }, '1.0.0'), { compatible: true });
+    assert.deepEqual(packageCompatibility({ minimumKonjugateVersion: '1.0.1' }, '1.0.0'), { compatible: false, reason: 'app-version', required: '1.0.1', running: '1.0.0' });
+    assert.deepEqual(packageCompatibility({ minimumKonjugateVersion: '9.0.0' }, null), { compatible: true });
+});
+
+test('an API version this Konjugate does not have is incompatibility, not an invalid manifest', () => {
+    const futureAddon = createPackageArchive({
+        packageManifest: packageManifest(), contributionManifest: { ...addonManifest, apiVersion: 2 }, files: { 'index.html': '<!doctype html>' }
+    });
+    const error = thrownCode(() => inspectPackageArchive(futureAddon, { extension: '.kja' }));
+    assert.equal(error.code, 'UNSUPPORTED_API_VERSION');
+    assert.equal(error.details.required, 2);
+    assert.match(error.message, /add-on API version 2/);
+
+    const manifest = packageManifest('plugin');
+    const futurePlugin = createPackageArchive({
+        packageManifest: manifest,
+        contributionManifest: { pluginId: manifest.packageId, name: manifest.name, version: manifest.version, apiVersion: 1, contributes: [{ kind: 'component', componentId: 'c', apiVersion: 2, entry: 'c.json' }] },
+        files: { 'c.json': '{}' }
+    });
+    assert.equal(thrownCode(() => inspectPackageArchive(futurePlugin, { extension: '.kjp' })).code, 'UNSUPPORTED_API_VERSION');
+
+    const brokenAddon = createPackageArchive({
+        packageManifest: packageManifest(), contributionManifest: { ...addonManifest, apiVersion: 0 }, files: { 'index.html': '<!doctype html>' }
+    });
+    assert.equal(thrownCode(() => inspectPackageArchive(brokenAddon, { extension: '.kja' })).code, 'INVALID_MANIFEST', 'a version below the supported one is a mistake, not a newer package');
+});
+
+test('the app version is judged before the API version, so the clearer message wins', () => {
+    const archive = createPackageArchive({
+        packageManifest: { ...packageManifest(), minimumKonjugateVersion: '2.0.0' }, contributionManifest: { ...addonManifest, apiVersion: 2 }, files: { 'index.html': '<!doctype html>' }
+    });
+    assert.equal(thrownCode(() => inspectPackageArchive(archive, { extension: '.kja', appVersion: '1.0.0' })).code, 'INCOMPATIBLE_APP_VERSION');
+});
+
+test('installing refuses an incompatible package and writes nothing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugate-compat-'));
+    try {
+        const archive = addonArchive({ minimumKonjugateVersion: '1.2.0' });
+        await assert.rejects(() => installPackageArchive(archive, { extension: '.kja', directory, appVersion: '1.1.0' }), { code: 'INCOMPATIBLE_APP_VERSION' });
+        assert.deepEqual(await listInstalledPackages(directory), []);
+        const installed = await installPackageArchive(archive, { extension: '.kja', directory, appVersion: '1.2.0' });
+        assert.equal(installed.packageManifest.minimumKonjugateVersion, '1.2.0');
+        const [entry] = await listInstalledPackages(directory);
+        assert.equal(entry.minimumKonjugateVersion, '1.2.0');
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('an installed package with no minimum lists it as null', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugate-compat-'));
+    try {
+        await installPackageArchive(addonArchive(), { extension: '.kja', directory });
+        assert.equal((await listInstalledPackages(directory))[0].minimumKonjugateVersion, null);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
 });

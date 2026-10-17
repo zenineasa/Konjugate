@@ -81,6 +81,25 @@ DependencyGraph buildDependencyGraph(const ExecutionPlan& plan) {
                 dependency.remoteStateIds.insert(stateIds.begin(), stateIds.end());
             }
         }
+        // A computational-node provider may read other nodes' states through the snapshot too.
+        if (target.nodeProvider) {
+            const auto& provider = *target.nodeProvider;
+            std::map<std::size_t, std::vector<EntityId>> providerRemoteStates;
+            for (const auto& binding : provider.bindings) {
+                if (binding.source != BindingSource::synchronizationSnapshot) continue;
+                const auto stateNode = plan.stateNodes.find(binding.valueId);
+                if (stateNode == plan.stateNodes.end()) throw std::runtime_error("A dependency references an unknown state.");
+                const auto sourceIndex = nodeIndexes.at(stateNode->second);
+                if (sourceIndex != targetIndex) providerRemoteStates[sourceIndex].push_back(binding.valueId);
+            }
+            for (const auto& [sourceIndex, stateIds] : providerRemoteStates) {
+                auto& dependency = accumulated[{sourceIndex, targetIndex}];
+                ++dependency.contributionTaskCount;
+                dependency.remoteBindingsPerSubstep += stateIds.size();
+                dependency.estimatedDependentOperationsPerSynchronization += (provider.bindings.size() + provider.outputs.size() + 1) * target.substeps;
+                dependency.remoteStateIds.insert(stateIds.begin(), stateIds.end());
+            }
+        }
     }
 
     DisjointComponents components(plan.nodes.size());

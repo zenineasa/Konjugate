@@ -476,6 +476,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     result.nodeCount = nodesOptional->size();
     if (!result.nodeCount) add(result, "emptyModel", "warning", "Add at least one node to begin building a model.");
     std::set<std::string> disabledNodeIds;
+    // A computational-node provider's bindings to other nodes' states, as (node, state) pairs: checked
+    // once every node's states are known, since a node may read one listed after it.
+    std::vector<std::pair<std::string, std::string>> remoteNodeProviderBindings;
     for (const auto& entry : *nodesOptional) {
         const auto& node = entry.second;
         const auto id = value(node, "id");
@@ -732,10 +735,12 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     } else if (!nodeProviderKeys.insert(key).second) {
                         add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "implementation");
                     }
-                    if (value(binding, "kind") != "state" || !stateIds[id].contains(value(binding, "stateId"))) {
-                        add(result, "providerBindingMissing", "error", "Provider binding references a missing local state.", "node", id, "implementation");
-                    } else {
+                    if (value(binding, "kind") != "state" || value(binding, "stateId").empty()) {
+                        add(result, "providerBindingMissing", "error", "Provider binding references a missing state.", "node", id, "implementation");
+                    } else if (stateIds[id].contains(value(binding, "stateId"))) {
                         nodeProviderBindingStateIds.insert(value(binding, "stateId"));
+                    } else {
+                        remoteNodeProviderBindings.emplace_back(id, value(binding, "stateId"));
                     }
                 }
                 // Unlike an edge/source term's single output, a computational-node provider
@@ -783,6 +788,17 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         "node", id, "implementation");
                 }
             }
+        }
+    }
+
+    // Another node's state, read through the step's synchronization snapshot as an edge reads it: it
+    // must exist, on a node that is enabled (a disabled node's states are never allocated).
+    for (const auto& [nodeId, stateId] : remoteNodeProviderBindings) {
+        const auto owner = std::find_if(stateIds.begin(), stateIds.end(), [&](const auto& entry) { return entry.second.contains(stateId); });
+        if (owner == stateIds.end()) {
+            add(result, "providerBindingMissing", "error", "Provider binding references a missing state.", "node", nodeId, "implementation");
+        } else if (disabledNodeIds.contains(owner->first)) {
+            add(result, "providerBindingStateDisabled", "error", "Provider binding reads a state of a disabled node.", "node", nodeId, "implementation");
         }
     }
 

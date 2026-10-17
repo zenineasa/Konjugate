@@ -430,9 +430,28 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
             providerTask.nodeId = compiledNode.nodeId;
             providerTask.providerSource = value(*implementation, "source");
+            // A binding to one of this node's own states reads it as it advances, like a source term;
+            // one to another node's state reads it from the step's synchronization snapshot, like an
+            // edge does. That other node's states may not be indexed yet (nodes compile in document
+            // order), so its index is resolved once every node is compiled, below.
             if (const auto bindingsNode = implementation->get_child_optional("bindings")) {
-                providerTask.bindings = compileBindings(*bindingsNode, compiledNode.nodeId, true,
-                    plan.stateIndexes, localStateIndexes, "key");
+                for (const auto& bindingItem : *bindingsNode) {
+                    const auto& binding = bindingItem.second;
+                    CompiledBinding compiled;
+                    compiled.symbol = value(binding, "key");
+                    if (value(binding, "kind") == "parameter") {
+                        compiled.source = BindingSource::parameter;
+                        compiled.valueId = idValue(binding, "parameterId");
+                    } else if (value(binding, "kind") == "time") {
+                        compiled.source = BindingSource::simulationTime;
+                    } else {
+                        compiled.valueId = idValue(binding, "stateId");
+                        const auto local = localStateIndexes.find(compiled.valueId);
+                        compiled.source = local != localStateIndexes.end() ? BindingSource::localState : BindingSource::synchronizationSnapshot;
+                        if (local != localStateIndexes.end()) compiled.valueIndex = local->second;
+                    }
+                    providerTask.bindings.push_back(std::move(compiled));
+                }
             }
             for (const auto& outputItem : implementation->get_child("outputs")) {
                 const auto& outputEntry = outputItem.second;
@@ -463,6 +482,18 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         }
         nodeIndexes[compiledNode.nodeId] = plan.nodes.size();
         plan.nodes.push_back(std::move(compiledNode));
+    }
+
+    for (auto& compiledNode : plan.nodes) {
+        if (!compiledNode.nodeProvider) continue;
+        for (auto& binding : compiledNode.nodeProvider->bindings) {
+            if (binding.source != BindingSource::synchronizationSnapshot) continue;
+            const auto found = plan.stateIndexes.find(binding.valueId);
+            if (found == plan.stateIndexes.end()) {
+                throw std::runtime_error("A computational-node provider binding references a state of a missing or disabled node.");
+            }
+            binding.valueIndex = found->second;
+        }
     }
 
     for (const auto& edgeItem : document.get_child("edges")) {

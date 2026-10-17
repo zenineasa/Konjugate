@@ -287,6 +287,28 @@ test('a node-level computational provider always blocks C++ export', () => {
     assert.match(python, /node_outputs\.gradients\.get\("rate", 0\.0\)/);
 });
 
+// The engine reads a node provider's binding to another node's state from the step's snapshot, as an
+// edge's; the export must too, or its run would differ from the engine's.
+test('a node provider reads its own node\'s states as it advances and other nodes\' from the snapshot', () => {
+    const document = baseDocument();
+    const [motorId, motorTorque, mechanismId, angle] = [id(), id(), id(), id()];
+    document.nodes.push({
+        id: motorId, name: 'Motor', states: [{ id: motorTorque, name: 'Torque', symbol: 'torque', initialValue: 2, unit: '' }], sourceTerms: []
+    }, {
+        id: mechanismId, name: 'Mechanism', states: [{ id: angle, name: 'Angle', symbol: 'angle', initialValue: 0, unit: '' }],
+        sourceTerms: [],
+        implementation: {
+            kind: 'python', providerApiVersion: 1,
+            source: 'from konjugate import NodeOutputCollector, NodeProvider, NodeProviderDescription, ScalarPort\n\n\nclass Mechanism(NodeProvider):\n    def describe(self):\n        return NodeProviderDescription("m", "M", [ScalarPort("torque", "Torque", "")], [ScalarPort("angle", "Angle", "")])\n\n    def evaluate(self, context, inputs, outputs):\n        outputs.add_gradient("angle", inputs["torque"])\n\n    def checkpoint(self):\n        return b""\n\n    def restore(self, payload):\n        pass\n',
+            bindings: [{ key: 'torque', kind: 'state', nodeId: motorId, stateId: motorTorque }],
+            outputs: [{ key: 'angle', stateId: angle, setsValue: true }]
+        }
+    });
+    const python = generateStandaloneProgram(document, 'python');
+    assert.match(python, /InputView\(\{"torque": snapshot\[0\]\}\)/);
+    assert.doesNotMatch(python, /"torque": state\[/);
+});
+
 test('a cases expression exports as a conditional in both languages', async () => {
     const { compileExpressionNode, emitExpression, cppOperators } = await import('../src/codeExport.mjs');
     const expression = ['Which', ['Less', 0, 'x', 1], 'a', ['Not', ['Equal', 'x', 2]], 2, 'True', 3];

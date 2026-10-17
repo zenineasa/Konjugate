@@ -423,7 +423,11 @@ function buildNodeProvider(plan, stateRecord) {
         if (binding.kind === 'parameter') throw new Error(`The computational-node provider on node "${plan.node.name}" cannot bind a parameter.`);
         const record = stateRecord.get(binding.stateId);
         if (!record) throw new Error(`The computational-node provider on node "${plan.node.name}" references a disabled or missing state.`);
-        symbols.set(binding.key, { text: `state[${plan.localIndexByStateId.get(binding.stateId)}]`, comment: `${plan.node.name}.${record.state.name}` });
+        // Its own node's state as the node advances, another node's from the step's snapshot, as the engine reads them.
+        const localIndex = plan.localIndexByStateId.get(binding.stateId);
+        symbols.set(binding.key, localIndex !== undefined
+            ? { text: `state[${localIndex}]`, comment: `${plan.node.name}.${record.state.name}` }
+            : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}` });
     }
     const outputs = (implementation.outputs ?? []).map((output) => {
         const localIndex = plan.localIndexByStateId.get(output.stateId);

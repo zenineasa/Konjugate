@@ -104,6 +104,13 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
                     }
                 }
             }
+            if (node.nodeProvider) {
+                for (const auto& binding : node.nodeProvider->bindings) {
+                    if (binding.source == BindingSource::synchronizationSnapshot) {
+                        synchronizationSnapshot.at(binding.valueIndex) = boundary.states.at(binding.valueId);
+                    }
+                }
+            }
             result.nodes.push_back(integrateNode(
                 node, nodeIndex, synchronizationSnapshot, parameterValues, simulationTime, synchronizationStep, providerEvaluator,
                 activeSchedules));

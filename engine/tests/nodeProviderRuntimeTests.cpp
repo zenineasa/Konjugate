@@ -234,6 +234,94 @@ public:
     bool called = false;
 };
 
+// A provider node ("Mechanism", id 1) listed BEFORE the node whose state it reads ("Motor", id 2), so
+// the validator and the plan compiler must resolve a binding to a state they have not met yet.
+// `motorEnabled` false disables the motor; `stateId` is what the binding reads.
+boost::property_tree::ptree projectWithRemoteNodeProviderBinding(int stateId = 21, bool motorEnabled = true) {
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "nodes": [
+            {
+                "id": 1, "name": "Mechanism",
+                "states": [{"id": 11, "name": "Angle", "symbol": "angle", "initialValue": 0}],
+                "sourceTerms": [],
+                "implementation": {
+                    "kind": "python",
+                    "providerApiVersion": 1,
+                    "source": "provider source",
+                    "bindings": [{"key": "torque", "kind": "state", "nodeId": 2, "stateId": )json" + std::to_string(stateId) + R"json(}],
+                    "outputs": [{"key": "angle", "stateId": 11, "setsValue": true}]
+                }
+            },
+            {
+                "id": 2, "name": "Motor", "enabled": )json" + std::string(motorEnabled ? "true" : "false") + R"json(,
+                "states": [{"id": 21, "name": "Torque", "symbol": "torque", "initialValue": 2.5}],
+                "sourceTerms": []
+            }
+        ],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+// Records the inputs a node provider is evaluated with.
+class RemoteInputRecorder final : public konjugate::ProviderEvaluator {
+public:
+    std::vector<double> inputs;
+
+    std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>&,
+                                      const std::vector<std::span<const double>>&,
+                                      double, double) override {
+        throw std::runtime_error("This test expects only computational-node evaluation.");
+    }
+
+    std::vector<std::pair<std::string, double>> evaluateNode(
+        const konjugate::NodeProviderTask&, std::span<const double> values, double, double) override {
+        inputs.assign(values.begin(), values.end());
+        return {{"angle", 1.0}};
+    }
+};
+
+void validatorAcceptsANodeProviderBindingToAnotherNodesState() {
+    const auto result = konjugate::validateModel(projectWithRemoteNodeProviderBinding());
+    require(result.valid, "A computational-node provider reading another node's state was rejected.");
+}
+
+void validatorRejectsANodeProviderBindingToAMissingOrDisabledNodesState() {
+    require(hasIssue(konjugate::validateModel(projectWithRemoteNodeProviderBinding(99)), "providerBindingMissing"),
+        "A node-provider binding to a state no node has should be providerBindingMissing.");
+    require(hasIssue(konjugate::validateModel(projectWithRemoteNodeProviderBinding(21, false)), "providerBindingStateDisabled"),
+        "A node-provider binding to a disabled node's state should be providerBindingStateDisabled.");
+}
+
+// The other node's state is read from the step's synchronization snapshot, as an edge reads it: the
+// value at the step's start, whatever that node does during the step.
+void executionPlanReadsAnotherNodesStateFromTheSnapshotForANodeProvider() {
+    const auto plan = konjugate::compileExecutionPlan(projectWithRemoteNodeProviderBinding());
+    const auto& task = *plan.nodes.front().nodeProvider;
+    require(task.bindings.size() == 1 && task.bindings.front().source == konjugate::BindingSource::synchronizationSnapshot,
+        "A node-provider binding to another node's state should read the synchronization snapshot.");
+    require(task.bindings.front().valueIndex == plan.stateIndexes.at(21),
+        "A node-provider binding to another node's state resolved to the wrong global index.");
+    auto snapshot = plan.initialStates;
+    snapshot.at(plan.stateIndexes.at(21)) = 7.5;
+    RemoteInputRecorder evaluator;
+    const auto result = konjugate::integrateNode(plan.nodes.front(), snapshot, {}, 0.0, 0.1, &evaluator);
+    require(evaluator.inputs.size() == 1 && evaluator.inputs.front() == 7.5,
+        "The node provider did not receive the other node's snapshot value.");
+    require(result.states.at(0) == 1.0, "The node provider's setsValue output was not written.");
+    bool missingRejected = false;
+    try {
+        static_cast<void>(konjugate::compileExecutionPlan(projectWithRemoteNodeProviderBinding(21, false)));
+    } catch (const std::runtime_error&) {
+        missingRejected = true;
+    }
+    require(missingRejected, "Compiling a node-provider binding to a disabled node's state should fail clearly.");
+}
+
 void validatorAcceptsACompleteComputationalNodeProvider() {
     const auto project = projectWithNodeImplementation(validNodeImplementation());
     const auto result = konjugate::validateModel(project);
@@ -783,6 +871,9 @@ int main() {
         executionPlanRoutesSetsValueNodeProviderOutputsAsAlgebraicWrites();
         executionPlanThrowsWhenASetsValueNodeProviderOutputHasNowhereToRouteTo();
         integrateNodeAppliesSetsValueNodeProviderOutputsDirectlyNotIntegrated();
+        validatorAcceptsANodeProviderBindingToAnotherNodesState();
+        validatorRejectsANodeProviderBindingToAMissingOrDisabledNodesState();
+        executionPlanReadsAnotherNodesStateFromTheSnapshotForANodeProvider();
         providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd();
         providerRuntimeExecutesNodeProviderCppInProcessEndToEnd();
         providerRuntimeCheckpointsAndRestoresPrngStateBitForBit();

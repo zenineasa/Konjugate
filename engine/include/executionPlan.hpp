@@ -162,7 +162,14 @@ struct NodeProviderOutputBinding {
     // docs/projectSchema.md's setsValue paragraph): by default an output's returned number is a
     // derivative, folded additively into its target state like any other contribution. When true,
     // the engine instead writes that same number directly into the target state every substep -- a
-    // plain replacement, never integrated -- making it a genuine algebraic state rather than the
+    // plain replacement, never integrated -- after the substep's contributions have been evaluated,
+    // so they read the value from before it. The provider is evaluated once per substep, at its start
+    // time t with step h, and a setsValue output is its value at t + h: a co-simulation step (advance
+    // over [t, t + h] on inputs read at t, then report), as an imported FMU's fmi2DoStep is. The node
+    // then records it beside its other states at t + h. Unlike a setsValue source term, it is not
+    // recomputed after the step's last update or settled before the first step (either would call the
+    // provider again for an interval it has already advanced over): a node's initial value for such a
+    // state is its value at the start. This makes it a genuine algebraic state rather than the
     // Euler-specific pseudo-derivative trick FMI import used before this field existed (see
     // src/fmiResolver.mjs). No SDK change: NodeOutputCollector::addGradient's value is reinterpreted
     // exactly like a source term's addGradient value is.
@@ -181,7 +188,9 @@ struct NodeProviderTask {
     ContributionImplementation implementation = ContributionImplementation::pythonProvider;
     std::string providerSource;
     std::string providerProcessKeyCache; // "py:" + providerSource, same scheme as ContributionTask
-    std::vector<CompiledBinding> bindings;          // own-node states only, like a source term
+    // This node's own states (read as the node advances, like a source term's), or other nodes'
+    // states (read from the step's synchronization snapshot, like an edge's); never parameters.
+    std::vector<CompiledBinding> bindings;
     std::vector<NodeProviderOutputBinding> outputs; // N named outputs -> this node's own states
 };
 

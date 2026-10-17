@@ -250,12 +250,12 @@ const pythonNodeProvider = `from konjugate import NodeProvider, NodeProviderDesc
 
 class LevelWithReading(NodeProvider):
     def describe(self):
-        return NodeProviderDescription("fidelity.levelWithReading", "Level with reading", [ScalarPort("level", "Level", "")],
+        return NodeProviderDescription("fidelity.levelWithReading", "Level with reading", [ScalarPort("level", "Level", ""), ScalarPort("other", "Other node", "")],
                                        [ScalarPort("levelRate", "Level rate", ""), ScalarPort("reading", "Reading", "")])
 
     def evaluate(self, context, inputs, outputs):
         outputs.add_gradient("levelRate", 0.3 - 0.1 * inputs["level"])
-        outputs.add_gradient("reading", 3.0 * inputs["level"] + context.simulation_time)
+        outputs.add_gradient("reading", 3.0 * inputs["level"] + context.simulation_time + 0.5 * inputs["other"])
 
     def checkpoint(self):
         return b""
@@ -309,7 +309,8 @@ function providerAlgebraicDocument(kind) {
             numerics: { substepsPerGlobalStep: 3 },
             implementation: {
                 kind: 'python', providerApiVersion: 1, source: pythonNodeProvider,
-                bindings: [{ key: 'level', kind: 'state', stateId: 21 }],
+                // "other" is another node's state, which the engine reads from the step's snapshot.
+                bindings: [{ key: 'level', kind: 'state', stateId: 21 }, { key: 'other', kind: 'state', nodeId: 1, stateId: 13 }],
                 outputs: [{ key: 'levelRate', stateId: 21 }, { key: 'reading', stateId: 22, setsValue: true }]
             },
             sourceTerms: [{

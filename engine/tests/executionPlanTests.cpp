@@ -13,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -767,6 +768,62 @@ void partitionRuntimeAppliesActiveParameterSchedules() {
     require(std::abs(execute(2, {}) - 1) < 1e-12, "Without an intervention a partition worker follows the stored schedule.");
 }
 
+// A node ("Mechanism", 1) whose computational-node provider reads a state of another node ("Motor", 2).
+konjugate::ExecutionPlan planWithRemoteNodeProviderBinding() {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [
+            {"id": 1, "name": "Mechanism", "states": [{"id": 11, "symbol": "angle", "initialValue": 0}], "sourceTerms": [],
+             "implementation": {"kind": "python", "providerApiVersion": 1, "source": "provider source",
+                 "bindings": [{"key": "torque", "kind": "state", "nodeId": 2, "stateId": 21}],
+                 "outputs": [{"key": "angle", "stateId": 11, "setsValue": true}]}},
+            {"id": 2, "name": "Motor", "states": [{"id": 21, "symbol": "torque", "initialValue": 0}], "sourceTerms": []}
+        ],
+        "edges": []
+    })json");
+    boost::property_tree::ptree document;
+    boost::property_tree::read_json(json, document);
+    return konjugate::compileExecutionPlan(document);
+}
+
+class RecordingNodeEvaluator final : public konjugate::ProviderEvaluator {
+public:
+    std::vector<double> inputs;
+    std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>&,
+                                      const std::vector<std::span<const double>>&, double, double) override {
+        throw std::runtime_error("This test expects only computational-node evaluation.");
+    }
+    std::vector<std::pair<std::string, double>> evaluateNode(
+        const konjugate::NodeProviderTask&, std::span<const double> values, double, double) override {
+        inputs.assign(values.begin(), values.end());
+        return {{"angle", 1.0}};
+    }
+};
+
+// The partitioned backend ships a node's remote states to it from its dependencies, so a node
+// provider's reads of other nodes must be dependencies like an edge's.
+void dependencyGraphCountsANodeProvidersReadsOfOtherNodes() {
+    const auto graph = konjugate::buildDependencyGraph(planWithRemoteNodeProviderBinding());
+    require(graph.dependencies.size() == 1, "A node provider's read of another node is not a dependency.");
+    const auto& dependency = graph.dependencies.front();
+    require(dependency.sourceNodeId == 2 && dependency.targetNodeId == 1, "The node provider's dependency has the wrong direction.");
+    require(dependency.remoteStateIds == std::vector<konjugate::EntityId>{21}, "The node provider's remote state is not communicated.");
+    require(graph.componentCount == 1, "A node provider and the node it reads should be one component.");
+}
+
+void partitionRuntimeHandsANodeProviderTheRemoteStatesItReads() {
+    const auto plan = planWithRemoteNodeProviderBinding();
+    konjugate::PartitionRuntime runtime(0, plan, {0});
+    konjugate::InMemoryPartitionTransport transport;
+    RecordingNodeEvaluator evaluator;
+    auto future = runtime.submit(transport, 1, {}, 0.1, 0.0, std::chrono::milliseconds(1000), &evaluator);
+    transport.publish({1, 1, 0, {{11, 0.0}, {21, 4.25}}});
+    const auto result = future.get();
+    require(evaluator.inputs.size() == 1 && evaluator.inputs.front() == 4.25,
+        "A partition did not hand the node provider the other node's boundary value.");
+    require(result.nodes.size() == 1 && result.nodes.front().states.at(0) == 1.0, "The partition lost the node provider's output.");
+}
+
 int main() {
     try {
         deterministicReductionUsesTaskSequence();
@@ -783,6 +840,7 @@ int main() {
         taskExecutorBoundsConcurrentWorkAndPropagatesResults();
         taskSubmissionPrioritizesEstimatedWorkAndKeepsStableTies();
         dependencyGraphAggregatesParallelTasksAndPreservesDirection();
+        dependencyGraphCountsANodeProvidersReadsOfOtherNodes();
         greedyPartitionerBalancesIndependentWork();
         greedyPartitionerCanKeepExpensiveCommunicationLocal();
         greedyPartitionerClustersACommunicationRing();
@@ -791,6 +849,7 @@ int main() {
         partitionTransportReportsMissingMessagesAndWorkerFailures();
         partitionRuntimeReplaysDeterministicallyThroughMessages();
         partitionRuntimeAppliesActiveParameterSchedules();
+        partitionRuntimeHandsANodeProviderTheRemoteStatesItReads();
         automaticBackendSelectionAccountsForWorkAndCommunication();
         std::cout << "Execution plan tests passed.\n";
         return 0;

@@ -250,12 +250,12 @@ const pythonNodeProvider = `from konjugate import NodeProvider, NodeProviderDesc
 
 class LevelWithReading(NodeProvider):
     def describe(self):
-        return NodeProviderDescription("fidelity.levelWithReading", "Level with reading", [ScalarPort("level", "Level", ""), ScalarPort("other", "Other node", "")],
+        return NodeProviderDescription("fidelity.levelWithReading", "Level with reading", [ScalarPort("level", "Level", ""), ScalarPort("other", "Other node", ""), ScalarPort("gain", "Gain", "")],
                                        [ScalarPort("levelRate", "Level rate", ""), ScalarPort("reading", "Reading", "")])
 
     def evaluate(self, context, inputs, outputs):
         outputs.add_gradient("levelRate", 0.3 - 0.1 * inputs["level"])
-        outputs.add_gradient("reading", 3.0 * inputs["level"] + context.simulation_time + 0.5 * inputs["other"])
+        outputs.add_gradient("reading", 3.0 * inputs["level"] + context.simulation_time + 0.5 * inputs["other"] + inputs["gain"])
 
     def checkpoint(self):
         return b""
@@ -310,7 +310,9 @@ function providerAlgebraicDocument(kind) {
             implementation: {
                 kind: 'python', providerApiVersion: 1, source: pythonNodeProvider,
                 // "other" is another node's state, which the engine reads from the step's snapshot.
-                bindings: [{ key: 'level', kind: 'state', stateId: 21 }, { key: 'other', kind: 'state', nodeId: 1, stateId: 13 }],
+                // "gain" is a shared parameter following a stored schedule, read at the substep's start.
+                bindings: [{ key: 'level', kind: 'state', stateId: 21 }, { key: 'other', kind: 'state', nodeId: 1, stateId: 13 },
+                    { key: 'gain', kind: 'parameter', sharedParameterId: 90 }],
                 outputs: [{ key: 'levelRate', stateId: 21 }, { key: 'reading', stateId: 22, setsValue: true }]
             },
             sourceTerms: [{
@@ -329,6 +331,7 @@ function providerAlgebraicDocument(kind) {
     }
     return {
         format: 'konjugate', version: 1, metadata: { projectName: `Provider algebraic fixture (${kind})` },
+        ...(kind === 'python' ? { sharedParameters: [{ id: 90, name: 'Gain', symbol: 'gain', value: 1, unit: '', mode: 'constant', schedule: { interpolation: 'linear', samples: [[0, 0.5], [1.5, 2]] } }] } : {}),
         nodes, edges: []
     };
 }

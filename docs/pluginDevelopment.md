@@ -140,7 +140,7 @@ This is the next major runtime capability because it enables controllers, actuat
 A computational-node provider should:
 
 - own one declared provider instance per model node -- **done**;
-- receive explicitly bound input states and parameters -- **done** (states only, its own node's or, through the step's synchronization snapshot, other nodes'; a node has no parameter concept to bind against);
+- receive explicitly bound input states and parameters -- **done** (states of its own node or, through the step's synchronization snapshot, of other nodes; and project-level shared parameters, since a node has no parameters of its own);
 - emit derivatives for one or more engine-owned output states -- **done**;
 - declare whether it is substep-aware or synchronization-step-only -- not done, always substep-synchronous today;
 - separate speculative evaluation from committed side effects -- not done;

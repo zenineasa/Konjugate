@@ -188,9 +188,13 @@ struct NodeProviderTask {
     ContributionImplementation implementation = ContributionImplementation::pythonProvider;
     std::string providerSource;
     std::string providerProcessKeyCache; // "py:" + providerSource, same scheme as ContributionTask
-    // This node's own states (read as the node advances, like a source term's), or other nodes'
-    // states (read from the step's synchronization snapshot, like an edge's); never parameters.
+    // This node's own states (read as the node advances, like a source term's), other nodes'
+    // states (read from the step's synchronization snapshot, like an edge's), or project-level
+    // shared parameters (a node has no parameters of its own), each one entry of `parameters`.
     std::vector<CompiledBinding> bindings;
+    // The shared parameters the bindings read, one each however many bindings read it: live
+    // values, stored schedules and recorded interventions reach them as they reach any parameter.
+    std::vector<CompiledParameter> parameters;
     std::vector<NodeProviderOutputBinding> outputs; // N named outputs -> this node's own states
 };
 
@@ -283,7 +287,14 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     double simulationTime = 0,
     double stepSize = 0,
     ProviderEvaluator* providerEvaluator = nullptr,
-    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites = nullptr);
+    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites = nullptr,
+    const std::vector<double>* nodeProviderParameterValues = nullptr);
+
+// The values of a computational-node provider's parameters (NodeProviderTask::parameters) at
+// simulationTime, resolved as every other parameter is: live overrides, recorded interventions and
+// stored schedules first, else the shared parameter's value.
+std::vector<double> resolveNodeProviderParameterValues(const NodeProviderTask& task, const EntityValues& liveParameterValues,
+                                                       const std::vector<ParameterSchedule>& activeSchedules = {}, double simulationTime = 0);
 
 // activeSchedules/simulationTime default to {}/0 so every existing call site (mostly tests
 // exercising a single substep in isolation) keeps its previous flat-override-only behavior

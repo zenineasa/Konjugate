@@ -49,5 +49,16 @@ export function resolveSharedParameters(document) {
     };
     for (const edge of resolved.edges ?? []) (edge.parameters ?? []).forEach(bake);
     for (const node of resolved.nodes ?? []) for (const term of node.sourceTerms ?? []) (term.parameters ?? []).forEach(bake);
+    // A computational-node provider binds shared parameters directly (a node has none of its own): each such binding
+    // gets the shared parameter itself, baked as a linked parameter is.
+    for (const node of resolved.nodes ?? []) {
+        for (const binding of node.implementation?.bindings ?? []) {
+            if (binding.kind !== 'parameter' || binding.sharedParameterId === undefined) continue;
+            const definition = shared.get(binding.sharedParameterId);
+            if (!definition) throw new Error(`Provider binding "${binding.key}" links to a shared parameter that does not exist.`);
+            binding.parameter = { id: definition.id, name: definition.name, symbol: definition.symbol, sharedParameterId: definition.id };
+            bake(binding.parameter);
+        }
+    }
     return resolved;
 }

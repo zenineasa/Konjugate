@@ -57,3 +57,32 @@ test('regenerates every entity ID and equation binding while retaining layout', 
     assert.equal(pasted.edges[0].equationModel.output.stateId, 25);
     assert.equal(pasted.nextId, 28);
 });
+
+// A computational-node provider drives its own node's states and may read another node's and shared parameters: a
+// pasted copy drives the copy's states, and reads what was not copied, and shared parameters, as the original did.
+test('a node provider is copied with its node, driving the copy\'s states', () => {
+    const withProvider = {
+        nodes: [
+            { id: 1, name: 'Arm', position: [0, 0, 0], states: [{ id: 2, name: 'Angle' }, { id: 3, name: 'Speed' }], sourceTerms: [], implementation: {
+                kind: 'python', providerApiVersion: 1, source: 'provider source',
+                bindings: [
+                    { key: 'speed', kind: 'state', nodeId: 1, stateId: 3 },
+                    { key: 'torque', kind: 'state', nodeId: 5, stateId: 6 },
+                    { key: 'payload', kind: 'parameter', sharedParameterId: 50 }
+                ],
+                outputs: [{ key: 'angle', stateId: 2, setsValue: true }, { key: 'speed', stateId: 3, setsValue: true }]
+            } },
+            { id: 5, name: 'Motor', position: [2, 0, 0], states: [{ id: 6, name: 'Torque' }], sourceTerms: [] }
+        ],
+        edges: []
+    };
+    const { nodes: [copy] } = remapGraphFragment(createGraphFragment(withProvider, [1]), 100);
+    assert.deepEqual(copy.states.map(({ id }) => id), [101, 102]);
+    assert.deepEqual(copy.implementation.bindings, [
+        { key: 'speed', kind: 'state', nodeId: 100, stateId: 102 },
+        { key: 'torque', kind: 'state', nodeId: 5, stateId: 6 },
+        { key: 'payload', kind: 'parameter', sharedParameterId: 50 }
+    ]);
+    assert.deepEqual(copy.implementation.outputs, [{ key: 'angle', stateId: 101, setsValue: true }, { key: 'speed', stateId: 102, setsValue: true }]);
+    assert.equal(copy.implementation.source, 'provider source');
+});

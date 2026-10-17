@@ -311,7 +311,8 @@ function hydrateProjectDocument(document) {
 
     const linkedParameters = [
         ...document.edges.flatMap((edge) => edge.parameters ?? []),
-        ...document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+        ...document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? [])),
+        ...document.nodes.flatMap((node) => nodeProviderParameterBindings(node).map((binding) => ({ ...binding, name: binding.key })))
     ].filter((parameter) => parameter.sharedParameterId !== undefined);
     for (const parameter of linkedParameters) {
         if (!sharedParameters.some((shared) => shared.id === parameter.sharedParameterId)) {
@@ -341,6 +342,9 @@ function hydrateProjectDocument(document) {
             enabled: node.enabled !== false,
             substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
             sourceTerms: (node.sourceTerms ?? []).map((term) => ({ ...term, parameters: term.parameters ?? [] })),
+            // A computational-node provider (or an FMU's reference), kept as authored: the canvas has no editor for
+            // it yet, but must not drop it, or the node would lose its dynamics when the model is saved or run.
+            implementation: node.implementation ? structuredClone(node.implementation) : null,
             states: (node.states ?? []).map((state) => ({
                 id: state.id,
                 label: state.name,
@@ -896,6 +900,9 @@ transformControls.addEventListener('mouseUp', () => {
 // TransformControls' own mouseDown/objectChange/mouseUp events directly, so interaction tests
 // can exercise the rotate/scale/move commit-and-undo path without needing real pointer
 // coordinates on the 3D gizmo's own handle geometry.
+// The document the canvas would save, for the interaction tests to check what it keeps.
+window.__debugProject = { serialize: () => serializeProjectDocument() };
+
 window.__debugTransform = {
     mode: () => transformControls.getMode(),
     attachedId: () => transformControls.object?.userData.id ?? null,
@@ -4834,7 +4841,9 @@ function parameterOwnersInModel() {
         ...model.relationships.filter((relationship) => !relationship.deleted).flatMap((relationship) => (relationship.parameters ?? [])
             .map((parameter) => ({ parameter, ownerLabel: relationship.title }))),
         ...model.nodes.filter((node) => !node.deleted).flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
-            .map((parameter) => ({ parameter, ownerLabel: `${node.title} · source term` }))))
+            .map((parameter) => ({ parameter, ownerLabel: `${node.title} · source term` })))),
+        ...model.nodes.filter((node) => !node.deleted).flatMap((node) => nodeProviderParameterBindings(node)
+            .map((binding) => ({ parameter: binding, ownerLabel: `${node.title} · provider` })))
     ];
     const users = new Map();
     own.filter(({ parameter }) => parameter.sharedParameterId !== undefined).forEach(({ parameter }) => {
@@ -4883,6 +4892,11 @@ function collectParameterRows() {
         (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => place({
             kind: 'sourceTerm', parameter, node, term, ownerLabel: `${node.title} · source term`
         })));
+        // Shown under the shared parameter it reads, by the provider's input key; edited there.
+        nodeProviderParameterBindings(node).forEach((binding) => place({
+            kind: 'nodeProvider', parameter: { name: binding.key, symbol: binding.key, sharedParameterId: binding.sharedParameterId }, node,
+            ownerLabel: `${node.title} · provider`
+        }));
     });
     const shared = model.sharedParameters.filter((definition) => usersByShared.has(definition.id)).map((definition) => ({
         kind: 'shared', parameter: definition, users: usersByShared.get(definition.id)
@@ -4962,6 +4976,11 @@ function jumpToParameterOwner(entry) {
     if (entry.kind === 'edge') {
         openRelationshipEditor(entry.relationship);
         requestAnimationFrame(() => $(`#edgeEditorParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`)?.focus());
+    } else if (entry.kind === 'nodeProvider') {
+        const node = nodeObjects.get(entry.node.id);
+        if (!node) return;
+        selectNode(node);
+        openNodeEditor(node.userData.definition);
     } else if (entry.kind === 'sourceTerm') {
         const node = nodeObjects.get(entry.node.id);
         if (!node) return;
@@ -6147,12 +6166,18 @@ function serializeGeometry(geometry) {
 
 // A shared parameter is written only while something visible still links to it, so unlinking
 // (or deleting) the last user of one never leaves an orphan definition in the saved file.
+// A computational-node provider's bindings to shared parameters (a node has no parameters of its own, so its
+// provider reads project-level ones): uses of those shared parameters, like a linked parameter is.
+function nodeProviderParameterBindings(node) {
+    return (node.implementation?.bindings ?? []).filter((binding) => binding.kind === 'parameter' && binding.sharedParameterId !== undefined);
+}
+
 function serializedSharedParameters(visibleNodeIds) {
     const linkedIds = new Set([
         ...model.relationships.filter((relationship) => !relationship.deleted)
             .flatMap((relationship) => relationship.parameters ?? []),
         ...model.nodes.filter((node) => visibleNodeIds.has(node.id))
-            .flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+            .flatMap((node) => [...(node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []), ...nodeProviderParameterBindings(node)])
     ].map((parameter) => parameter.sharedParameterId).filter((id) => id !== undefined));
     const written = model.sharedParameters.filter((shared) => linkedIds.has(shared.id));
     return written.length ? { sharedParameters: structuredClone(written) } : {};
@@ -6201,6 +6226,7 @@ function serializeProjectDocument() {
                         ...(!term.implementation ? { expressionModel: normalized } : {})
                     };
                 }),
+                ...(node.implementation ? { implementation: structuredClone(node.implementation) } : {}),
                 appearance: node.importedGeometry
                     ? {
                         type: 'mesh',
@@ -7580,6 +7606,10 @@ async function renderParameterTuningComparison() {
         document_.nodes.forEach((node) => (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => {
             if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
         })));
+        // A fitted shared parameter is one variable for everything linked to it, the provider of a node included.
+        (document_.sharedParameters ?? []).forEach((parameter) => {
+            if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
+        });
 
         const runResult = await window.engine.run(JSON.stringify(document_), { globalTimeStep: timeStep, outputInterval: timeStep, targetTime });
         if (!runResult.available) throw new Error('The native simulation engine is unavailable.');
@@ -11096,6 +11126,7 @@ function hydrateFragmentNode(node) {
         enabled: node.enabled !== false,
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
         sourceTerms: node.sourceTerms ?? [],
+        implementation: node.implementation ? structuredClone(node.implementation) : null,
         states: (node.states ?? []).map((state) => ({
             id: state.id,
             label: state.name,

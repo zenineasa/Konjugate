@@ -225,7 +225,7 @@ export function buildModel(sourceDocument) {
             }, stateRecord, schedules));
         }
         plan.algebraic = orderAlgebraicTasks(plan);
-        if (plan.node.implementation) plan.nodeProvider = buildNodeProvider(plan, stateRecord);
+        if (plan.node.implementation) plan.nodeProvider = buildNodeProvider(plan, stateRecord, schedules);
     }
 
     for (const edge of document.edges ?? []) {
@@ -366,6 +366,25 @@ function pythonScheduleLines(model) {
     ].join('\n');
 }
 
+// A parameter's symbol entry: its value, or, when it follows a stored schedule, a lookup of that schedule at `time`
+// ('start' of the substep, or 'algebraic' for a setsValue term's instant). `parameter` is also exposed on the entry
+// (beyond text/comment) so a caller that cares about liveness -- fmiCodeGen.mjs, which exposes a live parameter as a
+// real FMI input rather than baking it, unlike this module's own C++/Python export -- can tell without re-deriving
+// the binding. Existing callers only read text/comment.
+function parameterSymbol(parameter, time, schedules) {
+    if (parameter.schedule) {
+        const scheduleKey = parameter.scheduleKey ?? `parameter:${parameter.id}`;
+        if (!schedules.byKey.has(scheduleKey)) {
+            schedules.byKey.set(scheduleKey, schedules.list.length);
+            schedules.list.push(compileStoredSchedule(parameter));
+        }
+        const schedule = schedules.byKey.get(scheduleKey);
+        // `text` is the C++ form, read directly by provider input lists; symbolText() gives either language.
+        return { schedule, scheduleTime: time, text: scheduleCalls.cpp(schedule, time), comment: `${parameter.symbol} (follows a schedule)`, parameter };
+    }
+    return { text: doubleLiteral(parameter.value), comment: parameter.symbol, parameter };
+}
+
 function buildContribution(spec, stateRecord, schedules) {
     const { entityLabel, ownerPlan, alwaysLocal, algebraic = false, bindings, outputStateId, mathJson, implementation, negate, parameters, identifierField } = spec;
     const outputLocalIndex = ownerPlan.localIndexByStateId.get(outputStateId);
@@ -382,22 +401,7 @@ function buildContribution(spec, stateRecord, schedules) {
         if (binding.kind === 'parameter') {
             const parameter = (parameters ?? []).find((item) => item.id === binding.parameterId);
             if (!parameter) throw new Error(`The ${entityLabel} has an unresolved parameter binding.`);
-            // `parameter` is also exposed on the symbol entry (beyond text/comment) so a caller
-            // that cares about liveness -- fmiCodeGen.mjs, which exposes a live parameter as a
-            // real FMI input rather than baking it, unlike this module's own C++/Python export --
-            // can tell without re-deriving the binding. Existing callers only read text/comment.
-            if (parameter.schedule) {
-                const scheduleKey = parameter.scheduleKey ?? `parameter:${parameter.id}`;
-                if (!schedules.byKey.has(scheduleKey)) {
-                    schedules.byKey.set(scheduleKey, schedules.list.length);
-                    schedules.list.push(compileStoredSchedule(parameter));
-                }
-                const schedule = schedules.byKey.get(scheduleKey);
-                // `text` is the C++ form, read directly by provider input lists; symbolText() gives either language.
-                symbols.set(key, { schedule, scheduleTime: algebraic ? 'algebraic' : 'start', text: scheduleCalls.cpp(schedule, algebraic ? 'algebraic' : 'start'), comment: `${parameter.symbol} (follows a schedule)`, parameter });
-                continue;
-            }
-            symbols.set(key, { text: doubleLiteral(parameter.value), comment: parameter.symbol, parameter });
+            symbols.set(key, parameterSymbol(parameter, algebraic ? 'algebraic' : 'start', schedules));
         } else {
             const record = stateRecord.get(binding.stateId);
             if (!record) throw new Error(`The ${entityLabel} references a disabled or missing state.`);
@@ -416,11 +420,16 @@ function buildContribution(spec, stateRecord, schedules) {
     return { entityLabel, outputStateId, outputLocalIndex, negate, symbols, mathJson, implementation, boundStateIds };
 }
 
-function buildNodeProvider(plan, stateRecord) {
+function buildNodeProvider(plan, stateRecord, schedules) {
     const implementation = plan.node.implementation;
     const symbols = new Map();
     for (const binding of implementation.bindings ?? []) {
-        if (binding.kind === 'parameter') throw new Error(`The computational-node provider on node "${plan.node.name}" cannot bind a parameter.`);
+        // A shared parameter, baked into the binding by resolveSharedParameters, read at the substep's start.
+        if (binding.kind === 'parameter') {
+            if (!binding.parameter) throw new Error(`The computational-node provider on node "${plan.node.name}" binds a parameter that is not a shared one.`);
+            symbols.set(binding.key, parameterSymbol(binding.parameter, 'start', schedules));
+            continue;
+        }
         const record = stateRecord.get(binding.stateId);
         if (!record) throw new Error(`The computational-node provider on node "${plan.node.name}" references a disabled or missing state.`);
         // Its own node's state as the node advances, another node's from the step's snapshot, as the engine reads them.

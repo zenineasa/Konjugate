@@ -322,6 +322,64 @@ void executionPlanReadsAnotherNodesStateFromTheSnapshotForANodeProvider() {
     require(missingRejected, "Compiling a node-provider binding to a disabled node's state should fail clearly.");
 }
 
+// A provider node reading a project-level shared parameter ("payload", id 50) through two bindings,
+// with `sharedExtra` spliced into the shared parameter's JSON (a mode, a schedule) and `binding`
+// replacing the first binding's JSON when given.
+boost::property_tree::ptree projectWithNodeProviderParameter(const std::string& sharedExtra = R"json(, "mode": "constant")json", const std::string& binding = "") {
+    const auto first = binding.empty() ? std::string(R"json({"key": "payload", "kind": "parameter", "sharedParameterId": 50})json") : binding;
+    std::istringstream json(R"json({
+        "format": "konjugate",
+        "version": 1,
+        "sharedParameters": [{"id": 50, "name": "Payload", "symbol": "payload", "value": 2, "unit": "kg")json" + sharedExtra + R"json(}],
+        "nodes": [{
+            "id": 1, "name": "Mechanism",
+            "states": [{"id": 11, "name": "Angle", "symbol": "angle", "initialValue": 0}],
+            "sourceTerms": [],
+            "implementation": {
+                "kind": "python",
+                "providerApiVersion": 1,
+                "source": "provider source",
+                "bindings": [)json" + first + R"json(, {"key": "payloadAgain", "kind": "parameter", "sharedParameterId": 50}],
+                "outputs": [{"key": "angle", "stateId": 11, "setsValue": true}]
+            }
+        }],
+        "edges": []
+    })json");
+    boost::property_tree::ptree project;
+    boost::property_tree::read_json(json, project);
+    return project;
+}
+
+void validatorAcceptsANodeProviderBindingToASharedParameterOnly() {
+    require(konjugate::validateModel(projectWithNodeProviderParameter()).valid,
+        "A computational-node provider reading a shared parameter was rejected.");
+    require(hasIssue(konjugate::validateModel(projectWithNodeProviderParameter(R"json(, "mode": "constant")json", R"json({"key": "payload", "kind": "parameter", "parameterId": 50})json")),
+        "providerBindingParameterNotShared"), "A node-provider binding to a parameter of its own should be providerBindingParameterNotShared.");
+    require(hasIssue(konjugate::validateModel(projectWithNodeProviderParameter(R"json(, "mode": "constant")json", R"json({"key": "payload", "kind": "parameter", "sharedParameterId": 99})json")),
+        "sharedParameterMissing"), "A node-provider binding to a missing shared parameter should be sharedParameterMissing.");
+}
+
+// The shared parameter reaches the provider as any parameter reaches its equation: its value, a live
+// override of it, or its stored schedule at the substep's start; two bindings of it are one parameter.
+void nodeProviderReceivesASharedParametersValueLiveOverrideAndSchedule() {
+    const auto read = [](const boost::property_tree::ptree& project, const konjugate::EntityValues& live, double time) {
+        const auto plan = konjugate::compileExecutionPlan(project);
+        const auto& task = *plan.nodes.front().nodeProvider;
+        require(task.parameters.size() == 1, "Two bindings of one shared parameter should compile to one parameter.");
+        RemoteInputRecorder evaluator;
+        static_cast<void>(konjugate::integrateNode(plan.nodes.front(), plan.initialStates, live, time, 0.1, &evaluator));
+        require(evaluator.inputs.size() == 2 && evaluator.inputs[0] == evaluator.inputs[1], "Both bindings of the shared parameter should read it.");
+        return evaluator.inputs[0];
+    };
+    require(read(projectWithNodeProviderParameter(), {}, 0) == 2, "The provider did not receive the shared parameter's value.");
+    require(read(projectWithNodeProviderParameter(R"json(, "mode": "live", "control": {"minimum": 0, "maximum": 10, "step": 0.5})json"), {{50, 7.5}}, 0) == 7.5,
+        "The provider did not receive a live override of the shared parameter.");
+    require(read(projectWithNodeProviderParameter(R"json(, "mode": "constant", "schedule": {"interpolation": "hold", "samples": [[0, 1], [5, 4]]})json"), {}, 6) == 4,
+        "The provider did not receive the shared parameter's stored schedule.");
+    require(konjugate::compileExecutionPlan(projectWithNodeProviderParameter(R"json(, "mode": "constant", "schedule": {"interpolation": "hold", "samples": [[0, 1]]})json")).nodes.front().hasParameterSchedules,
+        "A node whose provider reads a scheduled parameter should re-resolve it every substep.");
+}
+
 void validatorAcceptsACompleteComputationalNodeProvider() {
     const auto project = projectWithNodeImplementation(validNodeImplementation());
     const auto result = konjugate::validateModel(project);
@@ -874,6 +932,8 @@ int main() {
         validatorAcceptsANodeProviderBindingToAnotherNodesState();
         validatorRejectsANodeProviderBindingToAMissingOrDisabledNodesState();
         executionPlanReadsAnotherNodesStateFromTheSnapshotForANodeProvider();
+        validatorAcceptsANodeProviderBindingToASharedParameterOnly();
+        nodeProviderReceivesASharedParametersValueLiveOverrideAndSchedule();
         providerRuntimeExecutesNodeProviderPythonWorkerEndToEnd();
         providerRuntimeExecutesNodeProviderCppInProcessEndToEnd();
         providerRuntimeCheckpointsAndRestoresPrngStateBitForBit();

@@ -735,7 +735,15 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     } else if (!nodeProviderKeys.insert(key).second) {
                         add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "implementation");
                     }
-                    if (value(binding, "kind") != "state" || value(binding, "stateId").empty()) {
+                    if (value(binding, "kind") == "parameter") {
+                        // A node has no parameters of its own: its provider reads project-level shared ones.
+                        if (value(binding, "sharedParameterId").empty()) {
+                            add(result, "providerBindingParameterNotShared", "error",
+                                "A computational-node provider binds only shared parameters, by sharedParameterId: a node has no parameters of its own.", "node", id, "implementation");
+                        } else if (!sharedParameterIds.contains(value(binding, "sharedParameterId"))) {
+                            add(result, "sharedParameterMissing", "error", "Provider binding \"" + key + "\" links to a shared parameter that does not exist.", "node", id, "implementation");
+                        }
+                    } else if (value(binding, "kind") != "state" || value(binding, "stateId").empty()) {
                         add(result, "providerBindingMissing", "error", "Provider binding references a missing state.", "node", id, "implementation");
                     } else if (stateIds[id].contains(value(binding, "stateId"))) {
                         nodeProviderBindingStateIds.insert(value(binding, "stateId"));

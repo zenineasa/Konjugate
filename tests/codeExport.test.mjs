@@ -309,6 +309,27 @@ test('a node provider reads its own node\'s states as it advances and other node
     assert.doesNotMatch(python, /"torque": state\[/);
 });
 
+// A node has no parameters of its own; its provider binds shared ones, which the export bakes as it bakes a linked one.
+test('a node provider\'s shared parameter reaches it in the export, as its value or its stored schedule', () => {
+    const document = baseDocument();
+    const [nodeId, angle, payloadId, gainId] = [id(), id(), id(), id()];
+    document.sharedParameters = [
+        { id: payloadId, name: 'Payload', symbol: 'payload', value: 2.5, unit: 'kg', mode: 'constant' },
+        { id: gainId, name: 'Gain', symbol: 'gain', value: 1, unit: '', mode: 'constant', schedule: { interpolation: 'hold', samples: [[0, 1], [1, 3]] } }
+    ];
+    document.nodes.push({
+        id: nodeId, name: 'Mechanism', states: [{ id: angle, name: 'Angle', symbol: 'angle', initialValue: 0, unit: '' }], sourceTerms: [],
+        implementation: {
+            kind: 'python', providerApiVersion: 1,
+            source: 'from konjugate import NodeOutputCollector, NodeProvider, NodeProviderDescription, ScalarPort\n\n\nclass Mechanism(NodeProvider):\n    def describe(self):\n        return NodeProviderDescription("m", "M", [ScalarPort("payload", "Payload", ""), ScalarPort("gain", "Gain", "")], [ScalarPort("angle", "Angle", "")])\n\n    def evaluate(self, context, inputs, outputs):\n        outputs.add_gradient("angle", inputs["payload"] * inputs["gain"])\n\n    def checkpoint(self):\n        return b""\n\n    def restore(self, payload):\n        pass\n',
+            bindings: [{ key: 'payload', kind: 'parameter', sharedParameterId: payloadId }, { key: 'gain', kind: 'parameter', sharedParameterId: gainId }],
+            outputs: [{ key: 'angle', stateId: angle, setsValue: true }]
+        }
+    });
+    const python = generateStandaloneProgram(document, 'python');
+    assert.match(python, /InputView\(\{"payload": 2\.5, "gain": schedule_value\(0, step_time\)\}\)/);
+});
+
 test('a cases expression exports as a conditional in both languages', async () => {
     const { compileExpressionNode, emitExpression, cppOperators } = await import('../src/codeExport.mjs');
     const expression = ['Which', ['Less', 0, 'x', 1], 'a', ['Not', ['Equal', 'x', 2]], 2, 'True', 3];

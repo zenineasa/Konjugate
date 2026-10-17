@@ -440,8 +440,23 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                     CompiledBinding compiled;
                     compiled.symbol = value(binding, "key");
                     if (value(binding, "kind") == "parameter") {
+                        // A shared parameter, compiled as a parameter linked to it is, so its
+                        // schedule and live control apply; one entry however many bindings read it.
+                        if (!binding.get_child_optional("sharedParameterId")) {
+                            throw std::runtime_error("A computational-node provider binds only shared parameters, by sharedParameterId.");
+                        }
                         compiled.source = BindingSource::parameter;
-                        compiled.valueId = idValue(binding, "parameterId");
+                        compiled.valueId = idValue(binding, "sharedParameterId");
+                        auto existing = std::find_if(providerTask.parameters.begin(), providerTask.parameters.end(),
+                            [&](const auto& parameter) { return parameter.controlId == compiled.valueId; });
+                        if (existing == providerTask.parameters.end()) {
+                            boost::property_tree::ptree link;
+                            link.put("id", compiled.valueId);
+                            link.put("sharedParameterId", compiled.valueId);
+                            providerTask.parameters.push_back(compileParameter(link, sharedParameters, storedSchedules));
+                            existing = std::prev(providerTask.parameters.end());
+                        }
+                        compiled.parameterIndex = static_cast<std::size_t>(std::distance(providerTask.parameters.begin(), existing));
                     } else if (value(binding, "kind") == "time") {
                         compiled.source = BindingSource::simulationTime;
                     } else {
@@ -578,7 +593,10 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             return std::any_of(task.parameters.begin(), task.parameters.end(), [](const auto& parameter) { return parameter.schedule != nullptr; });
         });
     };
-    for (auto& node : plan.nodes) node.hasParameterSchedules = scheduled(node.contributions) || scheduled(node.algebraicTasks);
+    for (auto& node : plan.nodes) {
+        node.hasParameterSchedules = scheduled(node.contributions) || scheduled(node.algebraicTasks) || (node.nodeProvider &&
+            std::any_of(node.nodeProvider->parameters.begin(), node.nodeProvider->parameters.end(), [](const auto& parameter) { return parameter.schedule != nullptr; }));
+    }
     return plan;
 }
 
@@ -615,7 +633,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     double simulationTime,
     double stepSize,
     ProviderEvaluator* providerEvaluator,
-    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites) {
+    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites,
+    const std::vector<double>* nodeProviderParameterValues) {
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
 
@@ -683,10 +702,14 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
         for (std::size_t index = 0; index < task.bindings.size(); ++index) {
             const auto& binding = task.bindings[index];
             if (binding.source == BindingSource::parameter) {
-                throw std::runtime_error("A computational-node provider binding cannot reference a parameter.");
+                if (!nodeProviderParameterValues) throw std::runtime_error("A computational-node provider's parameter was evaluated without its values.");
+                inputs[index] = nodeProviderParameterValues->at(binding.parameterIndex);
+            } else if (binding.source == BindingSource::simulationTime) {
+                inputs[index] = simulationTime;
+            } else {
+                inputs[index] = binding.source == BindingSource::localState
+                    ? localStates.at(binding.valueIndex) : synchronizationSnapshot.at(binding.valueIndex);
             }
-            inputs[index] = binding.source == BindingSource::localState
-                ? localStates.at(binding.valueIndex) : synchronizationSnapshot.at(binding.valueIndex);
         }
         if (!providerEvaluator) throw std::runtime_error("A computational-node provider requires an initialized provider runtime.");
         const auto outputs = providerEvaluator->evaluateNode(task, inputs, simulationTime, stepSize);
@@ -785,6 +808,14 @@ NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& 
         }
     }
     return resolved;
+}
+
+std::vector<double> resolveNodeProviderParameterValues(const NodeProviderTask& task, const EntityValues& liveParameterValues,
+                                                       const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+    std::vector<double> values;
+    values.reserve(task.parameters.size());
+    for (const auto& parameter : task.parameters) values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, simulationTime));
+    return values;
 }
 
 NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const EntityValues& liveParameterValues,
@@ -901,9 +932,12 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         // instant explicit Euler evaluates everything else at.
         applyAlgebraicTasks(node.algebraicTasks, localStates, algebraicParameterValues, substepTime, nodeTimeStep, providerEvaluator);
         std::vector<std::pair<std::size_t, double>> algebraicNodeProviderWrites;
+        // The provider's parameters at this substep's start, as its other inputs are read then.
+        const auto providerParameterValues = node.nodeProvider && !node.nodeProvider->parameters.empty()
+            ? resolveNodeProviderParameterValues(*node.nodeProvider, liveParameterValues, activeSchedules, substepTime) : std::vector<double>{};
         const auto evaluated = evaluateContributionTasks(
             node, localStates, synchronizationSnapshot, parameterValues,
-            substepTime, nodeTimeStep, providerEvaluator, &algebraicNodeProviderWrites);
+            substepTime, nodeTimeStep, providerEvaluator, &algebraicNodeProviderWrites, &providerParameterValues);
         // Same plain-replacement treatment as applyAlgebraicTasks, applied here rather than inside
         // evaluateContributionTasks itself -- see that function's declaration comment. Order versus
         // the Euler integration below never matters: a setsValue nodeProvider output's state index

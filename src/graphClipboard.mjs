@@ -35,7 +35,12 @@ function remapImplementation(implementation, ids) {
         ...(implementation.output ? { output: {
             ...structuredClone(implementation.output),
             ...(ids.has(implementation.output.stateId) ? { stateId: ids.get(implementation.output.stateId) } : {})
-        } } : {})
+        } } : {}),
+        // A computational-node provider's outputs, one per state it drives.
+        ...(Array.isArray(implementation.outputs) ? { outputs: implementation.outputs.map((output) => ({
+            ...structuredClone(output),
+            ...(ids.has(output.stateId) ? { stateId: ids.get(output.stateId) } : {})
+        })) } : {})
     };
 }
 
@@ -85,7 +90,9 @@ export function remapGraphFragment(fragment, firstId, positionOffset = [1, 0, 1]
             parameters: (term.parameters ?? []).map((parameter) => ({ ...structuredClone(parameter), id: ids.get(parameter.id) })),
             ...(term.expressionModel ? { expressionModel: remapEquationModel(term.expressionModel, ids) } : {}),
             ...(term.implementation ? { implementation: remapImplementation(term.implementation, ids) } : {})
-        }))
+        })),
+        // A node's own provider reads and drives the copy's states; one it reads on a node not copied stays as it was.
+        ...(node.implementation ? { implementation: remapImplementation(node.implementation, ids) } : {})
     }));
     const edges = fragment.edges.map((edge) => ({
         ...structuredClone(edge),

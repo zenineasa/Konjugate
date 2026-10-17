@@ -4068,6 +4068,46 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    await run('a node provider survives the canvas, and its shared parameter is listed and kept as used', async () => {
+        // A node has no parameters of its own; its computational-node provider reads a shared one. The canvas has no
+        // editor for the provider, but must keep it, and count its binding as a use of the shared parameter, or the
+        // live controls, the parameters table and a save would leave the parameter out.
+        const implementation = {
+            kind: 'python', providerApiVersion: 1, source: 'provider source',
+            bindings: [{ key: 'payload', kind: 'parameter', sharedParameterId: 100 }],
+            outputs: [{ key: 'angle', stateId: 2, setsValue: true }]
+        };
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' },
+            sharedParameters: [{ id: 100, name: 'Payload', symbol: 'payload', value: 2, unit: 'kg', mode: 'live', control: { minimum: 0, maximum: 5, step: 0.5 } }],
+            nodes: [{
+                id: 1, name: 'Mechanism', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                states: [{ id: 2, name: 'Angle', symbol: 'angle', initialValue: 0 }], implementation
+            }],
+            edges: [],
+            runConfigurations: [{ id: 3, name: 'Default', globalTimeStep: 0.01, outputInterval: 0.01 }], activeRunConfigurationId: 3
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-node-provider-'));
+        const projectPath = join(directory, 'nodeProvider.kjt');
+        await writeFile(projectPath, await encodeProjectFile(JSON.stringify(project)));
+
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The node-provider project did not load.');
+        const saved = await evaluate(opened, `window.__debugProject.serialize()`);
+        assert.deepEqual(saved.nodes[0].implementation, implementation, 'The canvas must keep a node\'s provider as it was authored.');
+        assert.deepEqual(saved.sharedParameters?.map(({ id }) => id), [100], 'A shared parameter only a provider reads must still be saved.');
+
+        await evaluate(opened, `document.querySelector('#parametersButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parametersPanel').hidden`, 'The parameters panel did not open.');
+        assert.match(await evaluate(opened, `document.querySelector('#parametersBody tr.sharedRow').textContent`), /Shared.*1 use/,
+            'The provider\'s binding must count as a use of the shared parameter.');
+        await evaluate(opened, `document.querySelector('[data-toggle-shared]').click()`);
+        assert.equal(await evaluate(opened, `document.querySelector('#parametersBody tr.sharedUserRow').lastElementChild.textContent`), 'Mechanism · provider');
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
     await run('the parameters table lists shared and ordinary parameters, edits inline, and jumps to owners', async () => {
         const project = sharedParameterTestProject({ withSourceTerm: true });
         // One ordinary parameter alongside the shared ones, so both row kinds are covered.

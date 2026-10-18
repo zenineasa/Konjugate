@@ -5,8 +5,10 @@
 // result in the canvas, and export it with a provenance manifest. The window never sees a file path,
 // a file's contents, or the model: it names declared ids, and this module does the work.
 
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -477,11 +479,67 @@ export async function runScenarioBranches({ content, config, scenario, intervent
 
 // ---- window and IPC ---------------------------------------------------------------------------------
 
+// Whether the Python that runs inline providers (the one set under Provider toolchains, or found on the PATH) can
+// import the modules a launcher's providers need, so a window can say what is missing before a run fails on it. Each
+// module is imported for real, so a module that is installed but broken (built for another Python) counts as missing.
+// Runs in the temporary directory, so nothing in the current directory is imported in place of a module.
+export const maximumPythonModules = 8;
+const pythonModuleCheck = [
+    'import importlib, json, sys',
+    'answer = {"version": sys.version.split()[0], "executable": sys.executable, "modules": {}}',
+    'for name in sys.argv[1:]:',
+    '    try:',
+    '        module = importlib.import_module(name)',
+    '        answer["modules"][name] = {"found": True, "version": str(getattr(module, "__version__", "")) or None}',
+    '    except Exception as error:',
+    '        answer["modules"][name] = {"found": False, "error": f"{type(error).__name__}: {error}"}',
+    'print(json.dumps(answer))'
+].join('\n');
+
+export function runPythonProcess(interpreter, args, { timeoutMs = 60000 } = {}) {
+    return new Promise((resolve) => {
+        let child;
+        try {
+            child = spawn(interpreter, args, { cwd: tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+        } catch (error) {
+            resolve({ code: -1, stdout: '', stderr: error.message });
+            return;
+        }
+        let stdout = '';
+        let stderr = '';
+        const timer = setTimeout(() => { child.kill(); stderr += `\nNo answer within ${timeoutMs / 1000} s.`; }, timeoutMs);
+        child.stdout.on('data', (chunk) => { stdout += chunk; });
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.on('error', (error) => { clearTimeout(timer); resolve({ code: -1, stdout: '', stderr: error.message }); });
+        child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    });
+}
+
+export async function checkPythonModules({ interpreter, chosen = false, modules, run = runPythonProcess }) {
+    if (!Array.isArray(modules) || !modules.length || modules.length > maximumPythonModules || !modules.every((name) => typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(name) && name.length <= 100)) {
+        throw new Error(`Name between 1 and ${maximumPythonModules} Python modules to check, each a module's import name.`);
+    }
+    const where = chosen ? 'the Python set under Provider toolchains' : 'the Python found on the PATH (set another under Provider toolchains)';
+    const result = interpreter ? await run(interpreter, ['-c', pythonModuleCheck, ...modules]) : { code: -1, stdout: '', stderr: 'No Python was found.' };
+    let answer = null;
+    try { answer = result.code === 0 ? JSON.parse(result.stdout.trim().split('\n').at(-1)) : null; } catch { answer = null; }
+    if (!answer || typeof answer.modules !== 'object') {
+        const reason = (result.stderr || result.stdout).trim().split('\n').at(-1) || `it exited with code ${result.code}`;
+        return { found: false, interpreter: interpreter || null, chosen, version: null, modules: Object.fromEntries(modules.map((name) => [name, { found: false, error: null }])), message: `Python could not be run (${where}): ${reason}` };
+    }
+    const missing = modules.filter((name) => !answer.modules[name]?.found);
+    return {
+        found: true, interpreter, executable: answer.executable ?? null, chosen, version: answer.version ?? null,
+        modules: Object.fromEntries(modules.map((name) => [name, answer.modules[name] ?? { found: false, error: null }])),
+        message: missing.length ? `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not importable in Python ${answer.version} at ${answer.executable} (${where}).` : `Python ${answer.version} at ${answer.executable} has ${modules.join(', ')}.`
+    };
+}
+
 export function registerLauncherHandlers(deps) {
     const {
         ipcMain, dialog, BrowserWindow, app, screen, currentDir, iconPath, projectWindows, projectWindowState, installCustomWindowState,
         auxiliaryWindowBounds, auxiliaryWindowPresentation, engineOptions, decodeProjectForRenderer, addonRegistry, inferWithEngine, fetchImpl = (...args) => globalThis.fetch(...args),
-        shell = null
+        shell = null, checkPython = checkPythonModules
     } = deps;
     const workspaces = new Map();
     // Each add-on's cache of what it fetched (addonCache.mjs), made when first used.
@@ -678,6 +736,14 @@ export function registerLauncherHandlers(deps) {
         if (!shell) throw new Error('This version of Konjugate cannot open pages in the browser.');
         await shell.openExternal(href);
         return {};
+    }));
+
+    // Whether the providers' Python can import the modules named (see checkPythonModules). Reads nothing of the user's
+    // beyond which Python that is and its version.
+    ipcMain.handle('launcherCheckPython', guarded(async (_context, { modules }) => {
+        const options = await engineOptions();
+        const interpreter = options.providerToolchains?.python?.interpreterPath || null;
+        return checkPython({ interpreter, chosen: Boolean(options.providerToolchains?.python?.chosen), modules });
     }));
 
     // Fetches a page of text from a listed host and hands it to the window, for a launcher that needs an answer to show

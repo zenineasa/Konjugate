@@ -2479,7 +2479,7 @@ const engineOptions = async () => {
         disabledFmuKeys: disabledExtensionKeys,
         providerToolchains: {
             cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
-            python: { interpreterPath: resolvedPython ?? '' },
+            python: { interpreterPath: resolvedPython ?? '', chosen: Boolean((await providerToolchainStore.get()).python.interpreterPath) },
             executionMode
         }
     };

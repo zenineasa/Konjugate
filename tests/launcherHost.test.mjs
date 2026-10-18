@@ -9,7 +9,7 @@ import { validateAddonManifest } from '../src/addonHost.mjs';
 import {
     binaryChoice, checkedDerived, storedFileKinds, checkedProgress, importerInputs, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
     attachAddonData, buildSessionEntry, sessionInputs,
-    checkForkTime,
+    checkForkTime, checkPythonModules, maximumPythonModules,
     checkRunLength,
     addressAllowed, applyOverrides, buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
 } from '../src/launcherHost.mjs';
@@ -512,4 +512,35 @@ test('a window keeping files names their endings: the dialog offers those, and a
     assert.deepEqual(storedFileKinds(null).filters, []);
     storedFileKinds(undefined).check('/anything.bin');
     for (const wrong of [[], ['.osm.pbf'], ['osm/pbf'], 'pbf', [1]]) assert.throws(() => storedFileKinds(wrong), /up to 8 endings/);
+});
+
+test('a window can ask whether the providers\' Python imports the modules it needs, and is told which Python that is', async () => {
+    const answering = (modules) => async (interpreter, args) => {
+        assert.equal(args[0], '-c');
+        return { code: 0, stdout: `${JSON.stringify({ version: '3.12.4', executable: '/usr/bin/python3', modules: Object.fromEntries(args.slice(2).map((name) => [name, modules[name]])) })}\n`, stderr: '' };
+    };
+    const found = await checkPythonModules({ interpreter: 'python3', modules: ['mujoco'], run: answering({ mujoco: { found: true, version: '3.16.0' } }) });
+    assert.equal(found.found, true);
+    assert.deepEqual(found.modules.mujoco, { found: true, version: '3.16.0' });
+    assert.match(found.message, /^Python 3\.12\.4 at \/usr\/bin\/python3 has mujoco\.$/);
+    const missing = await checkPythonModules({ interpreter: '/opt/py/bin/python', chosen: true, modules: ['mujoco', 'numpy'], run: answering({ mujoco: { found: false, error: "ModuleNotFoundError: No module named 'mujoco'" }, numpy: { found: true, version: '2.0' } }) });
+    assert.equal(missing.modules.mujoco.found, false);
+    assert.match(missing.message, /^mujoco is not importable in Python 3\.12\.4 .*the Python set under Provider toolchains/);
+    // No Python at all, or one that fails, is said plainly, with every module counted missing.
+    const absent = await checkPythonModules({ interpreter: 'python3', modules: ['mujoco'], run: async () => ({ code: -1, stdout: '', stderr: 'spawn python3 ENOENT' }) });
+    assert.equal(absent.found, false);
+    assert.equal(absent.modules.mujoco.found, false);
+    assert.match(absent.message, /could not be run \(the Python found on the PATH.*\): spawn python3 ENOENT/);
+    // Only import names, and not too many.
+    for (const modules of [[], ['os; import x'], ['-c'], Array.from({ length: maximumPythonModules + 1 }, (_, index) => `m${index}`), 'mujoco']) {
+        await assert.rejects(checkPythonModules({ interpreter: 'python3', modules, run: async () => assert.fail('Python should not be run.') }), /Name between 1 and/);
+    }
+});
+
+test('the check runs a real Python, importing what is there and not what is not', { skip: process.platform === 'win32' && 'python3 is not assumed on Windows' }, async () => {
+    const answer = await checkPythonModules({ interpreter: 'python3', modules: ['json', 'konjugate_no_such_module'] });
+    if (!answer.found) return; // No python3 on this computer: the message says so, and there is nothing more to check.
+    assert.equal(answer.modules.json.found, true);
+    assert.equal(answer.modules.konjugate_no_such_module.found, false);
+    assert.match(answer.modules.konjugate_no_such_module.error, /ModuleNotFoundError/);
 });

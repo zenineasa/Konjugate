@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld('konjugateLauncher', Object.freeze({
     restoreSession: () => ipcRenderer.invoke('launcherRestoreSession'),
     exportResults: (scenarioId, options) => ipcRenderer.invoke('launcherExportResults', { scenarioId, ...options }),
     openPage: (pageId) => ipcRenderer.invoke('launcherOpenPage', { pageId }),
+    // Whether the Python that runs inline providers can import these modules: { found, interpreter, version, modules, message }.
+    checkPython: (modules) => ipcRenderer.invoke('launcherCheckPython', { modules }),
     onProgress: (callback) => ipcRenderer.on('launcherProgress', (_event, progress) => callback(progress)),
     // Large files kept for the user (with files.store): listed, brought in from disk, downloaded from a declared host,
     // described, removed, and given to the importer as a binary role's files.

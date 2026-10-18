@@ -242,6 +242,13 @@ export async function runInteractionTests(driver) {
             return;
         }
         try {
+            // Each test starts with the project window in front and drawing: a window an earlier test opened may cover
+            // it, and a covered window can report itself hidden, which stops the canvas drawing, so labels a test clicks
+            // or measures stay where they were. A window the test opens itself still opens on top.
+            if (!await window.isDestroyed()) {
+                await window.focus();
+                await waitFor(window, `!document.hidden`, 'The project window stayed hidden.');
+            }
             await task();
             passedCount += 1;
             console.log(`✓ ${name}`);
@@ -2160,6 +2167,8 @@ export async function runInteractionTests(driver) {
 
     await run('camera controls provide wheel-free zoom and model fitting', async () => {
         assert.equal(await evaluate(window, `document.querySelector('[data-nav-action="zoomIn"]').ariaLabel`), 'Zoom camera in');
+        // A camera move left animating by an earlier test would overwrite the zoom when it ends: the camera still, first.
+        await waitForStableRect(window, `document.querySelector('#viewCube').dataset.cameraDistance`, 'The camera did not come to rest before zooming.', 5000);
         const before = Number(await evaluate(window, `document.querySelector('#viewCube').dataset.cameraDistance`));
         await evaluate(window, `document.querySelector('[data-nav-action="zoomIn"]').click()`);
         await waitFor(window, `Number(document.querySelector('#viewCube').dataset.cameraDistance) < ${before}`, 'Camera zoom-in control did not reduce its target distance.');
@@ -4410,10 +4419,17 @@ export async function runInteractionTests(driver) {
 
         await evaluate(exampleWindow, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Plugin tank').click()`);
         await waitFor(exampleWindow, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Plugin tank'`, 'Selecting the plugin example did not populate the preview.');
+        // The status line is the validation readout too: it says the example is an unsaved copy once its guide has
+        // opened, and the model's validation may say its own a moment later. Every message it shows is recorded from
+        // before the load, so the one saying so is seen however soon the next follows it.
+        await evaluate(exampleWindow, `(() => {
+            window.__statusMessages = [];
+            const status = document.querySelector('#statusText');
+            new MutationObserver(() => window.__statusMessages.push(status.textContent)).observe(status, { childList: true, characterData: true, subtree: true });
+        })()`);
         await evaluate(exampleWindow, `document.querySelector('#examplesExplorerLoad').click()`);
         await waitFor(exampleWindow, `document.querySelector('.documentTitle').textContent === 'pluginTank'`, 'The plugin example did not load.');
-        // The status says so once the example's guide has opened, a moment after the title is set.
-        await waitFor(exampleWindow, `/unsaved copy/i.test(document.querySelector('#statusText').textContent)`, 'The plugin example was not said to be an unsaved copy.');
+        await waitFor(exampleWindow, `window.__statusMessages.some((message) => /unsaved copy/i.test(message))`, 'The plugin example was not said to be an unsaved copy.', 15000);
         // A label enters the page when the canvas next draws a frame, which is after the title is set.
         await waitFor(exampleWindow, `document.querySelectorAll('.node-label-container').length === 1`, 'The plugin example did not show its one node.');
         await closeWhenValidated(exampleWindow);

@@ -80,6 +80,9 @@ function wrapPage(page) {
         async title() {
             return page.title();
         },
+        async focus() {
+            await page.bringToFront();
+        },
         async close() {
             await page.close();
         },

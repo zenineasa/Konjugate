@@ -58,6 +58,12 @@ function wrapWindow(win) {
         async title() {
             return win.getTitle();
         },
+        // Brings the window in front of the others: a window behind another may report itself hidden, and the canvas
+        // does not draw while it is.
+        async focus() {
+            win.show();
+            win.focus();
+        },
         async close() {
             win.close();
         },

@@ -50,6 +50,15 @@ function checkAddress(address, allowed) {
     if (!allowed.has(address.hostname.toLowerCase())) throw new Error(`This window may not download from ${address.hostname}. It may reach: ${[...allowed].join(', ')}.`);
 }
 
+// How many bytes a response's body will read as, when its server says. A body sent compressed (GitHub sends text so)
+// is unpacked as it is read, while its content-length counts it compressed, so then the size is not known.
+export function bodyLength(response) {
+    const encoding = (response.headers.get('content-encoding') ?? '').trim().toLowerCase();
+    if (encoding && encoding !== 'identity') return null;
+    const length = Number(response.headers.get('content-length'));
+    return Number.isFinite(length) && length > 0 ? length : null;
+}
+
 export function createFileStore({ directory, now = () => Date.now() }) {
     const paths = (id) => ({ data: join(directory, `${id}.data`), meta: join(directory, `${id}.json`), part: join(directory, `${id}.part`) });
     const readMeta = async (id) => {
@@ -115,7 +124,7 @@ export function createFileStore({ directory, now = () => Date.now() }) {
                 current = new URL(location, current);
             }
             if (!response.ok) throw new Error(`${current.hostname} answered ${response.status}.`);
-            const total = Number(response.headers.get('content-length')) || null;
+            const total = bodyLength(response);
             if (total && total > maximumStoredFileBytes) throw new Error(`The file is larger than the ${maximumStoredFileBytes / 1024 / 1024} MB a stored file may be.`);
             await mkdir(directory, { recursive: true });
             const id = entryId();
@@ -170,8 +179,7 @@ export function createFileStore({ directory, now = () => Date.now() }) {
                 }
                 if ([301, 302, 303, 307, 308].includes(response.status)) { current = new URL(response.headers.get('location'), current); continue; }
                 if (!response.ok) throw new Error(`${current.hostname} answered ${response.status}.`);
-                const length = Number(response.headers.get('content-length'));
-                return Number.isFinite(length) && length > 0 ? length : null;
+                return bodyLength(response);
             }
             throw new Error(`${current.hostname} redirected too many times.`);
         },

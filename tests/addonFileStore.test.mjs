@@ -29,7 +29,7 @@ function server(routes) {
                 await new Promise((resolve) => setTimeout(resolve, 1));
             }
         });
-        return new Response(stream, { status: 200, headers: route.length === null ? {} : { 'content-length': String(route.length ?? route.body.length) } });
+        return new Response(stream, { status: 200, headers: { ...(route.length === null ? {} : { 'content-length': String(route.length ?? route.body.length) }), ...(route.encoding ? { 'content-encoding': route.encoding } : {}) } });
     };
     return { fetchImpl, asked };
 }
@@ -128,4 +128,18 @@ test('how large a file is, asked of its server before downloading it, through re
     assert.equal(await store.size({ url: 'https://download.geofabrik.de/quiet.osm.pbf', hosts, fetchImpl }), null, 'a server that does not say');
     await assert.rejects(() => store.size({ url: 'https://download.geofabrik.de/missing.osm.pbf', hosts, fetchImpl }), /answered 404/);
     await assert.rejects(() => store.size({ url: 'https://elsewhere.example/a.osm.pbf', hosts, fetchImpl }), /may not download from elsewhere\.example/);
+});
+
+test('a file sent compressed is kept whole: its content-length counts it compressed, so it is not held to that', async () => {
+    const store = createFileStore({ directory: await mkdtemp(join(tmpdir(), 'konjugate-files-')) });
+    const body = new TextEncoder().encode('<mujoco model="scene">'.repeat(15));
+    // As GitHub answers raw text: gzip, with the compressed length, while fetch hands over the body unpacked.
+    const { fetchImpl } = server({ 'https://raw.githubusercontent.com/scene.xml': { body, length: 262, encoding: 'gzip' } });
+    const progress = [];
+    const entry = await store.download({ url: 'https://raw.githubusercontent.com/scene.xml', hosts: ['raw.githubusercontent.com'], fetchImpl, onProgress: (step) => progress.push(step) });
+    assert.equal(entry.bytes, body.length);
+    assert.ok(progress.every(({ total }) => total === null), 'The compressed length is not shown as the total.');
+    // And how large it is, asked first, is not known either.
+    const head = async () => new Response(null, { status: 200, headers: { 'content-length': '262', 'content-encoding': 'gzip' } });
+    assert.equal(await store.size({ url: 'https://raw.githubusercontent.com/scene.xml', hosts: ['raw.githubusercontent.com'], fetchImpl: head }), null);
 });

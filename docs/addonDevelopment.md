@@ -201,6 +201,8 @@ context
 
 The context contains metadata, not the full model or result sample storage. It returns `null` after the result session is no longer available.
 
+It also carries the model's `nodes` and `edges` as they appear: each node's `id`, `title`, `shape`, `color`, `rotation`, `scale`, its imported `mesh` (`{ position, normal, index }`) when it has one, and its `parts` when its appearance has them (see [Project schema](projectSchema.md)): the meshes of bodies the node reports the pose of, such as a robot's links, each named by the `prefix` of its pose states.
+
 ### `listSignals()`
 
 Returns a promise for the signal catalogue. It requires `results.read`.

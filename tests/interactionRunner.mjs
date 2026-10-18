@@ -4068,7 +4068,7 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
-    await run('a node provider survives the canvas, and its shared parameter is listed and kept as used', async () => {
+    await run('a node provider survives the canvas, with its body parts, and its shared parameter is listed and kept as used', async () => {
         // A node has no parameters of its own; its computational-node provider reads a shared one. The canvas has no
         // editor for the provider, but must keep it, and count its binding as a use of the shared parameter, or the
         // live controls, the parameters table and a save would leave the parameter out.
@@ -4077,11 +4077,13 @@ export async function runInteractionTests(driver) {
             bindings: [{ key: 'payload', kind: 'parameter', sharedParameterId: 100 }],
             outputs: [{ key: 'angle', stateId: 2, setsValue: true }]
         };
+        // A body's shape, in the frame of the body whose pose states start with its prefix.
+        const parts = [{ prefix: 'link', mesh: { position: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0], normal: [], index: [0, 1, 2] }, color: '#c0c0c0' }];
         const project = {
             format: 'konjugate', version: 1, metadata: { units: 'SI' },
             sharedParameters: [{ id: 100, name: 'Payload', symbol: 'payload', value: 2, unit: 'kg', mode: 'live', control: { minimum: 0, maximum: 5, step: 0.5 } }],
             nodes: [{
-                id: 1, name: 'Mechanism', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                id: 1, name: 'Mechanism', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888', parts },
                 states: [{ id: 2, name: 'Angle', symbol: 'angle', initialValue: 0 }], implementation
             }],
             edges: [],
@@ -4097,6 +4099,7 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The node-provider project did not load.');
         const saved = await evaluate(opened, `window.__debugProject.serialize()`);
         assert.deepEqual(saved.nodes[0].implementation, implementation, 'The canvas must keep a node\'s provider as it was authored.');
+        assert.deepEqual(saved.nodes[0].appearance.parts, parts, 'The canvas must keep a node\'s body parts.');
         assert.deepEqual(saved.sharedParameters?.map(({ id }) => id), [100], 'A shared parameter only a provider reads must still be saved.');
 
         await evaluate(opened, `document.querySelector('#parametersButton').click()`);

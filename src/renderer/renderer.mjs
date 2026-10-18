@@ -345,6 +345,9 @@ function hydrateProjectDocument(document) {
             // A computational-node provider (or an FMU's reference), kept as authored: the canvas has no editor for
             // it yet, but must not drop it, or the node would lose its dynamics when the model is saved or run.
             implementation: node.implementation ? structuredClone(node.implementation) : null,
+            // Parts of the node's shape, each a mesh in the frame of a body the node reports the pose of (a robot's
+            // links, say): kept and handed to result visualizers, not drawn on the canvas.
+            appearanceParts: Array.isArray(appearance.parts) ? structuredClone(appearance.parts) : null,
             states: (node.states ?? []).map((state) => ({
                 id: state.id,
                 label: state.name,
@@ -5647,6 +5650,7 @@ function createAddonContext(contextNames) {
                         normal: node.importedGeometry.getAttribute('normal') ? Array.from(node.importedGeometry.getAttribute('normal').array) : null,
                         index: node.importedGeometry.getIndex() ? Array.from(node.importedGeometry.getIndex().array) : null
                     } : null,
+                    parts: node.appearanceParts ?? null,
                     states: node.states.map(({ id, label, symbol, unit }) => ({ id, label, symbol, unit }))
                 };
             }),
@@ -6227,18 +6231,21 @@ function serializeProjectDocument() {
                     };
                 }),
                 ...(node.implementation ? { implementation: structuredClone(node.implementation) } : {}),
-                appearance: node.importedGeometry
-                    ? {
-                        type: 'mesh',
-                        fileName: node.geometryFileName,
-                        color: `#${node.color.toString(16).padStart(6, '0')}`,
-                        mesh: serializeGeometry(node.importedGeometry)
-                    }
-                    : {
-                        type: 'primitive',
-                        shape: node.shape,
-                        color: `#${node.color.toString(16).padStart(6, '0')}`
-                    }
+                appearance: {
+                    ...(node.importedGeometry
+                        ? {
+                            type: 'mesh',
+                            fileName: node.geometryFileName,
+                            color: `#${node.color.toString(16).padStart(6, '0')}`,
+                            mesh: serializeGeometry(node.importedGeometry)
+                        }
+                        : {
+                            type: 'primitive',
+                            shape: node.shape,
+                            color: `#${node.color.toString(16).padStart(6, '0')}`
+                        }),
+                    ...(node.appearanceParts ? { parts: structuredClone(node.appearanceParts) } : {})
+                }
             };
         }),
         edges: model.relationships
@@ -11127,6 +11134,7 @@ function hydrateFragmentNode(node) {
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
         sourceTerms: node.sourceTerms ?? [],
         implementation: node.implementation ? structuredClone(node.implementation) : null,
+        appearanceParts: Array.isArray(appearance.parts) ? structuredClone(appearance.parts) : null,
         states: (node.states ?? []).map((state) => ({
             id: state.id,
             label: state.name,

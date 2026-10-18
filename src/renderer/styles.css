@@ -1486,3 +1486,14 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Hidden labels vanish unless they are selected, hovered (.peek), flagged, pinned, or needed to pick an endpoint. */
 .hideNodeLabels:not(.pickingEndpoint) .node-label-container:not(.selected):not(.peek):not(.hasStabilityFinding),
 .hideEdgeLabels .bundleLabel:not(.pinned):not(.peek):not(:focus-within) { visibility: hidden; pointer-events: none; }
+
+/* A relationship with several equations, listed read-only in the relationship editor. */
+.relationshipEquations {
+    max-height: 260px;
+    overflow: auto;
+    margin: 4px 0 0;
+    padding-left: 18px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}

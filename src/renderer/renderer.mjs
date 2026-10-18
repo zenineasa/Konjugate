@@ -341,6 +341,7 @@ function hydrateProjectDocument(document) {
             deleted: false,
             enabled: node.enabled !== false,
             substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
+            integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
             sourceTerms: (node.sourceTerms ?? []).map((term) => ({ ...term, parameters: term.parameters ?? [] })),
             // A computational-node provider (or an FMU's reference), kept as authored: the canvas has no editor for
             // it yet, but must not drop it, or the node would lose its dynamics when the model is saved or run.
@@ -1749,6 +1750,7 @@ function captureNodeModel(node) {
         // undoable step with the source-term edit that caused them.
         sharedParameters: structuredClone(model.sharedParameters),
         substepsPerGlobalStep: definition.substepsPerGlobalStep,
+        integration: definition.integration ?? 'explicit',
         bindings: model.relationships.map((edge) => ({
             id: edge.id,
             sourceStateId: edge.sourceStateId,
@@ -1774,6 +1776,7 @@ function applyNodeModel(node, snapshot) {
     definition.sourceTerms = structuredClone(snapshot.sourceTerms);
     if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
     definition.substepsPerGlobalStep = snapshot.substepsPerGlobalStep;
+    definition.integration = snapshot.integration ?? 'explicit';
     snapshot.bindings.forEach((binding) => {
         const edge = model.relationships.find((candidate) => candidate.id === binding.id);
         if (edge) {
@@ -1829,6 +1832,7 @@ function renderNodeEditorModel(node) {
     $('#editNodeName').value = definition.title;
     $('#editNodeType').value = definition.type;
     $('#editNodeSubsteps').value = definition.substepsPerGlobalStep;
+    $('#editNodeIntegration').value = definition.integration ?? 'explicit';
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#nodeEffectiveTimeStep').textContent = `${(configuration.globalTimeStep / definition.substepsPerGlobalStep).toPrecision(6)} s`;
     const stateContainer = $('#nodeEditorStates');
@@ -2264,6 +2268,9 @@ function openNodeEditor(definition, clientX, clientY) {
 }
 
 function normalizeEdgeEquationModel(definition, equationModel = definition.equationModel) {
+    // A relationship with several equations (equationModel.outputs) is kept as authored: the canvas shows it but
+    // has no editor for it yet, and must not rewrite its bindings or drop its equations.
+    if (Array.isArray(equationModel?.outputs)) return structuredClone(equationModel);
     const sourceNode = model.nodes.find((node) => node.id === definition.source);
     const targetNode = model.nodes.find((node) => node.id === definition.target);
     const base = equationModel ?? {
@@ -2601,6 +2608,37 @@ function renderEdgeEditor(definition) {
     const implementationKind = definition.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
     $('#editEdgeImplementationKind').value = implementationKind;
+    // A relationship with several equations: each listed with the state it sets. The canvas has no editor for them yet.
+    const equations = Array.isArray(definition.equationModel?.outputs) ? definition.equationModel.outputs : null;
+    $('#editEdgeEquationsList').hidden = !equations;
+    $('#editEdgeImplementationKind').closest('label').hidden = Boolean(equations);
+    $('#editEquationOutput').closest('label').hidden = Boolean(equations);
+    if (equations) {
+        const stateName = (stateId) => {
+            for (const node of model.nodes) {
+                const state = node.states.find((candidate) => candidate.id === stateId);
+                if (state) return `${node.title}.${state.symbol}`;
+            }
+            return 'a missing state';
+        };
+        const list = $('#editEdgeEquationsList');
+        const definitions = definition.equationModel.definitions ?? [];
+        list.replaceChildren();
+        const heading = document.createElement('p');
+        heading.className = 'builderHint';
+        heading.textContent = `This relationship sets ${equations.length} state${equations.length === 1 ? '' : 's'} of its two nodes, each the sum of what every relationship setting it gives, worked out at each step in dependency order${definitions.length ? `, using ${definitions.length} intermediate quantities` : ''}. It is written by a toolbox; the canvas shows its equations but does not edit them yet.`;
+        list.appendChild(heading);
+        const table = document.createElement('ul');
+        table.className = 'relationshipEquations';
+        for (const equation of equations) {
+            const item = document.createElement('li');
+            item.textContent = `${stateName(equation.stateId)} ${equation.latex ? `= ${equation.latex}` : ''}`.trim();
+            table.appendChild(item);
+        }
+        list.appendChild(table);
+        for (const id of ['#editEdgeEquationHeading', '#equationDiagnostics', '#editEdgeReferencePicker', '#editEdgeProviderSection', '#editEdgeMathField', '#editEdgeEquation']) $(id).hidden = true;
+        return;
+    }
     // The math-field/latex-textarea toggle their own `hidden` directly (matching the existing
     // Visual/LaTeX mode toggle) rather than through a hidden ancestor: MathLive's custom element
     // does not reliably accept focus again once an ancestor of it has been display:none'd.
@@ -6206,7 +6244,8 @@ function serializeProjectDocument() {
                 type: node.type,
                 ...(node.subsystemId === null ? {} : { subsystemId: node.subsystemId }),
                 enabled: node.enabled !== false,
-                numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep },
+                // integration is written only when it is not the default, so other models save exactly as before.
+                numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep, ...(node.integration === 'semiImplicit' ? { integration: 'semiImplicit' } : {}) },
                 position: object.position.toArray(),
                 // Omitted when at the identity value, like subsystemId above -- keeps a node
                 // that was never rotated/scaled serializing exactly as it did before these
@@ -8587,6 +8626,11 @@ $('#editNodeSubsteps').addEventListener('change', (event) => {
     if (!selectedNode) return;
     const substeps = Math.max(1, Math.min(10000, Math.trunc(Number(event.target.value) || 1)));
     changeNodeModel(selectedNode, (snapshot) => { snapshot.substepsPerGlobalStep = substeps; });
+});
+$('#editNodeIntegration').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    const integration = event.target.value === 'semiImplicit' ? 'semiImplicit' : 'explicit';
+    changeNodeModel(selectedNode, (snapshot) => { snapshot.integration = integration; });
 });
 $('#editAddState').addEventListener('click', () => {
     if (!selectedNode) return;
@@ -11132,6 +11176,7 @@ function hydrateFragmentNode(node) {
         deleted: false,
         enabled: node.enabled !== false,
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
+            integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
         sourceTerms: node.sourceTerms ?? [],
         implementation: node.implementation ? structuredClone(node.implementation) : null,
         appearanceParts: Array.isArray(appearance.parts) ? structuredClone(appearance.parts) : null,

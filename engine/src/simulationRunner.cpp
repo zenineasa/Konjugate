@@ -651,7 +651,12 @@ void runSimulation(const boost::property_tree::ptree& document,
     for (const auto& item : nodeSubsteps) nodeIds.push_back(item.first);
     std::sort(nodeIds.begin(), nodeIds.end());
 
-    const auto steps = static_cast<std::size_t>(std::ceil((targetTime - startTime) / globalTimeStep));
+    // A run (or the rest of one, from a checkpoint) that is a whole number of steps, give or take rounding in
+    // targetTime - startTime, takes exactly that many full steps: a resumed run then steps exactly as the run it
+    // came from, rather than ending on a step a few ulps short.
+    const auto stepsExactly = (targetTime - startTime) / globalTimeStep;
+    const auto wholeSteps = std::abs(stepsExactly - std::round(stepsExactly)) <= 1e-9 * std::max(1.0, stepsExactly);
+    const auto steps = static_cast<std::size_t>(wholeSteps ? std::round(stepsExactly) : std::ceil(stepsExactly));
     std::vector<NodeRuntimeMetrics> nodeMetrics(executionPlan.nodes.size());
     std::uint64_t synchronizationComputeNanoseconds = 0;
     std::uint64_t partitionBoundaryMessages = 0;
@@ -671,6 +676,8 @@ void runSimulation(const boost::property_tree::ptree& document,
     // first sample, the first checkpoint and every node's first step all see consistent values --
     // after a restart too, where a fork may have changed the parameters they depend on.
     settleAlgebraicStates(executionPlan, states, runControl.parameterValues, startTime, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
+    // And the states algebraic relationships set, across nodes, in dependency order.
+    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, startTime);
     std::vector<Sample> samples = {{startTime, states}};
     std::vector<Checkpoint> checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
     std::vector<Sample> pendingEventSamples;
@@ -957,7 +964,8 @@ void runSimulation(const boost::property_tree::ptree& document,
             return;
         }
         const auto wallStepStarted = std::chrono::steady_clock::now();
-        const auto synchronizationStep = std::min(globalTimeStep, targetTime - startTime - static_cast<double>(step) * globalTimeStep);
+        const auto synchronizationStep = wholeSteps || step + 1 < steps
+            ? globalTimeStep : std::min(globalTimeStep, targetTime - startTime - static_cast<double>(step) * globalTimeStep);
         const auto synchronizationStartedAt = std::chrono::steady_clock::now();
         const auto snapshot = states;
         auto synchronizedStates = snapshot;
@@ -1039,6 +1047,9 @@ void runSimulation(const boost::property_tree::ptree& document,
         states = std::move(synchronizedStates);
         const auto elapsed = std::min(targetTime, startTime + static_cast<double>(step + 1) * globalTimeStep);
         currentTime = elapsed;
+        // The states algebraic relationships set, from the states the step reached, at its end: every
+        // node reads them from the next step's synchronization snapshot.
+        evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime);
         if (!stabilityMonitoredNodeIds.empty()) {
             auto newFindings = stabilityMonitor.observeGlobalStep(states, currentTime);
             stabilityFindings.insert(stabilityFindings.end(),

@@ -86,3 +86,24 @@ test('a node provider is copied with its node, driving the copy\'s states', () =
     assert.deepEqual(copy.implementation.outputs, [{ key: 'angle', stateId: 101, setsValue: true }, { key: 'speed', stateId: 102, setsValue: true }]);
     assert.equal(copy.implementation.source, 'provider source');
 });
+
+// A relationship with several equations sets states of its two nodes: copied with both, it sets the copies' states.
+test('a relationship with several equations is copied setting the copies\' states', () => {
+    const graph = {
+        nodes: [
+            { id: 1, name: 'Parent', position: [0, 0, 0], states: [{ id: 2, name: 'X' }], sourceTerms: [] },
+            { id: 3, name: 'Child', position: [1, 0, 0], states: [{ id: 4, name: 'Y' }, { id: 5, name: 'Z' }], sourceTerms: [] }
+        ],
+        edges: [{ id: 6, name: 'Joint', source: { nodeId: 1 }, target: { nodeId: 3 }, parameters: [], equationModel: {
+            bindings: [{ symbol: 'x', kind: 'state', role: 'source', nodeId: 1, stateId: 2 }],
+            definitions: [{ symbol: 'twice', mathJson: ['Multiply', 2, 'x'] }],
+            outputs: [{ role: 'target', stateId: 4, mathJson: 'twice', setsValue: true }, { role: 'target', stateId: 5, mathJson: 'x', setsValue: true }]
+        } }]
+    };
+    const pasted = remapGraphFragment(createGraphFragment(graph, [1, 3]), 100);
+    const [parent, child] = pasted.nodes;
+    const [joint] = pasted.edges;
+    assert.deepEqual(joint.equationModel.outputs.map(({ stateId }) => stateId), child.states.map(({ id }) => id));
+    assert.deepEqual(joint.equationModel.bindings.map(({ nodeId, stateId }) => [nodeId, stateId]), [[parent.id, parent.states[0].id]]);
+    assert.deepEqual(joint.equationModel.definitions, graph.edges[0].equationModel.definitions);
+});

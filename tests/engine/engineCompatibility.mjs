@@ -581,6 +581,19 @@ assert.equal(await run(executable, ['run', input, '--configuration', join(direct
 const restartResult = decodeResultFile(await readFile(join(directory, 'restartResult.bin')));
 assert.deepEqual(restartResult.samples.map((sample) => sample.time), [0.1, 0.2]);
 
+// A run resumed partway steps exactly as the run it came from, to the last bit: the rest of the run is a whole number
+// of steps, so its last step is a full one too. (It once came a few ulps short, since 2 - 1 - 999 * 0.001 is just
+// under 0.001, and ended a hair away from the run that never stopped.)
+await writeFile(join(directory, 'wholeRun.json'), JSON.stringify({ name: 'Whole', targetTime: 2, globalTimeStep: 0.001, outputInterval: 0.01 }));
+assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'wholeRun.json'), '--output', join(directory, 'wholeResult.bin')]), 0);
+const wholeResult = decodeResultFile(await readFile(join(directory, 'wholeResult.bin')));
+const midway = wholeResult.checkpoints.find((checkpoint) => Math.abs(checkpoint.time - 1) < 1e-9);
+await writeFile(join(directory, 'resumedRun.json'), JSON.stringify({ name: 'Resumed', targetTime: 2, globalTimeStep: 0.001, outputInterval: 0.01, startCheckpoint: midway }));
+assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'resumedRun.json'), '--output', join(directory, 'resumedResult.bin')]), 0);
+const resumedResult = decodeResultFile(await readFile(join(directory, 'resumedResult.bin')));
+assert.equal(resumedResult.samples.at(-1).states[0].value, wholeResult.samples.at(-1).states[0].value, 'A resumed run must end where the whole run ends.');
+assert.equal(resumedResult.execution.nodeMetrics[0].invocations, 1000);
+
 const unsupportedInput = join(directory, 'project.unsupported');
 await writeFile(unsupportedInput, await encodeProjectFile(project));
 assert.equal(await run(executable, ['validate', unsupportedInput, '--report', report]), 3);

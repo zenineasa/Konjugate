@@ -7,6 +7,7 @@ const computeEngine = new ComputeEngine();
 const allowedOperators = new Set([
     'Abs', 'Add', 'Cos', 'Divide', 'Exp', 'Ln', 'Log', 'Max', 'Min', 'Multiply',
     'Negate', 'Power', 'Root', 'Sin', 'Sqrt', 'Subtract', 'Tan',
+    'Arcsin', 'Arccos', 'Arctan', 'Arctan2', 'Tanh',
     // \begin{cases} and the comparisons/logic its conditions use
     'Which', 'Less', 'LessEqual', 'Greater', 'GreaterEqual', 'Equal', 'NotEqual', 'And', 'Or', 'Not'
 ]);

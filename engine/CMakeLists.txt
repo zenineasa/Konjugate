@@ -294,6 +294,16 @@ if(BUILD_TESTING)
             )
     endif()
 
+    add_executable(algebraicRelationshipTests
+        tests/algebraicRelationshipTests.cpp
+        src/executionPlan.cpp
+        src/modelValidator.cpp
+        src/stabilityAnalysis.cpp
+    )
+    target_include_directories(algebraicRelationshipTests PRIVATE include ${BOOST_INCLUDE_DIR})
+    target_link_libraries(algebraicRelationshipTests PRIVATE Eigen3::Eigen Threads::Threads)
+    add_test(NAME algebraicRelationshipTests COMMAND algebraicRelationshipTests)
+
     add_executable(nodeProviderRuntimeTests
         tests/nodeProviderRuntimeTests.cpp
         ${PROVIDER_PROTOCOL_SOURCES}

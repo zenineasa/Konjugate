@@ -184,8 +184,8 @@ void validateTypedMathJson(const boost::property_tree::ptree& expression,
     }
     const auto operation = items.front()->data();
     const auto arguments = items.size() - 1;
-    const std::set<std::string> unary = {"Abs", "Cos", "Exp", "Ln", "Log", "Negate", "Sin", "Sqrt", "Tan"};
-    const std::set<std::string> binary = {"Divide", "Max", "Min", "Power"};
+    const std::set<std::string> unary = {"Abs", "Arccos", "Arcsin", "Arctan", "Cos", "Exp", "Ln", "Log", "Negate", "Sin", "Sqrt", "Tan", "Tanh"};
+    const std::set<std::string> binary = {"Arctan2", "Divide", "Max", "Min", "Power"};
     const std::set<std::string> comparisons = {"Less", "LessEqual", "Greater", "GreaterEqual", "Equal", "NotEqual"};
     const bool numericOperation = unary.contains(operation) || binary.contains(operation) || operation == "Add" || operation == "Multiply" || operation == "Which";
     const bool booleanOperation = comparisons.contains(operation) || operation == "And" || operation == "Or" || operation == "Not";
@@ -322,6 +322,68 @@ std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
     for (const auto& symbol : unknownSymbols) errors.push_back("Unknown symbol: " + symbol + ".");
     return errors;
 }
+}
+
+void validateAlgebraicRelationship(ValidationResult& result, const boost::property_tree::ptree& edge, const boost::property_tree::ptree& outputs,
+                                   std::unordered_map<std::string, std::set<std::string>>& stateIds, const std::set<std::string>& parameterIds,
+                                   const std::string& sourceNode, const std::string& targetNode, const std::string& id,
+                                   std::set<std::string>& relationshipStateIds) {
+    const auto implementationKind = value(edge, "implementation.kind");
+    if (!implementationKind.empty() && implementationKind != "equation") {
+        add(result, "relationshipOutputsInvalid", "error", "A relationship with several equations is written as equations, not a program.", "edge", id, "implementation");
+    }
+    if (value(edge, "directionality") == "bidirectional") {
+        add(result, "relationshipOutputsInvalid", "error", "A relationship with several equations is directed: each equation names the state it sets.", "edge", id, "output");
+    }
+    std::set<std::string> symbols;
+    if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& bindingEntry : *bindings) {
+        const auto& binding = bindingEntry.second;
+        symbols.insert(value(binding, "symbol"));
+        if (value(binding, "kind") == "parameter") {
+            if (!parameterIds.contains(value(binding, "parameterId"))) add(result, "edgeBindingMissing", "error", "Equation binding references a missing parameter.", "edge", id, "equation");
+        } else if (value(binding, "kind") != "time") {
+            const auto bindingNode = value(binding, "nodeId");
+            if ((bindingNode != sourceNode && bindingNode != targetNode) || !stateIds[bindingNode].contains(value(binding, "stateId"))) {
+                add(result, "edgeBindingMissing", "error", "Equation binding references a missing endpoint state.", "edge", id, "equation");
+            }
+        }
+    }
+    if (const auto definitions = edge.get_child_optional("equationModel.definitions")) for (const auto& definitionEntry : *definitions) {
+        const auto& definition = definitionEntry.second;
+        const auto symbol = value(definition, "symbol");
+        std::vector<std::string> errors;
+        const auto mathJson = definition.get_child_optional("mathJson");
+        if (!mathJson) errors.push_back("Its expression is missing.");
+        else validateMathJson(*mathJson, symbols, errors);
+        if (!std::regex_match(symbol, std::regex("^[A-Za-z][A-Za-z0-9_]*$")) || !symbols.insert(symbol).second) {
+            errors.push_back("A definition needs a name of its own (letters and digits).");
+        }
+        if (!errors.empty()) add(result, "relationshipDefinitionInvalid", "error", "Definition \"" + symbol + "\": " + errors.front(), "edge", id, "equation");
+    }
+    if (outputs.empty()) add(result, "edgeOutputMissing", "error", "A relationship with several equations needs at least one.", "edge", id, "output");
+    std::set<std::string> outputStates;
+    for (const auto& outputEntry : outputs) {
+        const auto& output = outputEntry.second;
+        const auto role = value(output, "role");
+        const auto stateId = value(output, "stateId");
+        const auto& candidates = role == "source" ? stateIds[sourceNode] : stateIds[targetNode];
+        if ((role != "source" && role != "target") || !candidates.contains(stateId)) {
+            add(result, "edgeOutputMissing", "error", "Each equation sets an existing state of one of the relationship's two nodes.", "edge", id, "output");
+            continue;
+        }
+        if (value(output, "setsValue") != "true") {
+            add(result, "relationshipOutputNotAlgebraic", "error", "Each equation of a relationship with several equations sets its state's value (setsValue).", "edge", id, "output");
+        }
+        if (!outputStates.insert(stateId).second) {
+            add(result, "relationshipOutputDuplicate", "error", "A relationship sets each state with one equation.", "edge", id, "output");
+        }
+        std::vector<std::string> errors;
+        const auto mathJson = output.get_child_optional("mathJson");
+        if (!mathJson) errors.push_back("Equation requires a valid executable expression.");
+        else validateMathJson(*mathJson, symbols, errors);
+        if (!errors.empty()) add(result, "edgeEquationInvalid", "error", errors.front(), "edge", id, "equation");
+        relationshipStateIds.insert(stateId);
+    }
 }
 
 ValidationResult validateModel(const boost::property_tree::ptree& document) {
@@ -479,6 +541,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     // A computational-node provider's bindings to other nodes' states, as (node, state) pairs: checked
     // once every node's states are known, since a node may read one listed after it.
     std::vector<std::pair<std::string, std::string>> remoteNodeProviderBindings;
+    // The states relationships' equations set (equationModel.outputs).
+    std::set<std::string> relationshipStateIds;
     for (const auto& entry : *nodesOptional) {
         const auto& node = entry.second;
         const auto id = value(node, "id");
@@ -500,6 +564,12 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 } catch (...) {
                     add(result, "nodeSubstepsInvalid", "error", "Node substeps per global step must be an integer from 1 through 10000.", "node", id, "numerics");
                 }
+            }
+            const auto integration = value(node, "numerics.integration");
+            if (!integration.empty() && integration != "explicit" && integration != "semiImplicit") {
+                add(result, "nodeIntegrationInvalid", "error", "A node's integration must be explicit or semiImplicit.", "node", id, "numerics");
+            } else if (integration == "semiImplicit" && node.get_child_optional("implementation")) {
+                add(result, "nodeIntegrationInvalid", "error", "A node with a computational-node provider is integrated explicitly.", "node", id, "numerics");
             }
         } else {
             disabledNodeIds.insert(id);
@@ -884,6 +954,12 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             }
         }
         if (!edgeEnabled) continue;
+        // A relationship with several equations, each setting a state of one of its endpoints from
+        // the bindings and the definitions (named intermediate quantities) before it.
+        if (const auto outputs = edge.get_child_optional("equationModel.outputs")) {
+            validateAlgebraicRelationship(result, edge, *outputs, stateIds, parameterIds, sourceNode, targetNode, id, relationshipStateIds);
+            continue;
+        }
         const auto implementation = edge.get_child_optional("implementation");
         const auto implementationKind = implementation ? value(*implementation, "kind") : "equation";
         if (implementationKind != "equation" && implementationKind != "cpp" && implementationKind != "python") {
@@ -977,6 +1053,21 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             countEdgeContribution(role, outputState);
         } else if (targetState.empty()) {
             add(result, "edgeOutputMissing", "error", "Choose the state updated by this equation.", "edge", id, "output");
+        }
+    }
+    // A state relationships set takes nothing else: no rate, no source term, no provider.
+    for (const auto& stateId : relationshipStateIds) {
+        if (stateContributorCounts[stateId] == 0) continue;
+        const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(), [&](const auto& entry) { return entry.second.contains(stateId); });
+        add(result, "algebraicStateMixed", "error",
+            "A state set by relationships' equations is the sum of what they set, and takes no other contribution.",
+            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
+    }
+    if (!relationshipStateIds.empty() && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
+        try {
+            static_cast<void>(compileExecutionPlan(document));
+        } catch (const std::exception& error) {
+            add(result, std::string(error.what()).find("form a loop") != std::string::npos ? "algebraicLoop" : "modelCompileFailed", "error", error.what(), "model", "");
         }
     }
     for (const auto& stateId : setsValueStateIds) {

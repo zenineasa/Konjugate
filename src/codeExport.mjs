@@ -25,7 +25,7 @@ import { resolveSharedParameters } from './sharedParameters.mjs';
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
 const minimumArgumentCounts = {
-    Negate: 1, Divide: 2, Power: 2, Sqrt: 1, Abs: 1, Exp: 1, Ln: 1, Log: 1, Sin: 1, Cos: 1, Tan: 1, Min: 2, Max: 2,
+    Negate: 1, Divide: 2, Power: 2, Sqrt: 1, Abs: 1, Exp: 1, Ln: 1, Log: 1, Sin: 1, Cos: 1, Tan: 1, Arcsin: 1, Arccos: 1, Arctan: 1, Arctan2: 2, Tanh: 1, Min: 2, Max: 2,
     Which: 2, Less: 2, LessEqual: 2, Greater: 2, GreaterEqual: 2, Equal: 2, NotEqual: 2, And: 2, Or: 2, Not: 1
 };
 
@@ -61,6 +61,11 @@ export const cppOperators = {
     Sin: (args) => `std::sin(${args[0]})`,
     Cos: (args) => `std::cos(${args[0]})`,
     Tan: (args) => `std::tan(${args[0]})`,
+    Arcsin: (args) => `std::asin(${args[0]})`,
+    Arccos: (args) => `std::acos(${args[0]})`,
+    Arctan: (args) => `std::atan(${args[0]})`,
+    Arctan2: (args) => `std::atan2(${args[0]}, ${args[1]})`,
+    Tanh: (args) => `std::tanh(${args[0]})`,
     Min: (args) => `std::min(${args[0]}, ${args[1]})`,
     Max: (args) => `std::max(${args[0]}, ${args[1]})`,
     Which: whichEmitter((condition, value, otherwise) => `(${condition} ? ${value} : ${otherwise})`, 'std::nan("")'),
@@ -95,6 +100,11 @@ const pythonOperators = {
     Sin: (args) => `math.sin(${args[0]})`,
     Cos: (args) => `math.cos(${args[0]})`,
     Tan: (args) => `math.tan(${args[0]})`,
+    Arcsin: (args) => `math.asin(${args[0]})`,
+    Arccos: (args) => `math.acos(${args[0]})`,
+    Arctan: (args) => `math.atan(${args[0]})`,
+    Arctan2: (args) => `math.atan2(${args[0]}, ${args[1]})`,
+    Tanh: (args) => `math.tanh(${args[0]})`,
     Min: (args) => `min(${args[0]}, ${args[1]})`,
     Max: (args) => `max(${args[0]}, ${args[1]})`,
     Which: whichEmitter((condition, value, otherwise) => `(${value} if ${condition} else ${otherwise})`, "float('nan')"),
@@ -228,8 +238,16 @@ export function buildModel(sourceDocument) {
         if (plan.node.implementation) plan.nodeProvider = buildNodeProvider(plan, stateRecord, schedules);
     }
 
+    for (const node of enabledNodes) {
+        if (node.numerics?.integration === 'semiImplicit') {
+            throw new Error(`Node "${node.name}" is integrated semi-implicitly, which code export cannot write yet.`);
+        }
+    }
     for (const edge of document.edges ?? []) {
         if (edge.enabled === false) continue;
+        if (Array.isArray(edge.equationModel?.outputs)) {
+            throw new Error(`Relationship "${edge.name}" sets several states with its equations, which code export cannot write yet.`);
+        }
         if (disabledNodeIds.has(edge.source.nodeId) || disabledNodeIds.has(edge.target.nodeId)) continue;
         const programmable = edge.implementation != null;
         const outputRole = programmable ? edge.implementation.output.role : edge.equationModel.output.role;

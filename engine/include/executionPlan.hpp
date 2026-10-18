@@ -37,6 +37,12 @@ enum class ExpressionOperation {
     sine,
     cosine,
     tangent,
+    arcsine,
+    arccosine,
+    arctangent,
+    // Arctan2(y, x): the angle of the point (x, y), from -pi to pi.
+    arctangent2,
+    hyperbolicTangent,
     minimum,
     maximum,
     // Piecewise support: MathJSON "Which" (LaTeX \begin{cases}) plus the comparisons and logic
@@ -230,6 +236,12 @@ public:
 struct NodeExecutionPlan {
     EntityId nodeId = 0;
     std::size_t substeps = 1;
+    // numerics.integration "semiImplicit": within each substep the node's states are updated one
+    // after another in the order the node lists them, each from contributions evaluated with the
+    // states already updated before it (so a position listed after its speed moves with the new
+    // speed: semi-implicit, or symplectic, Euler). Otherwise every state is updated together from
+    // the substep's starting values (explicit Euler).
+    bool semiImplicit = false;
     std::vector<EntityId> stateIds;
     std::vector<std::size_t> stateIndexes;
     std::vector<ContributionTask> contributions;
@@ -251,7 +263,38 @@ struct NodeExecutionPlan {
     bool hasParameterSchedules = false;
 };
 
+// An algebraic relationship: an edge whose equations set states of its two endpoints (rather than
+// adding a rate to one), with named intermediate quantities (definitions) its equations may share.
+// See docs/projectSchema.md. Every state is read from the plan's whole state vector: all algebraic
+// relationships are evaluated together at each synchronization instant, in dependency order, so a
+// chain of them across many nodes settles within the instant.
+struct AlgebraicRelationship {
+    EntityId edgeId = 0;
+    // States (source synchronizationSnapshot, valueIndex the plan's index), parameters and time.
+    std::vector<CompiledBinding> bindings;
+    std::vector<CompiledParameter> parameters;
+    // Each reads the bindings (symbols 0 .. bindings.size() - 1) and earlier definitions (symbol
+    // bindings.size() + k for definition k).
+    std::vector<CompiledExpression> definitions;
+};
+
+// One equation of an algebraic relationship: its value is added to its state, which every
+// algebraic relationship writing it sums (and nothing else writes).
+struct AlgebraicOutput {
+    std::size_t relationship = 0;
+    EntityId outputStateId = 0;
+    std::size_t outputStateIndex = std::numeric_limits<std::size_t>::max();
+    CompiledExpression expression;
+    // The definitions it needs, directly or through other definitions, in ascending order.
+    std::vector<std::size_t> definitions;
+};
+
 struct ExecutionPlan {
+    std::vector<AlgebraicRelationship> algebraicRelationships;
+    // In the order they are evaluated: every output writing a state comes before any output reading it.
+    std::vector<AlgebraicOutput> algebraicOutputs;
+    // The states algebraic relationships set, each the sum of its outputs.
+    std::vector<std::size_t> algebraicStateIndexes;
     StateValues initialStates;
     std::unordered_map<EntityId, EntityId> stateNodes;
     std::unordered_map<EntityId, std::size_t> stateIndexes;
@@ -354,6 +397,11 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
 // an initial value, or one computed under parameters a fork has since changed -- need not match
 // its expression, and other nodes read it through the synchronization snapshot before its own node
 // recomputes it. `stepSize` is only passed on to programmable terms' providers.
+// Sets every state algebraic relationships set: each to zero, then each output's value added, in
+// dependency order, from `states` (which it updates), at simulationTime.
+void evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime);
+
 void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                            double time, double stepSize, ProviderEvaluator* providerEvaluator = nullptr,
                            const std::vector<ParameterSchedule>& activeSchedules = {});

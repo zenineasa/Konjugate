@@ -485,3 +485,17 @@ test('the Python header is ASCII however long, so Python 3.9 reads it, and still
     // C++ reads UTF-8 in a string literal of any length: its header is left as it is.
     assert.ok(generateStandaloneProgram(document, 'cpp').includes('Road A → B 1 — Größe (m³)'));
 });
+
+test('code export writes atan2 and the other inverse functions, and refuses what it cannot write yet by name', async () => {
+    const { compileExpressionNode, emitExpression, cppOperators } = await import('../src/codeExport.mjs');
+    const symbols = new Map([['y', 'y'], ['x', 'x']]);
+    assert.equal(emitExpression(compileExpressionNode(['Arctan2', 'y', 'x']), symbols, cppOperators), 'std::atan2(y, x)');
+    assert.equal(emitExpression(compileExpressionNode(['Tanh', 'x']), symbols, cppOperators), 'std::tanh(x)');
+    const semi = singleNodeSourceTermModel();
+    semi.nodes[0].numerics = { substepsPerGlobalStep: 1, integration: 'semiImplicit' };
+    assert.throws(() => generateStandaloneProgram(semi, 'python'), /integrated semi-implicitly, which code export cannot write yet/);
+    const several = singleNodeSourceTermModel();
+    several.edges.push({ id: id(), name: 'Joint', source: { nodeId: several.nodes[0].id }, target: { nodeId: several.nodes[0].id }, parameters: [],
+        equationModel: { bindings: [], outputs: [] } });
+    assert.throws(() => generateStandaloneProgram(several, 'python'), /sets several states with its equations, which code export cannot write yet/);
+});

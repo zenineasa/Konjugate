@@ -398,6 +398,14 @@ test('a launcher may require fetchCache and keepSession, and a cached address is
     assert.throws(() => addressAllowed('not an address', ['overpass-api.de']), /not a web address/);
 });
 
+test('a launcher may require algebraicRelationships, for models whose relationships set states at each instant', () => {
+    const manifest = launcher();
+    manifest.requires = ['algebraicRelationships'];
+    assert.doesNotThrow(() => validateAddonManifest(manifest));
+    manifest.requires = ['algebraicRelationshipsLater'];
+    assert.throws(() => validateAddonManifest(manifest));
+});
+
 test('the window may choose when a scenario starts, from the run\'s start up to its end', () => {
     assert.equal(checkForkTime(0, 90 * 86400), 0);
     assert.equal(checkForkTime(10 * 86400, 90 * 86400), 10 * 86400);

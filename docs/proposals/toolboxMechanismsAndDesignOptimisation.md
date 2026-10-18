@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: Toolbox mechanisms, model merging and design optimisation
-description: RFC for three core capabilities a robotics toolbox needs, each useful to every toolbox - rebuilding only a toolbox's own part of a model, providers that solve a group of nodes and edges together, and optimisation towards a design objective with constraints.
+description: RFC for three core capabilities a robotics toolbox needs, each useful to every toolbox - rebuilding only a toolbox's own part of a model, relationships that set their endpoints' states at each instant (so coupled dynamics stay in the graph), and optimisation towards a design objective with constraints.
 tags: [proposals, addons, launcher, providers, optimisation, robotics]
 status: proposed
 ---
@@ -10,14 +10,14 @@ status: proposed
 
 # Toolbox mechanisms, model merging and design optimisation
 
-**Status: proposed.** Nothing here is built. It comes from planning the robotics toolbox (`konjugate-robotics`, see its `docs/direction.md`), but each part is meant to serve the logistics and fintech toolboxes too.
+**Status: proposed; Part 2 built (October 2026, not yet released).** It comes from planning the robotics toolbox (`konjugate-robotics`, see its `docs/direction.md`), but each part is meant to serve the logistics and fintech toolboxes too.
 
 ## Problem
 
-The robotics toolbox is a CAD-like launcher window: people build a robot from solids joined at chosen frames, or import one from MJCF or URDF, and each robot becomes a mechanism subsystem in the canvas. Its joints and named frames (end effector, payload) are nodes inside it that people wire motors, servos, controllers and sensors to; its dynamics run in MuJoCo, embedded in one provider. Three things stand in the way today.
+The robotics toolbox is a CAD-like launcher window: people build a robot from solids joined at chosen frames, or import one from MJCF or URDF, and each robot becomes a mechanism subsystem in the canvas. Its joints and named frames (end effector, payload) are nodes inside it that people wire motors, servos, controllers and sensors to; its dynamics are its joints' own equations. Three things stand in the way today.
 
 1. **A rebuild replaces the whole model.** `launcherOpenInCanvas` (`src/launcherHost.mjs`) sends the importer's model to the project window, which loads it in place of the current one. That is right for logistics, where the canvas mostly shows what the window built. A robot, though, is the start of a model: people wire controllers, batteries and sensors around it by hand, and the next rebuild from the window would throw that work away. The window also cannot read the canvas model, so nothing edited there can flow back.
-2. **There is no way to solve several nodes and edges together.** The engine integrates with snapshot-coupled explicit Euler, relationships contribute one scalar derivative each, and a source term reads only its own node. Coupled rigid-body dynamics and closed kinematic loops do not fit that: the four-bar example approximates rigid rods with stiff springs, needs a 0.002 s step and still drifts 2 to 3 percent, and the arm examples leave their joints uncoupled. Computational-node providers come closest (several outputs, their own checkpoint and restore, in process for C++, and since October 2026 reading other nodes' states through the step's snapshot and shared parameters) but write only to their own node and cannot be packaged in a plugin.
+2. **Coupled dynamics do not fit one derivative per relationship.** The engine integrates with snapshot-coupled explicit Euler, and each relationship contributes one scalar derivative. A chain of rigid bodies is coupled: how fast an elbow turns depends on the whole arm. The arm examples leave their joints uncoupled, and the four-bar example approximates rigid rods with stiff springs, needs a 0.002 s step and still drifts 2 to 3 percent. Solving the whole mechanism inside one node (a provider running a physics engine and setting every solid's states) would work, but it hides the solver outside the graph, against Konjugate's main idea that nodes influence each other only through edges.
 3. **Optimisation only fits data.** The `OptimizerBackend` and NLopt run a whole simulation per evaluation over bounded parameters, but the loss is always the error against a CSV. Designing (shortest cycle time with every joint torque within its motor's limit, say) needs an objective computed from the results and constraints.
 
 ## Part 1: toolbox-owned regions of a model
@@ -47,33 +47,24 @@ The whole merge is one undo step in the project window.
 
 Logistics: a user could add their own cost node or a hand-made link to a built network without losing it on the next build. Fintech the same for its markets models.
 
-## Part 2: group providers
+## Part 2: algebraic relationships
 
-A **group provider** owns a declared set of nodes and edges (a subsystem is the natural boundary) and computes the derivatives, or sets the values, of their states together, once per substep:
+Coupled rigid-body dynamics can stay in the graph when the method splits along the joints. Featherstone's articulated-body method does: written with every spatial quantity in the world frame about the world's origin, each joint needs only its two solids' states. Outward, it sets its child's pose and velocity; inward, it passes the child's articulated inertia and bias force to its parent (a parent sums what its children pass); outward again, it works out its own acceleration and sets its child's. What core needs for that is general:
 
-- it reads any state or parameter of its group and declared inputs from outside the group (a motor's torque, say);
-- it writes the states of every node in its group, as derivatives or algebraic values (`setsValue`), not only its own node's;
-- it may integrate internally with its own substeps across one engine step, as an FMU does in co-simulation, and reports its states back at the synchronisation boundary;
-- it checkpoints and restores like a computational-node provider, so forks and restarts work;
-- it reads parameters every step, so live sliders, schedules, interventions and fitting reach it like any equation.
+- **A relationship with several equations, each setting a state on one of its two endpoints** (`equationModel.outputs`, each with `role` `source` or `target`, a state, MathJSON and `setsValue: true`, sharing the relationship's `bindings` and named `definitions`, intermediate values used by several equations). An equation reads states of the relationship's own two endpoints and its parameters, never anything else, so influence still flows only along edges.
+- **Evaluated at each instant, across the model, in dependency order:** at the start of a run and after each step, every such equation is evaluated once, after the equations setting the states it reads. Equations setting the same state are summed, which is how a parent collects what each of its children passes up. A model whose equations depend on each other in a loop is refused (`algebraicLoop`), as is a state both set this way and integrated (`algebraicStateMixed`).
+- **Semi-implicit integration for a node** (`numerics.integration: "semiImplicit"`): its states are updated in the order listed, each from the ones updated before it, so a joint's speed is updated first and its position from the new speed. This keeps an undamped pendulum's energy bounded where explicit Euler lets it grow.
+- **Arcsin, Arccos, Arctan, Arctan2 and Tanh** in equations, for angles from rotation matrices and smooth friction.
 
-For robotics the group is one mechanism subsystem and the provider embeds MuJoCo (Apache-2.0; chosen over Pinocchio for contact, closed loops through equality constraints and native MJCF, while Pinocchio's analytic derivatives would go unused by Part 3's finite differences). Inside the subsystem:
+Each joint is then one relationship of a few dozen equations, which the canvas shows as MathJSON with LaTeX beside it. Live parameters, schedules, interventions, forks and fitting reach them as they reach any equation. Built and tested in the engine (`engine/tests/algebraicRelationshipTests.cpp`); the robotics toolbox checks a drawn pendulum, two-link arm and a cart carrying two pendulums against an independent Newton-Euler solution and agrees to within 1e-9. A launcher whose models use it requires `algebraicRelationships`.
 
-- each joint is a node with angle, speed and servo current states, whose parameters (axis, frame, limits, servo gains) the provider reads;
-- each named frame is a node with pose and force states;
-- each solid is a node with pose and velocity states, so poses and contact forces are result signals like any other.
+Not covered yet: closed loops (a four-bar) and contact, which need constraint and contact forces. Both can be edges too: a loop's closing joint as a relationship applying the force that keeps it closed, contact as one between the solids that touch. They will be proposed when built.
 
-The canvas shows the solids, joints and frames; the engine sees one coupled task.
-
-The provider's substeps (around 1 ms) are also where fast loops belong, since explicit Euler at the engine step cannot hold them. A joint in **servo mode** (a smart servo with its own position loop, such as the Feetech STS3215) runs that loop inside the provider at every substep: the graph sends setpoints at the engine step and reads back the current the servo draws, for the battery and thermal models. A joint in **torque mode** takes its torque from a motor in the graph, whose current the toolbox makes quasi-static (`setsValue`) by default so the engine step need not resolve the motor's L/R. So a group provider must be able to keep internal state that is not a node state (a servo's integrator) and include it in its checkpoint.
-
-Groups must be packaged in plugins (`kind: "groupProvider"` in `plugin.json`), C++ in process first, as the robotics toolbox will ship its provider that way. The validator checks that no state of a group is also written by an ordinary relationship from outside it, unless the provider declares that state as an input.
-
-Open points: whether the partitioned backend keeps a group in one partition (it should, simply); how a group appears in code export and FMU export (perhaps as an FMU-like call, or not exported at first); whether vectors in provider ports are needed for performance (a 7-joint arm has around 100 scalars); how a plugin links a third-party C library such as MuJoCo on every platform; and whether validation should warn when a relationship's time constant (a motor's L/R, say) is close to or below the engine step, which belongs with the numerical stability diagnostics proposal.
+Fast loops still need a step well below their time constant: a smart servo's position loop is part of its joint's equations and runs at the engine step, so a robot's step is around a millisecond.
 
 ### Who else gains
 
-Anything with stiff or algebraic coupling: hydraulic networks, electrical circuits solved as a whole, a logistics routing step solved per day rather than per edge.
+Anything with algebraic coupling along a chain or tree: an electrical ladder network, a hydraulic line of pipes and valves, a supply chain whose stocks pass demand upstream within a day.
 
 ## Part 3: design objectives and constraints
 
@@ -96,6 +87,6 @@ Logistics: least cost with every store's service level at or above a target. Fin
 ## Order
 
 1. Part 1, merging (robotics milestone B, sizing motors wired by hand to an imported robot, needs it so a rebuild keeps them; logistics benefits at once).
-2. Part 2, group providers (robotics milestone A, MuJoCo fed by MJCF and URDF import, can start as an inline computational-node provider on one mechanism node while this is built).
+2. Part 2, algebraic relationships (robotics milestone A; built).
 3. Part 3, design objectives (robotics milestone E).
 4. Part 1, reading the model.

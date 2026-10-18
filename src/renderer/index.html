@@ -611,6 +611,11 @@
             <div data-node-panel="numerics" hidden>
                 <section>
                     <label class="editorField"><span>Substeps per global step</span><input id="editNodeSubsteps" type="number" min="1" max="10000" step="1"></label>
+                    <label class="editorField"><span>Integration</span><select id="editNodeIntegration">
+                        <option value="explicit">Explicit Euler</option>
+                        <option value="semiImplicit">Semi-implicit Euler (states in order)</option>
+                    </select></label>
+                    <p class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy.</p>
                     <p class="builderHint">The node timestep is the global timestep divided by this integer. Cross-node values remain fixed until the next global synchronization.</p>
                     <div class="derivedTimeStep">Effective timestep <strong id="nodeEffectiveTimeStep">—</strong></div>
                 </section>
@@ -709,6 +714,7 @@
                     <option value="python">Python program</option>
                 </select></label>
                 <label class="editorField"><span>Updates</span><select id="editEquationOutput"></select></label>
+                <div id="editEdgeEquationsList" hidden></div>
                 <div id="editEdgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
                 <math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
                 <textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>

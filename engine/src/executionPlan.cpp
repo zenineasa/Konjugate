@@ -2,6 +2,7 @@
 
 #include "executionPlan.hpp"
 #include <algorithm>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -48,6 +49,11 @@ ExpressionOperation operationFromName(const std::string& name) {
     if (name == "Sin") return ExpressionOperation::sine;
     if (name == "Cos") return ExpressionOperation::cosine;
     if (name == "Tan") return ExpressionOperation::tangent;
+    if (name == "Arcsin") return ExpressionOperation::arcsine;
+    if (name == "Arccos") return ExpressionOperation::arccosine;
+    if (name == "Arctan") return ExpressionOperation::arctangent;
+    if (name == "Arctan2") return ExpressionOperation::arctangent2;
+    if (name == "Tanh") return ExpressionOperation::hyperbolicTangent;
     if (name == "Min") return ExpressionOperation::minimum;
     if (name == "Max") return ExpressionOperation::maximum;
     if (name == "Which") return ExpressionOperation::conditional;
@@ -192,6 +198,22 @@ void bindExpressionSymbols(CompiledExpression& expression, const std::vector<Com
     for (auto& argument : expression.arguments) bindExpressionSymbols(argument, bindings);
 }
 
+// Binds an expression's symbols against a table of names (an algebraic relationship's bindings, then
+// its definitions), allowing only the first `visible` of them.
+void bindExpressionNames(CompiledExpression& expression, const std::vector<std::string>& names, std::size_t visible) {
+    if (expression.operation == ExpressionOperation::symbol) {
+        const auto found = std::find(names.begin(), names.begin() + static_cast<std::ptrdiff_t>(visible), expression.symbol);
+        if (found == names.begin() + static_cast<std::ptrdiff_t>(visible)) throw std::runtime_error("Unknown executable symbol: " + expression.symbol + ".");
+        expression.symbolIndex = static_cast<std::size_t>(std::distance(names.begin(), found));
+    }
+    for (auto& argument : expression.arguments) bindExpressionNames(argument, names, visible);
+}
+
+void collectSymbolIndexes(const CompiledExpression& expression, std::set<std::size_t>& indexes) {
+    if (expression.operation == ExpressionOperation::symbol) indexes.insert(expression.symbolIndex);
+    for (const auto& argument : expression.arguments) collectSymbolIndexes(argument, indexes);
+}
+
 bool expressionReadsSymbol(const CompiledExpression& expression, std::size_t symbolIndex) {
     if (expression.operation == ExpressionOperation::symbol && expression.symbolIndex == symbolIndex) return true;
     return std::any_of(expression.arguments.begin(), expression.arguments.end(), [&](const auto& argument) {
@@ -260,6 +282,11 @@ double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
         case ExpressionOperation::sine: return std::sin(argument(0));
         case ExpressionOperation::cosine: return std::cos(argument(0));
         case ExpressionOperation::tangent: return std::tan(argument(0));
+        case ExpressionOperation::arcsine: return std::asin(argument(0));
+        case ExpressionOperation::arccosine: return std::acos(argument(0));
+        case ExpressionOperation::arctangent: return std::atan(argument(0));
+        case ExpressionOperation::arctangent2: return std::atan2(argument(0), argument(1));
+        case ExpressionOperation::hyperbolicTangent: return std::tanh(argument(0));
         case ExpressionOperation::minimum: return std::min(argument(0), argument(1));
         case ExpressionOperation::maximum: return std::max(argument(0), argument(1));
         case ExpressionOperation::conditional: {
@@ -314,6 +341,140 @@ std::size_t CompiledExpression::operationCount() const noexcept {
     return count;
 }
 
+namespace {
+
+void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tree::ptree& edge, const boost::property_tree::ptree& outputs,
+                                  const SharedParameters& sharedParameters,
+                                  std::unordered_map<EntityId, std::shared_ptr<const ParameterSchedule>>& storedSchedules) {
+    if (value(edge, "directionality") == "bidirectional") throw std::runtime_error("A relationship with several equations is directed.");
+    if (!value(edge, "implementation.kind").empty() && value(edge, "implementation.kind") != "equation") {
+        throw std::runtime_error("A relationship with several equations is written as equations.");
+    }
+    AlgebraicRelationship relationship;
+    relationship.edgeId = idValue(edge, "id");
+    const std::unordered_map<EntityId, std::size_t> noLocalStates;
+    if (const auto bindings = edge.get_child_optional("equationModel.bindings")) {
+        // No node is the output's own: every state is read from the plan's whole state vector.
+        relationship.bindings = compileBindings(*bindings, 0, false, plan.stateIndexes, noLocalStates);
+    }
+    if (const auto parameters = edge.get_child_optional("parameters")) {
+        for (const auto& parameterItem : *parameters) relationship.parameters.push_back(compileParameter(parameterItem.second, sharedParameters, storedSchedules));
+    }
+    for (auto& binding : relationship.bindings) {
+        if (binding.source != BindingSource::parameter) continue;
+        const auto found = std::find_if(relationship.parameters.begin(), relationship.parameters.end(), [&](const auto& parameter) { return parameter.id == binding.valueId; });
+        if (found == relationship.parameters.end()) throw std::runtime_error("An executable parameter binding is unresolved.");
+        binding.parameterIndex = static_cast<std::size_t>(std::distance(relationship.parameters.begin(), found));
+    }
+    std::vector<std::string> names;
+    for (const auto& binding : relationship.bindings) names.push_back(binding.symbol);
+    if (const auto definitions = edge.get_child_optional("equationModel.definitions")) {
+        for (const auto& definitionItem : *definitions) {
+            auto expression = compileExpression(definitionItem.second.get_child("mathJson"));
+            // A definition reads the bindings and the definitions before it.
+            bindExpressionNames(expression, names, names.size());
+            names.push_back(value(definitionItem.second, "symbol"));
+            relationship.definitions.push_back(std::move(expression));
+        }
+    }
+    const auto bindingCount = relationship.bindings.size();
+    // The definitions each definition needs, directly or through others.
+    std::vector<std::set<std::size_t>> needs(relationship.definitions.size());
+    for (std::size_t index = 0; index < relationship.definitions.size(); ++index) {
+        std::set<std::size_t> symbols;
+        collectSymbolIndexes(relationship.definitions[index], symbols);
+        for (const auto symbol : symbols) {
+            if (symbol < bindingCount) continue;
+            const auto definition = symbol - bindingCount;
+            needs[index].insert(definition);
+            needs[index].insert(needs[definition].begin(), needs[definition].end());
+        }
+    }
+    const auto relationshipIndex = plan.algebraicRelationships.size();
+    const auto sourceNodeId = idValue(edge, "source.nodeId");
+    const auto targetNodeId = idValue(edge, "target.nodeId");
+    for (const auto& outputItem : outputs) {
+        const auto& output = outputItem.second;
+        if (value(output, "setsValue") != "true") throw std::runtime_error("Each equation of a relationship with several equations sets its state's value.");
+        AlgebraicOutput compiled;
+        compiled.relationship = relationshipIndex;
+        compiled.outputStateId = idValue(output, "stateId");
+        const auto node = value(output, "role") == "source" ? sourceNodeId : targetNodeId;
+        const auto found = plan.stateIndexes.find(compiled.outputStateId);
+        if (found == plan.stateIndexes.end() || plan.stateNodes.at(compiled.outputStateId) != node) {
+            throw std::runtime_error("A relationship's equation sets a state that is not its endpoint's.");
+        }
+        compiled.outputStateIndex = found->second;
+        compiled.expression = compileExpression(output.get_child("mathJson"));
+        bindExpressionNames(compiled.expression, names, names.size());
+        std::set<std::size_t> symbols;
+        collectSymbolIndexes(compiled.expression, symbols);
+        std::set<std::size_t> definitions;
+        for (const auto symbol : symbols) {
+            if (symbol < bindingCount) continue;
+            definitions.insert(symbol - bindingCount);
+            definitions.insert(needs[symbol - bindingCount].begin(), needs[symbol - bindingCount].end());
+        }
+        compiled.definitions.assign(definitions.begin(), definitions.end());
+        plan.algebraicOutputs.push_back(std::move(compiled));
+    }
+    plan.algebraicRelationships.push_back(std::move(relationship));
+}
+
+// The states an algebraic output reads: those its equation and the definitions it needs use.
+std::vector<std::size_t> algebraicOutputReads(const ExecutionPlan& plan, const AlgebraicOutput& output) {
+    const auto& relationship = plan.algebraicRelationships[output.relationship];
+    std::set<std::size_t> symbols;
+    collectSymbolIndexes(output.expression, symbols);
+    for (const auto definition : output.definitions) collectSymbolIndexes(relationship.definitions[definition], symbols);
+    std::vector<std::size_t> reads;
+    for (const auto symbol : symbols) {
+        if (symbol >= relationship.bindings.size()) continue;
+        const auto& binding = relationship.bindings[symbol];
+        if (binding.source == BindingSource::synchronizationSnapshot || binding.source == BindingSource::localState) reads.push_back(binding.valueIndex);
+    }
+    return reads;
+}
+
+// Orders the outputs so every output writing a state comes before any output reading it. A cycle
+// has no defined solution at an instant, and is refused.
+void orderAlgebraicOutputs(ExecutionPlan& plan) {
+    if (plan.algebraicOutputs.empty()) return;
+    std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
+    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
+    const auto count = plan.algebraicOutputs.size();
+    std::vector<std::vector<std::size_t>> after(count);
+    std::vector<std::size_t> waiting(count, 0);
+    for (std::size_t index = 0; index < count; ++index) {
+        std::set<std::size_t> dependencies;
+        for (const auto read : algebraicOutputReads(plan, plan.algebraicOutputs[index])) {
+            const auto found = writers.find(read);
+            if (found != writers.end()) dependencies.insert(found->second.begin(), found->second.end());
+        }
+        for (const auto dependency : dependencies) {
+            after[dependency].push_back(index);
+            ++waiting[index];
+        }
+    }
+    std::vector<std::size_t> ready;
+    for (std::size_t index = count; index-- > 0;) if (!waiting[index]) ready.push_back(index);
+    std::vector<AlgebraicOutput> ordered;
+    ordered.reserve(count);
+    while (!ready.empty()) {
+        const auto index = ready.back();
+        ready.pop_back();
+        ordered.push_back(plan.algebraicOutputs[index]);
+        for (auto next = after[index].rbegin(); next != after[index].rend(); ++next) if (!--waiting[*next]) ready.push_back(*next);
+    }
+    if (ordered.size() != count) throw std::runtime_error("Relationships that set states' values form a loop, which has no defined solution.");
+    plan.algebraicOutputs = std::move(ordered);
+    std::set<std::size_t> states;
+    for (const auto& output : plan.algebraicOutputs) states.insert(output.outputStateIndex);
+    plan.algebraicStateIndexes.assign(states.begin(), states.end());
+}
+
+}
+
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     const auto sharedParameters = collectSharedParameters(document);
     std::unordered_map<EntityId, std::shared_ptr<const ParameterSchedule>> storedSchedules;
@@ -332,6 +493,9 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         NodeExecutionPlan compiledNode;
         compiledNode.nodeId = idValue(node, "id");
         compiledNode.substeps = node.get<std::size_t>("numerics.substepsPerGlobalStep", 1);
+        const auto integration = node.get<std::string>("numerics.integration", "explicit");
+        if (integration != "explicit" && integration != "semiImplicit") throw std::runtime_error("A node's numerics.integration must be explicit or semiImplicit.");
+        compiledNode.semiImplicit = integration == "semiImplicit";
         if (!compiledNode.substeps || compiledNode.substeps > 10000) {
             throw std::runtime_error("Node substepsPerGlobalStep must be an integer from 1 through 10000.");
         }
@@ -522,6 +686,12 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             continue;
         }
         const auto implementationKind = value(edge, "implementation.kind");
+        // An algebraic relationship (equationModel.outputs): compiled apart from the nodes' tasks, as it
+        // is evaluated for the whole plan at each synchronization instant.
+        if (const auto outputs = edge.get_child_optional("equationModel.outputs")) {
+            compileAlgebraicRelationship(plan, edge, *outputs, sharedParameters, storedSchedules);
+            continue;
+        }
         const auto programmable = implementationKind == "cpp" || implementationKind == "python";
         const auto outputRole = value(edge, programmable ? "implementation.output.role" : "equationModel.output.role");
         const auto outputStateId = idValue(edge, programmable ? "implementation.output.stateId" : "equationModel.output.stateId");
@@ -586,6 +756,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             buildContribution(otherNodeId, otherStateId, true);
         }
     }
+    orderAlgebraicOutputs(plan);
     std::sort(plan.stateIds.begin(), plan.stateIds.end());
     plan.taskSubmissionOrder = planTaskSubmissionOrder(plan.nodes);
     const auto scheduled = [](const std::vector<ContributionTask>& tasks) {
@@ -920,6 +1091,13 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     const auto hasSchedules = !activeSchedules.empty() || node.hasParameterSchedules;
     auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
     auto algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, simulationTime);
+    // Semi-implicit: the node's contributions, one group per state it updates, in the node's order.
+    std::vector<NodeExecutionPlan> semiImplicitTasks;
+    if (node.semiImplicit) {
+        if (node.nodeProvider) throw std::runtime_error("A node with a computational-node provider is integrated explicitly.");
+        semiImplicitTasks.resize(node.stateIndexes.size());
+        for (const auto& task : node.contributions) semiImplicitTasks.at(task.outputStateIndex).contributions.push_back(task);
+    }
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
         const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
         if (hasSchedules && substep > 0) {
@@ -935,6 +1113,17 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         // The provider's parameters at this substep's start, as its other inputs are read then.
         const auto providerParameterValues = node.nodeProvider && !node.nodeProvider->parameters.empty()
             ? resolveNodeProviderParameterValues(*node.nodeProvider, liveParameterValues, activeSchedules, substepTime) : std::vector<double>{};
+        if (node.semiImplicit) {
+            // Each state in the node's order, from contributions evaluated with the states updated before it.
+            for (std::size_t stateIndex = 0; stateIndex < node.stateIndexes.size(); ++stateIndex) {
+                const auto& stateTasks = semiImplicitTasks[stateIndex];
+                if (stateTasks.contributions.empty()) continue;
+                const auto stateParameters = resolveParameterValues(stateTasks.contributions, liveParameterValues, activeSchedules, substepTime);
+                const auto stateEvaluated = evaluateContributionTasks(stateTasks, localStates, synchronizationSnapshot, stateParameters, substepTime, nodeTimeStep, providerEvaluator);
+                for (const auto& derivative : reduceContributions(stateEvaluated)) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
+            }
+            continue;
+        }
         const auto evaluated = evaluateContributionTasks(
             node, localStates, synchronizationSnapshot, parameterValues,
             substepTime, nodeTimeStep, providerEvaluator, &algebraicNodeProviderWrites, &providerParameterValues);
@@ -958,6 +1147,41 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
     return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+}
+
+void evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+    if (plan.algebraicOutputs.empty()) return;
+    for (const auto index : plan.algebraicStateIndexes) states.at(index) = 0;
+    // Each relationship's parameters, resolved once for this instant.
+    std::vector<std::vector<double>> parameterValues(plan.algebraicRelationships.size());
+    std::vector<bool> resolved(plan.algebraicRelationships.size(), false);
+    std::vector<double> symbols;
+    for (const auto& output : plan.algebraicOutputs) {
+        const auto& relationship = plan.algebraicRelationships[output.relationship];
+        if (!resolved[output.relationship]) {
+            auto& values = parameterValues[output.relationship];
+            for (const auto& parameter : relationship.parameters) values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, simulationTime));
+            resolved[output.relationship] = true;
+        }
+        const auto& values = parameterValues[output.relationship];
+        symbols.assign(relationship.bindings.size() + relationship.definitions.size(), 0.0);
+        for (std::size_t index = 0; index < relationship.bindings.size(); ++index) {
+            const auto& binding = relationship.bindings[index];
+            if (binding.source == BindingSource::parameter) symbols[index] = values.at(binding.parameterIndex);
+            else if (binding.source == BindingSource::simulationTime) symbols[index] = simulationTime;
+            else symbols[index] = states.at(binding.valueIndex);
+        }
+        for (const auto definition : output.definitions) {
+            symbols[relationship.bindings.size() + definition] = relationship.definitions[definition].evaluate(symbols);
+        }
+        const auto result = output.expression.evaluate(symbols);
+        if (!std::isfinite(result)) {
+            throw std::runtime_error("The relationship " + std::to_string(relationship.edgeId) + " produced a non-finite value for state " +
+                std::to_string(output.outputStateId) + " at " + std::to_string(simulationTime) + " s.");
+        }
+        states.at(output.outputStateIndex) += result;
+    }
 }
 
 }

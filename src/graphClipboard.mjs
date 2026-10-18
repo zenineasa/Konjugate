@@ -13,6 +13,11 @@ function remapEquationModel(equationModel, ids) {
             ...(ids.has(binding.stateId) ? { stateId: ids.get(binding.stateId) } : {}),
             ...(ids.has(binding.parameterId) ? { parameterId: ids.get(binding.parameterId) } : {})
         })),
+        // A relationship with several equations: each sets a state of the copy.
+        ...(Array.isArray(equationModel.outputs) ? { outputs: equationModel.outputs.map((output) => ({
+            ...structuredClone(output),
+            ...(ids.has(output.stateId) ? { stateId: ids.get(output.stateId) } : {})
+        })) } : {}),
         ...(equationModel.output ? {
             output: {
                 ...structuredClone(equationModel.output),

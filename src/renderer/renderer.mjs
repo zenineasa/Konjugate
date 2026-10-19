@@ -11946,6 +11946,53 @@ $$('[data-group-equation-mode]').forEach((button) => button.addEventListener('cl
     (latexMode ? $('#groupEquation') : $('#groupMathField')).focus();
 }));
 
+// Tooltips for the title bar and the toolstrip are drawn here, in one fixed layer of their own, not as a
+// ::after of each button. Both bars clip their contents (so a narrow window scrolls or truncates instead of
+// overlapping its neighbours), and a tooltip hanging below its button always lay outside that clip.
+const barTooltipSelector = '#titleBar [data-tooltip], .toolstrip [data-tooltip]';
+const barTooltip = document.createElement('div');
+barTooltip.className = 'barTooltip';
+barTooltip.setAttribute('role', 'tooltip');
+document.body.append(barTooltip);
+let barTooltipTarget = null;
+let barTooltipTimer = 0;
+
+function hideBarTooltip() {
+    clearTimeout(barTooltipTimer);
+    barTooltipTarget = null;
+    barTooltip.classList.remove('visible');
+}
+
+function showBarTooltip(target) {
+    const text = target.dataset.tooltip;
+    if (!text || !target.isConnected) return;
+    barTooltip.textContent = text;
+    const anchor = target.getBoundingClientRect();
+    const width = barTooltip.offsetWidth;
+    const left = Math.min(Math.max(anchor.left + anchor.width / 2 - width / 2, 4), Math.max(4, window.innerWidth - width - 4));
+    barTooltip.style.left = `${left}px`;
+    barTooltip.style.top = `${anchor.bottom + 7}px`;
+    barTooltip.classList.add('visible');
+}
+
+function trackBarTooltip(target, delay) {
+    if (target === barTooltipTarget) return;
+    hideBarTooltip();
+    if (!target) return;
+    barTooltipTarget = target;
+    barTooltipTimer = setTimeout(() => showBarTooltip(target), delay);
+}
+
+document.addEventListener('pointerover', (event) => trackBarTooltip(event.target.closest?.(barTooltipSelector) ?? null, 350));
+document.addEventListener('pointerdown', hideBarTooltip, true);
+document.documentElement.addEventListener('pointerleave', hideBarTooltip);
+document.addEventListener('focusin', (event) => {
+    const target = event.target.closest?.(barTooltipSelector);
+    if (target?.matches(':focus-visible')) trackBarTooltip(target, 0);
+});
+document.addEventListener('focusout', hideBarTooltip);
+window.addEventListener('blur', hideBarTooltip);
+
 $('#copySelection').addEventListener('click', copySelectedGraph);
 $('#pasteSelection').addEventListener('click', pasteGraph);
 window.addEventListener('focus', updateSelectionActionControls);

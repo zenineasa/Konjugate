@@ -93,10 +93,14 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .onRampMore { margin: -12px 0 24px; color: #778d98; }
 .linkButton { padding: 0; color: #83d7cf; background: none; border: 0; font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
 .communityRow { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; }
-.communityLink { display: inline-flex; height: 30px; padding: 0 14px; align-items: center; color: #b8ced2; background: transparent; border: 1px solid #2c4350; border-radius: 5px; font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
-.communityLink:hover, .communityLink:focus-visible { background: #12252d; }
-.communityDiscord { color: #fff; background: #5865f2; border-color: #5865f2; font-weight: 600; }
-.communityDiscord:hover, .communityDiscord:focus-visible { color: #fff; background: #6f7af5; }
+.communityLink { display: inline-flex; min-height: 36px; padding: 0 16px; align-items: center; justify-content: center; gap: 9px; color: #dbe7eb; background: #0c1821; border: 1px solid #253a46; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 600; text-decoration: none; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.communityLink:hover, .communityLink:focus-visible { background: #10202a; border-color: #3d5967; transform: translateY(-2px); }
+.communityIcon { width: 18px; height: 18px; flex: none; }
+.communityDiscord .communityIcon { color: #8c97ff; }
+.communityDiscord:hover, .communityDiscord:focus-visible { border-color: #5865f2; }
+.communityWhatsapp { color: #061412; background: #25d366; border-color: #25d366; }
+.communityWhatsapp:hover, .communityWhatsapp:focus-visible { background: #4ae585; border-color: #4ae585; }
+@media (prefers-reduced-motion: reduce) { .communityLink { transition: none; } .communityLink:hover, .communityLink:focus-visible { transform: none; } }
 .communityNote { margin: 0; color: #778d98; font-size: 11px; }
 .welcomeFooter { margin-top: 36px; padding-top: 14px; border-top: 1px solid #263a44; color: #778d98; }
 .welcomeFooter p, .welcomeFooter li { font-size: 11px; line-height: 1.6; }

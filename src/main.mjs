@@ -1202,6 +1202,7 @@ ipcMain.handle('applicationOpenWelcome', (event) => openWelcomeWindow(getWindowF
 ipcMain.on('newProjectWindow', () => createProjectWindow());
 const allowedExternalLinkPrefixes = [
     'https://discord.gg/',
+    'https://whatsapp.com/channel/',
     'https://github.com/zenineasa/Konjugate/',
     'https://www.youtube.com/',
     'https://youtu.be/',

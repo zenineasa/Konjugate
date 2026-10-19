@@ -66,6 +66,7 @@ test('the fixed links point at Konjugate\'s own places', () => {
         assert.ok(url.startsWith('https://github.com/zenineasa/Konjugate/'), url);
     }
     assert.ok(welcomeLinks.discord.startsWith('https://discord.gg/'));
+    assert.ok(welcomeLinks.whatsapp.startsWith('https://whatsapp.com/channel/'));
 });
 
 test('the page model imports nothing but the Node-free version comparison', async () => {

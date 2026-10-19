@@ -8,6 +8,7 @@ export const onRampVisibleLimit = 8;
 
 export const welcomeLinks = Object.freeze({
     discord: 'https://discord.gg/WPUzNyC3S',
+    whatsapp: 'https://whatsapp.com/channel/0029Vb8dF8EKgsNs7dydEG1x',
     documentation: 'https://github.com/zenineasa/Konjugate/tree/master/docs',
     reportProblem: 'https://github.com/zenineasa/Konjugate/issues/new',
     allReleases: 'https://github.com/zenineasa/Konjugate/releases'

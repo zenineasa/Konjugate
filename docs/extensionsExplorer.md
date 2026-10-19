@@ -49,7 +49,7 @@ Reviewing reservation PRs is fine at today's single-maintainer scale and won't b
 
 ## The Extensions Explorer
 
-Extends `#extensionsDialog` with a second mode alongside today's "Installed" list — "Discover" — rather than building a separate window or dialog.
+Extends `#extensionsDialog` with a second mode alongside today's "Installed" list — "Discover" — rather than building a separate window or dialog. The Extensions button that opens it is at the top of the left rail, with the update and restart badges.
 
 **Built**, for the one-click discover/filter/install flow below. `src/registryClient.mjs` (`fetchRemoteRegistry`, `installFromRegistryEntry`) does the network fetch and the download→verify→install sequence; `packageDiscoverRegistry`/`packageInstallFromRegistry` in `src/main.mjs` expose it over IPC (with a local on-disk cache for the offline case); `#extensionsDialog`'s Installed/Discover mode toggle, domain-chip filter, and Discover detail pane are wired in `src/renderer/renderer.mjs`. Update checking (below) is built too; only the popularity signal (the last bullet) is not built yet.
 

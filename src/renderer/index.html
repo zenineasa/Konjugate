@@ -61,14 +61,6 @@
                     <svg class="exampleButtonIcon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 3.5h4a2 2 0 0 1 2 2v7.5a1.5 1.5 0 0 0-2-1.5h-4zM13.5 3.5h-4a2 2 0 0 0-2 2v7.5a1.5 1.5 0 0 1 2-1.5h4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
                     <span>Examples</span><i aria-hidden="true"></i>
                 </button>
-                <button id="extensionsButton" type="button" aria-label="Manage extensions" aria-haspopup="dialog" data-tooltip="Extensions">
-        <img class="documentActionIcon" src="../../assets/extensions.svg" alt="">
-        <span id="extensionsRestartBadge" class="diagnosticsBadge" hidden></span>
-        <!-- Count of installed add-ons/plugins with a newer release (see docs/extensionsExplorer.md's
-             Update checking note) -- kept separate from #extensionsRestartBadge above, which is a
-             different state that can be showing at the same time. -->
-        <span id="extensionsUpdateBadge" class="diagnosticsBadge extensionsUpdateBadge" hidden></span>
-    </button>
                 <button id="exampleGuideButton" class="exampleGuideButton" type="button" aria-label="About this example" data-tooltip="About this example" hidden>?</button>
             </div>
         </div>
@@ -488,12 +480,6 @@
                 <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
             </div>
         </div>
-        <span id="addonToolstripSeparator" class="divider" hidden></span>
-        <!-- The one deliberate "give" point in the toolstrip: everything else here is flex-shrink:0
-             (see .toolstrip in styles.css), so an arbitrary and growing number of installed add-ons
-             scrolls horizontally within its own bounds instead of pushing Run and the other fixed
-             controls off the edge of the window, unreachable. -->
-        <span id="addonToolstripContributions" class="addonToolstripContributions"></span>
         <div class="toolSpacer"></div>
         <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
         <div class="labelControls" aria-label="Label detail">
@@ -502,6 +488,28 @@
             <button data-detail="edges" type="button" title="Relationship labels: compact">Edges<i class="detailMode" aria-hidden="true"></i></button>
         </div>
         <button id="runButton" class="runButton" type="button" title="A simulation engine is not configured" disabled><span>▶</span> Run</button>
+    </nav>
+
+    <!-- A rail down the left edge for what is installed beside the core tools: the Extensions button
+         (where extensions are managed and discovered) at the top, then one button per add-on command. The toolstrip has a fixed set of
+         controls to fit in the window's width, while the number of installed add-ons is open-ended,
+         and a column grows downward instead of sideways. Each button shows its icon alone and widens
+         over the canvas, on its own, while hovered or keyboard-focused, so nothing re-fits as the
+         pointer passes. -->
+    <nav id="addonRail" class="addonRail" aria-label="Extensions and add-ons">
+        <button id="extensionsButton" class="toolButton railTool" type="button" aria-label="Manage extensions" aria-haspopup="dialog">
+            <span class="railToolSymbol">
+                <img class="documentActionIcon" src="../../assets/extensions.svg" alt="">
+                <span id="extensionsRestartBadge" class="diagnosticsBadge" hidden></span>
+                <!-- Count of installed add-ons/plugins with a newer release (see docs/extensionsExplorer.md's
+                     Update checking note) -- kept separate from #extensionsRestartBadge above, which is a
+                     different state that can be showing at the same time. -->
+                <span id="extensionsUpdateBadge" class="diagnosticsBadge extensionsUpdateBadge" hidden></span>
+            </span>
+            <span id="extensionsButtonLabel" class="railToolLabel">Extensions</span>
+        </button>
+        <span class="railSeparator" aria-hidden="true"></span>
+        <div id="addonRailButtons" class="addonRailButtons"></div>
     </nav>
 
     <main id="canvas" class="canvas" data-tool="select">

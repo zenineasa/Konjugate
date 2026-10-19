@@ -795,7 +795,6 @@ export async function runInteractionTests(driver) {
         // reading src/renderer/webShims/misc.mjs directly), so no add-on toolstrip button ever
         // renders on the web edition regardless of which add-ons a real desktop install has.
         await waitFor(window, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]:not([hidden])'))`, 'Manifest-declared add-on toolstrip command did not appear.');
-        assert.equal(await evaluate(window, `document.querySelector('#addonToolstripSeparator').hidden`), false);
         const before = driver.allHandles();
         await evaluate(window, `document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]').click()`);
         analysisHandle = await driver.waitForNewHandle(before);
@@ -901,7 +900,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), false);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || document.querySelector('#nodeModelActions').hidden`), false);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), false);
-        assert.equal(await evaluate(window, `document.querySelector('#addonToolstripSeparator').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('.addonTool:not([hidden])') === null`), true);
     });
 
     await run('multi-selection copies, pastes and deletes a connected graph fragment transactionally', async () => {

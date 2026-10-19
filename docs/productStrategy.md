@@ -230,7 +230,7 @@ The first ecosystem milestone should be a local installation workflow rather tha
 
 The repository should ship three intentionally small contribution examples:
 
-- **Hello World add-on:** adds one toolstrip action or read-only panel.
+- **Hello World add-on:** adds one rail button action or read-only panel.
 - **Hello World provider:** evaluates a simple relationship through the public provider protocol.
 - **Hello World component:** inserts one reusable node or relationship template.
 

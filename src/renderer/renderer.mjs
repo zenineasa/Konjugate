@@ -557,7 +557,7 @@ let resultPlaybackStartedFrom = 0;
 const preferredPlaybackFrameMilliseconds = 100;
 let nodeDetailsBeforeResult = null;
 let toolBeforeResult = null;
-let addonToolstripContributions = [];
+let addonRailContributions = [];
 let pendingAssistantProposal = null;
 let assistantPreviewRevision = 0;
 let assistantGenerationController = null;
@@ -4307,7 +4307,7 @@ function setResultModeLocked(locked) {
     $('#nodeModelActions').hidden = locked || !$('[data-node-tab="model"]').classList.contains('active');
     applyInspectorReadOnly();
     updateHistoryControls();
-    refreshAddonToolstripContributions();
+    refreshAddonRailContributions();
 }
 
 function registerActiveBranch({ parentBranchUuid = null, forkTime = null } = {}) {
@@ -5709,32 +5709,32 @@ function addonConditionMatches(condition) {
     return condition === 'always' || (condition === 'resultsActive' && Boolean(activeResult));
 }
 
-function refreshAddonToolstripContributions() {
-    let visibleCount = 0;
-    addonToolstripContributions.forEach(({ contribution, button }) => {
-        const visible = addonConditionMatches(contribution.when);
-        button.hidden = !visible;
-        if (visible) visibleCount += 1;
+function refreshAddonRailContributions() {
+    addonRailContributions.forEach(({ contribution, button }) => {
+        button.hidden = !addonConditionMatches(contribution.when);
     });
-    $('#addonToolstripSeparator').hidden = visibleCount === 0;
 }
 
-async function initializeAddonToolstripContributions() {
+async function initializeAddonRailContributions() {
     try {
         const contributions = await window.addons.listToolstripContributions();
-        const container = $('#addonToolstripContributions');
+        const container = $('#addonRailButtons');
         container.replaceChildren();
-        addonToolstripContributions = contributions.map((contribution) => {
+        addonRailContributions = contributions.map((contribution) => {
             const button = document.createElement('button');
             button.type = 'button';
-            button.className = 'toolButton addonTool';
+            button.className = 'toolButton addonTool railTool';
             button.ariaLabel = contribution.tooltip;
             button.dataset.tooltip = contribution.tooltip;
             button.dataset.addonId = contribution.addonId;
             button.dataset.commandId = contribution.commandId;
             const symbol = document.createElement('span');
             symbol.textContent = contribution.symbol;
-            button.append(symbol, document.createTextNode(contribution.label));
+            symbol.className = 'railToolSymbol';
+            const label = document.createElement('span');
+            label.textContent = contribution.label;
+            label.className = 'railToolLabel';
+            button.append(symbol, label);
             button.addEventListener('click', async () => {
                 const contexts = createAddonContext(contribution.contexts);
                 if (!contexts) return;
@@ -5748,7 +5748,7 @@ async function initializeAddonToolstripContributions() {
             container.appendChild(button);
             return { contribution, button };
         });
-        refreshAddonToolstripContributions();
+        refreshAddonRailContributions();
     } catch (error) {
         console.error('Add-on contributions could not be loaded.', error);
     }
@@ -9694,7 +9694,7 @@ function renderPackageUpdatesBadge() {
     badge.textContent = String(count);
     const label = count ? `Manage extensions (${count} update${count === 1 ? '' : 's'} available)` : 'Manage extensions';
     $('#extensionsButton').setAttribute('aria-label', label);
-    $('#extensionsButton').dataset.tooltip = count ? `Extensions · ${count} update${count === 1 ? '' : 's'} available` : 'Extensions';
+    $('#extensionsButtonLabel').textContent = count ? `Extensions · ${count} update${count === 1 ? '' : 's'} available` : 'Extensions';
 }
 
 // A human-readable warning if uninstalling/disabling entry would leave an installed bundle sibling
@@ -12159,7 +12159,7 @@ resizeRenderer();
 setTool('select');
 setCameraView('orbit', false);
 updateModelStatus();
-initializeAddonToolstripContributions();
+initializeAddonRailContributions();
 checkPendingProjectOpen();
 
 let lastRenderTime = 0;

@@ -15,7 +15,7 @@ It no longer ships bundled with Konjugate core -- its source lives in its own re
 ## What it demonstrates
 
 - a version 1 `resultVisualizer` manifest;
-- a manifest-contributed toolstrip command;
+- a manifest-contributed rail button (declared under the manifest's `toolstrip` key);
 - a separate sandboxed Electron window;
 - a narrow `results.read` permission;
 - reading public result context without accessing private result storage;

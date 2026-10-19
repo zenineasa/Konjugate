@@ -18,6 +18,7 @@
     --border: #263744;
     --muted: #718692;
     --math-keyboard-inset: 0px;
+    --rail-width: 44px;
 }
 
 * { box-sizing: border-box; }
@@ -314,7 +315,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 #extensionsDiscoverInstall:disabled { opacity: .5; cursor: default; }
 
 .componentLibraryPanel {
-    position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); left: 10px;
+    position: fixed; z-index: 34; top: calc(var(--title-height) + var(--tools-height) + 10px); left: calc(var(--rail-width) + 10px);
     bottom: calc(var(--math-keyboard-inset) + 10px); display: flex; flex-direction: column; width: 300px;
     overflow: hidden; color: #b8c7ce; background: rgb(14 25 34 / 97%); border: 1px solid #3a4d58;
     border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px);
@@ -400,7 +401,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .windowControls .titleAssistantControl[aria-expanded="true"] { color: #a1f2ea; background: rgb(66 201 188 / 10%); }
 .windowControls .titleAssistantControl:disabled { color: #344751; cursor: default; }
 #diagnosticsButton { color: #5c7079; font-size: 12px; }
-#extensionsButton { position: relative; }
 #extensionsButton .extensionsUpdateBadge { right: auto; left: 4px; color: #06201d; background: #82cfc8; }
 .diagnosticsBadge {
     position: absolute; top: 6px; right: 4px; min-width: 13px; height: 13px; padding: 0 3px;
@@ -418,7 +418,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     border-bottom: 1px solid rgba(255, 255, 255, 0.07); box-shadow: 0 4px 16px rgb(0 0 0 / 24%);
     backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
 }
-.toolstrip > :not(#addonToolstripContributions, .toolstripLeft) { flex-shrink: 0; }
+.toolstrip > :not(.toolstripLeft) { flex-shrink: 0; }
 .toolSpacer { flex: 1 1 auto; min-width: 0; }
 .toolstripLeft {
     display: flex;
@@ -450,13 +450,29 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .squareTool:disabled { color: #344852; background: transparent; border-color: transparent; cursor: default; opacity: .45; }
 .historyTool { font-size: 13px; }
 .clipboardTool { font-size: 14px; }
-.addonToolstripContributions {
-    display: flex; align-items: center; gap: 5px; flex: 0 1 auto; max-width: 320px; min-width: 0;
-    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
-}
-.toolstrip #addonToolstripSeparator[hidden] { display: none; }
 .addonTool[hidden] { display: none; }
-.addonTool > span { color: #72d5cc; font-size: 14px; }
+.addonRail {
+    position: fixed; z-index: 39; top: calc(var(--title-height) + var(--tools-height)); bottom: 0; left: 0; display: flex;
+    width: var(--rail-width); flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 6px;
+    background: rgb(9 18 24 / 92%); border-right: 1px solid rgb(255 255 255 / 7%);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+.railSeparator { width: 18px; height: 1px; flex-shrink: 0; align-self: center; margin: 3px 0; background: rgb(255 255 255 / 14%); border-radius: 1px; }
+/* Nothing sits below the Extensions button while no add-on button is showing, so there is nothing to divide it from. */
+.addonRail:not(:has(.addonTool:not([hidden]))) .railSeparator { display: none; }
+.addonRailButtons { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; align-items: flex-start; gap: 4px; }
+/* One button widens on its own, over the canvas, while hovered or keyboard-focused: the rail itself keeps
+   its width, and so does the canvas. The rail must not clip (no overflow), or the widened button would be
+   cut off at the rail's edge. */
+.railTool { position: relative; width: 32px; flex-shrink: 0; justify-content: flex-start; gap: 0; padding: 0; overflow: hidden; white-space: nowrap; }
+.railTool:is(:hover, :focus-visible) {
+    z-index: 1; width: auto; color: #f0f6f8; background: var(--raised); border-color: rgb(66 201 188 / 38%);
+    box-shadow: 4px 4px 16px rgb(0 0 0 / 40%);
+}
+.railToolSymbol { position: relative; display: grid; width: 30px; flex-shrink: 0; place-items: center; color: #72d5cc; font-size: 14px; }
+.railToolLabel { max-width: 0; padding-right: 0; overflow: hidden; opacity: 0; transition: max-width .14s ease .08s, padding .14s ease .08s, opacity .1s ease .08s; }
+.railTool:is(:hover, :focus-visible) .documentActionIcon { filter: brightness(1.65); opacity: 1; }
+.railTool:is(:hover, :focus-visible) .railToolLabel { max-width: 200px; padding-right: 10px; opacity: 1; }
 .primaryTool { color: #d7e5ea; background: rgb(66 201 188 / 14%); border-color: rgb(66 201 188 / 35%); }
 .primaryTool:hover { color: #ffffff; background: rgb(66 201 188 / 24%); border-color: rgb(66 201 188 / 55%); }
 .primaryTool .toolSvg { stroke: var(--accent-bright); }
@@ -573,7 +589,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantPanel footer button:disabled { opacity: .45; cursor: default; }
 
 .canvas {
-    position: fixed; inset: calc(var(--title-height) + var(--tools-height)) 0 0; overflow: hidden;
+    position: fixed; inset: calc(var(--title-height) + var(--tools-height)) 0 0 var(--rail-width); overflow: hidden;
     background-color: #0a131b;
     background-image:
         linear-gradient(30deg, transparent 49.8%, rgb(49 72 84 / 18%) 50%, transparent 50.2%),

@@ -111,7 +111,7 @@ Konjugate ships with a built-in Explorer for discovering and one-click-installin
 </tr>
 <tr>
 <td width="280"><a href="https://github.com/zenineasa/konjugate-robotics"><img src="registry/images/konjugate.robotics.webp" alt="Konjugate Robotics Toolbox"></a></td>
-<td><strong><a href="https://github.com/zenineasa/konjugate-robotics">Konjugate Robotics Toolbox</a></strong><br>Draw a robot from solids and joints and build it into the canvas: each solid becomes a node and each joint a relationship carrying the joint's own equations, so the robot runs, forks and fits like any other model.</td>
+<td><strong><a href="https://github.com/zenineasa/konjugate-robotics">Konjugate Robotics Toolbox</a></strong><br>Draw a robot from solids and joints in a 3D window and build it into the canvas: each solid becomes a node and each joint an edge carrying its own equations. The robot then runs, takes live sliders, forks and fits like any other model, and can be wired to anything else you model.</td>
 </tr>
 <tr>
 <td width="280"><a href="https://github.com/zenineasa/Konjugate-PoseVisualizer"><img src="registry/images/konjugate.poseVisualizer.webp" alt="Pose Visualizer"></a></td>

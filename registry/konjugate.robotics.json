@@ -6,8 +6,8 @@
     "publicKeys": [
         "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA1bAvYJbIhUmxf0n/GIjKNV5gd6Ieizo6cFx+02zqiE8=\n-----END PUBLIC KEY-----\n"
     ],
-    "title": "Robotics Toolbox",
-    "description": "Draw a robot from solids and joints and build it into the canvas: each solid a node, each joint a relationship carrying the joint's own equations, so the robot runs, forks and fits like any other model.",
+    "title": "Konjugate Robotics Toolbox",
+    "description": "Draw a robot from solids and joints in a 3D window and build it into the canvas: each solid becomes a node and each joint an edge carrying its own equations. The robot then runs, takes live sliders, forks and fits like any other model, and can be wired to anything else you model.",
     "license": "AGPL-3.0-only",
     "domain": "robotics",
     "url": "https://github.com/zenineasa/konjugate-robotics",

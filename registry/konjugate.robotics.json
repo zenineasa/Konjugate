@@ -1,0 +1,20 @@
+{
+    "format": "konjugate-namespace-entry",
+    "formatVersion": 1,
+    "owner": "Zenin Easa Panthakkalakath",
+    "contact": "https://github.com/zenineasa",
+    "publicKeys": [
+        "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA1bAvYJbIhUmxf0n/GIjKNV5gd6Ieizo6cFx+02zqiE8=\n-----END PUBLIC KEY-----\n"
+    ],
+    "title": "Robotics Toolbox",
+    "description": "Draw a robot from solids and joints and build it into the canvas: each solid a node, each joint a relationship carrying the joint's own equations, so the robot runs, forks and fits like any other model.",
+    "license": "AGPL-3.0-only",
+    "domain": "robotics",
+    "url": "https://github.com/zenineasa/konjugate-robotics",
+    "packages": [
+        {
+            "packageType": "addon",
+            "packageId": "konjugate.robotics.toolbox"
+        }
+    ]
+}

@@ -12,6 +12,9 @@
     "domain": "robotics",
     "url": "https://github.com/zenineasa/konjugate-robotics",
     "image": "images/konjugate.robotics.webp",
+    "screenshots": [
+        { "image": "screenshots/konjugate.robotics.gripperArm.webp", "caption": "An arm with a two-finger gripper drawn from solids and joints, its wrist's servo, limits and damping open beside it" }
+    ],
     "packages": [
         {
             "packageType": "addon",

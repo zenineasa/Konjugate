@@ -102,7 +102,28 @@ async function waitForStableRect(window, expression, message, timeout = 3000) {
     throw new Error(message);
 }
 
+// Two things move every node, relationship and label on the screen without the model changing: the canvas sliding
+// over when an editor card opens or closes (`.webglContainer` and `.css2dContainer` animate their `right` edge), and the
+// camera still easing after a view change or a drag (its snap animation, or OrbitControls' damping). A screen point read
+// during either is where the thing was, not where it will be when the click lands, so anything aiming at the canvas
+// waits for both to stop first. `getAnimations()` flushes style, so a slide a click just started is already counted;
+// the camera is at rest once the view cube's readout (distance, target and turn, to four places: the turn's
+// matrix keeps drifting in its 40th decimal as damping decays) holds for a few frames.
+async function waitForCanvasAtRest(window, timeout = 5000) {
+    await waitFor(window, `!document.getAnimations().some((animation) => ['webglContainer', 'css2dContainer'].includes(animation.effect?.target?.id) && animation.playState !== 'finished')`,
+        'The canvas did not stop sliding.', timeout);
+    await waitForStableRect(window, `(() => { const cube = document.querySelector('#viewCube'); return [cube.dataset.cameraDistance, cube.dataset.cameraTarget, document.querySelector('#viewCubeObject').style.transform.replace(/(?<![a-z])-?[\\d.]+(e[-+]?\\d+)?/g, (number) => String(Math.round(Number(number) * 1e4) / 1e4 || 0))].join('|'); })()`,
+        'The camera did not come to rest.', timeout);
+}
+
+// A test hook's screen point (window.__relationshipScreenPoint and the like), read once the canvas is at rest.
+async function canvasPoint(window, expression) {
+    await waitForCanvasAtRest(window);
+    return evaluate(window, expression);
+}
+
 async function clickElement(window, expression, modifiers = []) {
+    await waitForCanvasAtRest(window);
     const point = await evaluate(window, `(() => {
         const element = ${expression};
         const bounds = element.getBoundingClientRect();
@@ -118,6 +139,7 @@ async function clickElement(window, expression, modifiers = []) {
 // its box (border, badge text), and a stale cached point can miss the element entirely on a
 // later right-click in the same test.
 async function rightClickElement(window, expression) {
+    await waitForCanvasAtRest(window);
     const point = await evaluate(window, `(() => {
         const element = ${expression};
         const bounds = element.getBoundingClientRect();
@@ -136,6 +158,7 @@ async function rightClickElement(window, expression) {
 // itself owns, rather than assume the originally-computed point is still clear.
 async function findCanvasPoint(window, point, maxRadius = 40) {
     if (!point) return null;
+    await waitForCanvasAtRest(window);
     for (let radius = 0; radius <= maxRadius; radius += 4) {
         const offsets = radius === 0 ? [[0, 0]] : [[radius, 0], [-radius, 0], [0, radius], [0, -radius], [radius, radius], [-radius, -radius], [radius, -radius], [-radius, radius]];
         for (const [dx, dy] of offsets) {
@@ -157,6 +180,7 @@ async function findCanvasPoint(window, point, maxRadius = 40) {
 // outside it would just find some other element's clear space, not a still-valid point on this
 // one.
 async function findUnoccludedPoint(window, elementExpression, maxRadius = 30) {
+    await waitForCanvasAtRest(window);
     const rect = await evaluate(window, `(() => {
         const el = ${elementExpression};
         const r = el?.getBoundingClientRect();
@@ -180,11 +204,9 @@ async function findUnoccludedPoint(window, elementExpression, maxRadius = 30) {
 }
 
 // A handful of raw, pixel-coordinate pointer gestures (as opposed to clicking a known DOM
-// element) grow occasionally flaky this deep into the suite -- accumulated frame-timing
-// variance across 50+ prior tests, not a bug in the gesture itself: the same sequence is
-// reliable every time run in isolation. Retried a few times rather than treated as a hard
-// failure, matching this suite's existing tolerance for a few other timing-sensitive
-// interactions elsewhere. `perform` re-runs from scratch each attempt (re-reading any screen
+// element) are retried a few times rather than treated as a hard failure: a press-and-hold or a
+// drag can still be cut short by a stray pointer event. (Most of their old flakiness was a point
+// read while the canvas was still sliding after a card closed; see waitForCanvasAtRest.) `perform` re-runs from scratch each attempt (re-reading any screen
 // points fresh) since a prior attempt may have nudged state slightly.
 async function retryGesture(window, perform, checkExpression, times = 5, settleMs = 200) {
     for (let attempt = 0; attempt < times; attempt += 1) {
@@ -1919,6 +1941,23 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });
 
+    await run('a point read once the canvas stops sliding is where a click lands', async () => {
+        // Opening and closing an editor card slides the canvas; every scenario that clicks the canvas waits for the slide
+        // to finish (waitForCanvasAtRest). Checked here so a change to the slide (its timing, or how it is done) cannot
+        // quietly turn those clicks back into misses.
+        const label = `[...document.querySelectorAll('.objectLabel')].find((element) => element.textContent.includes('Enclosed air'))`;
+        await evaluate(window, `${label}.click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Clicking the node did not open its editor.');
+        await waitForCanvasAtRest(window);
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        assert.equal(await evaluate(window, `document.getAnimations().some((animation) => animation.effect?.target?.id === 'webglContainer' && animation.playState !== 'finished')`), true,
+            'Closing the card did not start the canvas slide this scenario guards against.');
+        await waitForCanvasAtRest(window);
+        const settled = await canvasPoint(window, `window.__relationshipScreenPoint('Heat source')`);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.deepEqual(await evaluate(window, `window.__relationshipScreenPoint('Heat source')`), settled, 'The relationship still moved after the canvas came to rest.');
+    });
+
     await run('clicking a relationship after replacing a deleted one selects the new edge', async () => {
         // Regression test: deleting a relationship only soft-deletes it (definition.deleted =
         // true, line/marker hidden via .visible = false) -- its mesh is never removed from
@@ -1958,6 +1997,7 @@ export async function runInteractionTests(driver) {
         // Click a point on the new relationship that no other relationship (or its label) covers. It shares
         // its source node with "Heat source", so its midpoint can lie on or beside that one's line or label,
         // depending on the window's size and the screen's scale.
+        await waitForCanvasAtRest(window);
         const point = await evaluate(window, `(() => {
             const others = ['Heat source', 'Air convection gain', 'Battery convection loss'];
             const otherPoints = others.flatMap((title) => Array.from({ length: 41 }, (_, index) => window.__relationshipScreenPoint(title, index / 40)).filter(Boolean));
@@ -2020,7 +2060,7 @@ export async function runInteractionTests(driver) {
 
     const deleteWaypointTestEdge = async (name) => {
         const cleanedUp = await retryGesture(window, async () => {
-            const cleanupPoint = await evaluate(window, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
+            const cleanupPoint = await canvasPoint(window, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
             await window.mouseMove(cleanupPoint);
             await window.mouseDown(cleanupPoint, { button: 'left', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
@@ -2054,13 +2094,13 @@ export async function runInteractionTests(driver) {
             if (!await evaluate(window, `document.querySelector('#edgeEditor').classList.contains('hidden')`)) {
                 await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
             }
-            const holdPoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
+            const holdPoint = await canvasPoint(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
             await pressAndHold(holdPoint);
         }, `document.querySelector('#statusText').textContent === 'Editing waypoints · Waypoint drag test edge' && document.querySelector('#edgeEditor').classList.contains('hidden')`);
         assert.ok(held, 'Press-and-hold did not report entering waypoint mode without opening the edge editor after 5 attempts.');
 
         const added = await retryGesture(window, async () => {
-            const linePoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
+            const linePoint = await canvasPoint(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
             await window.mouseMove(linePoint);
             await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
@@ -2091,7 +2131,7 @@ export async function runInteractionTests(driver) {
         // on or near a node would route later clicks to the node's context menu instead of the
         // waypoint's, since the contextmenu handler checks for a node hit first.
         const dragged = await retryGesture(window, async () => {
-            const currentHandlePoint = await findCanvasPoint(window, await evaluate(window, `window.__waypointScreenPoint('Waypoint drag test edge', 0)`));
+            const currentHandlePoint = await findCanvasPoint(window, await canvasPoint(window, `window.__waypointScreenPoint('Waypoint drag test edge', 0)`));
             if (!currentHandlePoint) return;
             const dragTo = { x: currentHandlePoint.x + 15, y: currentHandlePoint.y - 12 };
             const midDrag = { x: Math.round((currentHandlePoint.x + dragTo.x) / 2), y: Math.round((currentHandlePoint.y + dragTo.y) / 2) };
@@ -2120,7 +2160,7 @@ export async function runInteractionTests(driver) {
         await createWaypointTestEdge('Waypoint add-remove test edge');
 
         const added = await retryGesture(window, async () => {
-            const linePoint = await evaluate(window, `window.__relationshipScreenPoint('Waypoint add-remove test edge', 0.75)`);
+            const linePoint = await canvasPoint(window, `window.__relationshipScreenPoint('Waypoint add-remove test edge', 0.75)`);
             await window.mouseMove(linePoint);
             await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
             await new Promise((resolve) => setTimeout(resolve, 60));
@@ -2135,7 +2175,7 @@ export async function runInteractionTests(driver) {
         await new Promise((resolve) => setTimeout(resolve, 300));
 
         const removed = await retryGesture(window, async () => {
-            const handlePoint = await findCanvasPoint(window, await evaluate(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`));
+            const handlePoint = await findCanvasPoint(window, await canvasPoint(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`));
             if (!handlePoint) return;
             await window.mouseMove(handlePoint);
             await window.mouseDown(handlePoint, { button: 'right', clickCount: 1 });
@@ -2145,7 +2185,7 @@ export async function runInteractionTests(driver) {
         assert.ok(removed, 'Right-clicking the waypoint handle did not open its context menu after 5 attempts.');
         await evaluate(window, `document.querySelector('#waypointContextRemove').click()`);
         await waitFor(window, `window.__relationshipWaypoints('Waypoint add-remove test edge').length === 0`, 'Removing the waypoint did not clear it.');
-        assert.equal(await evaluate(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`), null, 'The waypoint handle was not removed from the scene once its waypoint was deleted.');
+        assert.equal(await canvasPoint(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`), null, 'The waypoint handle was not removed from the scene once its waypoint was deleted.');
 
         await deleteWaypointTestEdge('Waypoint add-remove test edge');
     });
@@ -3985,7 +4025,7 @@ export async function runInteractionTests(driver) {
         })()`);
         const diagnostics = () => evaluate(opened, `document.querySelector('#equationDiagnostics').textContent`);
 
-        const point = await evaluate(opened, `window.__relationshipScreenPoint('Warm room')`);
+        const point = await canvasPoint(opened, `window.__relationshipScreenPoint('Warm room')`);
         assert.ok(point, 'Could not locate the Warm room edge on screen.');
         await opened.mouseMove(point);
         await opened.mouseDown(point, { button: 'left', clickCount: 1 });
@@ -4053,7 +4093,7 @@ export async function runInteractionTests(driver) {
         const opened = await driver.waitForNewHandle(before);
         await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The shared-parameter project did not load.');
         const openEdge = async (name) => {
-            const point = await evaluate(opened, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
+            const point = await canvasPoint(opened, `window.__relationshipScreenPoint(${JSON.stringify(name)})`);
             assert.ok(point, `Could not locate ${name} on screen.`);
             await opened.mouseMove(point);
             await opened.mouseDown(point, { button: 'left', clickCount: 1 });
@@ -4570,7 +4610,7 @@ export async function runInteractionTests(driver) {
     const openRelationship = async (title) => {
         // A third of the way along, clear of the label the canvas draws at the middle, once the view has stopped moving
         // (a model just loaded is still being fitted into view).
-        const locate = () => evaluate(window, `JSON.stringify(window.__relationshipScreenPoint(${JSON.stringify(title)}, 0.3))`);
+        const locate = () => canvasPoint(window, `JSON.stringify(window.__relationshipScreenPoint(${JSON.stringify(title)}, 0.3))`);
         let previous = null;
         let located = await locate();
         for (let attempt = 0; attempt < 40 && located !== previous; attempt += 1) {

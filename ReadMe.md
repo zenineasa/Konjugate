@@ -110,7 +110,7 @@ Konjugate ships with a built-in Explorer for discovering and one-click-installin
 <td><strong><a href="https://github.com/zenineasa/Konjugate-Fintech">Konjugate Fintech Toolbox</a></strong><br>Quantitative finance, DeFi, and systemic-risk modeling for Konjugate: interbank contagion stress-testing and market-dynamics causal transmission.</td>
 </tr>
 <tr>
-<td width="280"></td>
+<td width="280"><a href="https://github.com/zenineasa/konjugate-robotics"><img src="registry/images/konjugate.robotics.webp" alt="Konjugate Robotics Toolbox"></a></td>
 <td><strong><a href="https://github.com/zenineasa/konjugate-robotics">Konjugate Robotics Toolbox</a></strong><br>Draw a robot from solids and joints and build it into the canvas: each solid becomes a node and each joint a relationship carrying the joint's own equations, so the robot runs, forks and fits like any other model.</td>
 </tr>
 <tr>

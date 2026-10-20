@@ -11,6 +11,7 @@
     "license": "AGPL-3.0-only",
     "domain": "robotics",
     "url": "https://github.com/zenineasa/konjugate-robotics",
+    "image": "images/konjugate.robotics.webp",
     "packages": [
         {
             "packageType": "addon",

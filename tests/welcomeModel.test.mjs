@@ -47,6 +47,8 @@ test('episodes are shown whole up to the limit, and a longer series hides only t
 test('paid items are labelled as such, and the other kinds get plain labels', () => {
     assert.equal(featuredLabel('sponsored'), 'Sponsored');
     assert.equal(featuredLabel('video'), 'New video');
+    assert.equal(featuredLabel('video', { playlist: true }), 'New playlist');
+    assert.equal(featuredLabel('announcement', { playlist: true }), 'Announcement');
     assert.equal(featuredLabel('announcement'), 'Announcement');
     assert.equal(featuredLabel('anything else'), 'Announcement');
 });

@@ -1,1 +1,6 @@
-{}
+{
+    "1.2.1": [
+        "The Robotics Toolbox is now in the Extensions Explorer: draw a robot from solids and joints, and run it like any other model.",
+        "A new video series, Break It Before the World Does, is featured on this page."
+    ]
+}

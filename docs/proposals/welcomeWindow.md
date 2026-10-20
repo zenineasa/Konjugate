@@ -45,6 +45,7 @@ The six On-Ramp episodes are the tutorial, and people come back to refer to it. 
 ## Other videos, announcements and promotions go elsewhere
 
 - **Featured** is a single slot under What's new. An item has an `id`, a `kind` (`announcement`, `video` or `sponsored`), a title, text, an optional image, a link, optional start and end dates, and optional "show at most N launches". One eligible item is shown at a time, highest priority first.
+- **A video item brings its own picture.** A `video` item takes a plain YouTube watch link, and its card shows that video's thumbnail from YouTube's public thumbnail CDN (the same one the On-Ramp cards use), so nothing needs to be added to `welcome/images/`; an explicit `image` still wins. To feature a whole playlist, give its `https://www.youtube.com/playlist?list=...` link and a `thumbnailVideoId`, the 11-character id of one of its videos (usually the first); the card is then labelled "New playlist" with a "Watch playlist" button. The picture and the title open the item, like the button.
 - **More to watch** is a short row of non-tutorial videos, newest first. A video that leaves the Featured slot lands here, and never in the On-Ramp section.
 - **Contextual placement** keeps most videos out of the Welcome window altogether: a causal-inference video on that feature's help page, a video per add-on in the Explorer (registry entries already support YouTube links), an example's video in its guide, a release demo in What's new.
 

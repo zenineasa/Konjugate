@@ -42,9 +42,9 @@ export function visibleEpisodes(episodes, expanded = false, limit = onRampVisibl
 }
 
 // The small label on a Featured item. Anything paid must say so.
-export function featuredLabel(kind) {
+export function featuredLabel(kind, { playlist = false } = {}) {
     if (kind === 'sponsored') return 'Sponsored';
-    if (kind === 'video') return 'New video';
+    if (kind === 'video') return playlist ? 'New playlist' : 'New video';
     return 'Announcement';
 }
 

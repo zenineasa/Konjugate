@@ -550,7 +550,12 @@ async function fetchWelcomeImage(url) {
 // The Featured item as the page needs it: its text, and its image once that has been resolved to a
 // data: URL (null until then). The link itself stays here -- the page asks to open an item by id
 // (welcomeOpenFeatured).
-const featuredPayload = (item, imageUrl = null) => (item ? { id: item.id, kind: item.kind, title: item.title, text: item.text, imageUrl } : null);
+// A video item that has no image of its own shows its video's thumbnail from YouTube's public thumbnail CDN, loaded by
+// the page the way the On-Ramp cards' are (see the CSP in exampleGuide/index.html), so it needs nothing in the repository.
+const featuredPayload = (item, imageUrl = null) => (item ? {
+    id: item.id, kind: item.kind, title: item.title, text: item.text, imageUrl, playlist: item.playlist,
+    thumbnailUrl: item.thumbnailVideoId ? `https://img.youtube.com/vi/${item.thumbnailVideoId}/hqdefault.jpg` : null
+} : null);
 
 // The image, from the on-disk cache or the network, or null. Separate from the payload above so it
 // never holds the window back: it arrives as a patch.

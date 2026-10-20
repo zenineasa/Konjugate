@@ -18,9 +18,9 @@ test('a valid feed is accepted whole, with dates as instants and defaults filled
     assert.deepEqual(result.problems, []);
     assert.deepEqual(result.featured[0], {
         id: 'launch', kind: 'announcement', title: 'Konjugate 2 is here', text: 'Read more.', image: 'welcome/images/launch.webp', url: 'https://example.org/launch',
-        startsAt: Date.parse('2026-11-01T00:00:00Z'), endsAt: Date.parse('2026-12-01T09:30:00Z'), maxLaunches: 5, priority: 2
+        startsAt: Date.parse('2026-11-01T00:00:00Z'), endsAt: Date.parse('2026-12-01T09:30:00Z'), maxLaunches: 5, priority: 2, thumbnailVideoId: null, playlist: false
     });
-    assert.deepEqual(result.featured[1], { id: 'plain', kind: 'announcement', title: 'Konjugate 2 is here', text: null, image: null, url: 'https://example.org/launch', startsAt: null, endsAt: null, maxLaunches: null, priority: 0 });
+    assert.deepEqual(result.featured[1], { id: 'plain', kind: 'announcement', title: 'Konjugate 2 is here', text: null, image: null, url: 'https://example.org/launch', startsAt: null, endsAt: null, maxLaunches: null, thumbnailVideoId: null, playlist: false, priority: 0 });
     assert.deepEqual(result.moreToWatch, [{ videoId: 'jiL0kP0VQvQ', title: 'A talk' }]);
 });
 
@@ -48,6 +48,10 @@ test('each rule on an item is enforced', () => {
         'url with credentials': item({ url: 'https://user:pass@example.org/x' }), 'relative url': item({ url: '/x' }), 'long url': item({ url: `https://example.org/${'x'.repeat(2050)}` }),
         'video that is not youtube': item({ kind: 'video', url: 'https://vimeo.com/123456789' }),
         'video with a playlist': item({ kind: 'video', url: 'https://www.youtube.com/watch?v=jiL0kP0VQvQ&list=PLabc' }),
+        'playlist with no thumbnail video': item({ kind: 'video', url: 'https://www.youtube.com/playlist?list=PLZdhU2VSi7Q0' }),
+        'playlist with a bad thumbnail video': item({ kind: 'video', url: 'https://www.youtube.com/playlist?list=PLZdhU2VSi7Q0', thumbnailVideoId: 'short' }),
+        'thumbnail video on an announcement': item({ kind: 'announcement', thumbnailVideoId: 'jiL0kP0VQvQ' }),
+        'thumbnail video that is not an id': item({ kind: 'video', url: 'https://youtu.be/jiL0kP0VQvQ', thumbnailVideoId: 'jiL0kP0VQ!Q' }),
         'image elsewhere': item({ image: 'images/launch.webp' }), 'image outside the folder': item({ image: 'welcome/images/../secret.png' }),
         'image that is a url': item({ image: 'https://tracker.example/pixel.png' }), 'svg image': item({ image: 'welcome/images/a.svg' }), 'nested image': item({ image: 'welcome/images/a/b.png' }),
         'bad start': item({ startsAt: 'tomorrow' }), 'bad end': item({ endsAt: '2026-13-45' }), 'end before start': item({ startsAt: '2026-12-01', endsAt: '2026-11-01' }),
@@ -65,6 +69,18 @@ test('a YouTube video item is accepted in either link form', () => {
     for (const url of ['https://www.youtube.com/watch?v=jiL0kP0VQvQ', 'https://youtu.be/jiL0kP0VQvQ']) {
         assert.equal(parseWelcomeFeed(feed([item({ kind: 'video', url })])).featured.length, 1, url);
     }
+});
+
+test('a video item shows its own thumbnail, and a playlist item the one it names', () => {
+    const [watched] = parseWelcomeFeed(feed([item({ kind: 'video', url: 'https://youtu.be/jiL0kP0VQvQ' })])).featured;
+    assert.equal(watched.thumbnailVideoId, 'jiL0kP0VQvQ');
+    assert.equal(watched.playlist, false);
+    const [playlist] = parseWelcomeFeed(feed([item({ kind: 'video', url: 'https://www.youtube.com/playlist?list=PLZdhU2VSi7Q0', thumbnailVideoId: 'X8D1G_xipbI' })])).featured;
+    assert.equal(playlist.thumbnailVideoId, 'X8D1G_xipbI');
+    assert.equal(playlist.playlist, true);
+    const [announcement] = parseWelcomeFeed(feed([item()])).featured;
+    assert.equal(announcement.thumbnailVideoId, null);
+    assert.equal(announcement.playlist, false);
 });
 
 test('repeated ids and videos are dropped, and the lists are capped', () => {

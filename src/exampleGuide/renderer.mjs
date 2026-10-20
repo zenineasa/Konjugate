@@ -82,27 +82,39 @@ function renderRecommendedAddons(entries, status) {
     </div>`;
 }
 
+// With highlights written for this version, a block of its own; without them there is nothing to add to the
+// heading and the status line, so it is a single line pointing at the release notes.
 function renderWhatsNew(whatsNew) {
-    const highlights = whatsNew.highlights.length ? `<ul>${whatsNew.highlights.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>` : '';
+    if (!whatsNew.highlights.length) {
+        return `<section class="whatsNew whatsNewCompact">
+            <span><strong>What's new in ${escapeHtml(whatsNew.version)}</strong> · updated from ${escapeHtml(whatsNew.previous)}</span>
+            <a href="${escapeHtml(whatsNew.url)}" data-external-link>Read the release notes</a>
+        </section>`;
+    }
     return `<section class="whatsNew">
         <h2>What's new in ${escapeHtml(whatsNew.version)}</h2>
-        <p>Konjugate was updated from ${escapeHtml(whatsNew.previous)}.</p>
-        ${highlights}
+        <p class="whatsNewFrom">Updated from ${escapeHtml(whatsNew.previous)}.</p>
+        <ul>${whatsNew.highlights.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
         <p><a href="${escapeHtml(whatsNew.url)}" data-external-link>Read the full release notes</a></p>
     </section>`;
 }
 
 const featuredActionLabel = { video: 'Watch', sponsored: 'Learn more', announcement: 'Read more' };
 
+// The picture and the title both open the item, like the button, so the whole card reads as one link; the picture
+// is the item's own image if it has one, else (for a video) the video's thumbnail.
 function renderFeatured(item) {
-    const image = item.imageUrl ? `<img class="featuredImage" src="${escapeHtml(item.imageUrl)}" alt="">` : '';
-    return `<section class="featured featured-${escapeHtml(item.kind)}">
-        <div class="featuredLabel">${escapeHtml(featuredLabel(item.kind))}</div>
+    const source = item.imageUrl ?? item.thumbnailUrl;
+    const open = `data-featured-open="${escapeHtml(item.id)}"`;
+    const image = source ? `<button type="button" class="featuredMedia" ${open} tabindex="-1" aria-hidden="true"><img class="featuredImage" src="${escapeHtml(source)}" alt=""></button>` : '';
+    const action = item.kind === 'video' && item.playlist ? 'Watch playlist' : (featuredActionLabel[item.kind] ?? 'Learn more');
+    return `<section class="featured featured-${escapeHtml(item.kind)}${source ? ' featuredWithImage' : ''}">
         ${image}
         <div class="featuredBody">
-            <div class="featuredTitle">${escapeHtml(item.title)}</div>
+            <div class="featuredLabel">${escapeHtml(featuredLabel(item.kind, { playlist: item.playlist === true }))}</div>
+            <button type="button" class="featuredTitle" ${open}>${escapeHtml(item.title)}</button>
             ${item.text ? `<p>${escapeHtml(item.text)}</p>` : ''}
-            <button type="button" data-featured-open="${escapeHtml(item.id)}">${escapeHtml(featuredActionLabel[item.kind] ?? 'Learn more')}</button>
+            <button type="button" class="featuredAction" ${open}>${escapeHtml(action)}</button>
         </div>
         <button type="button" class="featuredDismiss" data-featured-dismiss="${escapeHtml(item.id)}" aria-label="Dismiss this">×</button>
     </section>`;
@@ -178,7 +190,7 @@ function wireWelcome() {
         welcome.onRampExpanded = true;
         renderWelcome();
     });
-    content.querySelector('[data-featured-open]')?.addEventListener('click', (event) => window.exampleGuide.openFeatured(event.currentTarget.dataset.featuredOpen));
+    content.querySelectorAll('[data-featured-open]').forEach((target) => target.addEventListener('click', (event) => window.exampleGuide.openFeatured(event.currentTarget.dataset.featuredOpen)));
     content.querySelector('[data-featured-dismiss]')?.addEventListener('click', async (event) => {
         if (await window.exampleGuide.dismissFeatured(event.currentTarget.dataset.featuredDismiss)) {
             welcome.featured = null;

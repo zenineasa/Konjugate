@@ -18,7 +18,10 @@ const idPattern = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const videoIdPattern = /^[A-Za-z0-9_-]{11}$/;
 // Images live in this repository, in welcome/images/, one file each, so they are reviewed with the item.
 const imagePathPattern = /^welcome\/images\/[\w-][\w.-]*\.(png|jpe?g|webp)$/i;
-const youtubeWatchPattern = /^https:\/\/(?:www\.youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}$/;
+const youtubeWatchPattern = /^https:\/\/(?:www\.youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})$/;
+// A whole playlist. It carries no video of its own, so the item names one (thumbnailVideoId, usually the first) to
+// borrow the card's picture from.
+const youtubePlaylistPattern = /^https:\/\/www\.youtube\.com\/playlist\?list=[A-Za-z0-9_-]{10,64}$/;
 const isoPattern = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 
 const text = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max;
@@ -38,6 +41,14 @@ function instant(value) {
     return typeof value === 'string' && isoPattern.test(value) ? Date.parse(value) : Number.NaN;
 }
 
+// What a video item shows: the id its picture comes from (the video itself, or a playlist's named one) and whether
+// it opens a playlist. Other kinds have neither.
+function videoPresentation(item) {
+    if (item.kind !== 'video') return { thumbnailVideoId: null, playlist: false };
+    const watched = youtubeWatchPattern.exec(item.url);
+    return { thumbnailVideoId: watched ? watched[1] : item.thumbnailVideoId, playlist: !watched };
+}
+
 function featuredItem(raw) {
     if (!raw || typeof raw !== 'object') return 'is not an object';
     if (typeof raw.id !== 'string' || !idPattern.test(raw.id)) return 'needs an id of letters, digits and dashes (at most 64 characters)';
@@ -45,7 +56,9 @@ function featuredItem(raw) {
     if (!text(raw.title, 120)) return 'needs a title of at most 120 characters';
     if (raw.text !== undefined && !text(raw.text, 400)) return 'text, if present, must be 1 to 400 characters';
     if (!httpsUrl(raw.url)) return 'needs an https url';
-    if (raw.kind === 'video' && !youtubeWatchPattern.test(raw.url)) return 'a video item needs a plain YouTube watch link';
+    if (raw.kind === 'video' && !youtubeWatchPattern.test(raw.url) && !youtubePlaylistPattern.test(raw.url)) return 'a video item needs a plain YouTube watch link, or a YouTube playlist link with a thumbnailVideoId';
+    if (raw.kind === 'video' && youtubePlaylistPattern.test(raw.url) && !videoIdPattern.test(raw.thumbnailVideoId ?? '')) return 'a playlist item needs a thumbnailVideoId, the 11-character id of one of its videos';
+    if (raw.thumbnailVideoId !== undefined && (raw.kind !== 'video' || !videoIdPattern.test(raw.thumbnailVideoId))) return 'thumbnailVideoId, if present, must be an 11-character YouTube video id on a video item';
     if (raw.image !== undefined && (typeof raw.image !== 'string' || !imagePathPattern.test(raw.image) || raw.image.includes('..'))) {
         return 'image, if present, must be a file in welcome/images/, e.g. "welcome/images/example.webp"';
     }
@@ -76,7 +89,7 @@ export function parseWelcomeFeed(raw) {
         ids.add(item.id);
         featured.push({
             id: item.id, kind: item.kind, title: item.title.trim(), text: item.text === undefined ? null : item.text.trim(),
-            image: item.image ?? null, url: item.url,
+            image: item.image ?? null, url: item.url, ...videoPresentation(item),
             startsAt: item.startsAt === undefined ? null : instant(item.startsAt), endsAt: item.endsAt === undefined ? null : instant(item.endsAt),
             maxLaunches: item.maxLaunches ?? null, priority: item.priority ?? 0
         });

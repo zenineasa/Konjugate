@@ -78,15 +78,24 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .whatsNew, .featured { position: relative; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 6%); border: 1px solid #243944; border-radius: 7px; }
 .whatsNew h2 { margin: 0 0 6px; padding-top: 0; border-top: 0; }
 .whatsNew ul { margin: 6px 0; }
-.featured { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; padding-right: 40px; }
-.featuredLabel { flex: 0 0 100%; color: #778d98; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-.featuredImage { flex: 0 0 200px; max-width: 100%; border-radius: 5px; }
-.featuredBody { flex: 1 1 240px; }
-.featuredTitle { color: #e6f0f2; font-size: 14px; font-weight: 600; }
-.featured button, .whatsNew button { height: 28px; padding: 0 13px; color: #09201e; background: #42c9bc; border: 0; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; }
-.featured button:hover, .whatsNew button:hover { background: #59d6ca; }
-.featured button.featuredDismiss { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; color: #8499a3; background: transparent; font-size: 16px; font-weight: 400; }
-.featured button.featuredDismiss:hover { color: #e6f0f2; background: #182730; }
+.featured { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding-right: 44px; }
+.featuredMedia { flex: 0 0 240px; max-width: 100%; padding: 0; overflow: hidden; background: #0a151d; border: 1px solid #253a46; border-radius: 6px; cursor: pointer; line-height: 0; transition: border-color .15s ease, transform .15s ease; }
+.featuredMedia:hover { border-color: #3d5967; transform: translateY(-2px); }
+.featuredImage { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.featuredBody { flex: 1 1 240px; min-width: 0; }
+.featuredLabel { color: #778d98; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.featuredBody > p { margin: 6px 0 12px; color: #b8ced2; }
+.featured button.featuredTitle { display: block; width: auto; height: auto; margin: 4px 0 0; padding: 0; color: #e6f0f2; background: none; border: 0; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.featured button.featuredTitle:hover, .featured button.featuredTitle:focus-visible { color: #83d7cf; text-decoration: underline; }
+.featuredBody > .featuredTitle + button { margin-top: 12px; }
+.featured button.featuredAction, .whatsNew button { height: 30px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+.featured button.featuredAction:hover, .featured button.featuredAction:focus-visible, .whatsNew button:hover { background: #74ddd3; border-color: #74ddd3; transform: translateY(-2px); }
+.featured button.featuredDismiss { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; color: #8499a3; background: transparent; border: 0; font-size: 16px; font-weight: 400; transform: none; }
+.featured button.featuredDismiss:hover { color: #e6f0f2; background: #182730; transform: none; }
+.whatsNewFrom { margin: 0 0 6px; color: #778d98; }
+.whatsNewCompact { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; padding-top: 10px; padding-bottom: 10px; color: #b8ced2; font-size: 11.5px; }
+.whatsNewCompact strong { color: #e6f0f2; }
+@media (prefers-reduced-motion: reduce) { .featuredMedia, .featured button.featuredAction, .whatsNew button { transition: none; } .featuredMedia:hover, .featured button.featuredAction:hover, .featured button.featuredAction:focus-visible, .whatsNew button:hover { transform: none; } }
 .card { position: relative; }
 .cardOpenedMark { position: absolute; top: 6px; right: 6px; padding: 1px 7px; color: #09201e; background: #42c9bc; border-radius: 9px; font-size: 10px; font-weight: 600; }
 .cardOpened .cardTitle { color: #8499a3; }

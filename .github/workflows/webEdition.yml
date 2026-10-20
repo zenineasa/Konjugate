@@ -43,6 +43,13 @@ jobs:
                       core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
                       core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
             - run: npm ci
+            # assets/icons is generated, not committed (see .gitignore), and build:webShell copies the favicon from
+            # it. rsvg-convert renders the icon's SVG; python3 and make are already on the runner.
+            - name: Generate the web icons
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y librsvg2-bin
+                  make iconsWeb
             - run: npm run setup:web
             - run: npm run build:web
             - run: npm run build:webShell

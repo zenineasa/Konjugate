@@ -8,12 +8,27 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import 'mathlive';
 import { DocumentController } from './documentController.mjs';
+import { parseScheduleText, scheduleError, scheduleSummary, scheduleText } from '../parameterSchedule.mjs';
+import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
+import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
+import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
 import {
     latexForBinding,
     reconcileEquationBindings,
     timeBinding,
     validateEquationLatex
 } from '../equationModel.mjs';
+import {
+    checkSeveralEquations,
+    compileSeveralEquations,
+    equationCandidates,
+    isSeveralEquations,
+    moved,
+    newDefinitionSymbol,
+    nextFreeOutput,
+    severalFromSingle,
+    singleFromSeveral
+} from '../relationshipEquations.mjs';
 import {
     causalMappingCreateValue,
     causalMappingValue,
@@ -25,7 +40,7 @@ import {
     providerReferenceValue
 } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
-import { defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
+import { defaultNodeProviderSource, defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
 import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
@@ -65,6 +80,8 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 }[character]));
 const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+// The Alt key as each platform names it, for shortcut hints: Option (⌥) on a Mac.
+const altKeyLabel = isMac ? '⌥' : 'Alt+';
 
 // Backstop so any console.error/console.warn -- including ones nobody has wired up to a
 // dedicated UI element -- still reaches the user via the quiet diagnostics badge/panel below,
@@ -343,8 +360,8 @@ function hydrateProjectDocument(document) {
             substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
             integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
             sourceTerms: (node.sourceTerms ?? []).map((term) => ({ ...term, parameters: term.parameters ?? [] })),
-            // A computational-node provider (or an FMU's reference), kept as authored: the canvas has no editor for
-            // it yet, but must not drop it, or the node would lose its dynamics when the model is saved or run.
+            // The node's own program: a computational-node provider, or an installed FMU's reference (edited under
+            // Program in the node editor).
             implementation: node.implementation ? structuredClone(node.implementation) : null,
             // Parts of the node's shape, each a mesh in the frame of a body the node reports the pose of (a robot's
             // links, say): kept and handed to result visualizers, not drawn on the canvas.
@@ -905,7 +922,12 @@ transformControls.addEventListener('mouseUp', () => {
 // can exercise the rotate/scale/move commit-and-undo path without needing real pointer
 // coordinates on the 3D gizmo's own handle geometry.
 // The document the canvas would save, for the interaction tests to check what it keeps.
-window.__debugProject = { serialize: () => serializeProjectDocument() };
+// `load` opens a project document in this window, as opening a file does, so a test can start from a model of its own
+// in either edition (the web edition has no OS file open).
+window.__debugProject = {
+    serialize: () => serializeProjectDocument(),
+    load: (document, fileName = 'test.kjt') => loadProjectDocument(structuredClone(document), { fileName })
+};
 
 window.__debugTransform = {
     mode: () => transformControls.getMode(),
@@ -1751,6 +1773,9 @@ function captureNodeModel(node) {
         sharedParameters: structuredClone(model.sharedParameters),
         substepsPerGlobalStep: definition.substepsPerGlobalStep,
         integration: definition.integration ?? 'explicit',
+        // The node's own program, if it has one (see renderNodeProgram), and its body parts (see renderNodeParts).
+        implementation: structuredClone(definition.implementation ?? null),
+        appearanceParts: structuredClone(definition.appearanceParts ?? null),
         bindings: model.relationships.map((edge) => ({
             id: edge.id,
             sourceStateId: edge.sourceStateId,
@@ -1777,6 +1802,8 @@ function applyNodeModel(node, snapshot) {
     if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
     definition.substepsPerGlobalStep = snapshot.substepsPerGlobalStep;
     definition.integration = snapshot.integration ?? 'explicit';
+    definition.implementation = structuredClone(snapshot.implementation ?? null);
+    definition.appearanceParts = snapshot.appearanceParts?.length ? structuredClone(snapshot.appearanceParts) : null;
     snapshot.bindings.forEach((binding) => {
         const edge = model.relationships.find((candidate) => candidate.id === binding.id);
         if (edge) {
@@ -1825,6 +1852,22 @@ function changeNodeModel(node, mutate) {
     });
 }
 
+// Moves a state one place up (-1) or down (1) in its node's list, as one undoable step. The order is the node's own:
+// semi-implicit integration updates the states in it, each from those updated before it. `focusField` puts the
+// keyboard back on the same field of the moved row.
+function moveNodeState(node, stateId, offset, focusField = null) {
+    const states = node.userData.definition.states;
+    const from = states.findIndex((state) => state.id === stateId);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= states.length) return;
+    changeNodeModel(node, (snapshot) => {
+        const [moved] = snapshot.states.splice(from, 1);
+        snapshot.states.splice(to, 0, moved);
+    });
+    const row = $(`#nodeEditorStates .editorStateRow[data-state-id="${stateId}"]`);
+    (focusField ? $(`[data-field="${focusField}"]`, row) : $(`.moveState[data-move="${offset}"]:not(:disabled)`, row) ?? $('input', row))?.focus();
+}
+
 function renderNodeEditorModel(node) {
     const definition = node.userData.definition;
     $('#editNodeError').textContent = '';
@@ -1838,16 +1881,25 @@ function renderNodeEditorModel(node) {
     const stateContainer = $('#nodeEditorStates');
     stateContainer.replaceChildren();
     if (!definition.states.length) stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
-    definition.states.forEach((state) => {
+    definition.states.forEach((state, index) => {
         const row = document.createElement('div');
         row.className = 'editorStateRow';
+        row.dataset.stateId = String(state.id);
         row.innerHTML = `
             <input data-field="name" value="${escapeHtml(state.label)}" aria-label="State name">
             <input data-field="symbol" value="${escapeHtml(state.symbol)}" aria-label="State symbol">
             <input data-field="value" type="number" value="${escapeHtml(state.initialValue ?? 0)}" aria-label="Initial value">
             <input data-field="unit" value="${escapeHtml(state.unit ?? '')}" aria-label="Unit">
-            <button type="button" title="Remove state">×</button>
+            <button type="button" class="moveState" data-move="-1" title="Move up (${altKeyLabel}↑): earlier in the list, updated earlier by semi-implicit integration" aria-label="Move ${escapeHtml(state.symbol)} up" ${index === 0 ? 'disabled data-unavailable' : ''}>↑</button>
+            <button type="button" class="moveState" data-move="1" title="Move down (${altKeyLabel}↓)" aria-label="Move ${escapeHtml(state.symbol)} down" ${index === definition.states.length - 1 ? 'disabled data-unavailable' : ''}>↓</button>
+            <button type="button" class="removeState" title="Remove state">×</button>
         `;
+        $$('.moveState', row).forEach((button) => button.addEventListener('click', () => moveNodeState(node, state.id, Number(button.dataset.move))));
+        row.addEventListener('keydown', (event) => {
+            if (!event.altKey || event.ctrlKey || event.metaKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+            event.preventDefault();
+            moveNodeState(node, state.id, event.key === 'ArrowUp' ? -1 : 1, event.target.dataset.field);
+        });
         $$('input', row).forEach((input) => input.addEventListener('change', () => {
             changeNodeModel(node, (snapshot) => {
                 const target = snapshot.states.find((candidate) => candidate.id === state.id);
@@ -1863,12 +1915,15 @@ function renderNodeEditorModel(node) {
                 }
             });
         }));
-        $('button', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
+        $('.removeState', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
             snapshot.states = snapshot.states.filter((candidate) => candidate.id !== state.id);
             snapshot.sourceTerms = snapshot.sourceTerms.filter((term) => term.state !== state.symbol);
         }));
         stateContainer.appendChild(row);
     });
+
+    renderNodeProgram(node);
+    renderNodeParts(node);
 
     const sourceTermContainer = $('#nodeEditorSourceTerms');
     sourceTermContainer.replaceChildren();
@@ -1893,6 +1948,268 @@ function renderNodeEditorModel(node) {
         }));
         sourceTermContainer.appendChild(row);
     });
+}
+
+// ---- A node's own program: a Python or C++ computational-node provider, or an installed FMU ------------------------
+function nodeProgramContext(node) {
+    const definition = node.userData.definition;
+    const nodes = model.nodes.filter((candidate) => !candidate.deleted);
+    return { definition, candidates: nodeProgramInputCandidates(definition, nodes, model.sharedParameters), nodes };
+}
+
+// The installed FMUs, cached while the node editor is open; null until read.
+let installedFmus = null;
+
+async function refreshInstalledFmus() {
+    try {
+        installedFmus = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu' && entry.enabled !== false);
+    } catch {
+        installedFmus = [];
+    }
+    return installedFmus;
+}
+
+function renderNodeProgram(node) {
+    const { definition, candidates, nodes } = nodeProgramContext(node);
+    const implementation = definition.implementation;
+    const kind = implementation?.kind ?? '';
+    $('#editNodeProgramKind').value = ['python', 'cpp', 'fmi'].includes(kind) ? kind : '';
+    $('#nodeProgramFields').hidden = !implementation;
+    if (!implementation) return;
+    const isFmu = kind === 'fmi';
+    $('#nodeProgramSourceFields').hidden = isFmu;
+    $('#nodeProgramFmuFields').hidden = !isFmu;
+    $('#editAddNodeProgramInput').hidden = isFmu;
+    $('#editAddNodeProgramOutput').hidden = isFmu;
+    if (!isFmu && document.activeElement !== $('#editNodeProgramSource')) $('#editNodeProgramSource').value = implementation.source ?? '';
+    if (isFmu) renderNodeProgramFmus(node);
+    const errors = nodeProgramErrors(implementation, definition, nodes, model.sharedParameters);
+    const rowError = (messages) => {
+        const element = document.createElement('div');
+        element.className = 'nodeProgramRowError';
+        element.textContent = messages.join(' ');
+        return element;
+    };
+    const removeButton = (title, onClick) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.title = title;
+        button.textContent = '×';
+        button.hidden = isFmu;
+        button.addEventListener('click', onClick);
+        return button;
+    };
+    const keyInput = (value, label, onChange) => {
+        const input = document.createElement('input');
+        input.dataset.field = 'key';
+        input.value = value ?? '';
+        input.spellcheck = false;
+        input.setAttribute('aria-label', label);
+        // An FMU's keys are its own variables' names.
+        input.readOnly = isFmu;
+        input.addEventListener('change', () => onChange(input.value.trim()));
+        return input;
+    };
+
+    const inputs = $('#nodeProgramInputs');
+    inputs.replaceChildren();
+    if (!(implementation.bindings ?? []).length) inputs.innerHTML = '<p class="emptyEditorState">No inputs</p>';
+    (implementation.bindings ?? []).forEach((binding, index) => {
+        const row = document.createElement('div');
+        row.className = 'nodeProgramRow';
+        row.dataset.index = String(index);
+        const reads = document.createElement('select');
+        reads.dataset.field = 'reads';
+        reads.setAttribute('aria-label', `What input ${binding.key} reads`);
+        reads.add(new Option('Choose…', ''));
+        candidates.forEach((candidate) => reads.add(new Option(candidate.label, candidate.value)));
+        reads.value = nodeProgramInputValue(binding, definition);
+        reads.addEventListener('change', () => {
+            const candidate = candidates.find((item) => item.value === reads.value);
+            if (!candidate) return;
+            changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, ...candidate.binding }; });
+        });
+        row.append(
+            keyInput(binding.key, 'Input key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index].key = key; })),
+            reads,
+            removeButton('Remove this input', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings.splice(index, 1); })),
+            rowError(errors.inputs[index] ?? [])
+        );
+        inputs.appendChild(row);
+    });
+
+    const outputs = $('#nodeProgramOutputs');
+    outputs.replaceChildren();
+    if (!(implementation.outputs ?? []).length) outputs.innerHTML = '<p class="emptyEditorState">No outputs</p>';
+    (implementation.outputs ?? []).forEach((output, index) => {
+        const row = document.createElement('div');
+        row.className = 'nodeProgramRow';
+        row.dataset.index = String(index);
+        const state = document.createElement('select');
+        state.dataset.field = 'state';
+        state.setAttribute('aria-label', `State output ${output.key} changes`);
+        state.add(new Option('Choose…', ''));
+        definition.states.forEach((candidate) => state.add(new Option(`this.${candidate.symbol}`, String(candidate.id))));
+        state.value = output.stateId === null || output.stateId === undefined ? '' : String(output.stateId);
+        state.addEventListener('change', () => {
+            if (!state.value) return;
+            changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].stateId = Number(state.value); });
+        });
+        const setsLabel = document.createElement('label');
+        setsLabel.className = 'nodeProgramSets';
+        setsLabel.title = 'Checked, the output is the state\'s value; unchecked, it is a rate added to the state.';
+        const sets = document.createElement('input');
+        sets.type = 'checkbox';
+        sets.dataset.field = 'setsValue';
+        sets.checked = Boolean(output.setsValue) || isFmu;
+        // An FMU reports values, never rates.
+        if (isFmu) sets.setAttribute('data-unavailable', '');
+        sets.disabled = isFmu || Boolean(activeResult);
+        sets.addEventListener('change', () => changeNodeModel(node, (snapshot) => {
+            if (sets.checked) snapshot.implementation.outputs[index].setsValue = true;
+            else delete snapshot.implementation.outputs[index].setsValue;
+        }));
+        setsLabel.append(sets, document.createTextNode(' sets the value'));
+        row.append(
+            keyInput(output.key, 'Output key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].key = key; })),
+            state,
+            setsLabel,
+            removeButton('Remove this output', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs.splice(index, 1); })),
+            rowError(errors.outputs[index] ?? [])
+        );
+        outputs.appendChild(row);
+    });
+    // The engine integrates a node with a program explicitly (nodeIntegrationInvalid).
+    if (definition.integration === 'semiImplicit') errors.errors.push('A node with a program is integrated explicitly: set Integration to Explicit Euler on the Numerics tab.');
+    $('#nodeProgramError').textContent = errors.errors.join(' ');
+}
+
+async function renderNodeProgramFmus(node) {
+    const select = $('#editNodeProgramFmu');
+    const implementation = node.userData.definition.implementation;
+    const fmus = installedFmus ?? await refreshInstalledFmus();
+    select.replaceChildren(new Option(fmus.length ? 'Choose an installed FMU…' : 'No FMU installed: install one from Extensions', ''));
+    fmus.forEach((fmu) => select.add(new Option(`${fmu.name} ${fmu.version}`, JSON.stringify([fmu.packageId, fmu.version]))));
+    const current = implementation?.fmuId ? JSON.stringify([implementation.fmuId, implementation.fmuVersion]) : '';
+    if (current && ![...select.options].some((option) => option.value === current)) {
+        select.add(new Option(`${implementation.fmuId} ${implementation.fmuVersion} (not installed here)`, current));
+    }
+    select.value = current;
+}
+
+// Wires an installed FMU into the node, keeping what the earlier wiring read and wrote under the same keys.
+async function useFmuForNode(node, guid, version) {
+    const ports = await window.extensions.fmuPorts(guid, version);
+    if (!ports || ports.error) {
+        $('#nodeProgramError').textContent = ports?.error ?? 'The FMU could not be read.';
+        return;
+    }
+    changeNodeModel(node, (snapshot) => {
+        snapshot.implementation = fmiImplementation(guid, version, ports, snapshot.implementation);
+    });
+}
+
+// ---- A node's body parts, for result visualizers ------------------------------------------------------------------
+function renderNodeParts(node) {
+    const definition = node.userData.definition;
+    const parts = definition.appearanceParts ?? [];
+    const container = $('#nodeParts');
+    container.replaceChildren();
+    if (!parts.length) container.innerHTML = '<p class="emptyEditorState">No parts</p>';
+    const problems = partProblems(parts, definition.states.map((state) => state.symbol));
+    parts.forEach((part, index) => {
+        const row = document.createElement('div');
+        row.className = 'nodePartRow';
+        row.dataset.index = String(index);
+        const prefix = document.createElement('input');
+        prefix.dataset.field = 'prefix';
+        prefix.value = part.prefix ?? '';
+        prefix.placeholder = 'no prefix';
+        prefix.spellcheck = false;
+        prefix.setAttribute('aria-label', 'Prefix of the states that place this part');
+        prefix.addEventListener('change', () => changeNodeModel(node, (snapshot) => { snapshot.appearanceParts[index].prefix = prefix.value.trim(); }));
+        const color = document.createElement('input');
+        color.type = 'color';
+        color.dataset.field = 'color';
+        color.value = /^#[0-9a-f]{6}$/i.test(part.color ?? '') ? part.color : '#888888';
+        color.setAttribute('aria-label', 'Colour of this part');
+        color.addEventListener('change', () => changeNodeModel(node, (snapshot) => { snapshot.appearanceParts[index].color = color.value; }));
+        const mesh = document.createElement('label');
+        mesh.className = 'partMesh';
+        mesh.title = 'Replace this part\'s mesh with an STL or STEP file';
+        const file = document.createElement('input');
+        file.type = 'file';
+        file.accept = '.stl,.step,.stp';
+        file.addEventListener('change', async () => {
+            const [chosen] = file.files;
+            if (!chosen) return;
+            try {
+                const replacement = await partMeshFromFile(chosen);
+                changeNodeModel(node, (snapshot) => { snapshot.appearanceParts[index].mesh = replacement; });
+            } catch (error) {
+                $('.nodePartProblem', row).textContent = error.message;
+            }
+        });
+        mesh.append(file, document.createTextNode(`${triangleCount(part.mesh)} triangles ↥`));
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '×';
+        remove.title = 'Remove this part';
+        remove.addEventListener('click', () => changeNodeModel(node, (snapshot) => { snapshot.appearanceParts.splice(index, 1); }));
+        const problem = document.createElement('div');
+        problem.className = 'nodePartProblem';
+        problem.textContent = [...problems[index].errors, ...problems[index].notes].join(' ');
+        problem.classList.toggle('note', !problems[index].errors.length);
+        row.append(prefix, color, mesh, remove, problem);
+        container.appendChild(row);
+    });
+}
+
+// A mesh file as a part's mesh: in metres, in the file's own frame (not centred or scaled to fit, as the node's own
+// shape is). STEP is read in millimetres; an STL's lengths are in the unit chosen beside the parts.
+async function partMeshFromFile(file) {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const buffer = await file.arrayBuffer();
+    let geometry;
+    let scale = Number($('#editNodePartUnit').value) || 0.001;
+    if (extension === 'stl') geometry = new STLLoader().parse(buffer);
+    else if (extension === 'step' || extension === 'stp') {
+        if (!window.occtimportjs) throw new Error('The STEP importer is unavailable.');
+        const occt = await window.occtimportjs();
+        geometry = geometryFromStepResult(occt.ReadStepFile(new Uint8Array(buffer), {
+            linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.001, angularDeflection: 0.5
+        }));
+        scale = 0.001;
+    } else throw new Error('Choose an STL, STEP, or STP file.');
+    try {
+        return meshFromArrays(geometry.attributes.position.array, geometry.attributes.normal?.array ?? null, geometry.index?.array ?? null, scale);
+    } finally {
+        geometry.dispose();
+    }
+}
+
+$('#editAddNodePart').addEventListener('change', async (event) => {
+    const [file] = event.target.files;
+    if (!file || !selectedNode) return;
+    const node = selectedNode;
+    try {
+        const mesh = await partMeshFromFile(file);
+        changeNodeModel(node, (snapshot) => {
+            const parts = snapshot.appearanceParts ??= [];
+            const taken = new Set(parts.map((part) => part.prefix ?? ''));
+            let prefix = taken.has('') ? 'part' : '';
+            for (let index = 2; taken.has(prefix); index += 1) prefix = `part${index}`;
+            parts.push({ prefix, mesh, color: '#888888' });
+        });
+    } catch (error) {
+        $('#editGeometryStatus').textContent = error.message;
+    } finally {
+        event.target.value = '';
+    }
+});
+
+function nodeProgramTemplate(kind, implementation, title) {
+    return defaultNodeProviderSource(kind, implementation?.bindings ?? [], implementation?.outputs ?? [], title);
 }
 
 function sourceTermBindingCandidates(definition) {
@@ -2105,6 +2422,7 @@ function renderSourceTermEditor(node, term) {
     $('h3', $('#termEquationHeading')).textContent = term.setsValue ? 'Value' : 'Equation';
     $('#termEquationHeading').hidden = !isEquation;
     $('#termEquationDiagnostics').hidden = !isEquation;
+    $('#termFunctions').hidden = !isEquation;
     $('#termReferencePicker').hidden = !isEquation;
     $('#termProviderSection').hidden = isEquation;
 
@@ -2137,6 +2455,10 @@ function renderSourceTermEditor(node, term) {
         mathField.hidden = true;
         latexSource.hidden = true;
         output.value = term.implementation.output?.stateId ?? '';
+        const fromPlugin = implementationKind === 'plugin';
+        $('#termProviderCode').hidden = fromPlugin;
+        $('#termPluginProviderFields').hidden = !fromPlugin;
+        if (fromPlugin) fillPluginProviders($('#termPluginProvider'), term.implementation);
         $('#termProviderSource').value = term.implementation.source ?? '';
         $('#termInsertProviderTemplate').hidden = !term.implementation.source?.trim();
         $('#termProviderOutputKey').value = term.implementation.output?.key ?? '';
@@ -2248,6 +2570,8 @@ function selectNodeEditorTab(tabName) {
 
 function openNodeEditor(definition, clientX, clientY) {
     const editor = $('#nodeEditor');
+    // Read the installed FMUs again, in case one was installed since.
+    installedFmus = null;
     hideCards(editor);
     const node = nodeObjects.get(definition.id);
     renderNodeEditorModel(node);
@@ -2268,8 +2592,8 @@ function openNodeEditor(definition, clientX, clientY) {
 }
 
 function normalizeEdgeEquationModel(definition, equationModel = definition.equationModel) {
-    // A relationship with several equations (equationModel.outputs) is kept as authored: the canvas shows it but
-    // has no editor for it yet, and must not rewrite its bindings or drop its equations.
+    // A relationship with several equations (equationModel.outputs) is kept as it is: its own editor
+    // (renderSeveralEquations) changes it, and nothing else may rewrite its bindings or drop its equations.
     if (Array.isArray(equationModel?.outputs)) return structuredClone(equationModel);
     const sourceNode = model.nodes.find((node) => node.id === definition.source);
     const targetNode = model.nodes.find((node) => node.id === definition.target);
@@ -2608,35 +2932,21 @@ function renderEdgeEditor(definition) {
     const implementationKind = definition.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
     $('#editEdgeImplementationKind').value = implementationKind;
-    // A relationship with several equations: each listed with the state it sets. The canvas has no editor for them yet.
-    const equations = Array.isArray(definition.equationModel?.outputs) ? definition.equationModel.outputs : null;
-    $('#editEdgeEquationsList').hidden = !equations;
-    $('#editEdgeImplementationKind').closest('label').hidden = Boolean(equations);
-    $('#editEquationOutput').closest('label').hidden = Boolean(equations);
-    if (equations) {
-        const stateName = (stateId) => {
-            for (const node of model.nodes) {
-                const state = node.states.find((candidate) => candidate.id === stateId);
-                if (state) return `${node.title}.${state.symbol}`;
-            }
-            return 'a missing state';
-        };
-        const list = $('#editEdgeEquationsList');
-        const definitions = definition.equationModel.definitions ?? [];
-        list.replaceChildren();
-        const heading = document.createElement('p');
-        heading.className = 'builderHint';
-        heading.textContent = `This relationship sets ${equations.length} state${equations.length === 1 ? '' : 's'} of its two nodes, each the sum of what every relationship setting it gives, worked out at each step in dependency order${definitions.length ? `, using ${definitions.length} intermediate quantities` : ''}. It is written by a toolbox; the canvas shows its equations but does not edit them yet.`;
-        list.appendChild(heading);
-        const table = document.createElement('ul');
-        table.className = 'relationshipEquations';
-        for (const equation of equations) {
-            const item = document.createElement('li');
-            item.textContent = `${stateName(equation.stateId)} ${equation.latex ? `= ${equation.latex}` : ''}`.trim();
-            table.appendChild(item);
-        }
-        list.appendChild(table);
-        for (const id of ['#editEdgeEquationHeading', '#equationDiagnostics', '#editEdgeReferencePicker', '#editEdgeProviderSection', '#editEdgeMathField', '#editEdgeEquation']) $(id).hidden = true;
+    // A relationship with several equations, each setting a state of one of the two nodes: edited row by row below.
+    const several = isSeveralEquations(definition.equationModel);
+    $('#editEdgeEquationsList').hidden = !several;
+    $('#editEquationOutput').closest('label').hidden = several;
+    if (several) $('#editEdgeImplementationKind').value = 'equations';
+    // Such a relationship is directed: what it sets on each node is written out, one equation per state.
+    const directionality = $('#editEdgeDirectionality');
+    directionality.toggleAttribute('data-unavailable', several);
+    directionality.disabled = several || Boolean(activeResult);
+    directionality.title = several ? 'A relationship with several equations is directed: each equation names the state it sets.' : '';
+    $('#editEdgeEquationHeading h3').textContent = several ? 'Equations' : 'Equation';
+    if (several) {
+        for (const id of ['#equationDiagnostics', '#editEdgeProviderSection', '#editEdgeMathField', '#editEdgeEquation']) $(id).hidden = true;
+        for (const id of ['#editEdgeEquationHeading', '#edgeFunctions', '#editEdgeReferencePicker']) $(id).hidden = false;
+        renderSeveralEquations(definition);
         return;
     }
     // The math-field/latex-textarea toggle their own `hidden` directly (matching the existing
@@ -2644,6 +2954,7 @@ function renderEdgeEditor(definition) {
     // does not reliably accept focus again once an ancestor of it has been display:none'd.
     $('#editEdgeEquationHeading').hidden = !isEquation;
     $('#equationDiagnostics').hidden = !isEquation;
+    $('#edgeFunctions').hidden = !isEquation;
     $('#editEdgeReferencePicker').hidden = !isEquation;
     $('#editEdgeProviderSection').hidden = isEquation;
 
@@ -2681,6 +2992,10 @@ function renderEdgeEditor(definition) {
     } else {
         mathField.hidden = true;
         latexSource.hidden = true;
+        const fromPlugin = implementationKind === 'plugin';
+        $('#editEdgeProviderCode').hidden = fromPlugin;
+        $('#editEdgePluginProviderFields').hidden = !fromPlugin;
+        if (fromPlugin) fillPluginProviders($('#editEdgePluginProvider'), definition.implementation);
         output.value = equationOutputValue(definition.implementation.output?.role ?? 'target', definition.implementation.output?.stateId);
         $('#editEdgeProviderSource').value = definition.implementation.source ?? '';
         $('#editInsertProviderTemplate').hidden = !definition.implementation.source?.trim();
@@ -2688,6 +3003,339 @@ function renderEdgeEditor(definition) {
         renderProviderBindingRows(definition);
     }
 }
+
+// ---- A relationship with several equations ------------------------------------------------------------------------
+// Each equation sets a state of the relationship's source or target node; intermediate quantities (definitions) are
+// worked out first, each from those above it. Every structural change (add, remove, move, rename, the state an
+// equation sets) is one undoable step; typing into an equation is one step per field, as for a single equation.
+
+// The relationship's two nodes and what its equations may read.
+function severalContext(snapshot) {
+    const sourceNode = model.nodes.find((node) => node.id === snapshot.source);
+    const targetNode = model.nodes.find((node) => node.id === snapshot.target);
+    return { sourceNode, targetNode, candidates: equationCandidates(snapshot.equationModel, sourceNode, targetNode, snapshot.parameters) };
+}
+
+function compileSeveral(snapshot) {
+    const { sourceNode, targetNode, candidates } = severalContext(snapshot);
+    snapshot.equationModel = compileSeveralEquations(snapshot.equationModel, candidates, sourceNode, targetNode);
+}
+
+// Which field of which row the reference chips insert into: the one last focused.
+let severalFocus = null;
+
+function severalLatexMode() {
+    return $('[data-equation-mode="latex"]').classList.contains('active');
+}
+
+function renderSeveralEquations(definition) {
+    const { sourceNode, targetNode, candidates } = severalContext(definition);
+    const equationModel = definition.equationModel;
+    const check = checkSeveralEquations(equationModel, candidates, sourceNode, targetNode);
+    const list = $('#editEdgeEquationsList');
+    list.replaceChildren();
+    const hint = document.createElement('p');
+    hint.className = 'builderHint';
+    hint.textContent = 'Each equation sets a state of the source or target node to its value at every step, rather than adding a rate to it. '
+        + 'Where several relationships set the same state, their values are added. Intermediate quantities are worked out first, each from those above it.';
+    list.appendChild(hint);
+    const section = (title, kind, items) => {
+        const heading = document.createElement('h3');
+        heading.textContent = title;
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.dataset.addSeveral = kind;
+        add.textContent = '＋';
+        add.title = kind === 'definition' ? 'Add an intermediate quantity' : 'Add an equation';
+        add.addEventListener('click', () => addSeveralRow(definition, kind));
+        heading.appendChild(add);
+        list.appendChild(heading);
+        if (!items.length) {
+            const empty = document.createElement('p');
+            empty.className = 'emptyEditorState';
+            empty.textContent = kind === 'definition' ? 'None' : 'No equations yet';
+            list.appendChild(empty);
+        }
+        items.forEach((item, index) => list.appendChild(severalRow(definition, kind, item, index, items.length,
+            (kind === 'definition' ? check.definitions : check.outputs)[index], sourceNode, targetNode)));
+    };
+    section('Intermediate quantities', 'definition', equationModel.definitions ?? []);
+    section('Equations', 'output', equationModel.outputs ?? []);
+    const summary = document.createElement('div');
+    summary.className = 'severalSummary';
+    summary.setAttribute('role', 'status');
+    summary.textContent = check.errors.join(' ');
+    list.appendChild(summary);
+    // The chips insert a state, parameter, time or intermediate quantity into the field last focused.
+    const references = $('#editStateReferenceChips');
+    references.replaceChildren();
+    [...candidates, ...(equationModel.definitions ?? []).map(({ symbol }) => ({ kind: 'definition', symbol, label: symbol }))].forEach((binding) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = binding.label;
+        button.title = binding.kind === 'definition' ? 'Insert intermediate quantity' : bindingInsertTitle(binding);
+        button.addEventListener('click', () => insertSeveralReference(binding));
+        references.appendChild(button);
+    });
+}
+
+function severalRow(definition, kind, item, index, count, check, sourceNode, targetNode) {
+    const row = document.createElement('div');
+    row.className = 'severalRow';
+    row.dataset.kind = kind;
+    row.dataset.index = String(index);
+    const head = document.createElement('div');
+    head.className = 'severalRowHead';
+    if (kind === 'definition') {
+        const symbol = document.createElement('input');
+        symbol.dataset.field = 'symbol';
+        symbol.value = item.symbol ?? '';
+        symbol.setAttribute('aria-label', 'Name of the intermediate quantity');
+        symbol.spellcheck = false;
+        symbol.addEventListener('change', () => renameSeveralDefinition(definition, index, symbol.value.trim()));
+        head.appendChild(symbol);
+    } else {
+        const sets = document.createElement('select');
+        sets.dataset.field = 'sets';
+        sets.setAttribute('aria-label', 'State this equation sets');
+        [['source', sourceNode], ['target', targetNode]].forEach(([role, node]) => {
+            node?.states.forEach((state) => sets.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id))));
+        });
+        sets.value = equationOutputValue(item.role, item.stateId);
+        sets.addEventListener('change', () => {
+            const picked = parseEquationOutput(sets.value);
+            if (!picked) return;
+            changeEdgeModel(definition, (snapshot) => {
+                Object.assign(snapshot.equationModel.outputs[index], picked);
+                compileSeveral(snapshot);
+            });
+        });
+        head.appendChild(sets);
+    }
+    const equals = document.createElement('span');
+    equals.className = 'severalEquals';
+    equals.textContent = '=';
+    head.appendChild(equals);
+    const button = (text, title, onClick, unavailable = false) => {
+        const element = document.createElement('button');
+        element.type = 'button';
+        element.textContent = text;
+        element.title = title;
+        if (unavailable) element.setAttribute('data-unavailable', '');
+        element.disabled = unavailable || Boolean(activeResult);
+        element.addEventListener('click', onClick);
+        head.appendChild(element);
+        return element;
+    };
+    const what = kind === 'definition' ? 'quantity' : 'equation';
+    button('↑', `Move this ${what} up (${altKeyLabel}↑)`, () => moveSeveralRow(definition, kind, index, -1), index === 0).dataset.move = '-1';
+    button('↓', `Move this ${what} down (${altKeyLabel}↓)`, () => moveSeveralRow(definition, kind, index, 1), index === count - 1).dataset.move = '1';
+    button('×', `Remove this ${what}`, () => removeSeveralRow(definition, kind, index)).dataset.remove = '';
+    row.appendChild(head);
+
+    const latex = check?.latex ?? item.latex ?? '';
+    const visual = document.createElement('math-field');
+    visual.className = 'equationMathField';
+    visual.setAttribute('aria-label', kind === 'definition' ? `Value of ${item.symbol}` : 'Equation expression');
+    const source = document.createElement('textarea');
+    source.className = 'equationSource';
+    source.rows = 2;
+    source.spellcheck = false;
+    source.value = latex;
+    const latexMode = severalLatexMode();
+    visual.hidden = latexMode;
+    source.hidden = !latexMode;
+    row.appendChild(visual);
+    row.appendChild(source);
+    visual.value = latex;
+    for (const [field, origin] of [[visual, 'visual'], [source, 'latex']]) {
+        field.addEventListener('focus', () => { severalFocus = { kind, index }; });
+        field.addEventListener('input', () => previewSeveralEquation(kind, index, field.value, origin));
+        field.addEventListener('change', () => finishEquationEdit());
+        field.dataset.several = origin;
+    }
+    const diagnostics = document.createElement('div');
+    diagnostics.className = 'equationDiagnostics';
+    diagnostics.setAttribute('role', 'status');
+    showSeveralDiagnostics(diagnostics, check);
+    row.appendChild(diagnostics);
+    row.addEventListener('keydown', (event) => {
+        if (!event.altKey || event.ctrlKey || event.metaKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        event.preventDefault();
+        moveSeveralRow(definition, kind, index, event.key === 'ArrowUp' ? -1 : 1);
+    });
+    return row;
+}
+
+function showSeveralDiagnostics(element, check) {
+    const errors = check?.errors ?? [];
+    element.classList.toggle('valid', !errors.length);
+    element.textContent = errors.length ? errors.join(' ') : 'Valid expression · MathJSON ready';
+}
+
+function severalItems(equationModel, kind) {
+    return kind === 'definition' ? (equationModel.definitions ??= []) : (equationModel.outputs ??= []);
+}
+
+function addSeveralRow(definition, kind) {
+    changeEdgeModel(definition, (snapshot) => {
+        const { sourceNode, targetNode, candidates } = severalContext(snapshot);
+        const items = severalItems(snapshot.equationModel, kind);
+        if (kind === 'definition') items.push({ symbol: newDefinitionSymbol(snapshot.equationModel, candidates), latex: '0' });
+        else items.push({ ...nextFreeOutput(snapshot.equationModel, sourceNode, targetNode), latex: '0' });
+        compileSeveral(snapshot);
+    });
+    focusSeveralRow(kind, severalItems(definition.equationModel, kind).length - 1);
+}
+
+function removeSeveralRow(definition, kind, index) {
+    changeEdgeModel(definition, (snapshot) => {
+        severalItems(snapshot.equationModel, kind).splice(index, 1);
+        compileSeveral(snapshot);
+    });
+}
+
+function moveSeveralRow(definition, kind, index, offset) {
+    const items = severalItems(definition.equationModel, kind);
+    if (moved(items, index, offset) === items) return;
+    changeEdgeModel(definition, (snapshot) => {
+        const list = severalItems(snapshot.equationModel, kind);
+        list.splice(0, list.length, ...moved(list, index, offset));
+        compileSeveral(snapshot);
+    });
+    focusSeveralRow(kind, index + offset);
+}
+
+// Renames an intermediate quantity, and every use of it in the rows below.
+function renameSeveralDefinition(definition, index, symbol) {
+    const previous = definition.equationModel.definitions[index]?.symbol;
+    if (!previous || symbol === previous) return;
+    const spelled = (name) => latexForBinding({ symbol: name });
+    const pattern = new RegExp(spelled(previous).replace(/[\\{}]/g, '\\$&') + (previous.length === 1 ? '(?![A-Za-z0-9])' : ''), 'g');
+    changeEdgeModel(definition, (snapshot) => {
+        const equations = snapshot.equationModel;
+        equations.definitions[index].symbol = symbol;
+        const rename = (item) => {
+            if (typeof item.latex !== 'string') return;
+            const latex = item.latex.replace(pattern, spelled(symbol));
+            if (latex !== item.latex) { item.latex = latex; delete item.mathJson; }
+        };
+        equations.definitions.slice(index + 1).forEach(rename);
+        equations.outputs.forEach(rename);
+        compileSeveral(snapshot);
+    });
+}
+
+function focusSeveralRow(kind, index) {
+    const row = $(`#editEdgeEquationsList .severalRow[data-kind="${kind}"][data-index="${index}"]`);
+    if (!row) return;
+    severalFocus = { kind, index };
+    const field = severalLatexMode() ? $('textarea', row) : $('math-field', row);
+    field?.focus();
+}
+
+function previewSeveralEquation(kind, index, latex, origin) {
+    if (activeResult || !selectedRelationship) return;
+    const definition = selectedRelationship;
+    beginEquationEditSession(`edge:${definition.id}:${kind}:${index}`, () => captureEdgeModel(definition), (snapshot) => applyEdgeModel(definition, snapshot));
+    const snapshot = { source: definition.source, target: definition.target, parameters: definition.parameters, equationModel: structuredClone(definition.equationModel) };
+    const item = severalItems(snapshot.equationModel, kind)[index];
+    if (!item) return;
+    item.latex = latex;
+    // What the user typed is what counts now: no MathJSON from before stands in for it.
+    delete item.mathJson;
+    compileSeveral(snapshot);
+    definition.equationModel = snapshot.equationModel;
+    const row = $(`#editEdgeEquationsList .severalRow[data-kind="${kind}"][data-index="${index}"]`);
+    if (row && origin !== 'visual') $('math-field', row).setValue(latex, { silenceNotifications: true });
+    if (row && origin !== 'latex') $('textarea', row).value = latex;
+    // One change can make another row read or stop reading: every row's diagnostics are shown again.
+    const { sourceNode, targetNode, candidates } = severalContext(definition);
+    const check = checkSeveralEquations(definition.equationModel, candidates, sourceNode, targetNode);
+    $$('#editEdgeEquationsList .severalRow').forEach((element) => {
+        const results = element.dataset.kind === 'definition' ? check.definitions : check.outputs;
+        showSeveralDiagnostics($('.equationDiagnostics', element), results[Number(element.dataset.index)]);
+    });
+    $('#editEdgeEquationsList .severalSummary').textContent = check.errors.join(' ');
+    updateRelationships();
+    updateValidationStatus();
+}
+
+function insertSeveralReference(binding) {
+    if (activeResult || !severalFocus) return;
+    const row = $(`#editEdgeEquationsList .severalRow[data-kind="${severalFocus.kind}"][data-index="${severalFocus.index}"]`);
+    if (!row) return;
+    const latex = latexForBinding(binding);
+    if (severalLatexMode()) {
+        const source = $('textarea', row);
+        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
+        source.dispatchEvent(new Event('input', { bubbles: true }));
+        source.focus();
+    } else {
+        const visual = $('math-field', row);
+        visual.insert(latex);
+        visual.focus();
+    }
+}
+
+// ---- A relationship provider an installed plugin contributes ---------------------------------------------------
+// An implementation of `kind` (a program in C++ or Python, or an installed plugin's provider), keeping the bindings
+// and output, and the source or the plugin reference the implementation already had.
+function pluginOrProgram(kind, previous, bindings, output, title) {
+    if (kind === 'plugin') {
+        return {
+            kind, providerApiVersion: 1,
+            pluginId: previous?.pluginId ?? '', pluginVersion: previous?.pluginVersion ?? '', providerId: previous?.providerId ?? '',
+            bindings, output
+        };
+    }
+    return {
+        kind, providerApiVersion: 1,
+        source: (previous?.kind === kind || previous?.kind === 'cpp' || previous?.kind === 'python') && previous.source
+            ? previous.source : defaultProviderSource(kind, bindings, output.key, title),
+        bindings, output
+    };
+}
+
+async function fillPluginProviders(select, implementation) {
+    let choices = [];
+    try {
+        choices = pluginProviderChoices(await window.extensions.list());
+    } catch { /* none to offer */ }
+    const current = pluginProviderValue(implementation);
+    select.replaceChildren(new Option(choices.length ? 'Choose an installed provider…' : 'No plugin provider installed: install one from Extensions', ''));
+    choices.forEach((choice) => select.add(new Option(choice.label, choice.value)));
+    if (current && !choices.some((choice) => choice.value === current)) {
+        select.add(new Option(`${implementation.pluginId} ${implementation.pluginVersion}: ${implementation.providerId} (not installed here)`, current));
+    }
+    select.value = current;
+}
+
+function pluginReferenceOf(value) {
+    try {
+        const [pluginId, pluginVersion, providerId] = JSON.parse(value);
+        return { pluginId, pluginVersion, providerId };
+    } catch {
+        return null;
+    }
+}
+
+$('#editEdgePluginProvider').addEventListener('change', (event) => {
+    const reference = pluginReferenceOf(event.target.value);
+    if (!selectedRelationship?.implementation || !reference) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => Object.assign(snapshot.implementation, reference));
+});
+$('#groupPluginProvider').addEventListener('change', (event) => {
+    const reference = pluginReferenceOf(event.target.value);
+    const group = currentEdgeGroup();
+    if (!group?.definition.implementation || !reference) return;
+    changeEdgeGroupModel(group, (snapshot) => Object.assign(snapshot.definition.implementation, reference));
+});
+$('#termPluginProvider').addEventListener('change', (event) => {
+    const reference = pluginReferenceOf(event.target.value);
+    if (!selectedSourceTermNodeId || !reference) return;
+    changeSourceTermModel(nodeObjects.get(selectedSourceTermNodeId), selectedSourceTermId, (term) => Object.assign(term.implementation, reference));
+});
 
 function bindingInsertTitle(binding) {
     if (binding.kind === 'time') return 'Insert simulation time (seconds)';
@@ -4272,7 +4920,8 @@ function applyInspectorReadOnly() {
     const locked = Boolean(activeResult);
     $$('[data-result-readonly]').forEach((notice) => { notice.hidden = !locked; });
     $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button), #edgeEditor > footer button, #edgeGroupEditor section :is(input, select, textarea, button), #edgeGroupEditor > footer button').forEach((control) => {
-        control.disabled = locked;
+        // A control that is off for a reason of its own (the first row cannot move up) stays off outside results too.
+        control.disabled = locked || control.hasAttribute('data-unavailable');
     });
     $$('#nodeEditor math-field, #edgeEditor math-field, #edgeGroupEditor math-field').forEach((field) => {
         field.readOnly = locked;
@@ -4986,6 +5635,70 @@ function editParameterRow(entry, patch) {
     return '';
 }
 
+// ---- A shared parameter's stored schedule ------------------------------------------------------------------------
+let scheduleDialogParameterId = null;
+
+function openScheduleDialog(parameterId) {
+    if (activeResult) return;
+    const parameter = model.sharedParameters.find((candidate) => candidate.id === parameterId);
+    if (!parameter) return;
+    scheduleDialogParameterId = parameterId;
+    $('#scheduleDialogTitle').textContent = `${parameter.name} over time`;
+    $('#scheduleInterpolation').value = parameter.schedule?.interpolation ?? 'linear';
+    // A new schedule starts from the constant it replaces, held from time zero.
+    $('#scheduleSamples').value = parameter.schedule ? scheduleText(parameter.schedule.samples) : `0, ${parameter.value}`;
+    $('#scheduleRemove').hidden = !parameter.schedule;
+    refreshScheduleDialog();
+    $('#scheduleDialog').showModal();
+    $('#scheduleSamples').focus();
+}
+
+// The schedule as typed, or the reason it cannot be saved.
+function readScheduleDialog() {
+    const parsed = parseScheduleText($('#scheduleSamples').value);
+    if (parsed.error) return { error: parsed.error };
+    const schedule = { interpolation: $('#scheduleInterpolation').value, samples: parsed.samples };
+    const error = scheduleError(schedule);
+    return error ? { error } : { schedule };
+}
+
+function refreshScheduleDialog() {
+    const { schedule, error } = readScheduleDialog();
+    $('#scheduleSummary').textContent = schedule ? scheduleSummary(schedule) : '';
+    $('#scheduleError').textContent = error ?? '';
+    $('#scheduleSave').disabled = Boolean(error);
+}
+
+function saveScheduleDialog() {
+    const { schedule, error } = readScheduleDialog();
+    if (error || scheduleDialogParameterId === null) return;
+    changeSharedParameter(scheduleDialogParameterId, (target) => {
+        target.schedule = schedule;
+        // A scheduled parameter is not a fitting target (parameterScheduleTuned).
+        delete target.tuning;
+    });
+    $('#scheduleDialog').close();
+}
+
+$('#scheduleSamples').addEventListener('input', refreshScheduleDialog);
+$('#scheduleInterpolation').addEventListener('change', refreshScheduleDialog);
+$('#scheduleDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveScheduleDialog();
+});
+$('#scheduleSamples').addEventListener('keydown', (event) => {
+    // The samples are typed one per line, so Enter is a new line; Ctrl+Enter (⌘Return on a Mac) saves.
+    if (event.key === 'Enter' && (isMac ? event.metaKey : event.ctrlKey)) {
+        event.preventDefault();
+        saveScheduleDialog();
+    }
+});
+$('#scheduleCancel').addEventListener('click', () => $('#scheduleDialog').close());
+$('#scheduleRemove').addEventListener('click', () => {
+    if (scheduleDialogParameterId !== null) changeSharedParameter(scheduleDialogParameterId, (target) => { delete target.schedule; });
+    $('#scheduleDialog').close();
+});
+
 function changeSharedParameter(id, mutate) {
     if (activeResult) return;
     const before = structuredClone(model.sharedParameters);
@@ -5071,11 +5784,16 @@ function parameterRowCells(entry, { locked, indent = false }) {
         const summary = document.createElement('span');
         summary.className = 'scheduleCell';
         summary.dataset.field = 'schedule';
-        const label = document.createElement('span');
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'scheduleOpen';
+        label.disabled = locked;
+        label.addEventListener('click', () => openScheduleDialog(parameter.id));
         label.textContent = `Schedule · ${samples.length} sample${samples.length === 1 ? '' : 's'}`;
         label.title = samples.length
             ? `${parameter.schedule.interpolation === 'hold' ? 'Each value held until the next sample' : 'Linearly interpolated'}, from t = ${formatFittedNumber(samples[0][0])} to ${formatFittedNumber(samples.at(-1)[0])}, values ${formatFittedNumber(Math.min(...values))} to ${formatFittedNumber(Math.max(...values))}. Removing the schedule makes ${formatFittedNumber(parameter.value)} the constant value.`
             : 'An empty schedule.';
+        label.title += ' Click to edit it.';
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'scheduleRemove';
@@ -5098,7 +5816,22 @@ function parameterRowCells(entry, { locked, indent = false }) {
             const error = editParameterRow(entry, { value: value.value.trim() === '' ? NaN : Number(value.value) });
             showError(value, error);
         });
-        cell(value);
+        if (entry.kind === 'shared') {
+            // A shared parameter may follow a schedule over time instead of a constant. (Any parameter can: link it to a
+            // shared one from its editor first.)
+            const wrapper = document.createElement('span');
+            wrapper.className = 'valueWithSchedule';
+            const schedule = document.createElement('button');
+            schedule.type = 'button';
+            schedule.className = 'scheduleAdd';
+            schedule.textContent = '⏱';
+            schedule.title = 'Follow a schedule over time instead of this constant…';
+            schedule.setAttribute('aria-label', `Give ${parameter.name} a schedule`);
+            schedule.disabled = locked;
+            schedule.addEventListener('click', () => openScheduleDialog(parameter.id));
+            wrapper.append(value, schedule);
+            cell(wrapper);
+        } else cell(value);
     }
 
     const unit = document.createElement('input');
@@ -8627,6 +9360,82 @@ $('#editNodeSubsteps').addEventListener('change', (event) => {
     const substeps = Math.max(1, Math.min(10000, Math.trunc(Number(event.target.value) || 1)));
     changeNodeModel(selectedNode, (snapshot) => { snapshot.substepsPerGlobalStep = substeps; });
 });
+$('#editNodeProgramKind').addEventListener('change', async (event) => {
+    if (!selectedNode) return;
+    const node = selectedNode;
+    const kind = event.target.value;
+    const previous = node.userData.definition.implementation;
+    if (kind === 'fmi') {
+        const fmus = await refreshInstalledFmus();
+        if (fmus.length === 1) { await useFmuForNode(node, fmus[0].packageId, fmus[0].version); return; }
+        // Several FMUs (or none): the node is set to take one, and the user chooses which below.
+        changeNodeModel(node, (snapshot) => { snapshot.implementation = { kind: 'fmi', fmuId: '', fmuVersion: '', bindings: [], outputs: [] }; });
+        return;
+    }
+    changeNodeModel(node, (snapshot) => {
+        if (!kind) { snapshot.implementation = null; return; }
+        // The inputs and outputs carry over; the source is kept when the language is, or starts from a template.
+        const bindings = structuredClone(previous?.bindings ?? []);
+        const outputs = structuredClone(previous?.outputs ?? []);
+        const keep = previous?.kind === kind && previous.source;
+        snapshot.implementation = {
+            kind, providerApiVersion: 1, bindings, outputs,
+            source: keep ? previous.source : defaultNodeProviderSource(kind, bindings, outputs, snapshot.title)
+        };
+    });
+});
+$('#editNodeProgramFmu').addEventListener('change', (event) => {
+    if (!selectedNode || !event.target.value) return;
+    const [guid, version] = JSON.parse(event.target.value);
+    useFmuForNode(selectedNode, guid, version);
+});
+$('#editNodeProgramSource').addEventListener('input', (event) => {
+    if (activeResult || !selectedNode) return;
+    const node = selectedNode;
+    const definition = node.userData.definition;
+    if (!definition.implementation) return;
+    beginEquationEditSession(`nodeProgram:${node.userData.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
+    definition.implementation = { ...definition.implementation, source: event.target.value };
+    updateValidationStatus();
+});
+$('#editNodeProgramSource').addEventListener('change', () => finishEquationEdit());
+$('#editNodeProgramTemplate').addEventListener('click', () => {
+    if (!selectedNode?.userData.definition.implementation) return;
+    const node = selectedNode;
+    if ($('#editNodeProgramSource').value.trim() && !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
+    changeNodeModel(node, (snapshot) => {
+        snapshot.implementation.source = nodeProgramTemplate(snapshot.implementation.kind, snapshot.implementation, snapshot.title);
+    });
+});
+$('#editNodeProgramOpenEditor').addEventListener('click', () => {
+    const implementation = selectedNode?.userData.definition.implementation;
+    if (!implementation || implementation.kind === 'fmi') return;
+    providerEditTarget = { type: 'node', nodeId: selectedNode.userData.id };
+    window.providerEditor.openWindow({
+        source: $('#editNodeProgramSource').value,
+        kind: implementation.kind,
+        title: selectedNode.userData.definition.title
+    });
+});
+$('#editAddNodeProgramInput').addEventListener('click', () => {
+    if (!selectedNode?.userData.definition.implementation) return;
+    const node = selectedNode;
+    const { candidates } = nodeProgramContext(node);
+    changeNodeModel(node, (snapshot) => {
+        const bindings = snapshot.implementation.bindings ??= [];
+        bindings.push({ key: freeKey(bindings, 'input'), ...(candidates[0]?.binding ?? { kind: 'state', stateId: null }) });
+    });
+});
+$('#editAddNodeProgramOutput').addEventListener('click', () => {
+    if (!selectedNode?.userData.definition.implementation) return;
+    const node = selectedNode;
+    changeNodeModel(node, (snapshot) => {
+        const outputs = snapshot.implementation.outputs ??= [];
+        const used = new Set(outputs.map((output) => output.stateId));
+        const state = snapshot.states.find((candidate) => !used.has(candidate.id)) ?? snapshot.states[0];
+        outputs.push({ key: freeKey(outputs, 'output'), stateId: state?.id ?? null });
+    });
+});
 $('#editNodeIntegration').addEventListener('change', (event) => {
     if (!selectedNode) return;
     const integration = event.target.value === 'semiImplicit' ? 'semiImplicit' : 'explicit';
@@ -8678,7 +9487,7 @@ $('#editEdgeTarget').addEventListener('change', (event) => {
     });
 });
 $('#editEdgeDirectionality').addEventListener('change', (event) => {
-    if (!selectedRelationship) return;
+    if (!selectedRelationship || isSeveralEquations(selectedRelationship.equationModel)) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.directionality = event.target.value;
     });
@@ -8762,7 +9571,32 @@ $('#editEquationOutput').addEventListener('change', (event) => {
 $('#editEdgeImplementationKind').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     const kind = event.target.value;
+    const wasSeveral = isSeveralEquations(selectedRelationship.equationModel);
+    if (kind === 'equations') {
+        if (wasSeveral) return;
+        // The one equation becomes the first of several, now setting its state; the relationship becomes directed.
+        changeEdgeModel(selectedRelationship, (snapshot) => {
+            const { sourceNode, targetNode, candidates } = severalContext(snapshot);
+            const single = snapshot.implementation
+                ? { latex: '0', output: { role: snapshot.implementation.output?.role ?? 'target', stateId: snapshot.implementation.output?.stateId } }
+                : snapshot.equationModel;
+            snapshot.equationModel = severalFromSingle(single, candidates, sourceNode, targetNode);
+            snapshot.implementation = null;
+            snapshot.directionality = 'directed';
+        });
+        return;
+    }
+    if (wasSeveral) {
+        const { outputs = [], definitions = [] } = selectedRelationship.equationModel;
+        if ((outputs.length > 1 || definitions.length) && !window.confirm(
+            `Keep only the first equation${definitions.length ? ', with the intermediate quantities it reads written into it' : ''}? The others are removed (Undo brings them back).`)) {
+            event.target.value = 'equations';
+            return;
+        }
+    }
     changeEdgeModel(selectedRelationship, (snapshot) => {
+        // From several equations, the first one stays, adding a rate to its state again.
+        if (wasSeveral) snapshot.equationModel = singleFromSeveral(snapshot.equationModel);
         if (kind === 'equation') {
             snapshot.implementation = null;
             return;
@@ -8770,14 +9604,7 @@ $('#editEdgeImplementationKind').addEventListener('change', (event) => {
         const { role, stateId } = parseEquationOutput($('#editEquationOutput').value) ?? { role: 'target', stateId: null };
         const bindings = snapshot.implementation?.bindings ?? [];
         const output = snapshot.implementation?.output ?? { key: 'output', role, stateId };
-        snapshot.implementation = {
-            kind,
-            providerApiVersion: 1,
-            source: snapshot.implementation?.source
-                || defaultProviderSource(kind, bindings, output.key, snapshot.title),
-            bindings,
-            output
-        };
+        snapshot.implementation = pluginOrProgram(kind, snapshot.implementation, bindings, output, snapshot.title);
     });
 });
 $('#editInsertProviderTemplate').addEventListener('click', () => {
@@ -8831,6 +9658,13 @@ window.providerEditor.onApplied(({ source }) => {
         if (!document.body.contains(providerEditTarget.sourceElement)) return fail('The source term builder was closed.');
         providerEditTarget.sourceElement.value = source;
         providerEditTarget.sourceElement.dispatchEvent(new Event('input', { bubbles: true }));
+        return succeed();
+    }
+    if (providerEditTarget.type === 'node') {
+        if (activeResult) return fail('Results are locked — close them to apply changes.');
+        const node = nodeObjects.get(providerEditTarget.nodeId);
+        if (!node || node.userData.definition.deleted || !node.userData.definition.implementation) return fail('This node no longer has a program.');
+        changeNodeModel(node, (snapshot) => { snapshot.implementation.source = source; });
         return succeed();
     }
     if (providerEditTarget.type === 'group') {
@@ -8903,14 +9737,7 @@ $('#termImplementationKind').addEventListener('change', (event) => {
         const stateId = Number($('#termOutputState').value) || node.userData.definition.states[0]?.id || null;
         const bindings = term.implementation?.bindings ?? [];
         const output = term.implementation?.output ?? { key: 'output', stateId };
-        term.implementation = {
-            kind,
-            providerApiVersion: 1,
-            source: term.implementation?.source
-                || defaultProviderSource(kind, bindings, output.key, node.userData.definition.title),
-            bindings,
-            output
-        };
+        term.implementation = pluginOrProgram(kind, term.implementation, bindings, output, node.userData.definition.title);
     });
 });
 $('#termSetsValue').addEventListener('change', (event) => {
@@ -9001,6 +9828,15 @@ $('[data-delete-source-term]').addEventListener('click', () => {
 $$('[data-equation-mode]').forEach((button) => button.addEventListener('click', () => {
     $$('[data-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
     const latexMode = button.dataset.equationMode === 'latex';
+    if (selectedRelationship && isSeveralEquations(selectedRelationship.equationModel)) {
+        // Every row of a relationship with several equations switches, and the keyboard stays on the row it was on.
+        $$('#editEdgeEquationsList .severalRow').forEach((row) => {
+            $('math-field', row).hidden = latexMode;
+            $('textarea', row).hidden = !latexMode;
+        });
+        if (severalFocus) focusSeveralRow(severalFocus.kind, severalFocus.index);
+        return;
+    }
     $('#editEdgeMathField').hidden = latexMode;
     $('#editEdgeEquation').hidden = !latexMode;
     (latexMode ? $('#editEdgeEquation') : $('#editEdgeMathField')).focus();
@@ -11438,6 +12274,7 @@ function renderEdgeGroupEditor(group) {
     $('#groupImplementationKind').value = implementationKind;
     $('#groupEquationHeading').hidden = !isEquation;
     $('#groupEquationDiagnostics').hidden = !isEquation;
+    $('#groupFunctions').hidden = !isEquation;
     $('#groupReferenceHint').hidden = !isEquation;
     $('#groupProviderSection').hidden = isEquation;
 
@@ -11475,6 +12312,10 @@ function renderEdgeGroupEditor(group) {
     } else {
         mathField.hidden = true;
         latexSource.hidden = true;
+        const fromPlugin = group.definition.implementation?.kind === 'plugin';
+        $('#groupProviderCode').hidden = fromPlugin;
+        $('#groupPluginProviderFields').hidden = !fromPlugin;
+        if (fromPlugin) fillPluginProviders($('#groupPluginProvider'), group.definition.implementation);
         $('#groupProviderSource').value = group.definition.implementation?.source ?? '';
         $('#groupInsertProviderTemplate').hidden = !group.definition.implementation?.source?.trim();
         $('#groupProviderOutputKey').value = group.definition.implementation?.output?.key ?? '';
@@ -11864,6 +12705,7 @@ $('#groupImplementationKind').addEventListener('change', (event) => {
     const isEquation = event.target.value === 'equation';
     $('#groupEquationHeading').hidden = !isEquation;
     $('#groupEquationDiagnostics').hidden = !isEquation;
+    $('#groupFunctions').hidden = !isEquation;
     $('#groupReferenceHint').hidden = !isEquation;
     $('#groupProviderSection').hidden = isEquation;
     const latexMode = $('[data-group-equation-mode="latex"]').classList.contains('active');
@@ -11878,13 +12720,7 @@ $('#groupImplementationKind').addEventListener('change', (event) => {
         }
         const bindings = snapshot.definition.implementation?.bindings ?? [];
         const output = snapshot.definition.implementation?.output ?? { key: 'output' };
-        snapshot.definition.implementation = {
-            kind,
-            providerApiVersion: 1,
-            source: snapshot.definition.implementation?.source || defaultProviderSource(kind, bindings, output.key, snapshot.name),
-            bindings,
-            output
-        };
+        snapshot.definition.implementation = pluginOrProgram(kind, snapshot.definition.implementation, bindings, output, snapshot.name);
     });
 });
 $('#groupInsertProviderTemplate').addEventListener('click', () => {

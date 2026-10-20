@@ -88,6 +88,8 @@ export const extensions = {
     install: async () => ({ available: false }),
     uninstall: async () => ({ available: false }),
     setEnabled: async () => ({ available: false }),
+    // No FMU is ever installed in the web edition.
+    fmuPorts: async () => ({ error: 'FMUs run in the desktop app only.' }),
     // Called unconditionally at renderer startup (restart-pending badge, update-count badge), so
     // they need no-op stand-ins here -- nothing is ever installed in the web edition to restart for
     // or update.

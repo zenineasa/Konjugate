@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { installFmuArchive } from '../src/fmuPackage.mjs';
-import { resolveFmiSource, resolveInstalledFmus, FmiResolutionError } from '../src/fmiResolver.mjs';
+import { describeInstalledFmuPorts, resolveFmiSource, resolveInstalledFmus, FmiResolutionError } from '../src/fmiResolver.mjs';
 import { packageKey } from '../src/packageArchive.mjs';
 
 function fakeFmuBytes({ guid = 'guid-1', variables = '' } = {}) {
@@ -185,5 +185,18 @@ test('resolveInstalledFmus walks node implementations and leaves non-fmi kinds u
         const resolved = JSON.parse(await resolveInstalledFmus(document, { fmuDirectory: directory }));
         assert.equal(resolved.nodes[0].implementation.kind, 'cpp');
         assert.equal(resolved.nodes[1].implementation, undefined);
+    });
+});
+
+test('an installed FMU\'s ports are described under the keys a node\'s implementation uses, for the node editor to wire', async () => {
+    await withInstalledFmu(async (directory, installed) => {
+        const ports = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
+        assert.deepEqual(ports, {
+            name: 'Decay', fmiVersion: '2.0',
+            inputs: [{ key: 'k', name: 'k', causality: 'input' }],
+            outputs: [{ key: 'decayLevel', name: 'Decay.Level' }]
+        });
+        await assert.rejects(describeInstalledFmuPorts(directory, installed.guid, '9.9.9'), /is not installed/);
+        await assert.rejects(describeInstalledFmuPorts(directory, '../escape', '1.0.0'), /unsafe/);
     });
 });

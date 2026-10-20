@@ -649,4 +649,47 @@ assert.notEqual(await run(executable, [
     '--output', join(directory, 'nodeProviderRestartMissingProviderState.bin')
 ]), 0);
 
+// The canvas's starting program for a node (Program in the node editor) runs as written, in Python and in C++, once its
+// two outputs are filled in: a rate for the tank's level, and a value set every substep.
+{
+    const { defaultNodeProviderSource } = await import('../../src/providerTemplate.mjs');
+    const runTemplate = async (kind) => {
+        let source = defaultNodeProviderSource(kind, [{ key: 'level' }, { key: 'setpoint' }], [{ key: 'rate' }, { key: 'shown' }], 'Tank');
+        source = kind === 'python'
+            ? source.replace('outputs.add_gradient("rate", 0.0)', 'outputs.add_gradient("rate", inputs["setpoint"] - inputs["level"])')
+                .replace('outputs.add_gradient("shown", 0.0)', 'outputs.add_gradient("shown", 2 * inputs["level"])')
+            : source.replace('outputs.addGradient("rate", 0.0);', 'outputs.addGradient("rate", context.inputs.at("setpoint") - context.inputs.at("level"));')
+                .replace('outputs.addGradient("shown", 0.0);', 'outputs.addGradient("shown", 2 * context.inputs.at("level"));');
+        const templateProject = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' },
+            sharedParameters: [{ id: 9, name: 'Setpoint', symbol: 'setpoint', value: 10, mode: 'constant' }],
+            nodes: [{
+                id: 1, name: 'Tank', position: [0, 0, 0], sourceTerms: [],
+                states: [{ id: 2, name: 'Level', symbol: 'level', initialValue: 0 }, { id: 3, name: 'Shown', symbol: 'shown', initialValue: 0 }],
+                implementation: {
+                    kind, providerApiVersion: 1, source,
+                    bindings: [{ key: 'level', kind: 'state', stateId: 2 }, { key: 'setpoint', kind: 'parameter', sharedParameterId: 9 }],
+                    outputs: [{ key: 'rate', stateId: 2 }, { key: 'shown', stateId: 3, setsValue: true }]
+                }
+            }],
+            edges: []
+        };
+        const templateInput = join(directory, `nodeTemplate-${kind}.kjt`);
+        await writeFile(templateInput, await encodeProjectFile(JSON.stringify(templateProject)));
+        await writeFile(join(directory, `nodeTemplate-${kind}.json`), JSON.stringify({
+            name: 'Template', targetTime: 2, globalTimeStep: 0.01, outputInterval: 0.5,
+            providers: kind === 'python'
+                ? { python: { sdkPath: pythonSdkPath } }
+                : { executionMode: 'inProcess', cpp: { sdkPath: join(dirname(pythonSdkPath), '..') } }
+        }));
+        assert.equal(await run(executable, ['run', templateInput, '--configuration', join(directory, `nodeTemplate-${kind}.json`),
+            '--output', join(directory, `nodeTemplate-${kind}.bin`)]), 0, `The ${kind} node template did not run.`);
+        return decodeResultFile(await readFile(join(directory, `nodeTemplate-${kind}.bin`))).samples.map((sample) => sample.states.map((state) => state.value));
+    };
+    const python = await runTemplate('python');
+    const cpp = await runTemplate('cpp');
+    assert.ok(Math.abs(python.at(-1)[0] - 10 * (1 - 0.99 ** 200)) < 1e-9, `The level should approach its setpoint as written, not ${python.at(-1)[0]}.`);
+    assert.deepEqual(cpp, python, 'The C++ and Python templates should compute the same.');
+}
+
 console.log('C++/Electron container compatibility passed.');

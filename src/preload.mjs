@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('projectFiles', {
 
 contextBridge.exposeInMainWorld('extensions', {
     list: () => ipcRenderer.invoke('packageList'),
+    // An installed FMU's input and output ports, for wiring it into a node.
+    fmuPorts: (guid, version) => ipcRenderer.invoke('packageFmuPorts', { guid, version }),
     install: () => ipcRenderer.invoke('packageInstall'),
     uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version }),
     setEnabled: (packageType, packageId, version, enabled) => ipcRenderer.invoke('packageSetEnabled', { packageType, packageId, version, enabled }),

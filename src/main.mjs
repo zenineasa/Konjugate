@@ -48,6 +48,7 @@ import { inspectPackageArchive, installPackageArchive, listInstalledPackages, lo
 import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
 import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
+import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
@@ -1521,6 +1522,16 @@ ipcMain.handle('packageInstall', async (event) => {
         packageId: installed.packageManifest.packageId,
         version: installed.packageManifest.version
     };
+});
+
+// An installed FMU's ports, for the node editor to wire it: { name, fmiVersion, inputs, outputs } (see
+// describeInstalledFmuPorts), or { error } when it cannot be read.
+ipcMain.handle('packageFmuPorts', async (_event, { guid, version }) => {
+    try {
+        return await describeInstalledFmuPorts(join(app.getPath('userData'), 'packages'), guid, version);
+    } catch (error) {
+        return { error: error.message };
+    }
 });
 
 ipcMain.handle('packageList', async () => {

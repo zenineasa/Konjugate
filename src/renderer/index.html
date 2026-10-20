@@ -106,6 +106,18 @@
         <div id="diagnosticsList" class="diagnosticsList"></div>
     </div>
 
+    <dialog id="scheduleDialog" class="passwordDialog scheduleDialog">
+        <form method="dialog">
+            <span class="contextKicker">Shared parameter</span>
+            <strong id="scheduleDialogTitle">Schedule</strong>
+            <p>Its value follows these samples over simulation time, in every run, in place of a constant. One sample per line: the time, then the value, with a comma, tab or space between them, so two columns pasted from a spreadsheet work as they are.</p>
+            <label><span>Between samples</span><select id="scheduleInterpolation"><option value="linear">Linearly interpolated</option><option value="hold">Each value held until the next sample</option></select></label>
+            <label><span>Samples (time, value)</span><textarea id="scheduleSamples" rows="10" spellcheck="false"></textarea></label>
+            <p id="scheduleSummary" class="builderHint" role="status"></p>
+            <div class="passwordError" id="scheduleError" role="alert"></div>
+            <footer><button id="scheduleRemove" class="footerLeftButton" type="button">Remove the schedule</button><button id="scheduleCancel" type="button">Cancel</button><button id="scheduleSave" class="doneButton" type="submit" title="Save (Ctrl+Enter, ⌘Return on a Mac)">Save</button></footer>
+        </form>
+    </dialog>
     <dialog id="passwordDialog" class="passwordDialog">
         <form method="dialog">
             <span class="contextKicker">Protected project</span>
@@ -605,6 +617,33 @@
                 <h3>Source terms <button id="editAddSourceTerm" type="button">＋</button></h3>
                 <div id="nodeEditorSourceTerms"></div>
             </section>
+            <section id="nodeProgramSection">
+                <label class="editorField"><span>Program</span><select id="editNodeProgramKind">
+                    <option value="">None: its states change by their source terms and relationships</option>
+                    <option value="python">Python program</option>
+                    <option value="cpp">C++ program</option>
+                    <option value="fmi">Installed FMU</option>
+                </select></label>
+                <p id="editNodeProgramHint" class="builderHint">A program computes this node's states itself, once per substep, beside its source terms: it reads any node's states and shared parameters, and keeps state of its own across checkpoints.</p>
+                <div id="nodeProgramFields" hidden>
+                    <div id="nodeProgramSourceFields">
+                        <div class="equationHeading"><h3>Source</h3><div class="templateButtonGroup">
+                            <button id="editNodeProgramOpenEditor" class="templateButton" type="button">Open code editor</button>
+                            <button id="editNodeProgramTemplate" class="templateButton" type="button">Reset template</button>
+                        </div></div>
+                        <textarea id="editNodeProgramSource" class="providerSource" rows="12" spellcheck="false"></textarea>
+                    </div>
+                    <div id="nodeProgramFmuFields" hidden>
+                        <label class="editorField"><span>FMU</span><select id="editNodeProgramFmu"></select></label>
+                        <p class="builderHint">Its inputs and outputs are the FMU's own; wire each below. Every output sets its state to the value the FMU reports.</p>
+                    </div>
+                    <h3>Inputs <button id="editAddNodeProgramInput" type="button" title="Add an input">＋</button></h3>
+                    <div id="nodeProgramInputs"></div>
+                    <h3>Outputs <button id="editAddNodeProgramOutput" type="button" title="Add an output">＋</button></h3>
+                    <div id="nodeProgramOutputs"></div>
+                    <div class="passwordError" id="nodeProgramError" role="alert"></div>
+                </div>
+            </section>
             <div class="passwordError" id="editNodeError" role="alert"></div>
             </div>
             <div data-node-panel="results" hidden>
@@ -623,7 +662,7 @@
                         <option value="explicit">Explicit Euler</option>
                         <option value="semiImplicit">Semi-implicit Euler (states in order)</option>
                     </select></label>
-                    <p class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy.</p>
+                    <p class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy. Reorder the states on the Model tab with their ↑ and ↓ buttons, or Alt (⌥ on a Mac) with the arrow keys.</p>
                     <p class="builderHint">The node timestep is the global timestep divided by this integer. Cross-node values remain fixed until the next global synchronization.</p>
                     <div class="derivedTimeStep">Effective timestep <strong id="nodeEffectiveTimeStep">—</strong></div>
                 </section>
@@ -655,6 +694,12 @@
                         </div>
                     </label>
                 </section>
+                <section>
+                    <h3>Body parts <label class="geometrySourceButton partAddButton" title="Add a part from an STL or STEP file"><input id="editAddNodePart" type="file" accept=".stl,.step,.stp">＋</label></h3>
+                    <p class="builderHint">Shapes for result visualizers such as Pose Visualizer, each drawn where the node's states put its body: the states named by its prefix (<code>armX</code>, <code>armY</code>, <code>armZ</code> and a turn for the prefix <code>arm</code>; <code>x</code>, <code>y</code>, <code>z</code> for none), with its mesh in metres in the body's own frame. The canvas draws the node's own shape above.</p>
+                    <label class="editorField"><span>A file's lengths are in</span><select id="editNodePartUnit"><option value="0.001">Millimetres</option><option value="1">Metres</option></select></label>
+                    <div id="nodeParts"></div>
+                </section>
             </div>
             <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="toggleNodeEnabled" type="button">Disable node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
         </div>
@@ -667,6 +712,7 @@
                     <option value="equation">Equation</option>
                     <option value="cpp">C++ program</option>
                     <option value="python">Python program</option>
+                    <option value="plugin">Installed plugin provider</option>
                 </select></label>
                 <label class="editorField"><span>Sets</span><select id="termSetsValue">
                     <option value="false">The derivative (default)</option>
@@ -682,14 +728,21 @@
                 <math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field>
                 <textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
                 <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
+                 <p id="termFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
                 <div id="termReferencePicker" class="referencePicker"><span>Available references</span><div id="termStateReferenceChips"></div></div>
                 <div id="termProviderSection" hidden>
-                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                        <button id="termOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
-                        <button id="termInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                    </div></div>
-                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                    <textarea id="termProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <div id="termProviderCode">
+                        <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                            <button id="termOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
+                            <button id="termInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                        </div></div>
+                        <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                        <textarea id="termProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    </div>
+                    <div id="termPluginProviderFields" hidden>
+                        <label class="editorField"><span>Provider</span><select id="termPluginProvider"></select></label>
+                        <p class="builderHint">A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.</p>
+                    </div>
                     <h3>Bindings <button id="termAddProviderBinding" type="button">＋</button></h3>
                     <p class="builderHint">Each binding exposes one state of this node to the provider under a stable key.</p>
                     <div id="termProviderBindings"></div>
@@ -718,23 +771,32 @@
             <section>
                 <label class="editorField"><span>Implementation</span><select id="editEdgeImplementationKind">
                     <option value="equation">Equation</option>
+                    <option value="equations">Equations that set values</option>
                     <option value="cpp">C++ program</option>
                     <option value="python">Python program</option>
+                    <option value="plugin">Installed plugin provider</option>
                 </select></label>
                 <label class="editorField"><span>Updates</span><select id="editEquationOutput"></select></label>
-                <div id="editEdgeEquationsList" hidden></div>
                 <div id="editEdgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <div id="editEdgeEquationsList" hidden></div>
                 <math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
                 <textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
+                 <p id="edgeFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
                 <div id="editEdgeReferencePicker" class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
                 <div id="editEdgeProviderSection" hidden>
-                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                        <button id="editOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
-                        <button id="editInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                    </div></div>
-                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                    <textarea id="editEdgeProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <div id="editEdgeProviderCode">
+                        <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                            <button id="editOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
+                            <button id="editInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                        </div></div>
+                        <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                        <textarea id="editEdgeProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    </div>
+                    <div id="editEdgePluginProviderFields" hidden>
+                        <label class="editorField"><span>Provider</span><select id="editEdgePluginProvider"></select></label>
+                        <p class="builderHint">A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.</p>
+                    </div>
                     <h3>Bindings <button id="editAddProviderBinding" type="button">＋</button></h3>
                     <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
                     <div id="editEdgeProviderBindings"></div>
@@ -760,20 +822,28 @@
                     <option value="equation">Equation</option>
                     <option value="cpp">C++ program</option>
                     <option value="python">Python program</option>
+                    <option value="plugin">Installed plugin provider</option>
                 </select></label>
                 <label class="editorField"><span>Updates</span><select id="groupEquationOutput"></select></label>
                 <div id="groupEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-group-equation-mode="visual" type="button">Visual</button><button data-group-equation-mode="latex" type="button">LaTeX</button></div></div>
                 <math-field id="groupMathField" class="equationMathField" aria-label="Equation expression"></math-field>
                 <textarea id="groupEquation" class="equationSource" rows="3" placeholder="Choose references below, or enter LaTeX" hidden></textarea>
                 <div id="groupEquationDiagnostics" class="equationDiagnostics" role="status"></div>
+                 <p id="groupFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
                 <p id="groupReferenceHint" class="builderHint"></p>
                 <div id="groupProviderSection" hidden>
-                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                        <button id="groupOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
-                        <button id="groupInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                    </div></div>
-                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                    <textarea id="groupProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    <div id="groupProviderCode">
+                        <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+                            <button id="groupOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
+                            <button id="groupInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
+                        </div></div>
+                        <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
+                        <textarea id="groupProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
+                    </div>
+                    <div id="groupPluginProviderFields" hidden>
+                        <label class="editorField"><span>Provider</span><select id="groupPluginProvider"></select></label>
+                        <p class="builderHint">A relationship provider an installed plugin contributes, pinned to that installed version, used on every edge of the group.</p>
+                    </div>
                     <h3>Bindings <button id="groupAddProviderBinding" type="button">＋</button></h3>
                     <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
                     <div id="groupProviderBindingRows" class="builderRows"></div>

@@ -4077,9 +4077,9 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
     await run('a node provider survives the canvas, with its body parts, and its shared parameter is listed and kept as used', async () => {
-        // A node has no parameters of its own; its computational-node provider reads a shared one. The canvas has no
-        // editor for the provider, but must keep it, and count its binding as a use of the shared parameter, or the
-        // live controls, the parameters table and a save would leave the parameter out.
+        // A node has no parameters of its own; its computational-node provider reads a shared one. The canvas must keep
+        // the provider as written until the user edits it (under Program in the node editor), and count its binding as
+        // a use of the shared parameter, or the live controls, the parameters table and a save would leave it out.
         const implementation = {
             kind: 'python', providerApiVersion: 1, source: 'provider source',
             bindings: [{ key: 'payload', kind: 'parameter', sharedParameterId: 100 }],
@@ -4537,6 +4537,395 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(crowdedWindow, `document.querySelector('[data-detail="nodes"]').title`), new RegExp(`${leftOut} left out where they would overlap`));
         await closeWhenValidated(crowdedWindow);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    // ---- Everything a toolbox can write, a user can write in the canvas ------------------------------------------------
+    // A small model of two nodes joined by one edge, loaded into this window, for the scenarios below.
+    const loadAuthoringProject = async (overrides = {}) => {
+        const state = (id, symbol, initialValue = 0) => ({ id, name: symbol, symbol, initialValue });
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [
+                { id: 1, name: 'Mass', position: [-4, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                    states: [state(2, 'position', 1), state(3, 'speed')], sourceTerms: [] },
+                { id: 4, name: 'Probe', position: [4, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                    states: [state(5, 'angle'), state(6, 'reading')], sourceTerms: [] }
+            ],
+            edges: [{
+                id: 7, name: 'Sense', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 4, stateId: 5 }, directionality: 'directed',
+                equation: '0', equationModel: { latex: '0', output: { role: 'target', stateId: 5 }, bindings: [], mathJson: 0 },
+                parameters: [], appearance: { color: '#888888', offset: 0 }
+            }],
+            ...overrides
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)})`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 2`, 'The authoring project did not load.');
+    };
+    const savedProject = async () => JSON.parse(await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`));
+    const openNode = async (title) => {
+        const label = `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes(${JSON.stringify(title)}))`;
+        await waitFor(window, `Boolean(${label})`, `The ${title} label was not on the canvas.`);
+        await evaluate(window, `${label}.click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === ${JSON.stringify(title)}`, `The ${title} node editor did not open.`);
+    };
+    const openRelationship = async (title) => {
+        // A third of the way along, clear of the label the canvas draws at the middle, once the view has stopped moving
+        // (a model just loaded is still being fitted into view).
+        const locate = () => evaluate(window, `JSON.stringify(window.__relationshipScreenPoint(${JSON.stringify(title)}, 0.3))`);
+        let previous = null;
+        let located = await locate();
+        for (let attempt = 0; attempt < 40 && located !== previous; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            previous = located;
+            located = await locate();
+        }
+        const point = JSON.parse(located);
+        assert.ok(point, `Could not locate ${title} on screen.`);
+        await window.mouseMove(point);
+        await window.mouseDown(point, { button: 'left', clickCount: 1 });
+        await window.mouseUp(point, { button: 'left', clickCount: 1 });
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === ${JSON.stringify(title)}`, `The ${title} edge editor did not open.`);
+    };
+    const typeInto = (selector, value, event = 'change') => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
+
+    await run('atan2 is typed as most people write it, and the equation help lists every function', async () => {
+        await loadAuthoringProject();
+        await openRelationship('Sense');
+        await evaluate(window, `document.querySelector('[data-equation-mode="latex"]').click()`);
+        await typeInto(`document.querySelector('#editEdgeEquation')`, String.raw`\operatorname{atan2}(\mathrm{sourceSpeed},\mathrm{sourcePosition})`);
+        await waitFor(window, `document.querySelector('#equationDiagnostics').classList.contains('valid')`, 'atan2 was not accepted.');
+        assert.match(await evaluate(window, `document.querySelector('#edgeFunctions').textContent`), /atan2\(y, x\)/);
+        assert.deepEqual((await savedProject()).edges[0].equationModel.mathJson, ['Arctan2', 'sourceSpeed', 'sourcePosition']);
+        await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    });
+
+    await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
+        await loadAuthoringProject();
+        await openNode('Mass');
+        const order = async () => (await savedProject()).nodes[0].states.map(({ symbol }) => symbol);
+        const row = (symbol) => `[...document.querySelectorAll('#nodeEditorStates .editorStateRow')].find((item) => item.querySelector('[data-field="symbol"]').value === ${JSON.stringify(symbol)})`;
+        assert.equal(await evaluate(window, `${row('position')}.querySelector('[data-move="-1"]').disabled`), true, 'The first state cannot move up.');
+        // By button: the speed moves before the position it changes, as semi-implicit integration wants.
+        await evaluate(window, `${row('speed')}.querySelector('[data-move="-1"]').click()`);
+        assert.deepEqual(await order(), ['speed', 'position']);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.deepEqual(await order(), ['position', 'speed']);
+        // Undo closes the inspector, as it always does; open it again.
+        await openNode('Mass');
+        // By key, from a field of the row, which keeps the keyboard on the moved row.
+        await evaluate(window, `(() => { const field = ${row('position')}.querySelector('[data-field="name"]'); field.focus(); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true })); })()`);
+        assert.deepEqual(await order(), ['speed', 'position']);
+        assert.equal(await evaluate(window, `document.activeElement === ${row('position')}.querySelector('[data-field="name"]')`), true,
+            `The moved row keeps the focus, not ${await evaluate(window, `document.activeElement?.outerHTML?.slice(0, 120)`)}.`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.deepEqual(await order(), ['position', 'speed']);
+    });
+
+    // Waits for the engine's own verdict on the model as it now is.
+    const engineVerdict = async (message) => {
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('pending')`, message, 15000);
+        return evaluate(window, `!document.querySelector('#validationSummary').classList.contains('error')`);
+    };
+    const gainParameter = { id: 8, name: 'Gain', symbol: 'gain', value: 2, mode: 'constant' };
+    const singleSense = {
+        id: 7, name: 'Sense', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 4, stateId: 5 }, directionality: 'bidirectional',
+        equation: String.raw`\mathrm{sourceSpeed}`,
+        equationModel: { latex: String.raw`\mathrm{sourceSpeed}`, output: { role: 'target', stateId: 6 }, bindings: [], mathJson: 'sourceSpeed' },
+        parameters: [gainParameter], appearance: { color: '#888888', offset: 0 }
+    };
+
+    await run('a relationship gets several equations that set values, each written, named, moved and removed in the canvas', async () => {
+        await loadAuthoringProject({ edges: [singleSense] });
+        await openRelationship('Sense');
+        const several = () => savedProject().then((project) => project.edges[0]);
+        const rowSelector = (kind, index) => `document.querySelector('#editEdgeEquationsList .severalRow[data-kind="${kind}"][data-index="${index}"]')`;
+        const setRowLatex = (kind, index, latex) => typeInto(`${rowSelector(kind, index)}.querySelector('textarea')`, latex);
+        const select = (selector, value) => evaluate(window, `(() => { const element = ${selector}; element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
+        // The one equation becomes the first of several, setting its state; the relationship becomes directed.
+        await select(`document.querySelector('#editEdgeImplementationKind')`, 'equations');
+        await waitFor(window, `!document.querySelector('#editEdgeEquationsList').hidden`, 'The equations editor did not open.');
+        let edge = await several();
+        assert.equal(edge.directionality, 'directed');
+        assert.deepEqual(edge.equationModel.outputs, [{ role: 'target', stateId: 6, latex: String.raw`\mathrm{sourceSpeed}`, mathJson: 'sourceSpeed', setsValue: true }]);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').disabled`), true);
+        await evaluate(window, `document.querySelector('[data-equation-mode="latex"]').click()`);
+
+        // An intermediate quantity, renamed: the equations reading it follow.
+        await evaluate(window, `document.querySelector('[data-add-several="definition"]').click()`);
+        await setRowLatex('definition', 0, String.raw`2\cdot\mathrm{gain}`);
+        await evaluate(window, `document.querySelector('[data-add-several="output"]').click()`);
+        await waitFor(window, `Boolean(${rowSelector('output', 1)})`, 'The new equation row did not appear.');
+        assert.equal(await evaluate(window, `${rowSelector('output', 1)}.querySelector('select').selectedOptions[0].textContent`), 'target.angle', 'A new equation sets a state no other equation sets.');
+        await setRowLatex('output', 1, String.raw`\mathrm{q1}\cdot\mathrm{sourceSpeed}`);
+        await waitFor(window, `${rowSelector('output', 1)}.querySelector('.equationDiagnostics').classList.contains('valid')`, 'The equation reading the quantity was not valid.');
+        await typeInto(`${rowSelector('definition', 0)}.querySelector('[data-field="symbol"]')`, 'twice');
+        edge = await several();
+        assert.deepEqual(edge.equationModel.definitions, [{ symbol: 'twice', latex: String.raw`2\cdot\mathrm{gain}`, mathJson: ['Multiply', 2, 'gain'] }]);
+        assert.equal(edge.equationModel.outputs[1].latex, String.raw`\mathrm{twice}\cdot\mathrm{sourceSpeed}`);
+        assert.deepEqual([edge.equationModel.outputs[1].mathJson[0], ...edge.equationModel.outputs[1].mathJson.slice(1).sort()], ['Multiply', 'sourceSpeed', 'twice']);
+        assert.deepEqual(edge.equationModel.bindings.map(({ symbol }) => symbol).sort(), ['gain', 'sourceSpeed']);
+        assert.equal(await engineVerdict('The model with several equations was not validated.'), true, 'The engine should accept the equations written in the canvas.');
+
+        // A reference chip inserts into the field last focused.
+        await evaluate(window, `${rowSelector('output', 0)}.querySelector('textarea').focus()`);
+        await evaluate(window, `(() => { const field = ${rowSelector('output', 0)}.querySelector('textarea'); field.setSelectionRange(field.value.length, field.value.length); })()`);
+        await evaluate(window, `[...document.querySelectorAll('#editStateReferenceChips button')].find((chip) => chip.textContent === 'twice').click()`);
+        await waitFor(window, `${rowSelector('output', 0)}.querySelector('textarea').value.endsWith('\\\\mathrm{twice}')`, 'The chip did not insert into the focused equation.');
+
+        // Two equations setting one state are refused on the row, by name.
+        await select(`${rowSelector('output', 1)}.querySelector('select')`, (await evaluate(window, `${rowSelector('output', 0)}.querySelector('select').value`)));
+        assert.match(await evaluate(window, `${rowSelector('output', 1)}.querySelector('.equationDiagnostics').textContent`), /target\.reading is set by another equation/);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await openRelationship('Sense');
+
+        // Moved by button and by key, then removed.
+        await evaluate(window, `${rowSelector('output', 1)}.querySelector('[data-move="-1"]').click()`);
+        assert.deepEqual((await several()).equationModel.outputs.map(({ stateId }) => stateId), [5, 6]);
+        await evaluate(window, `(() => { const field = ${rowSelector('output', 0)}.querySelector('textarea'); field.focus(); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true })); })()`);
+        assert.deepEqual((await several()).equationModel.outputs.map(({ stateId }) => stateId), [6, 5]);
+        await evaluate(window, `${rowSelector('output', 1)}.querySelector('[data-remove]').click()`);
+        assert.deepEqual((await several()).equationModel.outputs.map(({ stateId }) => stateId), [6]);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.deepEqual((await several()).equationModel.outputs.map(({ stateId }) => stateId), [6, 5], 'Undo brings a removed equation back.');
+
+        // Back to one equation: the first stays, with the quantity it reads written into it.
+        await openRelationship('Sense');
+        await evaluate(window, `window.__confirmAnswer = window.confirm; window.confirm = () => true`);
+        await select(`document.querySelector('#editEdgeImplementationKind')`, 'equation');
+        await evaluate(window, `window.confirm = window.__confirmAnswer`);
+        edge = await several();
+        assert.equal(edge.equationModel.outputs, undefined);
+        assert.deepEqual(edge.equationModel.output, { role: 'target', stateId: 6 });
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').disabled`), false);
+        await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    });
+
+    await run('a relationship a toolbox wrote with several equations opens readable, and editing one equation keeps the others exactly', async () => {
+        // As the robotics toolbox writes a joint: its own binding symbols, MathJSON, and LaTeX that is only for show.
+        const written = {
+            id: 7, name: 'Joint', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 4, stateId: 5 }, directionality: 'directed',
+            equation: '', parameters: [gainParameter], appearance: { color: '#888888', offset: 0 },
+            equationModel: {
+                bindings: [{ symbol: 'pX', kind: 'state', role: 'source', nodeId: 1, stateId: 2 }, { symbol: 'gain', kind: 'parameter', parameterId: 8 }],
+                definitions: [{ symbol: 'cosq', mathJson: ['Cos', 'pX'], latex: String.raw`\cos\left(\mathrm{p}_{X}\right)` }],
+                outputs: [
+                    { role: 'target', stateId: 5, mathJson: ['Multiply', 'gain', 'cosq'], latex: String.raw`\mathrm{gain}\,\mathrm{cosq}`, setsValue: true },
+                    { role: 'target', stateId: 6, mathJson: ['Add', 'pX', 1], setsValue: true }
+                ]
+            }
+        };
+        await loadAuthoringProject({ edges: [written] });
+        assert.equal(await engineVerdict('The toolbox relationship was not validated.'), true);
+        await openRelationship('Joint');
+        await evaluate(window, `document.querySelector('[data-equation-mode="latex"]').click()`);
+        const rowField = (kind, index) => `document.querySelector('#editEdgeEquationsList .severalRow[data-kind="${kind}"][data-index="${index}"] textarea')`;
+        assert.equal(await evaluate(window, `${rowField('definition', 0)}.value`), String.raw`\cos\left(\mathrm{pX}\right)`, 'LaTeX that does not read back is shown as written from the MathJSON.');
+        assert.equal(await evaluate(window, `${rowField('output', 1)}.value`), String.raw`\mathrm{pX}+1`, 'An equation with no LaTeX is shown as written from its MathJSON.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#editEdgeEquationsList .equationDiagnostics')].every((item) => item.classList.contains('valid'))`), true);
+        // Opening it changed nothing.
+        assert.deepEqual((await savedProject()).edges[0].equationModel, written.equationModel);
+        await typeInto(rowField('output', 1), String.raw`\mathrm{pX}+2`);
+        const edited = (await savedProject()).edges[0].equationModel;
+        assert.deepEqual(edited.outputs[1].mathJson, ['Add', 'pX', 2]);
+        assert.deepEqual(edited.outputs[0].mathJson, written.equationModel.outputs[0].mathJson);
+        assert.deepEqual(edited.definitions[0].mathJson, written.equationModel.definitions[0].mathJson);
+        assert.deepEqual(edited.bindings, written.equationModel.bindings, 'The toolbox\'s bindings are kept as they were.');
+        assert.equal(await engineVerdict('The edited relationship was not validated.'), true);
+        await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    });
+
+    await run('a shared parameter is given a schedule, edited, removed and undone from the parameters table', async () => {
+        await loadAuthoringProject({
+            sharedParameters: [{ id: 100, name: 'Price', symbol: 'price', value: 2, unit: '', mode: 'constant' }],
+            edges: [{ ...singleSense, directionality: 'directed', equation: String.raw`\mathrm{gain}`,
+                equationModel: { latex: String.raw`\mathrm{gain}`, output: { role: 'target', stateId: 6 }, bindings: [{ kind: 'parameter', parameterId: 8, symbol: 'gain' }], mathJson: 'gain' },
+                parameters: [{ ...gainParameter, sharedParameterId: 100 }] }]
+        });
+        const shared = async () => (await savedProject()).sharedParameters.find(({ id }) => id === 100);
+        if (await evaluate(window, `document.querySelector('#parametersPanel').hidden`)) await evaluate(window, `document.querySelector('#parametersButton').click()`);
+        await waitFor(window, `!document.querySelector('#parametersPanel').hidden`, 'The parameters panel did not open.');
+        const sharedRow = `document.querySelector('#parametersTable tr.sharedRow')`;
+        await waitFor(window, `Boolean(${sharedRow}?.querySelector('.scheduleAdd'))`, 'The shared parameter has no schedule button.');
+        await evaluate(window, `${sharedRow}.querySelector('.scheduleAdd').click()`);
+        await waitFor(window, `document.querySelector('#scheduleDialog').open`, 'The schedule dialog did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#scheduleSamples').value`), '0, 2', 'A new schedule starts from the constant it replaces.');
+        // Times that do not increase cannot be saved, and the dialog says why.
+        await typeInto(`document.querySelector('#scheduleSamples')`, 'time, price\n0, 2\n10, 3\n10, 4', 'input');
+        assert.match(await evaluate(window, `document.querySelector('#scheduleError').textContent`), /times must increase/);
+        assert.equal(await evaluate(window, `document.querySelector('#scheduleSave').disabled`), true);
+        await typeInto(`document.querySelector('#scheduleSamples')`, 'time, price\n0, 2\n10, 3\n20, 4', 'input');
+        assert.match(await evaluate(window, `document.querySelector('#scheduleSummary').textContent`), /3 samples, linearly interpolated/);
+        // Saved by key, as by the button.
+        await evaluate(window, `document.querySelector('#scheduleSamples').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true }))`);
+        await waitFor(window, `!document.querySelector('#scheduleDialog').open`, 'Ctrl+Enter did not save the schedule.');
+        assert.deepEqual((await shared()).schedule, { interpolation: 'linear', samples: [[0, 2], [10, 3], [20, 4]] });
+        assert.equal(await engineVerdict('The scheduled parameter was not validated.'), true);
+        // Edited: each value held.
+        await evaluate(window, `${sharedRow}.querySelector('.scheduleOpen').click()`);
+        await waitFor(window, `document.querySelector('#scheduleDialog').open`, 'The schedule did not open for editing.');
+        assert.equal(await evaluate(window, `document.querySelector('#scheduleSamples').value`), '0, 2\n10, 3\n20, 4');
+        await evaluate(window, `(() => { const select = document.querySelector('#scheduleInterpolation'); select.value = 'hold'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(window, `document.querySelector('#scheduleSave').click()`);
+        assert.equal((await shared()).schedule.interpolation, 'hold');
+        // Removed from the dialog, and undone.
+        await evaluate(window, `${sharedRow}.querySelector('.scheduleOpen').click()`);
+        await evaluate(window, `document.querySelector('#scheduleRemove').click()`);
+        assert.equal((await shared()).schedule, undefined);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal((await shared()).schedule?.interpolation, 'hold');
+        await evaluate(window, `document.querySelector('#parametersButton').click()`);
+    });
+
+    await run('a node gets a program in the node editor: its language, inputs from any node or shared parameter, outputs and source', async () => {
+        await loadAuthoringProject({ sharedParameters: [{ id: 100, name: 'Setpoint', symbol: 'setpoint', value: 10, unit: '', mode: 'constant' }] });
+        await openNode('Mass');
+        const program = async () => (await savedProject()).nodes[0].implementation;
+        const select = (selector, value) => evaluate(window, `(() => { const element = ${selector}; element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await select(`document.querySelector('#editNodeProgramKind')`, 'python');
+        await waitFor(window, `!document.querySelector('#nodeProgramFields').hidden`, 'The program fields did not open.');
+        assert.match((await program()).source, /class Mass\(NodeProvider\)/, 'A new program starts from a template.');
+        assert.match(await evaluate(window, `document.querySelector('#nodeProgramError').textContent`), /Add an output/);
+        // An input reading another node's state, one reading a shared parameter, and an output setting a value.
+        await evaluate(window, `document.querySelector('#editAddNodeProgramInput').click()`);
+        await select(`document.querySelector('#nodeProgramInputs .nodeProgramRow select')`, 'state:4:6');
+        await evaluate(window, `document.querySelector('#editAddNodeProgramInput').click()`);
+        await select(`document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')[1].querySelector('select')`, 'shared:100');
+        await typeInto(`document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')[1].querySelector('[data-field="key"]')`, 'setpoint');
+        await evaluate(window, `document.querySelector('#editAddNodeProgramOutput').click()`);
+        await evaluate(window, `(() => { const box = document.querySelector('#nodeProgramOutputs [data-field="setsValue"]'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        let implementation = await program();
+        assert.deepEqual(implementation.bindings, [{ key: 'input', kind: 'state', nodeId: 4, stateId: 6 }, { key: 'setpoint', kind: 'parameter', sharedParameterId: 100 }]);
+        assert.deepEqual(implementation.outputs, [{ key: 'output', stateId: 2, setsValue: true }]);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeProgramError').textContent`), '');
+        // The template is written again from the inputs and outputs, and the source is typed: one undo step each.
+        await evaluate(window, `window.__confirmAnswer = window.confirm; window.confirm = () => true`);
+        await evaluate(window, `document.querySelector('#editNodeProgramTemplate').click()`);
+        await evaluate(window, `window.confirm = window.__confirmAnswer`);
+        implementation = await program();
+        assert.match(implementation.source, /ScalarPort\("setpoint", "setpoint", ""\)/);
+        assert.match(implementation.source, /outputs\.add_gradient\("output", 0\.0\)/);
+        await typeInto(`document.querySelector('#editNodeProgramSource')`, implementation.source.replace('0.0)', 'inputs["setpoint"])'));
+        assert.match((await program()).source, /add_gradient\("output", inputs\["setpoint"\]\)/);
+        assert.equal(await engineVerdict('The node with a program was not validated.'), true);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.match((await program()).source, /add_gradient\("output", 0\.0\)/, 'Undo takes back the typing.');
+        // C++, then none.
+        await openNode('Mass');
+        await select(`document.querySelector('#editNodeProgramKind')`, 'cpp');
+        implementation = await program();
+        assert.equal(implementation.kind, 'cpp');
+        assert.match(implementation.source, /public konjugate::sdk::v1::NodeProvider/);
+        assert.equal(implementation.bindings.length, 2, 'The inputs carry over to another language.');
+        await select(`document.querySelector('#editNodeProgramKind')`, '');
+        assert.equal(await program(), undefined);
+    });
+
+    await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
+        // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
+        await evaluate(window, `(() => {
+            window.__extensionsList = window.extensions.list; window.__fmuPorts = window.extensions.fmuPorts;
+            window.extensions.list = async () => [{ packageType: 'fmu', packageId: 'guid-1', name: 'Heater', version: '1.0', enabled: true }];
+            window.extensions.fmuPorts = async () => ({ name: 'Heater', fmiVersion: '2.0', inputs: [{ key: 'power', name: 'power', causality: 'input' }], outputs: [{ key: 'temperature', name: 'temperature' }] });
+        })()`);
+        try {
+            await loadAuthoringProject();
+            await openNode('Mass');
+            await evaluate(window, `(() => { const element = document.querySelector('#editNodeProgramKind'); element.value = 'fmi'; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(window, `document.querySelectorAll('#nodeProgramInputs .nodeProgramRow').length === 1`, 'The FMU\'s input was not listed.');
+            let implementation = (await savedProject()).nodes[0].implementation;
+            assert.deepEqual(implementation, { kind: 'fmi', fmuId: 'guid-1', fmuVersion: '1.0', bindings: [{ key: 'power', kind: 'state', stateId: null }], outputs: [{ key: 'temperature', stateId: null, setsValue: true }] });
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramInputs [data-field="key"]').readOnly`), true, 'The FMU\'s keys are its own.');
+            assert.equal(await evaluate(window, `document.querySelector('#editAddNodeProgramInput').hidden`), true);
+            await evaluate(window, `(() => { const element = document.querySelector('#nodeProgramInputs select'); element.value = 'state:4:6'; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await evaluate(window, `(() => { const element = document.querySelector('#nodeProgramOutputs select'); element.value = '3'; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            implementation = (await savedProject()).nodes[0].implementation;
+            assert.deepEqual(implementation.bindings, [{ key: 'power', kind: 'state', nodeId: 4, stateId: 6 }]);
+            assert.deepEqual(implementation.outputs, [{ key: 'temperature', stateId: 3, setsValue: true }]);
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramOutputs [data-field="setsValue"]').disabled`), true, 'An FMU reports values, never rates.');
+        } finally {
+            await evaluate(window, `window.extensions.list = window.__extensionsList; window.extensions.fmuPorts = window.__fmuPorts`);
+        }
+    }, { skip: driver.kind !== 'playwright' && 'stands in for an installed FMU, which the desktop bridge does not let a test replace; the FMU import fidelity tests cover real ones' });
+
+    await run('a node is given body parts for result visualizers, each from a mesh file, named, coloured, replaced and removed', async () => {
+        await loadAuthoringProject();
+        await openNode('Mass');
+        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
+        const parts = async () => (await savedProject()).nodes[0].appearance.parts;
+        // A one-triangle STL in millimetres, chosen as a person picks a file.
+        const choose = (selector, size) => evaluate(window, `(() => {
+            const stl = ['solid t', 'facet normal 0 0 1', 'outer loop', 'vertex 0 0 0', 'vertex ${size} 0 0', 'vertex 0 ${size} 0', 'endloop', 'endfacet', 'endsolid t'].join(String.fromCharCode(10));
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([stl], 'triangle.stl'));
+            const input = ${selector};
+            input.files = transfer.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await choose(`document.querySelector('#editAddNodePart')`, 1000);
+        await waitFor(window, `document.querySelectorAll('#nodeParts .nodePartRow').length === 1`, 'The part was not added.');
+        let saved = await parts();
+        assert.deepEqual(saved, [{ prefix: '', color: '#888888', mesh: { position: [0, 0, 0, 1, 0, 0, 0, 1, 0], normal: [0, 0, 1, 0, 0, 1, 0, 0, 1], index: [0, 1, 2] } }]);
+        assert.match(await evaluate(window, `document.querySelector('#nodeParts .nodePartProblem').textContent`), /no state x, y, z/, 'A part its node cannot place says so.');
+        await typeInto(`document.querySelector('#nodeParts [data-field="prefix"]')`, 'arm');
+        await typeInto(`document.querySelector('#nodeParts [data-field="color"]')`, '#d08b4a');
+        await choose(`document.querySelector('#nodeParts .partMesh input')`, 500);
+        await waitFor(window, `document.querySelector('#nodeParts .partMesh')?.textContent.startsWith('1 triangles')`, 'The replaced mesh was not shown.');
+        saved = await parts();
+        assert.equal(saved[0].prefix, 'arm');
+        assert.equal(saved[0].color, '#d08b4a');
+        assert.deepEqual(saved[0].mesh.position, [0, 0, 0, 0.5, 0, 0, 0, 0.5, 0]);
+        await evaluate(window, `document.querySelector('#nodeParts .nodePartRow > button').click()`);
+        assert.equal(await parts(), undefined, 'With no parts left, the node has none.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal((await parts())[0].prefix, 'arm');
+    });
+
+    await run('an installed plugin\'s provider is chosen for a relationship and for a source term', async () => {
+        await evaluate(window, `(() => {
+            window.__extensionsList = window.extensions.list;
+            window.extensions.list = async () => [{ packageType: 'plugin', packageId: 'example.helloProvider', name: 'Hello', version: '0.1.0',
+                enabled: true, manifest: { contributes: [{ providerId: 'example.helloWorld', runtime: 'python' }] } }];
+        })()`);
+        try {
+            await loadAuthoringProject({ edges: [{ ...singleSense, directionality: 'directed' }] });
+            const select = (selector, value) => evaluate(window, `(() => { const element = ${selector}; element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            const reference = JSON.stringify(['example.helloProvider', '0.1.0', 'example.helloWorld']);
+            await openRelationship('Sense');
+            await select(`document.querySelector('#editEdgeImplementationKind')`, 'plugin');
+            await waitFor(window, `!document.querySelector('#editEdgePluginProviderFields').hidden && document.querySelector('#editEdgePluginProvider').options.length === 2`, 'The installed providers were not offered.');
+            assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderCode').hidden`), true, 'A plugin provider has no source to edit.');
+            await select(`document.querySelector('#editEdgePluginProvider')`, reference);
+            let edge = (await savedProject()).edges[0];
+            assert.deepEqual({ ...edge.implementation, output: undefined }, {
+                kind: 'plugin', providerApiVersion: 1, pluginId: 'example.helloProvider', pluginVersion: '0.1.0', providerId: 'example.helloWorld', bindings: [], output: undefined
+            });
+            assert.equal(edge.implementation.output.stateId, 6, 'The state it updates carries over.');
+            await select(`document.querySelector('#editEdgeImplementationKind')`, 'python');
+            edge = (await savedProject()).edges[0];
+            assert.match(edge.implementation.source, /RelationshipProvider/, 'A program starts from a template again.');
+            await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+
+            // A source term of the Mass node.
+            await openNode('Mass');
+            await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
+            if (await evaluate(window, `document.querySelector('#sourceTermEditor').classList.contains('hidden')`)) {
+                await waitFor(window, `Boolean(document.querySelector('#nodeEditorSourceTerms .sourceTermOpen'))`, 'The source term was not added.');
+                await evaluate(window, `[...document.querySelectorAll('#nodeEditorSourceTerms .sourceTermOpen')].at(-1).click()`);
+            }
+            await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term editor did not open.');
+            await select(`document.querySelector('#termImplementationKind')`, 'plugin');
+            await waitFor(window, `!document.querySelector('#termPluginProviderFields').hidden && document.querySelector('#termPluginProvider').options.length === 2`, 'The installed providers were not offered for the source term.');
+            await select(`document.querySelector('#termPluginProvider')`, reference);
+            const term = (await savedProject()).nodes[0].sourceTerms.at(-1);
+            assert.equal(term.implementation.kind, 'plugin');
+            assert.equal(term.implementation.providerId, 'example.helloWorld');
+        } finally {
+            await evaluate(window, `window.extensions.list = window.__extensionsList`);
+        }
+    }, { skip: driver.kind !== 'playwright' && 'stands in for an installed plugin, which the desktop bridge does not let a test replace' });
 
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

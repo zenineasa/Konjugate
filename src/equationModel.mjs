@@ -70,6 +70,14 @@ export function latexForBinding(binding) {
     return binding.symbol.length === 1 ? binding.symbol : `\\mathrm{${binding.symbol}}`;
 }
 
+// What the parser folds a division by zero and the like into: no number the engine can run.
+const nonFiniteSymbols = new Set(['ComplexInfinity', 'PositiveInfinity', 'NegativeInfinity', 'NaN', 'Undefined']);
+
+function containsSymbol(expression, names) {
+    if (typeof expression === 'string') return names.has(expression);
+    return Array.isArray(expression) && expression.slice(1).some((operand) => containsSymbol(operand, names));
+}
+
 function collectUnsupportedOperators(expression, unsupported = new Set()) {
     if (!Array.isArray(expression)) return unsupported;
     const [operator, ...operands] = expression;
@@ -109,14 +117,109 @@ function collectConditionErrors(expression, condition = false, errors = new Set(
     return errors;
 }
 
+// Function names typed as \operatorname{...} that mean an operation the engine knows: atan2 is how most people write
+// the two-argument arctangent (the parser's own spelling for it is \arctan(y, x)).
+const functionAliases = new Map([['atan2', 'Arctan2'], ['arctan2', 'Arctan2'], ['Atan2', 'Arctan2']]);
+
+// What the parser reads, in the operations the engine runs: \exp(x) and e^{x} as Exp, e and \pi as numbers, a
+// fraction of two numbers as a division, an nth root as a power, and a subtraction as adding the negation.
+function canonicalFunctions(expression) {
+    if (expression === 'ExponentialE') return Math.E;
+    if (expression === 'Pi') return Math.PI;
+    // A number with more digits than a double holds comes as { num: "..." }: the engine reads doubles.
+    if (expression && typeof expression === 'object' && !Array.isArray(expression)) {
+        if ('num' in expression) return Number(expression.num);
+        if ('sym' in expression) return canonicalFunctions(expression.sym);
+        if ('fn' in expression) return canonicalFunctions(expression.fn);
+    }
+    if (!Array.isArray(expression)) return expression;
+    const [head, ...rest] = expression;
+    const operator = functionAliases.get(head) ?? head;
+    if (operator === 'Power' && rest[0] === 'ExponentialE') return ['Exp', canonicalFunctions(rest[1])];
+    const operands = rest.map(canonicalFunctions);
+    if (operator === 'Rational') return ['Divide', ...operands];
+    if (operator === 'Root') return ['Power', operands[0], ['Divide', 1, operands[1]]];
+    if (operator === 'Subtract') return ['Add', operands[0], ['Negate', operands[1]]];
+    return [operator, ...operands];
+}
+
+// ---- MathJSON as LaTeX ------------------------------------------------------------------------------------------------
+// Writes an executable expression as LaTeX that validateEquationLatex reads back as the same expression, so an equation
+// a toolbox wrote as MathJSON alone can be shown and edited in the canvas like a typed one.
+
+const latexFunctions = {
+    Sin: '\\sin', Cos: '\\cos', Tan: '\\tan', Arcsin: '\\arcsin', Arccos: '\\arccos', Arctan: '\\arctan', Tanh: '\\tanh',
+    Exp: '\\exp', Ln: '\\ln', Log: '\\log', Min: '\\min', Max: '\\max', Arctan2: '\\arctan'
+};
+const latexComparisons = { Less: '<', LessEqual: '\\le ', Greater: '>', GreaterEqual: '\\ge ', Equal: '=', NotEqual: '\\ne ' };
+
+function numberLatex(value) {
+    if (!Number.isFinite(value)) throw new Error(`${value} cannot be written as LaTeX.`);
+    const text = String(value);
+    if (!/e/i.test(text)) return text;
+    const [mantissa, exponent] = value.toExponential().split('e');
+    return `${mantissa}\\times10^{${Number(exponent)}}`;
+}
+
+const parenthesize = (text) => `\\left(${text}\\right)`;
+const isNegative = (expression) => (typeof expression === 'number' && expression < 0) || (Array.isArray(expression) && expression[0] === 'Negate');
+
+export function mathJsonToLatex(expression) {
+    if (typeof expression === 'number') return numberLatex(expression);
+    if (typeof expression === 'string') {
+        if (expression === 'True') return '\\text{otherwise}';
+        return latexForBinding({ symbol: expression });
+    }
+    if (!Array.isArray(expression)) throw new Error('An expression is a number, a symbol or an operation.');
+    const [operator, ...operands] = expression;
+    const write = mathJsonToLatex;
+    // An operand of a product or a power is wrapped unless it binds at least as tightly.
+    const factor = (operand) => {
+        const text = write(operand);
+        return isNegative(operand) || (Array.isArray(operand) && ['Add', 'Subtract'].includes(operand[0])) ? parenthesize(text) : text;
+    };
+    const atom = (operand) => (typeof operand === 'string' || (typeof operand === 'number' && operand >= 0)
+        || (Array.isArray(operand) && (latexFunctions[operand[0]] || ['Abs', 'Sqrt'].includes(operand[0])))
+        ? write(operand) : parenthesize(write(operand)));
+    if (latexFunctions[operator]) return `${latexFunctions[operator]}${parenthesize(operands.map(write).join(','))}`;
+    if (latexComparisons[operator]) return operands.map(write).join(latexComparisons[operator]);
+    switch (operator) {
+    case 'Add': return operands.map((operand, index) => {
+        if (index === 0) return write(operand);
+        if (typeof operand === 'number' && operand < 0) return numberLatex(operand);
+        if (Array.isArray(operand) && operand[0] === 'Negate') return `-${factor(operand[1])}`;
+        return `+${write(operand)}`;
+    }).join('');
+    case 'Subtract': return `${write(operands[0])}-${factor(operands[1])}`;
+    case 'Multiply': return operands.map(factor).join('\\cdot ');
+    case 'Negate': return `-${factor(operands[0])}`;
+    case 'Divide': return `\\frac{${write(operands[0])}}{${write(operands[1])}}`;
+    case 'Power': return `${atom(operands[0])}^{${write(operands[1])}}`;
+    case 'Sqrt': return `\\sqrt{${write(operands[0])}}`;
+    case 'Root': return `\\sqrt[${write(operands[1])}]{${write(operands[0])}}`;
+    case 'Abs': return `\\left|${write(operands[0])}\\right|`;
+    case 'And': return operands.map((operand) => parenthesize(write(operand))).join('\\land ');
+    case 'Or': return operands.map((operand) => parenthesize(write(operand))).join('\\lor ');
+    case 'Not': return `\\lnot${parenthesize(write(operands[0]))}`;
+    case 'Which': {
+        const rows = [];
+        for (let index = 0; index < operands.length; index += 2) rows.push(`${write(operands[index + 1])}&${write(operands[index])}`);
+        return `\\begin{cases}${rows.join('\\\\')}\\end{cases}`;
+    }
+    default: throw new Error(`The operation ${operator} cannot be written as LaTeX.`);
+    }
+}
+
 export function validateEquationLatex(latex, bindings = []) {
     if (!latex?.trim()) return { valid: false, mathJson: null, symbols: [], errors: ['Enter an expression.'] };
-    const expression = computeEngine.parse(latex);
+    const parsed = computeEngine.parse(latex);
+    const expression = { errors: parsed.errors, unknowns: parsed.unknowns, symbols: parsed.symbols, json: canonicalFunctions(parsed.json) };
     const errors = expression.errors.map(() => 'The LaTeX expression could not be parsed.');
     const knownSymbols = new Set(bindings.map((binding) => binding.symbol));
     const unknownSymbols = expression.unknowns.filter((symbol) => !knownSymbols.has(symbol));
     if (unknownSymbols.length) errors.push(`Unknown ${unknownSymbols.length === 1 ? 'symbol' : 'symbols'}: ${unknownSymbols.join(', ')}.`);
     const unsupported = [...collectUnsupportedOperators(expression.json)];
+    if (containsSymbol(expression.json, nonFiniteSymbols)) errors.push('The expression divides by zero or is otherwise not a number.');
     if (unsupported.length) errors.push(`Unsupported ${unsupported.length === 1 ? 'operation' : 'operations'}: ${unsupported.join(', ')}.`);
     else errors.push(...collectConditionErrors(expression.json));
     return {

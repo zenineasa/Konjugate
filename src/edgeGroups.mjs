@@ -46,7 +46,10 @@ export function resolveGroupEdgeForPair({ group, sourceNode, targetNode, allocat
     const implementation = usesImplementation ? {
         kind: definition.implementation.kind,
         providerApiVersion: definition.implementation.providerApiVersion,
-        source: definition.implementation.source,
+        // A program's source, or an installed plugin's provider, pinned to its version.
+        ...(definition.implementation.kind === 'plugin'
+            ? { pluginId: definition.implementation.pluginId, pluginVersion: definition.implementation.pluginVersion, providerId: definition.implementation.providerId }
+            : { source: definition.implementation.source }),
         bindings: definition.implementation.bindings.map((binding) => binding.kind === 'parameter'
             ? { key: binding.key, kind: 'parameter', parameterId: binding.parameterId }
             : {

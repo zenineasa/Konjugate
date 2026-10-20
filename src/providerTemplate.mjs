@@ -206,3 +206,87 @@ std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProv
 }
 `;
 }
+
+/**
+ * A starter computational-node provider (a node's own program): it reads every declared input by its key and adds
+ * to every declared output, and keeps no state of its own, so checkpoint() is empty. A program that keeps state (a
+ * controller's integral, say) saves it in checkpoint() and reads it back in restore(), so forks and resumed runs
+ * carry on exactly.
+ */
+export function defaultNodeProviderSource(kind, inputs = [], outputs = [], title = '') {
+    const inputKeys = sanitizedKeys(inputs);
+    const outputKeys = sanitizedKeys(outputs);
+    const { id, name, className } = providerIdentity(title || 'Node');
+    if (kind === 'python') {
+        const ports = (keys) => keys.map((key) => `                ScalarPort("${key}", "${key}", ""),`).join('\n') || '                # None declared yet.';
+        return `from konjugate import NodeProvider, NodeProviderDescription, ScalarPort
+
+
+class ${className}(NodeProvider):
+    def describe(self):
+        return NodeProviderDescription(
+            "${id}",
+            "${name}",
+            [
+${ports(inputKeys)}
+            ],
+            [
+${ports(outputKeys)}
+            ],
+        )
+
+    def evaluate(self, context, inputs, outputs):
+        # Each input by its key (context.simulation_time and context.step_size are there too):
+${(inputKeys.length ? inputKeys : ['key']).map((key) => `        #   ${key} = inputs["${key}"]`).join('\n')}
+        # Each output: a rate added to its state, or the state's value when the output sets the value.
+${outputKeys.length ? outputKeys.map((key) => `        outputs.add_gradient("${key}", 0.0)`).join('\n') : '        pass'}
+
+    def checkpoint(self):
+        return b""
+
+    def restore(self, payload):
+        pass
+`;
+    }
+    const ports = (keys) => keys.map((key) => `                konjugate::sdk::v1::ScalarPort{"${key}", "${key}", ""}`).join(',\n') || '                // None declared yet.';
+    return `#include <konjugate/relationshipProvider.hpp>
+
+#include <memory>
+
+namespace {
+
+class ${className} final : public konjugate::sdk::v1::NodeProvider {
+public:
+    konjugate::sdk::v1::NodeProviderDescription describe() const override {
+        return {
+            "${id}",
+            "${name}",
+            {
+${ports(inputKeys)}
+            },
+            {
+${ports(outputKeys)}
+            }
+        };
+    }
+
+    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
+                  konjugate::sdk::v1::NodeOutputCollector& outputs) override {
+        // Each input by its key (context.simulationTime and context.stepSize are there too):
+${(inputKeys.length ? inputKeys : ['key']).map((key) => `        //   const double ${key} = context.inputs.at("${key}");`).join('\n')}
+        // Each output: a rate added to its state, or the state's value when the output sets the value.
+${outputKeys.map((key) => `        outputs.addGradient("${key}", 0.0);`).join('\n') || '        (void)context;'}
+        (void)outputs;
+    }
+
+    std::vector<std::byte> checkpoint() const override { return {}; }
+    void restore(std::span<const std::byte>) override {}
+};
+
+}
+
+std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
+    return std::make_unique<${className}>();
+}
+`;
+}

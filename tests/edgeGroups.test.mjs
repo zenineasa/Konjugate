@@ -132,3 +132,19 @@ test('strips edge groups and member tags without mutating the input document', (
     });
     assert.equal(document.edges[0].groupId, 100);
 });
+
+test('a group whose provider an installed plugin contributes gives every member edge that reference, pinned to its version', () => {
+    const group = makeGroup();
+    group.definition.implementation = {
+        kind: 'plugin', providerApiVersion: 1, pluginId: 'example.helloProvider', pluginVersion: '0.1.0', providerId: 'example.helloWorld',
+        bindings: [{ key: 'own', kind: 'state', role: 'target', symbol: 'temperature' }], output: { key: 'output' }
+    };
+    let nextId = 500;
+    const edge = resolveGroupEdgeForPair({ group, sourceNode: nodeA, targetNode: nodeB, allocateId: () => nextId++ });
+    assert.deepEqual(edge.implementation, {
+        kind: 'plugin', providerApiVersion: 1, pluginId: 'example.helloProvider', pluginVersion: '0.1.0', providerId: 'example.helloWorld',
+        bindings: [{ key: 'own', kind: 'state', role: 'target', nodeId: 2, stateId: 20 }],
+        output: { key: 'output', role: 'target', stateId: 20 }
+    });
+    assert.equal('source' in edge.implementation, false);
+});

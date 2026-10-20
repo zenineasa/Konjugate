@@ -480,6 +480,36 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
     };
 }
 
+// An installed FMU's ports as a node's implementation names them: each input or parameter, which the node must bind
+// to a state or a shared parameter, and each output, which sets a state of the node. For the canvas, so a user can wire
+// an FMU into a node without writing the keys by hand. Returns { name, fmiVersion, inputs: [{ key, name, causality }],
+// outputs: [{ key, name }] }.
+export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
+    if (!fmuDirectory) throw new FmiResolutionError('FMI import requires an installed FMU directory.', 'FMU_DIRECTORY_MISSING');
+    if (typeof guid !== 'string' || !guid || typeof version !== 'string' || !versionPattern.test(version)) {
+        throw new FmiResolutionError('An FMU is named by its fmuId and fmuVersion.', 'FMU_REFERENCE_INVALID');
+    }
+    const fmusRoot = resolve(fmuDirectory, 'fmus');
+    const fmuRoot = resolve(fmusRoot, guid, version);
+    if (!fmuRoot.startsWith(`${fmusRoot}${sep}`)) throw new FmiResolutionError('The FMU reference path is unsafe.', 'FMU_REFERENCE_INVALID');
+    let xmlText;
+    try {
+        xmlText = await readFile(resolve(fmuRoot, 'modelDescription.xml'), 'utf8');
+    } catch {
+        throw new FmiResolutionError(`FMU ${guid} version ${version} is not installed.`, 'FMU_NOT_INSTALLED');
+    }
+    const description = parseModelDescription(xmlText);
+    const inputVariables = description.variables.filter((variable) => variable.causality === 'input' || variable.causality === 'parameter');
+    const outputVariables = description.variables.filter((variable) => variable.causality === 'output');
+    const inputKeys = keyByVariableName(inputVariables, 'input/parameter');
+    const outputKeys = keyByVariableName(outputVariables, 'output');
+    return {
+        name: description.modelName, fmiVersion: description.fmiVersion,
+        inputs: inputVariables.map((variable) => ({ key: inputKeys.get(variable.name), name: variable.name, causality: variable.causality })),
+        outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name }))
+    };
+}
+
 // The document-walk counterpart to pluginResolver.mjs's resolveInstalledPlugins, scoped to node
 // implementations only -- `kind: "fmi"` is only ever valid there (see docs/projectSchema.md), not
 // on an edge or source term. Kept as its own pass rather than folded into resolveInstalledPlugins

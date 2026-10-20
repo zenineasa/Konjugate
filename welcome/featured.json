@@ -1,6 +1,14 @@
 {
     "format": "konjugate-welcome-feed",
     "formatVersion": 1,
-    "featured": [],
+    "featured": [
+        {
+            "id": "break-it-before-the-world-does",
+            "kind": "video",
+            "title": "Break It Before the World Does",
+            "text": "Start with the first episode of the playlist.",
+            "url": "https://youtu.be/X8D1G_xipbI"
+        }
+    ],
     "moreToWatch": []
 }

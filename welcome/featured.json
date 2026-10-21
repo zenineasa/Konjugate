@@ -3,9 +3,16 @@
     "formatVersion": 1,
     "featured": [
         {
-            "id": "break-it-before-the-world-does",
+            "id": "break-it-before-the-world-does-ep-2",
             "kind": "video",
-            "title": "Break It Before the World Does",
+            "title": "Could Your City Run Out of Bread? | Break It Before the World Does Ep. 2",
+            "text": "What happens to your shelves if the border closes for two weeks?",
+            "url": "https://www.youtube.com/watch?v=Ur_3iGknlnQ"
+        },
+        {
+            "id": "break-it-before-the-world-does-ep-1",
+            "kind": "video",
+            "title": "Hormuz Closed: What About Your Shelves? | Break It Before the World Does Ep. 1",
             "text": "Start with the first episode of the playlist.",
             "url": "https://youtu.be/X8D1G_xipbI"
         }

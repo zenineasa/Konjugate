@@ -173,3 +173,11 @@ test('the module imports nothing, so it can be tested and reasoned about on its 
     const source = await readFile(new URL('../src/welcomeFeed.mjs', import.meta.url), 'utf8');
     assert.ok(!/^\s*import\s/m.test(source));
 });
+
+test('the repository welcome/featured.json parses cleanly with no problems', async () => {
+    const raw = JSON.parse(await readFile(new URL('../welcome/featured.json', import.meta.url), 'utf8'));
+    const result = parseWelcomeFeed(raw);
+    assert.deepEqual(result.problems, []);
+    assert.equal(result.featured[0].id, 'break-it-before-the-world-does-ep-2');
+    assert.equal(result.featured[0].thumbnailVideoId, 'Ur_3iGknlnQ');
+});

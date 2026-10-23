@@ -5090,9 +5090,9 @@ export async function runInteractionTests(driver) {
 
         // Back to one equation: the first stays, with the quantity it reads written into it.
         await openRelationship('Sense');
-        await evaluate(window, `window.__confirmAnswer = window.confirm; window.confirm = () => true`);
+        await evaluate(window, `(() => { window.__confirmAnswer = window.confirm; window.confirm = () => true; })()`);
         await select(`document.querySelector('#editEdgeImplementationKind')`, 'equation');
-        await evaluate(window, `window.confirm = window.__confirmAnswer`);
+        await evaluate(window, `(() => { window.confirm = window.__confirmAnswer; })()`);
         edge = await several();
         assert.equal(edge.equationModel.outputs, undefined);
         assert.deepEqual(edge.equationModel.output, { role: 'target', stateId: 6 });
@@ -5200,9 +5200,9 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(implementation.outputs, [{ key: 'output', stateId: 2, setsValue: true }]);
         assert.equal(await evaluate(window, `document.querySelector('#nodeProgramError').textContent`), '');
         // The template is written again from the inputs and outputs, and the source is typed: one undo step each.
-        await evaluate(window, `window.__confirmAnswer = window.confirm; window.confirm = () => true`);
+        await evaluate(window, `(() => { window.__confirmAnswer = window.confirm; window.confirm = () => true; })()`);
         await evaluate(window, `document.querySelector('#editNodeProgramTemplate').click()`);
-        await evaluate(window, `window.confirm = window.__confirmAnswer`);
+        await evaluate(window, `(() => { window.confirm = window.__confirmAnswer; })()`);
         implementation = await program();
         assert.match(implementation.source, /ScalarPort\("setpoint", "setpoint", ""\)/);
         assert.match(implementation.source, /outputs\.add_gradient\("output", 0\.0\)/);

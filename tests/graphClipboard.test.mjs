@@ -107,3 +107,55 @@ test('a relationship with several equations is copied setting the copies\' state
     assert.deepEqual(joint.equationModel.bindings.map(({ nodeId, stateId }) => [nodeId, stateId]), [[parent.id, parent.states[0].id]]);
     assert.deepEqual(joint.equationModel.definitions, graph.edges[0].equationModel.definitions);
 });
+
+// The remap finds ids by what they are (an `id`, or a field ending in `Id` or `Ids`), not by where the code knows to look,
+// so a reference or an entity added to the schema later is renumbered with no change here.
+test('renumbers an id-bearing entity and a reference that no code has ever listed', () => {
+    const graph = {
+        nodes: [{
+            id: 1, name: 'Arm', position: [0, 0, 0], states: [{ id: 2, name: 'Angle' }], sourceTerms: [],
+            futureEntities: [{ id: 3, label: 'part', owner: { nodeId: 1, stateId: 2 }, peerStateIds: [2, 77] }]
+        }],
+        edges: []
+    };
+    const { nodes: [copy] } = remapGraphFragment(createGraphFragment(graph, [1]), 100);
+    assert.deepEqual(copy.futureEntities, [{ id: 102, label: 'part', owner: { nodeId: 100, stateId: 101 }, peerStateIds: [101, 77] }]);
+});
+
+test('a relationship\'s own program is copied pointing at the copies, and what was not copied stays as it was', () => {
+    const graph = {
+        nodes: [
+            { id: 1, name: 'A', position: [0, 0, 0], states: [{ id: 2, name: 'X' }], sourceTerms: [] },
+            { id: 3, name: 'B', position: [1, 0, 0], states: [{ id: 4, name: 'Y' }], sourceTerms: [] }
+        ],
+        edges: [{
+            id: 5, name: 'Link', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 3, stateId: 4 }, parameters: [{ id: 6, name: 'k' }],
+            implementation: { kind: 'cpp', source: 'code', bindings: [
+                { key: 'x', kind: 'state', nodeId: 1, stateId: 2 },
+                { key: 'k', kind: 'parameter', parameterId: 6 },
+                { key: 'shared', kind: 'parameter', sharedParameterId: 900 },
+                { key: 'other', kind: 'state', nodeId: 50, stateId: 51 }
+            ], output: { stateId: 4 } }
+        }]
+    };
+    const { nodes, edges: [copy] } = remapGraphFragment(createGraphFragment(graph, [1, 3]), 100);
+    assert.deepEqual(copy.implementation.bindings.map(({ nodeId, stateId, parameterId, sharedParameterId }) => [nodeId, stateId, parameterId, sharedParameterId]), [
+        [nodes[0].id, nodes[0].states[0].id, undefined, undefined],
+        [undefined, undefined, copy.parameters[0].id, undefined],
+        [undefined, undefined, undefined, 900],
+        [50, 51, undefined, undefined]
+    ]);
+    assert.equal(copy.implementation.output.stateId, nodes[1].states[0].id);
+});
+
+test('the copy shares nothing with the original', () => {
+    const fragment = createGraphFragment(document, [1, 3]);
+    const { nodes } = remapGraphFragment(fragment, 20);
+    nodes[0].sourceTerms[0].parameters[0].value = 99;
+    assert.equal(fragment.nodes[0].sourceTerms[0].parameters[0].value, 2);
+});
+
+test('a fragment that reuses an id is refused', () => {
+    const graph = { nodes: [{ id: 1, name: 'A', position: [0, 0, 0], states: [{ id: 1, name: 'X' }], sourceTerms: [] }], edges: [] };
+    assert.equal(validateGraphFragment(createGraphFragment(graph, [1])), false);
+});

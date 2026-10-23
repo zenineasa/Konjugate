@@ -53,6 +53,8 @@ import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
+import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument } from '../modelCodec.mjs';
+import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
 import {
     expandEdgeGroup,
@@ -337,72 +339,8 @@ function hydrateProjectDocument(document) {
         }
     }
 
-    const nodes = document.nodes.map((node) => {
-        const appearance = node.appearance ?? {};
-        const importedGeometry = appearance.type === 'mesh'
-            ? geometryFromDocument(appearance.mesh)
-            : null;
-        return {
-            id: node.id,
-            title: node.name || 'Untitled node',
-            type: node.type || 'Custom node',
-            description: node.description ?? '',
-            shape: importedGeometry ? 'imported' : appearance.shape || 'box',
-            position: node.position?.length === 3 ? node.position : [0, 0, 0],
-            rotation: node.rotation?.length === 3 ? node.rotation : [0, 0, 0],
-            scale: node.scale?.length === 3 ? node.scale : [1, 1, 1],
-            color: Number.parseInt(String(appearance.color ?? '#34727a').replace('#', ''), 16),
-            importedGeometry,
-            geometryFileName: appearance.fileName ?? null,
-            badgeClass: '',
-            subsystemId: node.subsystemId ?? null,
-            deleted: false,
-            enabled: node.enabled !== false,
-            substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
-            integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
-            sourceTerms: (node.sourceTerms ?? []).map((term) => ({ ...term, parameters: term.parameters ?? [] })),
-            // The node's own program: a computational-node provider, or an installed FMU's reference (edited under
-            // Program in the node editor).
-            implementation: node.implementation ? structuredClone(node.implementation) : null,
-            // Parts of the node's shape, each a mesh in the frame of a body the node reports the pose of (a robot's
-            // links, say): kept and handed to result visualizers, not drawn on the canvas.
-            appearanceParts: Array.isArray(appearance.parts) ? structuredClone(appearance.parts) : null,
-            states: (node.states ?? []).map((state) => ({
-                id: state.id,
-                label: state.name,
-                symbol: state.symbol,
-                initialValue: state.initialValue,
-                unit: state.unit ?? '',
-                value: stateValueText(state.initialValue, state.unit).text, exactValue: stateValueText(state.initialValue, state.unit).exact,
-                className: ''
-            }))
-        };
-    });
-    const relationships = document.edges.map((edge) => ({
-        id: edge.id,
-        groupId: edge.groupId ?? null,
-        title: edge.name || 'Untitled relationship',
-        description: edge.description ?? '',
-        source: edge.source.nodeId,
-        sourceStateId: edge.source.stateId ?? null,
-        target: edge.target.nodeId,
-        targetStateId: edge.target.stateId ?? null,
-        directionality: edge.directionality ?? 'directed',
-        equation: edge.equation ?? '',
-        equationModel: edge.equationModel ?? {
-            latex: edge.equation ?? '',
-            output: { role: 'target', stateId: edge.target.stateId ?? null },
-            bindings: [],
-            mathJson: null
-        },
-        implementation: edge.implementation ?? null,
-        parameters: edge.parameters ?? [],
-        color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
-        offset: Number(edge.appearance?.offset) || 0,
-        waypoints: Array.isArray(edge.appearance?.waypoints) ? edge.appearance.waypoints.map((point) => point.map(Number)) : [],
-        deleted: false,
-        enabled: edge.enabled !== false
-    }));
+    const nodes = document.nodes.map((node) => nodeFromDocument(node, modelCodecContext));
+    const relationships = document.edges.map((edge) => relationshipFromDocument(edge));
     const runConfigurations = Array.isArray(document.runConfigurations) && document.runConfigurations.length
         ? document.runConfigurations.map((configuration) => ({
             id: configuration.id ?? allocateModelEntityId(),
@@ -424,6 +362,21 @@ function hydrateProjectDocument(document) {
         edgeGroups
     };
 }
+
+// What the model codec (src/modelCodec.mjs) needs from the canvas and the editor to convert a node or relationship
+// between its saved form and the definition the canvas works on.
+const modelCodecContext = {
+    geometryFromDocument: (mesh) => geometryFromDocument(mesh),
+    serializeGeometry: (geometry) => serializeGeometry(geometry),
+    stateValueText: (value, unit) => stateValueText(value, unit),
+    transformOf: (definition) => {
+        const object = nodeObjects.get(definition.id);
+        return { position: object.position.toArray(), rotation: object.rotation.toArray().slice(0, 3), scale: object.scale.toArray() };
+    },
+    newId: () => allocateModelEntityId(),
+    sourceTermExpressionModel: (definition, term) => normalizeSourceTermExpressionModel(definition, term),
+    relationshipEquationModel: (definition) => normalizeEdgeEquationModel(definition)
+};
 
 const emptyProjectDocument = {
     format: 'konjugate',
@@ -1766,19 +1719,12 @@ function positionCard(card, clientX, clientY) {
 function captureNodeModel(node) {
     const definition = node.userData.definition;
     return {
-        title: definition.title,
-        type: definition.type,
-        description: definition.description ?? '',
-        states: structuredClone(definition.states),
-        sourceTerms: structuredClone(definition.sourceTerms),
+        // Every field of the definition but those in nodeSnapshotExcludedKeys (src/modelDefinition.mjs), so a field
+        // added to a node is saved by editing and restored by undo without being listed here.
+        ...snapshotDefinition(definition, nodeSnapshotExcludedKeys),
         // Shared parameters ride along so linking, unlinking and editing a shared value are one
         // undoable step with the source-term edit that caused them.
         sharedParameters: structuredClone(model.sharedParameters),
-        substepsPerGlobalStep: definition.substepsPerGlobalStep,
-        integration: definition.integration ?? 'explicit',
-        // The node's own program, if it has one (see renderNodeProgram), and its body parts (see renderNodeParts).
-        implementation: structuredClone(definition.implementation ?? null),
-        appearanceParts: structuredClone(definition.appearanceParts ?? null),
         bindings: model.relationships.map((edge) => ({
             id: edge.id,
             sourceStateId: edge.sourceStateId,
@@ -1798,16 +1744,12 @@ function refreshNodeLabel(node) {
 
 function applyNodeModel(node, snapshot) {
     const definition = node.userData.definition;
-    definition.title = snapshot.title;
-    definition.type = snapshot.type;
-    definition.description = snapshot.description ?? '';
-    definition.states = structuredClone(snapshot.states);
-    definition.sourceTerms = structuredClone(snapshot.sourceTerms);
+    Object.assign(definition, snapshotFields(snapshot, nodeSnapshotExcludedKeys));
     if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
-    definition.substepsPerGlobalStep = snapshot.substepsPerGlobalStep;
+    // Where an absent or empty value means the default, not "keep what was there".
     definition.integration = snapshot.integration ?? 'explicit';
-    definition.implementation = structuredClone(snapshot.implementation ?? null);
-    definition.appearanceParts = snapshot.appearanceParts?.length ? structuredClone(snapshot.appearanceParts) : null;
+    definition.implementation = definition.implementation ?? null;
+    definition.appearanceParts = snapshot.appearanceParts?.length ? definition.appearanceParts : null;
     snapshot.bindings.forEach((binding) => {
         const edge = model.relationships.find((candidate) => candidate.id === binding.id);
         if (edge) {
@@ -2620,21 +2562,12 @@ function normalizeEdgeEquationModel(definition, equationModel = definition.equat
 function captureEdgeModel(definition) {
     const equationModel = normalizeEdgeEquationModel(definition);
     return {
-        title: definition.title,
-        description: definition.description ?? '',
-        source: definition.source,
-        sourceStateId: definition.sourceStateId,
-        target: definition.target,
-        targetStateId: definition.targetStateId,
-        directionality: definition.directionality,
-        equation: definition.equation,
+        // Every field of the definition but those in relationshipSnapshotExcludedKeys (src/modelDefinition.mjs).
+        ...snapshotDefinition(definition, relationshipSnapshotExcludedKeys),
         equationModel: structuredClone(equationModel),
-        implementation: structuredClone(definition.implementation ?? null),
-        parameters: structuredClone(definition.parameters),
         // Shared parameters ride along so linking, unlinking and editing a shared value are one
         // undoable step with the edge edit that caused them.
         sharedParameters: structuredClone(model.sharedParameters),
-        color: definition.color,
         waypoints: structuredClone(definition.waypoints ?? [])
     };
 }
@@ -2663,18 +2596,16 @@ function setRelationshipColor(definition, color) {
 }
 
 function applyEdgeModel(definition, snapshot) {
-    definition.title = snapshot.title;
-    definition.description = snapshot.description ?? '';
-    definition.source = snapshot.source;
-    definition.sourceStateId = snapshot.sourceStateId;
-    definition.target = snapshot.target;
-    definition.targetStateId = snapshot.targetStateId;
-    definition.parameters = structuredClone(snapshot.parameters);
+    // Direction and colour go through their setters below, since changing them also redraws; the equation model and the
+    // equation text are derived from one another.
+    const fields = snapshotFields(snapshot, relationshipSnapshotExcludedKeys);
+    for (const derived of ['directionality', 'color', 'equationModel', 'equation']) delete fields[derived];
+    Object.assign(definition, fields);
     if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
     definition.equationModel = normalizeEdgeEquationModel(definition, snapshot.equationModel);
     definition.equation = definition.equationModel.latex;
-    definition.implementation = structuredClone(snapshot.implementation ?? null);
-    definition.waypoints = structuredClone(snapshot.waypoints ?? []);
+    definition.implementation = definition.implementation ?? null;
+    definition.waypoints = definition.waypoints ?? [];
     setRelationshipDirectionality(definition, snapshot.directionality);
     setRelationshipColor(definition, snapshot.color);
     // Before updateRelationships() -- it calls syncContextualOverlays() internally, which reads
@@ -6978,82 +6909,13 @@ function serializeProjectDocument() {
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
         ...serializedSharedParameters(visibleNodeIds),
-        nodes: visibleNodes.map((node) => {
-            const object = nodeObjects.get(node.id);
-            return {
-                id: node.id,
-                name: node.title,
-                type: node.type,
-                ...(node.description ? { description: node.description } : {}),
-                ...(node.subsystemId === null ? {} : { subsystemId: node.subsystemId }),
-                enabled: node.enabled !== false,
-                // integration is written only when it is not the default, so other models save exactly as before.
-                numerics: { substepsPerGlobalStep: node.substepsPerGlobalStep, ...(node.integration === 'semiImplicit' ? { integration: 'semiImplicit' } : {}) },
-                position: object.position.toArray(),
-                // Omitted when at the identity value, like subsystemId above -- keeps a node
-                // that was never rotated/scaled serializing exactly as it did before these
-                // fields existed, rather than growing every node's JSON with inert zeros/ones.
-                ...(object.rotation.x === 0 && object.rotation.y === 0 && object.rotation.z === 0
-                    ? {} : { rotation: object.rotation.toArray().slice(0, 3) }),
-                ...(object.scale.x === 1 && object.scale.y === 1 && object.scale.z === 1
-                    ? {} : { scale: object.scale.toArray() }),
-                states: node.states.map((state) => ({
-                    id: state.id ?? allocateModelEntityId(),
-                    name: state.label,
-                    symbol: state.symbol,
-                    initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
-                    unit: state.unit ?? ''
-                })),
-                sourceTerms: (node.sourceTerms ?? []).map((term) => {
-                    const normalized = normalizeSourceTermExpressionModel(node, term);
-                    return {
-                        ...term,
-                        parameters: term.parameters ?? [],
-                        ...(!term.implementation ? { expressionModel: normalized } : {})
-                    };
-                }),
-                ...(node.implementation ? { implementation: structuredClone(node.implementation) } : {}),
-                appearance: {
-                    ...(node.importedGeometry
-                        ? {
-                            type: 'mesh',
-                            fileName: node.geometryFileName,
-                            color: `#${node.color.toString(16).padStart(6, '0')}`,
-                            mesh: serializeGeometry(node.importedGeometry)
-                        }
-                        : {
-                            type: 'primitive',
-                            shape: node.shape,
-                            color: `#${node.color.toString(16).padStart(6, '0')}`
-                        }),
-                    ...(node.appearanceParts ? { parts: structuredClone(node.appearanceParts) } : {})
-                }
-            };
-        }),
+        nodes: visibleNodes.map((node) => nodeToDocument(node, modelCodecContext)),
         edges: model.relationships
             .filter((edge) => (
                 !edge.deleted &&
                 visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
             ))
-            .map((edge) => ({
-                id: edge.id,
-                ...(edge.groupId == null ? {} : { groupId: edge.groupId }),
-                name: edge.title,
-                ...(edge.description ? { description: edge.description } : {}),
-                source: { nodeId: edge.source, stateId: edge.sourceStateId ?? '' },
-                target: { nodeId: edge.target, stateId: edge.targetStateId ?? '' },
-                directionality: edge.directionality,
-                enabled: edge.enabled !== false,
-                equation: edge.equationModel?.latex ?? edge.equation ?? '',
-                equationModel: normalizeEdgeEquationModel(edge),
-                ...(edge.implementation ? { implementation: edge.implementation } : {}),
-                parameters: edge.parameters ?? [],
-                appearance: {
-                    color: `#${edge.color.toString(16).padStart(6, '0')}`,
-                    offset: edge.offset,
-                    waypoints: edge.waypoints ?? []
-                }
-            })),
+            .map((edge) => relationshipToDocument(edge, modelCodecContext)),
         subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => ({
             id: subsystem.id,
             name: subsystem.name,
@@ -12018,59 +11880,13 @@ function copySelectedGraph() {
     return true;
 }
 
+// A pasted node lands in the subsystem being viewed, whichever one it was copied from.
 function hydrateFragmentNode(node) {
-    const appearance = node.appearance ?? {};
-    const importedGeometry = appearance.type === 'mesh' ? geometryFromDocument(appearance.mesh) : null;
-    return {
-        id: node.id,
-        title: node.name || 'Untitled node',
-        type: node.type || 'Custom node',
-        description: node.description ?? '',
-        shape: importedGeometry ? 'imported' : appearance.shape || 'box',
-        position: node.position?.length === 3 ? node.position : [0, 0, 0],
-        rotation: node.rotation?.length === 3 ? node.rotation : [0, 0, 0],
-        scale: node.scale?.length === 3 ? node.scale : [1, 1, 1],
-        color: Number.parseInt(String(appearance.color ?? '#34727a').replace('#', ''), 16),
-        importedGeometry,
-        geometryFileName: appearance.fileName ?? null,
-        badgeClass: '',
-        subsystemId: activeSubsystemId,
-        deleted: false,
-        enabled: node.enabled !== false,
-        substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
-            integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
-        sourceTerms: node.sourceTerms ?? [],
-        implementation: node.implementation ? structuredClone(node.implementation) : null,
-        appearanceParts: Array.isArray(appearance.parts) ? structuredClone(appearance.parts) : null,
-        states: (node.states ?? []).map((state) => ({
-            id: state.id,
-            label: state.name,
-            symbol: state.symbol,
-            initialValue: state.initialValue,
-            unit: state.unit ?? '',
-            value: stateValueText(state.initialValue, state.unit).text, exactValue: stateValueText(state.initialValue, state.unit).exact,
-            className: ''
-        }))
-    };
+    return nodeFromDocument(node, modelCodecContext, { subsystemId: activeSubsystemId });
 }
 
 function hydrateFragmentRelationship(edge) {
-    return {
-        id: edge.id,
-        title: edge.name || 'Untitled relationship',
-        description: edge.description ?? '',
-        source: edge.source.nodeId,
-        sourceStateId: edge.source.stateId ?? null,
-        target: edge.target.nodeId,
-        targetStateId: edge.target.stateId ?? null,
-        directionality: edge.directionality ?? 'directed',
-        equation: edge.equation ?? '',
-        equationModel: edge.equationModel,
-        parameters: edge.parameters ?? [],
-        color: Number.parseInt(String(edge.appearance?.color ?? '#9c83c4').replace('#', ''), 16),
-        offset: Number(edge.appearance?.offset) || 0,
-        enabled: edge.enabled !== false
-    };
+    return relationshipFromDocument(edge, { pasted: true });
 }
 
 // The default [1, 0, 1] paste offset shifts a pasted copy along X and Z, leaving Y untouched --

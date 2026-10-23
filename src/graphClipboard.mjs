@@ -3,58 +3,38 @@
 export const graphFragmentFormat = 'konjugateGraphFragment';
 export const graphFragmentVersion = 1;
 
-function remapEquationModel(equationModel, ids) {
-    if (!equationModel) return equationModel;
-    return {
-        ...structuredClone(equationModel),
-        bindings: (equationModel.bindings ?? []).map((binding) => ({
-            ...structuredClone(binding),
-            ...(ids.has(binding.nodeId) ? { nodeId: ids.get(binding.nodeId) } : {}),
-            ...(ids.has(binding.stateId) ? { stateId: ids.get(binding.stateId) } : {}),
-            ...(ids.has(binding.parameterId) ? { parameterId: ids.get(binding.parameterId) } : {})
-        })),
-        // A relationship with several equations: each sets a state of the copy.
-        ...(Array.isArray(equationModel.outputs) ? { outputs: equationModel.outputs.map((output) => ({
-            ...structuredClone(output),
-            ...(ids.has(output.stateId) ? { stateId: ids.get(output.stateId) } : {})
-        })) } : {}),
-        ...(equationModel.output ? {
-            output: {
-                ...structuredClone(equationModel.output),
-                ...(ids.has(equationModel.output.stateId) ? { stateId: ids.get(equationModel.output.stateId) } : {})
-            }
-        } : {})
-    };
+// Every entity in a project document carries a positive integer `id` (see the project schema), and everything that refers
+// to one does so in a field named `id` or ending in `Id` (`nodeId`, `stateId`, `parameterId`, `sharedParameterId`) or
+// `Ids`. Copying a graph gives each copied entity a new id and rewrites each such field that names one; it does not list
+// the places a reference can appear, so a new kind of binding, or a new entity with an id, is copied correctly the day it
+// is added. A reference to something that was not copied (a state of a node left behind, a shared parameter) is left alone.
+const isIdKey = (key) => key === 'id' || key.endsWith('Id');
+const isIdListKey = (key) => key.endsWith('Ids');
+
+function collectEntityIds(value, found = []) {
+    if (Array.isArray(value)) {
+        value.forEach((item) => collectEntityIds(item, found));
+    } else if (value && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value)) {
+            if (key === 'id' && typeof child === 'number') found.push(child);
+            else collectEntityIds(child, found);
+        }
+    }
+    return found;
 }
 
-function remapImplementation(implementation, ids) {
-    if (!implementation) return implementation;
-    return {
-        ...structuredClone(implementation),
-        bindings: (implementation.bindings ?? []).map((binding) => ({
-            ...structuredClone(binding),
-            ...(ids.has(binding.nodeId) ? { nodeId: ids.get(binding.nodeId) } : {}),
-            ...(ids.has(binding.stateId) ? { stateId: ids.get(binding.stateId) } : {}),
-            ...(ids.has(binding.parameterId) ? { parameterId: ids.get(binding.parameterId) } : {})
-        })),
-        ...(implementation.output ? { output: {
-            ...structuredClone(implementation.output),
-            ...(ids.has(implementation.output.stateId) ? { stateId: ids.get(implementation.output.stateId) } : {})
-        } } : {}),
-        // A computational-node provider's outputs, one per state it drives.
-        ...(Array.isArray(implementation.outputs) ? { outputs: implementation.outputs.map((output) => ({
-            ...structuredClone(output),
-            ...(ids.has(output.stateId) ? { stateId: ids.get(output.stateId) } : {})
-        })) } : {})
-    };
+function remapIds(value, ids) {
+    if (Array.isArray(value)) return value.map((item) => remapIds(item, ids));
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => {
+        if (isIdKey(key) && typeof child === 'number' && ids.has(child)) return [key, ids.get(child)];
+        if (isIdListKey(key) && Array.isArray(child)) return [key, child.map((id) => (ids.has(id) ? ids.get(id) : id))];
+        return [key, remapIds(child, ids)];
+    }));
 }
 
 function fragmentEntityIds(fragment) {
-    return fragment.nodes.flatMap((node) => [
-        node.id,
-        ...(node.states ?? []).map((state) => state.id),
-        ...(node.sourceTerms ?? []).flatMap((term) => [term.id, ...(term.parameters ?? []).map((parameter) => parameter.id)])
-    ]).concat(fragment.edges.flatMap((edge) => [edge.id, ...(edge.parameters ?? []).map((parameter) => parameter.id)]));
+    return collectEntityIds([fragment.nodes, fragment.edges]);
 }
 
 export function validateGraphFragment(fragment) {
@@ -84,30 +64,10 @@ export function remapGraphFragment(fragment, firstId, positionOffset = [1, 0, 1]
     let nextId = firstId;
     const ids = new Map(fragmentEntityIds(fragment).map((id) => [id, nextId++]));
     const nodes = fragment.nodes.map((node) => ({
-        ...structuredClone(node),
-        id: ids.get(node.id),
+        ...remapIds(node, ids),
         name: `${node.name} copy`,
-        position: (node.position ?? [0, 0, 0]).map((value, index) => Number(value) + Number(positionOffset[index] ?? 0)),
-        states: (node.states ?? []).map((state) => ({ ...structuredClone(state), id: ids.get(state.id) })),
-        sourceTerms: (node.sourceTerms ?? []).map((term) => ({
-            ...structuredClone(term),
-            id: ids.get(term.id),
-            parameters: (term.parameters ?? []).map((parameter) => ({ ...structuredClone(parameter), id: ids.get(parameter.id) })),
-            ...(term.expressionModel ? { expressionModel: remapEquationModel(term.expressionModel, ids) } : {}),
-            ...(term.implementation ? { implementation: remapImplementation(term.implementation, ids) } : {})
-        })),
-        // A node's own provider reads and drives the copy's states; one it reads on a node not copied stays as it was.
-        ...(node.implementation ? { implementation: remapImplementation(node.implementation, ids) } : {})
+        position: (node.position ?? [0, 0, 0]).map((value, index) => Number(value) + Number(positionOffset[index] ?? 0))
     }));
-    const edges = fragment.edges.map((edge) => ({
-        ...structuredClone(edge),
-        id: ids.get(edge.id),
-        name: `${edge.name} copy`,
-        source: { ...structuredClone(edge.source), nodeId: ids.get(edge.source.nodeId), ...(ids.has(edge.source.stateId) ? { stateId: ids.get(edge.source.stateId) } : {}) },
-        target: { ...structuredClone(edge.target), nodeId: ids.get(edge.target.nodeId), ...(ids.has(edge.target.stateId) ? { stateId: ids.get(edge.target.stateId) } : {}) },
-        equationModel: remapEquationModel(edge.equationModel, ids),
-        ...(edge.implementation ? { implementation: remapImplementation(edge.implementation, ids) } : {}),
-        parameters: (edge.parameters ?? []).map((parameter) => ({ ...structuredClone(parameter), id: ids.get(parameter.id) }))
-    }));
+    const edges = fragment.edges.map((edge) => ({ ...remapIds(edge, ids), name: `${edge.name} copy` }));
     return { nodes, edges, nextId };
 }

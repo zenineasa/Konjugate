@@ -23,6 +23,7 @@ okf_version: "0.2"
 
 # Developer & Contributor Guides
 
+* [Design Principles](designPrinciples.md) - One source of truth: how to build on a shared definition instead of copying it, and the checklist for adding a field to the schema
 * [Development Setup](developmentSetup.md) - Prerequisites, toolchain setup, and build instructions for Konjugate core and native engine
 * [Add-on Development](addonDevelopment.md) - Building launcher and visualizer add-ons (.kja) with the visualizer bridge and window state
 * [Plugin Development](pluginDevelopment.md) - Authoring .kjp packages with numerical behavior and declarative component templates

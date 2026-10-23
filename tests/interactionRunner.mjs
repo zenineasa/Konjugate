@@ -2296,6 +2296,43 @@ export async function runInteractionTests(driver) {
         assert.equal(Math.round((await evaluate(window, `window.uiZoom.get()`)) * 10) / 10, 1);
     });
 
+    await run('a node description can be written, saved, cleared and undone', async () => {
+        const describe = async (selector, text) => evaluate(window, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        const savedNode = () => evaluate(window, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Described node')`);
+
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#newNodeName').value = 'Described node';
+            const values = { name: 'Pressure', symbol: 'pressure', value: '101325', unit: 'Pa' };
+            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+            document.querySelector('#createNode').click();
+        })()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Described node'`, 'The new node did not open its editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeDescription').value`), '');
+        assert.equal((await savedNode()).description, undefined, 'An empty description was saved instead of omitted.');
+
+        await describe('#editNodeDescription', '  Gas pressure inside the vessel.  ');
+        assert.equal((await savedNode()).description, 'Gas pressure inside the vessel.', 'The description was not trimmed and saved.');
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal((await savedNode()).description, undefined, 'Undo did not remove the description.');
+        await evaluate(window, `document.querySelector('#redoButton').click()`);
+        assert.equal((await savedNode()).description, 'Gas pressure inside the vessel.');
+        // Undo and redo close the editor; opening the node again shows the restored text.
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Described node'))`, 'The Described node label did not render after redo.');
+        await waitForCanvasAtRest(window);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Described node'))?.click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Described node'`, 'Clicking the node did not reopen its editor.');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeDescription').value`), 'Gas pressure inside the vessel.');
+        await describe('#editNodeDescription', '');
+        assert.equal((await savedNode()).description, undefined, 'Clearing the description did not omit it from the saved document.');
+
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await savedNode(), undefined, 'Undoing back through the creation did not remove the node.');
+    });
+
     await run('component library places node templates and connects them with an auto-bound edge template', async () => {
         await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
         await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'Component library panel did not open.');
@@ -2320,6 +2357,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((l) => l.textContent.includes('Thermal mass')).length === 2`, 'The second thermal mass node template was not placed.');
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
         assert.equal(await evaluate(window, `!document.querySelector('#componentLibraryPanel').hidden`), true, 'The library panel closed itself after placing a node.');
+        // The template's own description travels with the node it places, so the library's explanation survives onto the canvas.
+        assert.deepEqual(await evaluate(window, `window.__debugProject.serialize().nodes.filter((node) => node.name === 'Thermal mass').map((node) => /lumped thermal capacity/.test(node.description ?? ''))`), [true, true]);
 
         await evaluate(window, `document.querySelector('[data-template-id="conduction"]').click()`);
         await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the edge template did not arm endpoint picking.');
@@ -2362,10 +2401,17 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((l) => l.textContent.includes('Thermal mass'))?.click()`);
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the new Conduction relationship did not open the edge editor.');
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'bidirectional', 'Conduction was not created as a bidirectional edge.');
+        // Likewise the edge template's description reaches the edge editor and the saved document.
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeDescription').value`), /Heat conduction between two thermal masses/);
+        assert.ok(await evaluate(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === 'Conduction' && /Heat conduction between two thermal masses/.test(edge.description ?? ''))`));
+        // And a description typed into the edge editor is saved, trimmed, as its own undoable step.
+        await evaluate(window, `(() => { const input = document.querySelector('#editEdgeDescription'); input.value = '  Edited note.  '; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.ok(await evaluate(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === 'Conduction' && edge.description === 'Edited note.')`), 'An edge description typed into the editor was not saved.');
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
-        // Undo the edge and both placed nodes so this scenario leaves the baseline model unchanged
+        // Undo the description edit, the edge and both placed nodes so this scenario leaves the baseline model unchanged
         // before the next one starts.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
@@ -4637,6 +4683,33 @@ export async function runInteractionTests(driver) {
         assert.deepEqual((await savedProject()).edges[0].equationModel.mathJson, ['Arctan2', 'sourceSpeed', 'sourcePosition']);
         await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    });
+
+    await run('node and edge descriptions survive being saved and opened again', async () => {
+        await loadAuthoringProject();
+        await openNode('Mass');
+        await typeInto(`document.querySelector('#editNodeDescription')`, 'A point mass on a spring.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        await openRelationship('Sense');
+        await typeInto(`document.querySelector('#editEdgeDescription')`, 'Reads the mass angle.');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+
+        // Through the file's own JSON text and back in, as saving and reopening does.
+        const saved = await savedProject();
+        assert.equal(saved.nodes.find((node) => node.name === 'Mass').description, 'A point mass on a spring.');
+        assert.equal(saved.nodes.find((node) => node.name === 'Probe').description, undefined, 'A node never described gained a description.');
+        assert.equal(saved.edges[0].description, 'Reads the mass angle.');
+        await loadAuthoringProject({ nodes: saved.nodes, edges: saved.edges });
+
+        await openNode('Mass');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeDescription').value`), 'A point mass on a spring.', 'The node description did not come back after reopening.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        await openRelationship('Sense');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDescription').value`), 'Reads the mass angle.', 'The edge description did not come back after reopening.');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+        const reopened = await savedProject();
+        assert.equal(reopened.nodes.find((node) => node.name === 'Mass').description, 'A point mass on a spring.', 'The description was lost on the second save.');
+        assert.equal(reopened.edges[0].description, 'Reads the mass angle.');
     });
 
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {

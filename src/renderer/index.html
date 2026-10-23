@@ -608,6 +608,7 @@
             <section>
                 <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
                 <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
+                <label class="editorField"><span>Description</span><textarea id="editNodeDescription" rows="3" placeholder="Optional notes on what this node represents"></textarea></label>
             </section>
             <section>
                 <h3>States <button id="editAddState" type="button">＋</button></h3>
@@ -757,6 +758,7 @@
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <section>
                 <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
+                <label class="editorField"><span>Description</span><textarea id="editEdgeDescription" rows="3" placeholder="Optional notes on what this relationship represents"></textarea></label>
                 <div class="endpointGrid">
                     <label class="editorField"><span>Source</span><select id="editEdgeSource"></select></label>
                     <label class="editorField"><span>Target</span><select id="editEdgeTarget"></select></label>

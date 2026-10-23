@@ -84,6 +84,7 @@ export function validateComponentTemplate(template) {
     if (!template || !['node', 'edge', 'bundle'].includes(template.kind)) throw new Error('A template must have kind "node", "edge" or "bundle".');
     if (!componentTemplateIdPattern.test(template.id ?? '')) throw new Error('A template needs a valid id.');
     if (!template.name) throw new Error('A template needs a name.');
+    if (template.description !== undefined && typeof template.description !== 'string') throw new Error('A template description must be a string.');
     const domains = template.domains ?? [];
     if (!Array.isArray(domains) || !domains.length || !domains.every((domain) => typeof domain === 'string' && domain)) {
         throw new Error('A template needs a non-empty domains array.');

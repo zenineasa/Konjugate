@@ -346,6 +346,7 @@ function hydrateProjectDocument(document) {
             id: node.id,
             title: node.name || 'Untitled node',
             type: node.type || 'Custom node',
+            description: node.description ?? '',
             shape: importedGeometry ? 'imported' : appearance.shape || 'box',
             position: node.position?.length === 3 ? node.position : [0, 0, 0],
             rotation: node.rotation?.length === 3 ? node.rotation : [0, 0, 0],
@@ -381,6 +382,7 @@ function hydrateProjectDocument(document) {
         id: edge.id,
         groupId: edge.groupId ?? null,
         title: edge.name || 'Untitled relationship',
+        description: edge.description ?? '',
         source: edge.source.nodeId,
         sourceStateId: edge.source.stateId ?? null,
         target: edge.target.nodeId,
@@ -1766,6 +1768,7 @@ function captureNodeModel(node) {
     return {
         title: definition.title,
         type: definition.type,
+        description: definition.description ?? '',
         states: structuredClone(definition.states),
         sourceTerms: structuredClone(definition.sourceTerms),
         // Shared parameters ride along so linking, unlinking and editing a shared value are one
@@ -1797,6 +1800,7 @@ function applyNodeModel(node, snapshot) {
     const definition = node.userData.definition;
     definition.title = snapshot.title;
     definition.type = snapshot.type;
+    definition.description = snapshot.description ?? '';
     definition.states = structuredClone(snapshot.states);
     definition.sourceTerms = structuredClone(snapshot.sourceTerms);
     if (snapshot.sharedParameters) model.sharedParameters = structuredClone(snapshot.sharedParameters);
@@ -1874,6 +1878,7 @@ function renderNodeEditorModel(node) {
     $('#nodeEditorTitle').textContent = definition.title;
     $('#editNodeName').value = definition.title;
     $('#editNodeType').value = definition.type;
+    $('#editNodeDescription').value = definition.description ?? '';
     $('#editNodeSubsteps').value = definition.substepsPerGlobalStep;
     $('#editNodeIntegration').value = definition.integration ?? 'explicit';
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
@@ -2616,6 +2621,7 @@ function captureEdgeModel(definition) {
     const equationModel = normalizeEdgeEquationModel(definition);
     return {
         title: definition.title,
+        description: definition.description ?? '',
         source: definition.source,
         sourceStateId: definition.sourceStateId,
         target: definition.target,
@@ -2658,6 +2664,7 @@ function setRelationshipColor(definition, color) {
 
 function applyEdgeModel(definition, snapshot) {
     definition.title = snapshot.title;
+    definition.description = snapshot.description ?? '';
     definition.source = snapshot.source;
     definition.sourceStateId = snapshot.sourceStateId;
     definition.target = snapshot.target;
@@ -2788,6 +2795,7 @@ function renderEdgeEditor(definition) {
     $('#editEdgeError').textContent = '';
     $('.edgeEditor > header strong').textContent = definition.title;
     $('#editEdgeName').value = definition.title;
+    $('#editEdgeDescription').value = definition.description ?? '';
     $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
     const source = $('#editEdgeSource');
     const target = $('#editEdgeTarget');
@@ -4072,6 +4080,7 @@ function applyNodeTemplate(template) {
         id,
         title: template.name,
         type: 'Custom node',
+        description: template.description ?? '',
         shape: template.shape ?? 'box',
         importedGeometry: null,
         geometryFileName: null,
@@ -4255,7 +4264,7 @@ function applyBundleTemplate(template) {
         const outputNode = edge.output.role === 'source' ? fromNode : toNode;
         const parameters = (edge.parameters ?? []).map((parameter) => templateParameter(parameter, sharedByKey));
         const definition = {
-            id: allocateModelEntityId(), title: edge.name, source: fromNode.id, target: toNode.id,
+            id: allocateModelEntityId(), title: edge.name, description: edge.description ?? template.description ?? '', source: fromNode.id, target: toNode.id,
             sourceStateId: stateFor(fromNode, 'source', edge.ports.source)?.id ?? null,
             targetStateId: stateFor(toNode, 'target', edge.ports.target)?.id ?? null,
             directionality: edge.bidirectional ? 'bidirectional' : 'directed',
@@ -6975,6 +6984,7 @@ function serializeProjectDocument() {
                 id: node.id,
                 name: node.title,
                 type: node.type,
+                ...(node.description ? { description: node.description } : {}),
                 ...(node.subsystemId === null ? {} : { subsystemId: node.subsystemId }),
                 enabled: node.enabled !== false,
                 // integration is written only when it is not the default, so other models save exactly as before.
@@ -7029,6 +7039,7 @@ function serializeProjectDocument() {
                 id: edge.id,
                 ...(edge.groupId == null ? {} : { groupId: edge.groupId }),
                 name: edge.title,
+                ...(edge.description ? { description: edge.description } : {}),
                 source: { nodeId: edge.source, stateId: edge.sourceStateId ?? '' },
                 target: { nodeId: edge.target, stateId: edge.targetStateId ?? '' },
                 directionality: edge.directionality,
@@ -9355,6 +9366,12 @@ $('#editNodeType').addEventListener('change', (event) => {
         snapshot.type = event.target.value.trim() || 'Custom node';
     });
 });
+$('#editNodeDescription').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    changeNodeModel(selectedNode, (snapshot) => {
+        snapshot.description = event.target.value.trim();
+    });
+});
 $('#editNodeSubsteps').addEventListener('change', (event) => {
     if (!selectedNode) return;
     const substeps = Math.max(1, Math.min(10000, Math.trunc(Number(event.target.value) || 1)));
@@ -9470,6 +9487,12 @@ $('#editEdgeName').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.title = event.target.value.trim() || 'Untitled relationship';
+    });
+});
+$('#editEdgeDescription').addEventListener('change', (event) => {
+    if (!selectedRelationship) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        snapshot.description = event.target.value.trim();
     });
 });
 $('#editEdgeSource').addEventListener('change', (event) => {
@@ -11399,6 +11422,7 @@ $('#createNode').addEventListener('click', () => {
         id,
         title: $('#newNodeName').value.trim() || 'Untitled node',
         type: 'Custom node',
+        description: '',
         shape: $('#newNodeShape').value,
         importedGeometry: pendingImportedGeometry?.clone() ?? null,
         geometryFileName: pendingGeometryFileName || null,
@@ -11497,6 +11521,7 @@ $('#createEdge').addEventListener('click', () => {
     const definition = {
         id: allocateModelEntityId(),
         title: $('#newEdgeName').value.trim() || 'Untitled relationship',
+        description: pendingEdgeTemplate?.description ?? '',
         source,
         target,
         sourceStateId: sourceNode?.states[0]?.id ?? null,
@@ -12000,6 +12025,7 @@ function hydrateFragmentNode(node) {
         id: node.id,
         title: node.name || 'Untitled node',
         type: node.type || 'Custom node',
+        description: node.description ?? '',
         shape: importedGeometry ? 'imported' : appearance.shape || 'box',
         position: node.position?.length === 3 ? node.position : [0, 0, 0],
         rotation: node.rotation?.length === 3 ? node.rotation : [0, 0, 0],
@@ -12032,6 +12058,7 @@ function hydrateFragmentRelationship(edge) {
     return {
         id: edge.id,
         title: edge.name || 'Untitled relationship',
+        description: edge.description ?? '',
         source: edge.source.nodeId,
         sourceStateId: edge.source.stateId ?? null,
         target: edge.target.nodeId,

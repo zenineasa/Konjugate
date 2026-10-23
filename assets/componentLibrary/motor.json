@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Motor",
     "domains": ["electrical", "mechanical"],
-    "description": "An electromechanical actuator with armature current and angular velocity states -- spans both domains, since it converts one into the other. Pair with Armature dynamics (from a voltage source) and either Shaft dynamics (against an external load) or Rotational drive (swinging a link directly).",
+    "description": "An electric motor with two states: Armature current (A) and Angular velocity of the rotor (rad/s), both starting at 0. It has no equations of its own. Armature dynamics, from a Voltage source or a Battery, drives the current, and reads the speed back as the back EMF. Shaft dynamics (against a Torque load) or Rotational drive (swinging a Rotational link) turns current into speed. Traction, Discharge and Resistive heating read the current to move a chassis, drain a battery and heat a housing. It spans the electrical and mechanical domains because it converts one into the other.",
     "shape": "cylinder",
     "color": "#397b86",
     "states": [

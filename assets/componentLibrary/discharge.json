@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Discharge",
     "domains": ["electrical"],
-    "description": "Depletes a battery's state of charge in proportion to the current a motor draws from it. Connect from a Motor to a Battery.",
+    "description": "Lowers a battery's State of charge in proportion to the current drawn from it: State of charge changes at −Discharge coefficient × current. Connect it from a Motor (it reads the Armature current) to a Battery (it changes the State of charge). Discharge coefficient (%/(A·s), default 0.05) is the percentage of charge lost for each ampere flowing for one second.",
     "color": "#c46a6a",
     "ports": { "source": "current", "target": "stateOfCharge" },
     "output": { "role": "target", "state": "stateOfCharge" },

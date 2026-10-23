@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Rotational link",
     "domains": ["mechanical"],
-    "description": "A rigid body free to rotate about a joint, with its own angle and angular velocity -- unlike a Torque load, it's a genuine moving body you can track and feed back into a controller, not just a fixed disturbance. Includes the self-referencing source term that integrates angular velocity into angle. Pair with Rotational drive.",
+    "description": "A rigid link that swings about a joint. Angle (rad) and Angular velocity (rad/s) both start at 0. The node's own equation makes Angle change at the rate of Angular velocity, so you only need to act on Angular velocity: connect Rotational drive from a Motor. Unlike a Torque load it is a body that moves, so its Angle can be read by a controller such as Position control.",
     "shape": "box",
     "color": "#5d7885",
     "states": [

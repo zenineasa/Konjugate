@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Armature dynamics",
     "domains": ["electrical"],
-    "description": "Drives a motor's armature current from a supply voltage, opposed by resistive drop and back-EMF. Connect from a Voltage source or a Battery (both expose a voltage state) to a Motor.",
+    "description": "Sets how quickly a motor's armature current changes: its rate of change is (supply voltage − Armature resistance × current − Back EMF constant × angular velocity) / Armature inductance. Connect it from a Voltage source or a Battery (it reads their Voltage) to a Motor (it reads and changes the motor's Armature current, and reads its Angular velocity). Armature resistance (Ω, default 2) is the voltage lost in the windings for each ampere. Back EMF constant (V·s/rad, default 0.1) is the voltage the spinning rotor generates against the supply for each rad/s, so a faster motor draws less current. Armature inductance (H, default 0.5) makes the current build up gradually instead of jumping.",
     "color": "#68a9cc",
     "ports": { "source": "voltage", "target": ["current", "angularVelocity"] },
     "output": { "role": "target", "state": "current" },

@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Voltage source",
     "domains": ["electrical"],
-    "description": "A supply voltage for a motor. Its state doesn't have to stay fixed -- Position control drives it directly, turning it into a commanded rather than a constant supply.",
+    "description": "An adjustable supply voltage for a motor. Its one state, Voltage (V), starts at 24. Armature dynamics reads it to drive the motor's current. It stays at its starting value unless something changes it: Position control drives it, which turns it from a fixed supply into a commanded input.",
     "shape": "box",
     "color": "#4d6c85",
     "states": [

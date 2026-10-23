@@ -7,7 +7,7 @@
         "electrical",
         "thermal"
     ],
-    "description": "Wires a battery, a motor and a thermal mass together in one step: the battery drives the motor's armature, the motor's current discharges the battery, and the same current heats the thermal mass. The armature and heating edges share one winding resistance, so they can never disagree about it. Select the three nodes, then click this bundle.",
+    "description": "Wires a battery, a motor and a thermal mass together in one step. Select the three nodes (a Battery, a Motor and a Thermal mass), then click this bundle. It creates three edges: Armature dynamics (the battery's voltage drives the motor's current), Discharge (the motor's current lowers the battery's state of charge) and Resistive heating (the same current heats the thermal mass). The Armature dynamics and Resistive heating edges share one Winding resistance (Ω, default 2), so they cannot disagree about it: change it once and both follow.",
     "color": "#68a9cc",
     "endpoints": [
         {
@@ -71,7 +71,8 @@
                     "unit": "H",
                     "mode": "constant"
                 }
-            ]
+            ],
+            "description": "The battery's Voltage drives the motor's Armature current, opposed by the Winding resistance and by the back EMF the spinning rotor generates, and smoothed by the Armature inductance."
         },
         {
             "name": "Discharge",
@@ -94,7 +95,8 @@
                     "unit": "%/(A·s)",
                     "mode": "constant"
                 }
-            ]
+            ],
+            "description": "The motor's Armature current lowers the battery's State of charge, by the Discharge coefficient for each ampere-second."
         },
         {
             "name": "Resistive heating",
@@ -122,7 +124,8 @@
                     "unit": "J/K",
                     "mode": "constant"
                 }
-            ]
+            ],
+            "description": "The same current heats the thermal mass through the shared Winding resistance (I²R), divided by the Thermal capacitance of the mass."
         }
     ]
 }

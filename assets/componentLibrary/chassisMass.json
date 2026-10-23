@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Chassis mass",
     "domains": ["mechanical"],
-    "description": "A body free to translate along one axis, with position and velocity states and the self-referencing source term that integrates one into the other. Pair with Traction, driven by a motor's wheel.",
+    "description": "A body that moves along one axis. Position (m) and Velocity (m/s) both start at 0. The node's own equation makes Position change at the rate of Velocity, so you only need to act on Velocity: connect Traction from a Motor and the motor's current accelerates the chassis. Further edges (drag, springs) can act on Velocity in the same way.",
     "shape": "box",
     "color": "#6b7f8c",
     "states": [

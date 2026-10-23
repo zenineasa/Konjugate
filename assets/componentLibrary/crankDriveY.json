@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Crank drive Y",
     "domains": ["mechanical"],
-    "description": "The Y component of the same circular-motion drive as Crank drive X -- see that template for the full explanation. Apply alongside it, between the same pivot and crank pin, with matching angularVelocity values (this app has no shared/linked parameters across edges, so keeping the two in sync is a modeling responsibility, not something enforced automatically).",
+    "description": "The Y half of the circular drive that Crank drive X describes, and it must be used with it. It acts on the target's Y position directly: Y changes at Angular velocity × (target X − source X). Apply it between the same pivot and crank pin as Crank drive X. Angular velocity (rad/s, default 1, live) is how fast the pin turns about the pivot, counter-clockwise when X points right and Y up. It must equal the value on Crank drive X, or the pin stops moving in a circle: link the two to one shared parameter in the Parameters table so they cannot differ.",
     "color": "#d6a14f",
     "ports": { "source": ["x", "y"], "target": ["x", "y"] },
     "output": { "role": "target", "state": "y" },

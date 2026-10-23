@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Rotational drive",
     "domains": ["mechanical"],
-    "description": "Drives a link's angular velocity directly from a motor's current, against the link's own moment of inertia -- simpler than Shaft dynamics, with no separate friction/disturbance modeling. Connect from a Motor to a Rotational link when you want to track the link's own angle (e.g. to feed a controller), not just the motor's internal speed.",
+    "description": "Turns a motor's current into the angular acceleration of a link: the link's Angular velocity changes at Torque constant × current / Moment of inertia. Connect it from a Motor (it reads the Armature current) to a Rotational link (it changes the link's Angular velocity). Torque constant (N·m/A, default 0.1) is the torque the motor makes for each ampere. Moment of inertia (kg·m², default 0.01) is how much torque the link needs for each rad/s² of acceleration. It is simpler than Shaft dynamics, with no friction or load, and the link's angle is a state you can track and feed to a controller.",
     "color": "#7d9dc7",
     "ports": { "source": "current", "target": "angularVelocity" },
     "output": { "role": "target", "state": "angularVelocity" },

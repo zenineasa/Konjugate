@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Torque load",
     "domains": ["mechanical"],
-    "description": "A fixed external resisting torque -- bearing friction, a held payload, gravity on an arm. Pair with Shaft dynamics against a motor's own rotor inertia.",
+    "description": "A constant resisting torque on a motor's shaft, such as bearing friction, a held payload or gravity on an arm. Its one state, Load torque (N·m), starts at 0.1 and stays there unless something changes it, so edit the starting value to set the load. Connect it to a Motor with Shaft dynamics, which subtracts it from the torque the motor makes.",
     "shape": "sphere",
     "color": "#9a6c59",
     "states": [

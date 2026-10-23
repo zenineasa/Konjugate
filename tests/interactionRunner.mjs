@@ -2358,7 +2358,10 @@ export async function runInteractionTests(driver) {
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
         assert.equal(await evaluate(window, `!document.querySelector('#componentLibraryPanel').hidden`), true, 'The library panel closed itself after placing a node.');
         // The template's own description travels with the node it places, so the library's explanation survives onto the canvas.
-        assert.deepEqual(await evaluate(window, `window.__debugProject.serialize().nodes.filter((node) => node.name === 'Thermal mass').map((node) => /lumped thermal capacity/.test(node.description ?? ''))`), [true, true]);
+        const templateDescription = (id) => evaluate(window, `window.componentLibrary.list().then((templates) => templates.find((template) => template.id === ${JSON.stringify(id)}).description)`);
+        const thermalMassDescription = await templateDescription('thermalMass');
+        assert.ok(thermalMassDescription.length > 60, 'The Thermal mass template has no real description to carry.');
+        assert.deepEqual(await evaluate(window, `window.__debugProject.serialize().nodes.filter((node) => node.name === 'Thermal mass').map((node) => node.description)`), [thermalMassDescription, thermalMassDescription]);
 
         await evaluate(window, `document.querySelector('[data-template-id="conduction"]').click()`);
         await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the edge template did not arm endpoint picking.');
@@ -2402,8 +2405,10 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the new Conduction relationship did not open the edge editor.');
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'bidirectional', 'Conduction was not created as a bidirectional edge.');
         // Likewise the edge template's description reaches the edge editor and the saved document.
-        assert.match(await evaluate(window, `document.querySelector('#editEdgeDescription').value`), /Heat conduction between two thermal masses/);
-        assert.ok(await evaluate(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === 'Conduction' && /Heat conduction between two thermal masses/.test(edge.description ?? ''))`));
+        const conductionDescription = await templateDescription('conduction');
+        assert.ok(conductionDescription.length > 60, 'The Conduction template has no real description to carry.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDescription').value`), conductionDescription);
+        assert.equal(await evaluate(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Conduction')?.description`), conductionDescription);
         // And a description typed into the edge editor is saved, trimmed, as its own undoable step.
         await evaluate(window, `(() => { const input = document.querySelector('#editEdgeDescription'); input.value = '  Edited note.  '; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         assert.ok(await evaluate(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === 'Conduction' && edge.description === 'Edited note.')`), 'An edge description typed into the editor was not saved.');
@@ -4366,6 +4371,12 @@ export async function runInteractionTests(driver) {
         await evaluate(bundleWindow, `document.querySelector('[data-action="select-all"]').click()`);
         await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"]').click()`);
         await waitFor(bundleWindow, `${edgeCount} === 3`, 'The bundle did not create its three edges.');
+        // Each edge it creates carries the bundle's own explanation of what that edge is for.
+        const bundleTemplate = await evaluate(bundleWindow, `window.componentLibrary.list().then((templates) => templates.find((template) => template.id === 'batteryMotorDrive'))`);
+        const byName = (left, right) => left[0].localeCompare(right[0]);
+        assert.ok(bundleTemplate.edges.every((edge) => edge.description?.length > 30));
+        assert.deepEqual((await evaluate(bundleWindow, `window.__debugProject.serialize().edges.map((edge) => [edge.name, edge.description])`)).sort(byName),
+            bundleTemplate.edges.map((edge) => [edge.name, edge.description]).sort(byName));
 
         await evaluate(bundleWindow, `document.querySelector('#parametersButton').click()`);
         await waitFor(bundleWindow, `!document.querySelector('#parametersPanel').hidden`, 'The parameters panel did not open.');

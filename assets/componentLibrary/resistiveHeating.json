@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Resistive heating",
     "domains": ["thermal"],
-    "description": "I²R heating: converts a motor's current draw into a heat injection rate on a thermal mass (its housing), normalized by that mass's thermal capacitance. Connect from a Motor to a Thermal mass.",
+    "description": "Heating from the current through a motor's windings (I²R): the target's temperature changes at Winding resistance × current² / Thermal capacitance. Connect it from a Motor (it reads the Armature current) to a Thermal mass (it changes the Temperature). Winding resistance (Ω, default 2) is the resistance the current heats. Thermal capacitance (J/K, default 50) is how much heat the housing needs to warm by one kelvin; use the housing's own value.",
     "color": "#d98b54",
     "ports": { "source": "current", "target": "temperature" },
     "output": { "role": "target", "state": "temperature" },

@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Free body",
     "domains": ["mechanical"],
-    "description": "A point with full 6-DOF pose (x, y, z, roll, pitch, yaw) and linear velocity (vx, vy, vz), with the self-referencing source terms that integrate velocity into position on each axis. Orientation states are present but undriven here -- nothing in the rod/crank templates constrains rotation, only distance. The same node plays three roles purely by which edges you attach: a fixed pivot (nothing connected), a kinematically-driven point (Crank drive), or a body that responds to constraints (Rod X/Y).",
+    "description": "A point in space with a full pose and velocity. X, Y and Z position (m) and X, Y and Z velocity (m/s) are the states that matter. Roll, Pitch and Yaw (rad) are there for visualisers, and nothing in the library drives them. The node's own equations make each position change at the rate of its velocity, so a connected edge can act on a velocity (Rod X and Rod Y do) or on a position directly (Crank drive does). What it does depends only on what you connect: left alone it is a fixed pivot (set its starting position in the initial values); under Crank drive it circles a pivot; under Rod X and Rod Y it follows a neighbour at a fixed distance.",
     "shape": "sphere",
     "color": "#5d7885",
     "states": [

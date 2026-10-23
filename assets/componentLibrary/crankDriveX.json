@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Crank drive X",
     "domains": ["mechanical"],
-    "description": "Drives the X component of uniform circular motion about a fixed center, at a live angular rate -- the standard identity d/dt[r cos(theta)] = -omega*(y-y0) for a point rotating at constant omega, which needs no separate angle state to track. Connect from a fixed Free body (the pivot) to another Free body (the crank pin); pair with Crank drive Y for the Y component. The radius is whatever the initial distance between the two happens to be -- preserved by the motion itself, not set as a parameter.",
+    "description": "Moves a point in a circle about a fixed centre by acting on its X position directly: X changes at −Angular velocity × (target Y − source Y), the X part of a point turning about the source at a constant rate, so no angle state is needed. Connect it from a Free body that stays put (the pivot) to a second Free body (the crank pin), and apply Crank drive Y between the same two. The radius of the circle is the starting distance between the two bodies; the motion preserves it, so it is not a parameter. Angular velocity (rad/s, default 1, live) is how fast the pin turns about the pivot, counter-clockwise when X points right and Y up; it can be changed during a run. Crank drive X and Crank drive Y each carry their own Angular velocity and must hold the same value, so link them to one shared parameter in the Parameters table to keep them in step.",
     "color": "#d6a14f",
     "ports": { "source": ["x", "y"], "target": ["x", "y"] },
     "output": { "role": "target", "state": "x" },

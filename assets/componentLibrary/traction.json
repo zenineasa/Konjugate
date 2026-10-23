@@ -4,7 +4,7 @@
     "kind": "edge",
     "name": "Traction",
     "domains": ["mechanical"],
-    "description": "Converts a driven wheel's motor current into chassis acceleration via the wheel radius -- the rotational-to-translational conversion at the heart of a wheeled robot's drivetrain. Connect from a Motor to a Chassis mass.",
+    "description": "Turns a driven wheel's motor current into acceleration of a chassis: the chassis Velocity changes at Torque constant × current / (Wheel radius × Chassis mass). Connect it from a Motor (it reads the Armature current) to a Chassis mass (it changes the Velocity). Torque constant (N·m/A, default 0.1) is the torque the motor makes for each ampere. Wheel radius (m, default 0.05) turns that torque into a force at the ground. Chassis mass (kg, default 2) turns the force into an acceleration; set it to match the Chassis mass node.",
     "color": "#7dc79d",
     "ports": { "source": "current", "target": "velocity" },
     "output": { "role": "target", "state": "velocity" },

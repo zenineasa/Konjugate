@@ -185,3 +185,32 @@ test('a fragment template that refers to something outside itself is refused', (
     template.fragment.nodes[0].implementation.bindings.push({ key: 'other', kind: 'state', nodeId: 77, stateId: 78 });
     assert.throws(() => validateComponentTemplate(template), /refers to node 77, which is not in the template/);
 });
+
+// A library template's description is what a person reads to learn what each part of it is, and it travels onto the node or
+// edge placed from it. So every state, parameter and edge of a bundled template has to be named in its description: add a
+// parameter without explaining it and this fails.
+test('every bundled template explains each of its states, parameters and edges in its description', async () => {
+    const directory = new URL('../assets/componentLibrary/', import.meta.url).pathname;
+    const words = (text) => text.toLowerCase().match(/[a-z0-9²]+/g) ?? [];
+    const mentions = (description, name) => {
+        const available = new Set(words(description));
+        return words(name).every((word) => available.has(word));
+    };
+    const names = (await readdir(directory)).filter((name) => name.endsWith('.json') && name !== 'webManifest.json');
+    assert.ok(names.length >= 24);
+    for (const file of names) {
+        const template = validateComponentTemplate(JSON.parse(await readFile(join(directory, file), 'utf8')));
+        const description = template.kind === 'fragment' ? template.fragment.nodes.map((node) => node.description ?? '').join(' ') : template.description ?? '';
+        assert.ok(description.trim().length > 60, `${template.id} has no real description.`);
+        const parts = {
+            node: () => template.states.map((state) => state.label),
+            edge: () => (template.parameters ?? []).map((parameter) => parameter.name),
+            bundle: () => template.edges.map((edge) => edge.name),
+            fragment: () => template.fragment.nodes.flatMap((node) => node.states.map((state) => state.name))
+        }[template.kind]();
+        for (const part of parts) assert.ok(mentions(description, part), `${template.id}'s description never mentions "${part}".`);
+        if (template.kind === 'bundle') {
+            for (const edge of template.edges) assert.ok((edge.description ?? '').trim().length > 30, `${template.id}'s edge "${edge.name}" has no description of its own.`);
+        }
+    }
+});

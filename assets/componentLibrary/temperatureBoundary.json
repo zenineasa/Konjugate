@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Temperature boundary",
     "domains": ["thermal"],
-    "description": "A fixed ambient temperature reference. Structurally identical to a Thermal mass -- the distinction is in how it's used (nothing feeds heat into it), not how it's shaped.",
+    "description": "A reference temperature for the surroundings. Its one state, Temperature (K), starts at 293.15, about 20 °C; change the starting value to change the surroundings. It is shaped exactly like a Thermal mass, and the difference is only in how it is used. Nothing in the node holds its temperature fixed: it stays put only while nothing exchanges heat with it. Conduction is bidirectional, so a boundary connected through it changes too, by as many kelvin as the other body changes but in the opposite direction (a hot boundary cools as the mass warms). It therefore behaves as a boundary only over a short run or against a body that barely moves it.",
     "shape": "sphere",
     "color": "#52727a",
     "states": [

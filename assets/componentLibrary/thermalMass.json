@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Thermal mass",
     "domains": ["thermal"],
-    "description": "A lumped thermal capacity with a single temperature state -- a motor housing, a battery pack, anything that heats up and cools down. Pair with Conduction (to a boundary) and Resistive heating (from a motor's current draw).",
+    "description": "A lumped thermal body with one state, Temperature (K), starting at 293.15, about 20 °C. Think of a motor housing or a battery pack: it warms when heat flows in and cools when heat flows out. It has no equations of its own; heat arrives through edges, from Resistive heating (a motor's current) and Conduction (to or from another body). How quickly it responds is set by the Thermal capacitance on those edges, not on the node.",
     "shape": "box",
     "color": "#c9603f",
     "states": [

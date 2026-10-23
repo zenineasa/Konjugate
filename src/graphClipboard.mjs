@@ -33,13 +33,32 @@ function remapIds(value, ids) {
     }));
 }
 
+// A fragment may carry the shared parameters its nodes and relationships link to (a library template does, since it has
+// to stand alone), each a project-document shared parameter with an `id`.
 function fragmentEntityIds(fragment) {
-    return collectEntityIds([fragment.nodes, fragment.edges]);
+    return collectEntityIds([fragment.nodes, fragment.edges, fragment.sharedParameters ?? []]);
+}
+
+// Every shared parameter a fragment's nodes and relationships link to, by id, whether or not the fragment carries it.
+export function fragmentSharedParameterReferences(fragment) {
+    const found = new Set();
+    const visit = (value) => {
+        if (Array.isArray(value)) value.forEach(visit);
+        else if (value && typeof value === 'object') {
+            for (const [key, child] of Object.entries(value)) {
+                if (key === 'sharedParameterId' && typeof child === 'number') found.add(child);
+                else visit(child);
+            }
+        }
+    };
+    visit([fragment.nodes, fragment.edges]);
+    return [...found];
 }
 
 export function validateGraphFragment(fragment) {
     if (fragment?.format !== graphFragmentFormat || fragment.version !== graphFragmentVersion ||
-        !Array.isArray(fragment.nodes) || !fragment.nodes.length || !Array.isArray(fragment.edges)) return false;
+        !Array.isArray(fragment.nodes) || !fragment.nodes.length || !Array.isArray(fragment.edges) ||
+        (fragment.sharedParameters !== undefined && !Array.isArray(fragment.sharedParameters))) return false;
     const ids = fragmentEntityIds(fragment);
     if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length) return false;
     const nodeIds = new Set(fragment.nodes.map((node) => node.id));
@@ -57,17 +76,22 @@ export function createGraphFragment(document, selectedNodeIds) {
     return { format: graphFragmentFormat, version: graphFragmentVersion, nodes, edges };
 }
 
-export function remapGraphFragment(fragment, firstId, positionOffset = [1, 0, 1]) {
+// `nameSuffix` is appended to every copied name (a pasted copy says it is one; a library template placed on the canvas
+// keeps its own names). `reuse` maps the id of a shared parameter the fragment carries to the id of one already in the
+// project, which the copy then links to instead of making its own.
+export function remapGraphFragment(fragment, firstId, positionOffset = [1, 0, 1], { nameSuffix = ' copy', reuse = new Map() } = {}) {
     if (!validateGraphFragment(fragment) || !Number.isSafeInteger(firstId) || firstId <= 0) {
         throw new Error('The copied graph fragment is invalid.');
     }
     let nextId = firstId;
-    const ids = new Map(fragmentEntityIds(fragment).map((id) => [id, nextId++]));
+    const ids = new Map(fragmentEntityIds(fragment).filter((id) => !reuse.has(id)).map((id) => [id, nextId++]));
+    reuse.forEach((existingId, id) => ids.set(id, existingId));
     const nodes = fragment.nodes.map((node) => ({
         ...remapIds(node, ids),
-        name: `${node.name} copy`,
+        name: `${node.name}${nameSuffix}`,
         position: (node.position ?? [0, 0, 0]).map((value, index) => Number(value) + Number(positionOffset[index] ?? 0))
     }));
-    const edges = fragment.edges.map((edge) => ({ ...remapIds(edge, ids), name: `${edge.name} copy` }));
-    return { nodes, edges, nextId };
+    const edges = fragment.edges.map((edge) => ({ ...remapIds(edge, ids), name: `${edge.name}${nameSuffix}` }));
+    const sharedParameters = (fragment.sharedParameters ?? []).filter((shared) => !reuse.has(shared.id)).map((shared) => remapIds(shared, ids));
+    return { nodes, edges, sharedParameters, nextId };
 }

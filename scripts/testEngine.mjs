@@ -21,4 +21,5 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'continuousT
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'causalInferenceCommitAndRun.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'postRunStabilityDiagnostics.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'duringRunStabilityMonitoring.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'pidTemplates.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'scripts', 'checkNodeProviderExample.mjs')]);

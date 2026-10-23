@@ -1,0 +1,206 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "id": "pidIsa",
+  "kind": "fragment",
+  "name": "PID controller (ISA / standard)",
+  "domains": [
+    "control"
+  ],
+  "color": "#8f6fd1",
+  "description": "A PID controller in the ISA (standard, ideal) form, u = P·(e + (1/I)·∫e dt + D·de/dt): P is a gain, and I and D are times in seconds (the integral and derivative times, often written Ti and Td). An I of zero or less turns the integral term off, and a D of zero or less turns the derivative term off. Use the parallel block if your controller reports Kp, Ki and Kd. A node with its own C++ program: it holds the control signal and the error as states, and reads the setpoint, gains and limits from live shared parameters. Point its Measurement input at the state to control, and connect its Control output to what it drives.",
+  "fragment": {
+    "format": "konjugateGraphFragment",
+    "version": 1,
+    "nodes": [
+      {
+        "id": 1,
+        "name": "PID controller (ISA / standard)",
+        "type": "Controller",
+        "description": "A PID controller in the ISA (standard, ideal) form, u = P·(e + (1/I)·∫e dt + D·de/dt): P is a gain, and I and D are times in seconds (the integral and derivative times, often written Ti and Td). An I of zero or less turns the integral term off, and a D of zero or less turns the derivative term off. Use the parallel block if your controller reports Kp, Ki and Kd. Wiring: the controller reads the quantity to control from its Measurement input. Open the node's Program and point that input at the state of the node you want to control (any node's state can be chosen), or leave it on this node's own Measurement state and drive that state yourself. The Control output state holds the control signal, recomputed every step; connect a relationship from it to the node being controlled (for example, an edge whose equation uses the controller's output as a heat flow, force or voltage). The Error state shows the setpoint minus the measurement, for plotting. Setpoint, gains and limits are shared parameters: the setpoint and gains are live, so they can be moved with a slider during a run, and each live parameter's slider range is editable in the parameters table. Both output limits and the derivative filter are constants. Output limits apply only when the maximum is larger than the minimum. The derivative acts on the error, so a step in the setpoint produces a brief kick in the output; a filter time greater than zero softens it. The integral stops accumulating while the output is held at a limit and the error would push it further (no wind-up), and the controller's memory is saved with checkpoints, so forks and resumed runs carry on exactly.",
+        "enabled": true,
+        "numerics": {
+          "substepsPerGlobalStep": 1
+        },
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "states": [
+          {
+            "id": 2,
+            "name": "Measurement",
+            "symbol": "measurement",
+            "initialValue": 0,
+            "unit": ""
+          },
+          {
+            "id": 3,
+            "name": "Control output",
+            "symbol": "output",
+            "initialValue": 0,
+            "unit": ""
+          },
+          {
+            "id": 4,
+            "name": "Error",
+            "symbol": "error",
+            "initialValue": 0,
+            "unit": ""
+          }
+        ],
+        "sourceTerms": [],
+        "implementation": {
+          "kind": "cpp",
+          "providerApiVersion": 1,
+          "source": "#include <konjugate/relationshipProvider.hpp>\n\n#include <cstddef>\n#include <cstring>\n#include <memory>\n#include <span>\n#include <vector>\n\nnamespace {\n\n// PID controller, ISA (standard) form\n// ISA (standard, ideal) form:  u = P*(e + (1/I)*integral(e) + D*de/dt); I <= 0 or D <= 0 turns that term off\n// where the error is e = setpoint - measurement. The control output is limited to [outputMin, outputMax] when\n// outputMax > outputMin, and the integral stops growing while the output is held at a limit it is already pushing\n// against (conditional integration), so it does not wind up. The derivative is taken on the error and passed through a\n// first-order filter of time constant filterTime (no filtering when that is zero or less). The integral of the error,\n// not the integral term itself, is what is remembered, so changing a gain while a run is going does not make the\n// output jump.\nclass PidIsa final : public konjugate::sdk::v1::NodeProvider {\npublic:\n    konjugate::sdk::v1::NodeProviderDescription describe() const override {\n        using konjugate::sdk::v1::ScalarPort;\n        return {\n            \"konjugate.pidIsa\",\n            \"PID controller, ISA (standard) form\",\n            {\n                ScalarPort{\"measurement\", \"measurement\", \"\"},\n                ScalarPort{\"setpoint\", \"setpoint\", \"\"},\n                ScalarPort{\"p\", \"p\", \"\"},\n                ScalarPort{\"i\", \"i\", \"\"},\n                ScalarPort{\"d\", \"d\", \"\"},\n                ScalarPort{\"filterTime\", \"filterTime\", \"\"},\n                ScalarPort{\"outputMin\", \"outputMin\", \"\"},\n                ScalarPort{\"outputMax\", \"outputMax\", \"\"}\n            },\n            {\n                ScalarPort{\"control\", \"control\", \"\"},\n                ScalarPort{\"error\", \"error\", \"\"}\n            }\n        };\n    }\n\n    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,\n                  konjugate::sdk::v1::NodeOutputCollector& outputs) override {\n        const double measurement = context.inputs.at(\"measurement\");\n        const double setpoint = context.inputs.at(\"setpoint\");\n        const double p = context.inputs.at(\"p\");\n        const double i = context.inputs.at(\"i\");\n        const double d = context.inputs.at(\"d\");\n        const double filterTime = context.inputs.at(\"filterTime\");\n        const double outputMin = context.inputs.at(\"outputMin\");\n        const double outputMax = context.inputs.at(\"outputMax\");\n        const double stepSize = context.stepSize;\n\n        const double error = setpoint - measurement;\n\n        double derivative = 0;\n        if (havePrevious_ && stepSize > 0) {\n            const double raw = (error - previousError_) / stepSize;\n            if (filterTime > 0) filteredDerivative_ += stepSize / (filterTime + stepSize) * (raw - filteredDerivative_);\n            else filteredDerivative_ = raw;\n            derivative = filteredDerivative_;\n        }\n\n        double integral = integral_ + (stepSize > 0 ? error * stepSize : 0);\n        double control = p * (error + (i > 0 ? integral / i : 0) + (d > 0 ? d * derivative : 0));\n\n        if (outputMax > outputMin) {\n            if (control > outputMax) {\n                control = outputMax;\n                if (error > 0) integral = integral_;\n            } else if (control < outputMin) {\n                control = outputMin;\n                if (error < 0) integral = integral_;\n            }\n        }\n\n        integral_ = integral;\n        previousError_ = error;\n        havePrevious_ = true;\n\n        outputs.addGradient(\"control\", control);\n        outputs.addGradient(\"error\", error);\n    }\n\n    // What the controller remembers, so a fork or a resumed run carries on exactly.\n    std::vector<std::byte> checkpoint() const override {\n        const double values[4] = {integral_, previousError_, filteredDerivative_, havePrevious_ ? 1.0 : 0.0};\n        std::vector<std::byte> payload(sizeof values);\n        std::memcpy(payload.data(), values, sizeof values);\n        return payload;\n    }\n\n    void restore(std::span<const std::byte> payload) override {\n        double values[4];\n        if (payload.size() != sizeof values) return;\n        std::memcpy(values, payload.data(), sizeof values);\n        integral_ = values[0];\n        previousError_ = values[1];\n        filteredDerivative_ = values[2];\n        havePrevious_ = values[3] != 0.0;\n    }\n\nprivate:\n    double integral_ = 0;\n    double previousError_ = 0;\n    double filteredDerivative_ = 0;\n    bool havePrevious_ = false;\n};\n\n}\n\nstd::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {\n    return std::make_unique<PidIsa>();\n}\n",
+          "bindings": [
+            {
+              "key": "measurement",
+              "kind": "state",
+              "stateId": 2
+            },
+            {
+              "key": "setpoint",
+              "kind": "parameter",
+              "sharedParameterId": 5
+            },
+            {
+              "key": "p",
+              "kind": "parameter",
+              "sharedParameterId": 6
+            },
+            {
+              "key": "i",
+              "kind": "parameter",
+              "sharedParameterId": 7
+            },
+            {
+              "key": "d",
+              "kind": "parameter",
+              "sharedParameterId": 8
+            },
+            {
+              "key": "filterTime",
+              "kind": "parameter",
+              "sharedParameterId": 9
+            },
+            {
+              "key": "outputMin",
+              "kind": "parameter",
+              "sharedParameterId": 10
+            },
+            {
+              "key": "outputMax",
+              "kind": "parameter",
+              "sharedParameterId": 11
+            }
+          ],
+          "outputs": [
+            {
+              "key": "control",
+              "stateId": 3,
+              "setsValue": true
+            },
+            {
+              "key": "error",
+              "stateId": 4,
+              "setsValue": true
+            }
+          ]
+        },
+        "appearance": {
+          "type": "primitive",
+          "shape": "box",
+          "color": "#8f6fd1"
+        }
+      }
+    ],
+    "edges": [],
+    "sharedParameters": [
+      {
+        "id": 5,
+        "name": "Setpoint",
+        "symbol": "setpoint",
+        "value": 1,
+        "unit": "",
+        "mode": "live",
+        "scope": "instance",
+        "control": {
+          "minimum": -100,
+          "maximum": 100,
+          "step": 0.1
+        }
+      },
+      {
+        "id": 6,
+        "name": "P (proportional gain)",
+        "symbol": "p",
+        "value": 1,
+        "unit": "",
+        "mode": "live",
+        "scope": "instance",
+        "control": {
+          "minimum": 0,
+          "maximum": 100,
+          "step": 0.01
+        }
+      },
+      {
+        "id": 7,
+        "name": "I (integral time)",
+        "symbol": "i",
+        "value": 10,
+        "unit": "s",
+        "mode": "live",
+        "scope": "instance",
+        "control": {
+          "minimum": 0,
+          "maximum": 1000,
+          "step": 0.1
+        }
+      },
+      {
+        "id": 8,
+        "name": "D (derivative time)",
+        "symbol": "d",
+        "value": 0,
+        "unit": "s",
+        "mode": "live",
+        "scope": "instance",
+        "control": {
+          "minimum": 0,
+          "maximum": 100,
+          "step": 0.01
+        }
+      },
+      {
+        "id": 9,
+        "name": "Derivative filter time",
+        "symbol": "filterTime",
+        "value": 0,
+        "unit": "s",
+        "mode": "constant",
+        "scope": "instance"
+      },
+      {
+        "id": 10,
+        "name": "Output minimum",
+        "symbol": "outputMin",
+        "value": -100,
+        "unit": "",
+        "mode": "constant",
+        "scope": "instance"
+      },
+      {
+        "id": 11,
+        "name": "Output maximum",
+        "symbol": "outputMax",
+        "value": 100,
+        "unit": "",
+        "mode": "constant",
+        "scope": "instance"
+      }
+    ]
+  }
+}

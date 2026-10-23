@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { validateComponentTemplate } from '../src/componentTemplate.mjs';
+import { componentTemplateHasCppProgram, validateComponentTemplate } from '../src/componentTemplate.mjs';
 
 const bundle = () => ({
     id: 'loadedMotor', kind: 'bundle', name: 'Loaded motor', domains: ['electrical'],
@@ -17,12 +17,12 @@ const bundle = () => ({
     }]
 });
 
-test('every bundled component template validates, bundles included', async () => {
+test('every bundled component template validates, bundles and assemblies included', async () => {
     const directory = new URL('../assets/componentLibrary/', import.meta.url).pathname;
     const names = (await readdir(directory)).filter((name) => name.endsWith('.json') && name !== 'webManifest.json');
     const kinds = new Set();
     for (const name of names) kinds.add(validateComponentTemplate(JSON.parse(await readFile(join(directory, name), 'utf8'))).kind);
-    assert.deepEqual([...kinds].sort(), ['bundle', 'edge', 'node']);
+    assert.deepEqual([...kinds].sort(), ['bundle', 'edge', 'fragment', 'node']);
 });
 
 test('a well-formed bundle validates and is cloned', () => {
@@ -87,4 +87,85 @@ test('a node template rejects malformed source-term parameters and shared parame
     rejects((t) => { t.sourceTerms[1].setsValue = 'yes'; }, /not a boolean/);
     rejects((t) => { t.sharedParameters[1].key = 'cover'; }, /node template shared parameter needs a unique key/);
     rejects((t) => { t.sharedParameters[0].scope = 'galaxy'; }, /node template shared parameter scope/);
+});
+
+// A fragment template: a node with its own C++ program, reading the two shared parameters it carries.
+const fragmentTemplate = () => ({
+    id: 'limitedGain', kind: 'fragment', name: 'Limited gain', domains: ['control'], description: 'Scales an input and clamps it.',
+    fragment: {
+        format: 'konjugateGraphFragment', version: 1,
+        nodes: [{
+            id: 1, name: 'Limited gain', description: 'Holds the clamped output.', position: [0, 0, 0],
+            states: [{ id: 2, name: 'Output', symbol: 'output', initialValue: 0, unit: '' }], sourceTerms: [],
+            implementation: {
+                kind: 'cpp', providerApiVersion: 1, source: 'struct Gain {};',
+                bindings: [{ key: 'gain', kind: 'parameter', sharedParameterId: 3 }, { key: 'limit', kind: 'parameter', sharedParameterId: 4 }],
+                outputs: [{ key: 'output', stateId: 2, setsValue: true }]
+            }
+        }],
+        edges: [],
+        sharedParameters: [
+            { id: 3, name: 'Gain', symbol: 'gain', value: 2, unit: '', mode: 'live', control: { minimum: 0, maximum: 10, step: 0.1 } },
+            { id: 4, name: 'Limit', symbol: 'limit', value: 5, unit: '', scope: 'instance' }
+        ]
+    }
+});
+
+test('a well-formed fragment template validates and is cloned', () => {
+    const template = fragmentTemplate();
+    const validated = validateComponentTemplate(template);
+    assert.deepEqual(validated, template);
+    assert.notEqual(validated.fragment, template.fragment);
+});
+
+test('a fragment template that links to a shared parameter it does not carry is refused', () => {
+    const template = fragmentTemplate();
+    template.fragment.sharedParameters.pop();
+    assert.throws(() => validateComponentTemplate(template), /does not carry/);
+});
+
+test('a fragment template\'s live shared parameter needs a usable slider range', () => {
+    const template = fragmentTemplate();
+    template.fragment.sharedParameters[0].control.maximum = -1;
+    assert.throws(() => validateComponentTemplate(template), /slider control/);
+});
+
+test('a fragment template may carry only inline programs', () => {
+    for (const implementation of [{ kind: 'fmi', fmuId: 'x', bindings: [], outputs: [] }, { kind: 'plugin', pluginId: 'p' }, { kind: 'cpp', source: '   ', bindings: [] }]) {
+        const template = fragmentTemplate();
+        template.fragment.nodes[0].implementation = implementation;
+        assert.throws(() => validateComponentTemplate(template), /inline cpp or python source/, JSON.stringify(implementation));
+    }
+});
+
+test('a fragment template needs a graph that is valid as the canvas copies it', () => {
+    const empty = fragmentTemplate();
+    empty.fragment.nodes = [];
+    assert.throws(() => validateComponentTemplate(empty), /valid graph fragment/);
+    const repeated = fragmentTemplate();
+    repeated.fragment.sharedParameters[1].id = 2;
+    assert.throws(() => validateComponentTemplate(repeated), /valid graph fragment/);
+    const unnamed = fragmentTemplate();
+    unnamed.fragment.nodes[0].name = '';
+    assert.throws(() => validateComponentTemplate(unnamed), /needs a name/);
+});
+
+test('a template that puts a C++ program in the model is recognised wherever the program sits', () => {
+    assert.equal(componentTemplateHasCppProgram(fragmentTemplate()), true);
+    const onSourceTerm = fragmentTemplate();
+    const program = onSourceTerm.fragment.nodes[0].implementation;
+    delete onSourceTerm.fragment.nodes[0].implementation;
+    onSourceTerm.fragment.nodes[0].sourceTerms = [{ id: 9, state: 'output', expression: '', implementation: program }];
+    assert.equal(componentTemplateHasCppProgram(onSourceTerm), true);
+    const python = fragmentTemplate();
+    python.fragment.nodes[0].implementation.kind = 'python';
+    assert.equal(componentTemplateHasCppProgram(python), false);
+    assert.equal(componentTemplateHasCppProgram(validateComponentTemplate(bundle())), false);
+});
+
+test('the bundled PID assemblies carry a C++ program, so the web library leaves them out', async () => {
+    const directory = new URL('../assets/componentLibrary/', import.meta.url).pathname;
+    for (const id of ['pidParallel', 'pidIsa']) {
+        assert.equal(componentTemplateHasCppProgram(validateComponentTemplate(JSON.parse(await readFile(join(directory, `${id}.json`), 'utf8')))), true, id);
+    }
 });

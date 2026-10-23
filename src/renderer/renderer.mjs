@@ -3871,13 +3871,22 @@ let componentLibraryType = 'all';
 let componentLibraryPlacementCount = 0;
 let pendingEdgeTemplate = null;
 
+function componentLibraryKindLabel(template) {
+    if (template.kind === 'bundle') return `Bundle · ${template.edges.length} edges`;
+    if (template.kind === 'fragment') {
+        const { nodes, edges } = template.fragment;
+        return `Assembly · ${nodes.length} node${nodes.length === 1 ? '' : 's'}${edges.length ? `, ${edges.length} edge${edges.length === 1 ? '' : 's'}` : ''}`;
+    }
+    return template.kind === 'node' ? 'Node' : 'Edge';
+}
+
 function renderComponentLibraryItem(template) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'componentLibraryItem';
     button.dataset.templateId = template.id;
     button.title = template.description ?? '';
-    button.innerHTML = `<span class="componentLibrarySwatch" style="background:${escapeHtml(template.color ?? '#42c9bc')}"></span><span><b>${escapeHtml(template.name)}</b><small>${template.kind === 'bundle' ? `Bundle · ${template.edges.length} edges` : template.kind === 'node' ? 'Node' : 'Edge'} · ${escapeHtml(template.domains.map(domainLabel).join(', '))}</small></span>`;
+    button.innerHTML = `<span class="componentLibrarySwatch" style="background:${escapeHtml(template.color ?? '#42c9bc')}"></span><span><b>${escapeHtml(template.name)}</b><small>${componentLibraryKindLabel(template)} · ${escapeHtml(template.domains.map(domainLabel).join(', '))}</small></span>`;
     button.addEventListener('click', () => applyComponentTemplate(template));
     return button;
 }
@@ -3910,7 +3919,7 @@ function renderComponentLibraryResults() {
 }
 
 function renderComponentLibraryChips() {
-    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges'], ['bundle', 'Bundles']];
+    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges'], ['bundle', 'Bundles'], ['fragment', 'Assemblies']];
     $('#componentLibraryTypeChips').replaceChildren(...types.map(([type, label]) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -4245,6 +4254,7 @@ function applyComponentTemplate(template) {
     if (activeResult) return;
     if (template.kind === 'node') applyNodeTemplate(template);
     else if (template.kind === 'bundle') applyBundleTemplate(template);
+    else if (template.kind === 'fragment') applyFragmentTemplate(template);
     else applyEdgeTemplate(template);
 }
 
@@ -11902,40 +11912,86 @@ function pasteOffsetForCurrentView() {
     return offset;
 }
 
+// Puts a remapped fragment (see remapGraphFragment) into the model as one undoable step and selects it. Pasting a copied
+// graph and placing a library assembly both insert this way, so what one can carry the other can.
+function insertGraphFragment(remapped, { sharedParameters = [] } = {}) {
+    nextModelEntityId = remapped.nextId;
+    const sharedBefore = structuredClone(model.sharedParameters);
+    model.sharedParameters = [...model.sharedParameters, ...sharedParameters];
+    const sharedAfter = structuredClone(model.sharedParameters);
+    const nodes = remapped.nodes.map(hydrateFragmentNode);
+    const relationships = remapped.edges.map(hydrateFragmentRelationship);
+    model.nodes.push(...nodes);
+    nodes.forEach(createNode);
+    model.relationships.push(...relationships);
+    relationships.forEach(createRelationship);
+    const nodeIds = nodes.map((node) => node.id);
+    const relationshipIds = relationships.map((relationship) => relationship.id);
+    const applyVisible = (visible) => {
+        nodeIds.forEach((id) => setNodeVisibility(id, visible));
+        relationshipIds.forEach((id) => setRelationshipVisibility(id, visible));
+        updateRelationships();
+        updateModelStatus();
+    };
+    clearSelection();
+    nodeIds.forEach((id) => selectNode(nodeObjects.get(id), { additive: selectedNodeIds.size > 0 }));
+    if (currentTool in transformPropertyForTool && selectedNode) transformControls.attach(selectedNode);
+    recordHistory({
+        undo: () => { applyVisible(false); model.sharedParameters = structuredClone(sharedBefore); },
+        redo: () => { applyVisible(true); model.sharedParameters = structuredClone(sharedAfter); }
+    });
+    updateRelationships();
+    updateModelStatus();
+    updateValidationStatus();
+    return nodes.length;
+}
+
 function pasteGraph() {
     if (activeResult) return false;
     const fragment = window.modelClipboard.read();
     if (!validateGraphFragment(fragment)) return false;
     try {
-        const remapped = remapGraphFragment(fragment, nextModelEntityId, pasteOffsetForCurrentView());
-        nextModelEntityId = remapped.nextId;
-        const nodes = remapped.nodes.map(hydrateFragmentNode);
-        const relationships = remapped.edges.map(hydrateFragmentRelationship);
-        model.nodes.push(...nodes);
-        nodes.forEach(createNode);
-        model.relationships.push(...relationships);
-        relationships.forEach(createRelationship);
-        const nodeIds = nodes.map((node) => node.id);
-        const relationshipIds = relationships.map((relationship) => relationship.id);
-        const applyVisible = (visible) => {
-            nodeIds.forEach((id) => setNodeVisibility(id, visible));
-            relationshipIds.forEach((id) => setRelationshipVisibility(id, visible));
-            updateRelationships();
-            updateModelStatus();
-        };
-        clearSelection();
-        nodeIds.forEach((id) => selectNode(nodeObjects.get(id), { additive: selectedNodeIds.size > 0 }));
-        if (currentTool in transformPropertyForTool && selectedNode) transformControls.attach(selectedNode);
-        recordHistory({ undo: () => applyVisible(false), redo: () => applyVisible(true) });
-        updateRelationships();
-        updateModelStatus();
-        updateValidationStatus();
-        $('#statusText').textContent = `${nodes.length} node${nodes.length === 1 ? '' : 's'} pasted`;
+        const count = insertGraphFragment(remapGraphFragment(fragment, nextModelEntityId, pasteOffsetForCurrentView()));
+        $('#statusText').textContent = `${count} node${count === 1 ? '' : 's'} pasted`;
         return true;
     } catch (error) {
         console.error('Copied graph could not be pasted.', error);
         $('#statusText').textContent = error.message;
         return false;
+    }
+}
+
+// A library assembly: a piece of model as the canvas holds it, placed whole, with its programs and the shared parameters
+// it links to. A "project"-scoped shared parameter reuses one the model already has with the same symbol; any other is
+// made for this placement, under a symbol not yet taken.
+function applyFragmentTemplate(template) {
+    const declared = template.fragment.sharedParameters ?? [];
+    const reuse = new Map(declared.filter((shared) => shared.scope === 'project').flatMap((shared) => {
+        const existing = model.sharedParameters.find((candidate) => candidate.symbol === shared.symbol);
+        return existing ? [[shared.id, existing.id]] : [];
+    }));
+    componentLibraryPlacementCount += 1;
+    // Cascaded like a node template, and for the same reason: the library sidebar docks over the left of the canvas.
+    const offset = [
+        1.5 + ((componentLibraryPlacementCount - 1) % 5) * 1.6,
+        sharedVisibleNodeAxisValue(1) ?? -0.7,
+        sharedVisibleNodeAxisValue(2) ?? 0
+    ];
+    try {
+        const remapped = remapGraphFragment(template.fragment, nextModelEntityId, offset, { nameSuffix: '', reuse });
+        const takenSymbols = new Set(model.sharedParameters.map((shared) => shared.symbol));
+        const sharedParameters = remapped.sharedParameters.map(({ scope, ...shared }) => {
+            let symbol = shared.symbol;
+            for (let suffix = 2; takenSymbols.has(symbol); suffix += 1) symbol = `${shared.symbol}${suffix}`;
+            takenSymbols.add(symbol);
+            return { ...shared, symbol };
+        });
+        hideCards();
+        const count = insertGraphFragment(remapped, { sharedParameters });
+        $('#statusText').textContent = `${template.name} placed · ${count} node${count === 1 ? '' : 's'}`;
+    } catch (error) {
+        console.error('The library assembly could not be placed.', error);
+        $('#statusText').textContent = error.message;
     }
 }
 

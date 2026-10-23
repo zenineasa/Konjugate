@@ -80,7 +80,7 @@ The same plugin can contribute a reusable component template:
 }
 ```
 
-After installation, the template appears in the existing Component Library. Placement uses the normal model-creation path, so validation, undo/redo and simulation semantics are identical to a bundled component. A plugin can now extend the modeling vocabulary as well as the numerical runtime.
+The template file can be a `node`, `edge` or `bundle` template, or a `fragment` (an assembly: nodes, relationships, inline C++ or Python programs and the shared parameters they link to, in the canvas's own copy-and-paste format; see [the component library proposal](proposals/componentLibrary.md#assemblies-a-piece-of-model-placed-whole)). Use a fragment when the component is more than one node or edge, or carries a program of its own. After installation, the template appears in the existing Component Library. Placement uses the normal model-creation path, so validation, undo/redo and simulation semantics are identical to a bundled component. A plugin can now extend the modeling vocabulary as well as the numerical runtime.
 
 A plugin can also contribute a ready-made example model, which appears in the Examples dialog beside the bundled ones:
 

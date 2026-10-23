@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../src/graphClipboard.mjs';
+import { createGraphFragment, fragmentSharedParameterReferences, remapGraphFragment, validateGraphFragment } from '../src/graphClipboard.mjs';
 
 const document = {
     nodes: [
@@ -158,4 +158,34 @@ test('the copy shares nothing with the original', () => {
 test('a fragment that reuses an id is refused', () => {
     const graph = { nodes: [{ id: 1, name: 'A', position: [0, 0, 0], states: [{ id: 1, name: 'X' }], sourceTerms: [] }], edges: [] };
     assert.equal(validateGraphFragment(createGraphFragment(graph, [1])), false);
+});
+
+// A library template is a fragment that stands alone: it carries the shared parameters its nodes link to, and keeps its names.
+const withShared = {
+    format: 'konjugateGraphFragment', version: 1,
+    nodes: [{
+        id: 1, name: 'Controller', position: [0, 0, 0], states: [{ id: 2, name: 'Output' }], sourceTerms: [],
+        implementation: { kind: 'cpp', source: 'code', bindings: [{ key: 'setpoint', kind: 'parameter', sharedParameterId: 10 }, { key: 'limit', kind: 'parameter', sharedParameterId: 11 }], outputs: [{ key: 'u', stateId: 2 }] }
+    }],
+    edges: [],
+    sharedParameters: [{ id: 10, name: 'Setpoint', symbol: 'setpoint', value: 1 }, { id: 11, name: 'Limit', symbol: 'limit', value: 5 }]
+};
+
+test('shared parameters a fragment carries are renumbered along with every link to them', () => {
+    const { nodes: [node], sharedParameters, nextId } = remapGraphFragment(withShared, 100, [0, 0, 0], { nameSuffix: '' });
+    assert.equal(node.name, 'Controller', 'A placed template lost its own name.');
+    assert.deepEqual(sharedParameters.map(({ id }) => id), [102, 103]);
+    assert.deepEqual(node.implementation.bindings.map(({ sharedParameterId }) => sharedParameterId), [102, 103]);
+    assert.equal(nextId, 104);
+});
+
+test('a shared parameter the project already has is linked to, not made again', () => {
+    const { nodes: [node], sharedParameters } = remapGraphFragment(withShared, 100, [0, 0, 0], { nameSuffix: '', reuse: new Map([[10, 7]]) });
+    assert.deepEqual(sharedParameters.map(({ symbol }) => symbol), ['limit']);
+    assert.deepEqual(node.implementation.bindings.map(({ sharedParameterId }) => sharedParameterId), [7, 102]);
+});
+
+test('lists the shared parameters a fragment links to, whether or not it carries them', () => {
+    assert.deepEqual(fragmentSharedParameterReferences(withShared), [10, 11]);
+    assert.deepEqual(fragmentSharedParameterReferences({ nodes: [{ id: 1, implementation: { bindings: [{ sharedParameterId: 99 }] } }], edges: [] }), [99]);
 });

@@ -17,7 +17,7 @@ import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName } from '../src/exampleCatalog.mjs';
-import { validateComponentTemplate } from '../src/componentTemplate.mjs';
+import { componentTemplateHasCppProgram, validateComponentTemplate } from '../src/componentTemplate.mjs';
 import { stripFrontmatter } from '../src/exampleGuide/markdown.mjs';
 import { WEB_EDITION_FAVICON, WEB_EDITION_IMAGE, webEditionHead, webEditionNoscript, webEditionRootPage } from './webEditionMetadata.mjs';
 
@@ -201,7 +201,12 @@ const componentEntries = [];
 for (const name of await readdir(componentLibraryDirectory)) {
     if (!name.endsWith('.json')) continue;
     try {
-        componentEntries.push(validateComponentTemplate(JSON.parse(await readFile(join(componentLibraryDirectory, name), 'utf8'))));
+        const template = validateComponentTemplate(JSON.parse(await readFile(join(componentLibraryDirectory, name), 'utf8')));
+        if (componentTemplateHasCppProgram(template)) {
+            console.warn(`Leaving component template ${name} out of the web library: it carries a C++ program, which the web edition cannot compile yet.`);
+            continue;
+        }
+        componentEntries.push(template);
     } catch (error) {
         console.warn(`Skipping component template ${name}: ${error.message}`);
     }

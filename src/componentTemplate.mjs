@@ -8,6 +8,8 @@
 // a malformed bundled template is rejected the same way in both places instead of only on
 // desktop.
 
+import { fragmentSharedParameterReferences, validateGraphFragment } from './graphClipboard.mjs';
+
 const componentTemplateIdPattern = /^[a-zA-Z][\w-]*$/;
 
 const validPortSymbols = (port) => port !== undefined && (Array.isArray(port) ? port.length : true) &&
@@ -35,6 +37,38 @@ function validateSharedParameters(sharedParameters, owner) {
         sharedSymbols.add(shared.symbol);
     });
     return sharedKeys;
+}
+
+// A fragment template is a piece of model exactly as the canvas holds it -- nodes, relationships, their programs and the
+// shared parameters they link to -- so it can express whatever a user can build there, with nothing for the template
+// format to keep in step with the canvas. It must stand alone: everything it links to travels with it. A program in it is
+// source it carries (cpp or python), never a reference to something installed on one machine (an FMU, a plugin).
+function validateFragmentTemplate(template) {
+    const { fragment } = template;
+    if (!validateGraphFragment(fragment)) throw new Error('A fragment template needs a valid graph fragment: nodes with unique positive integer ids, and relationships between them.');
+    const carried = new Set((fragment.sharedParameters ?? []).map((shared) => shared.id));
+    fragmentSharedParameterReferences(fragment).forEach((id) => {
+        if (!carried.has(id)) throw new Error(`A fragment template links to shared parameter ${id}, which it does not carry.`);
+    });
+    validateSharedParameters((fragment.sharedParameters ?? []).map((shared) => ({ ...shared, key: `shared${shared.id}` })), 'fragment template');
+    const checkProgram = (implementation, owner) => {
+        if (!implementation) return;
+        if (!['cpp', 'python'].includes(implementation.kind) || typeof implementation.source !== 'string' || !implementation.source.trim()) {
+            throw new Error(`${owner} has a program that is not inline cpp or python source.`);
+        }
+    };
+    fragment.nodes.forEach((node) => {
+        if (!node.name) throw new Error('A fragment template node needs a name.');
+        (node.states ?? []).forEach((state) => {
+            if (!componentTemplateIdPattern.test(state?.symbol ?? '') || !state.name) throw new Error(`Node "${node.name}" has a state without a name and symbol.`);
+        });
+        checkProgram(node.implementation, `Node "${node.name}"`);
+        (node.sourceTerms ?? []).forEach((term) => checkProgram(term.implementation, `A source term of node "${node.name}"`));
+    });
+    fragment.edges.forEach((edge) => {
+        if (!edge.name) throw new Error('A fragment template relationship needs a name.');
+        checkProgram(edge.implementation, `Relationship "${edge.name}"`);
+    });
 }
 
 // A bundle stamps out several edges at once among N named endpoint nodes, optionally with shared
@@ -81,7 +115,7 @@ function validateBundleTemplate(template) {
 // Deliberately hand-rolled like validateAddonManifest rather than a schema library -- the shape
 // is small and stable.
 export function validateComponentTemplate(template) {
-    if (!template || !['node', 'edge', 'bundle'].includes(template.kind)) throw new Error('A template must have kind "node", "edge" or "bundle".');
+    if (!template || !['node', 'edge', 'bundle', 'fragment'].includes(template.kind)) throw new Error('A template must have kind "node", "edge", "bundle" or "fragment".');
     if (!componentTemplateIdPattern.test(template.id ?? '')) throw new Error('A template needs a valid id.');
     if (!template.name) throw new Error('A template needs a name.');
     if (template.description !== undefined && typeof template.description !== 'string') throw new Error('A template description must be a string.');
@@ -89,7 +123,9 @@ export function validateComponentTemplate(template) {
     if (!Array.isArray(domains) || !domains.length || !domains.every((domain) => typeof domain === 'string' && domain)) {
         throw new Error('A template needs a non-empty domains array.');
     }
-    if (template.kind === 'bundle') {
+    if (template.kind === 'fragment') {
+        validateFragmentTemplate(template);
+    } else if (template.kind === 'bundle') {
         validateBundleTemplate(template);
     } else if (template.kind === 'node') {
         if (!Array.isArray(template.states) || !template.states.length) throw new Error('A node template needs at least one state.');
@@ -139,4 +175,16 @@ export function validateComponentTemplate(template) {
         }
     }
     return structuredClone(template);
+}
+
+// Whether placing the template puts a C++ program in the model, which needs a compiler. Found by walking the whole
+// template for an `implementation` of kind cpp, not by looking in the places a program is known to go, so a template
+// shape added later is covered too. The web edition cannot compile C++ yet, so its library leaves such templates out.
+export function componentTemplateHasCppProgram(template) {
+    const visit = (value) => {
+        if (Array.isArray(value)) return value.some(visit);
+        if (!value || typeof value !== 'object') return false;
+        return Object.entries(value).some(([key, child]) => (key === 'implementation' && child?.kind === 'cpp') || visit(child));
+    };
+    return visit(template);
 }

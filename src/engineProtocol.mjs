@@ -11,6 +11,8 @@
 // Uint8Array, which Buffer instances already satisfy (Buffer extends Uint8Array), so nothing about
 // the existing Node-side callers changes.
 
+import { scheduleModeNumbers, waveformProblem, waveformShapes } from './parameterSchedule.mjs';
+
 function concatBytes(arrays) {
     const length = arrays.reduce((total, array) => total + array.length, 0);
     const result = new Uint8Array(length);
@@ -140,9 +142,13 @@ export function encodeEngineCommand(sequence, command) {
         if (!Number.isSafeInteger(command.parameterId) || command.parameterId <= 0) {
             throw new Error('A parameter schedule requires a positive safe integer identifier.');
         }
-        const modes = { step: 1, ramp: 2, pulse: 3, piecewise: 4 };
-        const mode = modes[command.mode];
+        const mode = scheduleModeNumbers[command.mode];
         if (!mode) throw new Error('Unsupported parameter schedule mode.');
+        const waveform = command.mode === 'waveform' ? command.waveform : null;
+        if (command.mode === 'waveform') {
+            const problem = waveformProblem(waveform);
+            if (problem) throw new Error(problem);
+        }
         const samples = command.mode === 'piecewise' ? (command.samples ?? []) : [];
         if (command.mode === 'piecewise' && samples.length < 2) {
             throw new Error('A piecewise parameter schedule requires at least two samples.');
@@ -157,7 +163,15 @@ export function encodeEngineCommand(sequence, command) {
             ...samples.map((sample) => encodedMessageField(7, concatBytes([
                 encodedDoubleField(1, Number(sample.time)),
                 encodedDoubleField(2, Number(sample.value))
-            ])))
+            ]))),
+            ...(waveform ? [
+                encodedField(8, 0, encodeVarint(waveformShapes[waveform.shape].number)),
+                encodedDoubleField(9, waveform.amplitude),
+                encodedDoubleField(10, waveform.frequency),
+                encodedDoubleField(11, waveform.phaseDegrees ?? 0),
+                encodedDoubleField(12, waveform.dutyCycle ?? 0),
+                encodedField(13, 0, encodeVarint(waveform.seed ?? 0))
+            ] : [])
         ]);
         payloadField = 6;
     } else {
@@ -455,6 +469,7 @@ export function decodeEngineEvent(buffer) {
             for (const item of fields(field.value)) {
                 if (item.number === 1 && item.wireType === 0) capabilities.metisAvailable = Boolean(item.value);
                 else if (item.number === 2 && item.wireType === 2) capabilities.metisVersion = decodeUtf8(item.value);
+                else if (item.number === 4 && item.wireType === 2) (capabilities.parameterScheduleModes ??= []).push(decodeUtf8(item.value));
             }
             event.capabilities = capabilities;
         } else if (field.number === 3 && field.wireType === 2) {

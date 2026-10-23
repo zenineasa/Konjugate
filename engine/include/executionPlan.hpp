@@ -109,7 +109,8 @@ struct CompiledParameter {
 // earlier one), the one with the latest startTime that has already begun governs -- see
 // resolveParameterValues' selection logic in executionPlan.cpp.
 struct ParameterSchedule {
-    enum class Mode { step, ramp, pulse, piecewise };
+    enum class Mode { step, ramp, pulse, piecewise, waveform };
+    enum class Shape { sine, square, triangle, sawtooth, noise };
     EntityId parameterId = 0;
     Mode mode = Mode::step;
     double startTime = 0;
@@ -127,6 +128,14 @@ struct ParameterSchedule {
     // than interpolating -- for a series of per-period rates, such as a daily volume, whose total
     // over each period must be kept.
     bool hold = false;
+    // Waveform only (docs/jobProtocol.md): a signal around baseValue, from startTime for duration (0 for the rest of
+    // the run), reading baseValue outside that.
+    Shape shape = Shape::sine;
+    double amplitude = 0;
+    double frequency = 0;
+    double phaseDegrees = 0;
+    double dutyCycle = 0;
+    std::uint64_t seed = 0;
 };
 
 double evaluateParameterSchedule(const ParameterSchedule& schedule, double simulationTime);

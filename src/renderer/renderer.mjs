@@ -8,7 +8,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import 'mathlive';
 import { DocumentController } from './documentController.mjs';
-import { parseScheduleText, scheduleError, scheduleSummary, scheduleText } from '../parameterSchedule.mjs';
+import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
@@ -321,7 +321,7 @@ function hydrateProjectDocument(document) {
                 maximum: Number(parameter.control.maximum),
                 step: Number(parameter.control.step)
             })) {
-                throw new Error(`Live parameter slider settings in “${edge.name ?? edge.id}” are invalid.`);
+                throw new Error(`Live range settings in “${edge.name ?? edge.id}” are invalid.`);
             }
             parameterSymbols.add(parameter.symbol);
         });
@@ -2292,9 +2292,7 @@ function renderSourceTermParameters(node, term) {
             <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
             <button type="button" title="Remove parameter">×</button>
             <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
-                <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
-                <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
-                <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+                ${liveRangeFields(control)}
                 <span class="parameterControlError" role="status"></span>
             </div>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
@@ -2718,10 +2716,10 @@ function parameterTuningError(value, tuning) {
 }
 
 function parameterControlError(value, control) {
-    if (![value, control.minimum, control.maximum, control.step].every(Number.isFinite)) return 'Value and slider settings must be finite numbers.';
+    if (![value, control.minimum, control.maximum, control.step].every(Number.isFinite)) return 'Value and live range settings must be finite numbers.';
     if (!(control.minimum < control.maximum)) return 'Minimum must be less than maximum.';
     if (!(control.step > 0)) return 'Step must be greater than zero.';
-    if (value < control.minimum || value > control.maximum) return 'The initial value must be within the slider bounds.';
+    if (value < control.minimum || value > control.maximum) return 'The initial value must be within the live range.';
     return '';
 }
 
@@ -2763,9 +2761,7 @@ function renderEdgeEditor(definition) {
             <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
             <button type="button" title="Remove parameter">×</button>
             <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
-                <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
-                <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
-                <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+                ${liveRangeFields(control)}
                 <span class="parameterControlError" role="status"></span>
             </div>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
@@ -4451,9 +4447,7 @@ function addEdgeParameterRow(values = {}) {
         <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
         <div class="parameterControlFields" ${values.mode === 'live' ? '' : 'hidden'}>
-            <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
-            <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
-            <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+            ${liveRangeFields(control)}
             <span class="parameterControlError" role="status"></span>
         </div>
     `;
@@ -5501,6 +5495,15 @@ $('#closeExecutionSummary').addEventListener('click', () => {
     $('#executionSummaryButton').ariaExpanded = 'false';
 });
 
+// The live range of a parameter: the lowest and highest value it can be set to while a run is going, and the step the
+// slider and the - and + buttons move by. One definition for every editor that shows it. (In the project file it is
+// `control: { minimum, maximum, step }`; the name stays so files keep opening.)
+function liveRangeFields(control) {
+    return `<label class="parameterField" title="The lowest value this parameter can be set to while a run is going"><span>Live minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
+                <label class="parameterField" title="The highest value this parameter can be set to while a run is going"><span>Live maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
+                <label class="parameterField" title="How far the slider and the − and + buttons move it at a time"><span>Live step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>`;
+}
+
 function liveParameterRange(parameter) {
     const value = Number(parameter.value) || 0;
     const magnitude = Math.max(Math.abs(value), 1);
@@ -5515,6 +5518,8 @@ function liveParameterRange(parameter) {
 
 function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
     liveParameterValues.set(parameterId, value);
+    // Setting a value outright ends any waveform on the parameter (the engine drops it too).
+    if (immediate) liveWaveformRuns.delete(parameterId);
     clearTimeout(liveParameterUpdateTimers.get(parameterId));
     const apply = async () => {
         liveParameterUpdateTimers.delete(parameterId);
@@ -5538,6 +5543,9 @@ async function sendLiveParameterSchedule(parameterId, schedule) {
     const startTime = Number(activeResult?.samples?.at(-1)?.time ?? 0);
     try {
         await window.engine.scheduleParameterValue(activeEngineJobId, parameterId, { ...schedule, startTime });
+        if (schedule.mode === 'waveform') liveWaveformRuns.set(parameterId, { startTime, waveform: schedule.waveform, centre: schedule.baseValue, duration: schedule.duration });
+        else liveWaveformRuns.delete(parameterId);
+        updateLiveWaveformCursors(startTime);
     } catch (error) {
         $('#statusText').textContent = error.message;
     }
@@ -6004,6 +6012,29 @@ documentController.subscribe(refreshParametersPanel);
 // they need no distinct mode here). Step keeps the exact instant-apply behavior every existing
 // caller already relies on; ramp/pulse route through onSchedule instead of onChange, carrying the
 // row's pre-edit value as the schedule's baseValue.
+// The schedule modes the engine in use can evaluate, which decides whether a parameter's controls offer waveforms: read
+// from the engine itself (an engine from before waveforms reports none and keeps the original three). Rows built before
+// the answer arrives keep the original three; rebuilding them picks the answer up.
+let availableScheduleModes = originalScheduleModes;
+
+// The waveforms running now, by parameter id: when each started, what it is and what it swings around. The live controls
+// draw a marker on each one's preview at the simulation time of the latest result, and a plain value set drops it.
+const liveWaveformRuns = new Map();
+function updateLiveWaveformCursors(time) {
+    if (!Number.isFinite(time)) return;
+    $$('#liveParameterRows .liveParameterRow').forEach((row) => row.updateWaveformCursor?.(time));
+}
+async function loadAvailableScheduleModes() {
+    try {
+        const response = await window.engine.capabilities();
+        const modes = response?.available ? response.capabilities?.parameterScheduleModes : null;
+        availableScheduleModes = Array.isArray(modes) && modes.length ? modes : originalScheduleModes;
+    } catch {
+        availableScheduleModes = originalScheduleModes;
+    }
+}
+loadAvailableScheduleModes();
+
 function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedule = false, onSchedule = null } = {}) {
     const { minimum, maximum, step } = liveParameterRange(parameter);
     const normalizedValue = Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -6014,6 +6045,12 @@ function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedu
         <div class="liveParameterLabel"><strong>${escapeHtml(parameter.name)}</strong><small>${escapeHtml(ownerLabel)}${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''}</small></div>
         <button data-adjust="-1" type="button" aria-label="Decrease ${escapeHtml(parameter.name)}">−</button>
         <input type="range" min="${minimum}" max="${maximum}" step="${step}" value="${normalizedValue}" aria-label="${escapeHtml(parameter.name)}">
+        ${allowSchedule ? `<svg class="waveformPreview" viewBox="0 0 240 56" role="img" aria-label="Preview of the waveform around ${escapeHtml(parameter.name)}" hidden>
+            <line class="waveformCentre" x1="0" x2="240"></line>
+            <polyline class="waveformLine" points=""></polyline>
+            <line class="waveformCursor" y1="0" y2="56" hidden></line>
+            <circle class="waveformDot" r="3" hidden></circle>
+        </svg>` : ''}
         <button data-adjust="1" type="button" aria-label="Increase ${escapeHtml(parameter.name)}">+</button>
         <input type="number" step="${step}" value="${normalizedValue}" aria-label="${escapeHtml(parameter.name)} value">
         ${allowSchedule ? `
@@ -6022,17 +6059,122 @@ function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedu
                 <option value="step">Step</option>
                 <option value="ramp">Ramp</option>
                 <option value="pulse">Pulse</option>
+                ${availableScheduleModes.includes('waveform') ? `<optgroup label="Waveform">${Object.entries(waveformShapes)
+                    .map(([shape, { label }]) => `<option value="waveform:${shape}">${label}</option>`).join('')}</optgroup>` : ''}
             </select>
-            <input type="number" data-schedule-duration min="0" step="any" placeholder="Duration (s)" hidden aria-label="Duration for ${escapeHtml(parameter.name)}">
+            <label class="scheduleField" data-duration-field hidden><span>Duration (s)</span><input type="number" data-schedule-duration min="0" step="any" placeholder="Duration (s)" aria-label="Duration for ${escapeHtml(parameter.name)}"></label>
+            <span class="parameterWaveformFields" hidden>
+                <label class="scheduleField" title="How far it swings either side of the value"><span>Amplitude${parameter.unit ? ` (${escapeHtml(parameter.unit)})` : ''}</span><input type="number" data-wave="amplitude" min="0" step="any" value="${Number(((maximum - minimum) / 10).toPrecision(3))}" aria-label="Amplitude for ${escapeHtml(parameter.name)}"></label>
+                <label class="scheduleField" title="Cycles per second (noise: new values per second)"><span>Frequency (Hz)</span><input type="number" data-wave="frequency" min="0" step="any" value="1" aria-label="Frequency for ${escapeHtml(parameter.name)}"></label>
+                <label class="scheduleField" title="Where in its cycle it starts, in degrees"><span>Phase (°)</span><input type="number" data-wave="phaseDegrees" step="any" value="0" aria-label="Phase for ${escapeHtml(parameter.name)}"></label>
+                <label class="scheduleField" title="The fraction of each cycle spent high" hidden><span>Duty cycle</span><input type="number" data-wave="dutyCycle" min="0" max="0.99" step="0.05" value="0.5" aria-label="Duty cycle for ${escapeHtml(parameter.name)}"></label>
+                <label class="scheduleField" title="The same seed gives the same noise every run" hidden><span>Seed</span><input type="number" data-wave="seed" min="0" step="1" value="1" aria-label="Seed for ${escapeHtml(parameter.name)}"></label>
+                <button type="button" data-schedule-start title="Start it around the value above">Start</button>
+                <small class="waveformCaption"></small>
+            </span>
         </div>` : ''}
     `;
     const slider = $('input[type="range"]', row);
-    const numberInput = $('input[type="number"]:not([data-schedule-duration])', row);
+    const numberInput = $('input[type="number"]:not([data-schedule-duration]):not([data-wave])', row);
     const modeSelect = allowSchedule ? $('[data-schedule-mode]', row) : null;
     const durationInput = allowSchedule ? $('[data-schedule-duration]', row) : null;
-    if (modeSelect) modeSelect.addEventListener('change', () => { durationInput.hidden = modeSelect.value === 'step'; });
+    const durationField = allowSchedule ? $('[data-duration-field]', row) : null;
+    const waveformFields = allowSchedule ? $('.parameterWaveformFields', row) : null;
+    const waveformShape = () => (modeSelect?.value.startsWith('waveform:') ? modeSelect.value.slice('waveform:'.length) : null);
+    // The waveform the fields describe, and how long it is to last (0: until the run ends).
+    const currentWaveform = () => {
+        const shape = waveformShape();
+        if (!shape) return null;
+        const field = (name) => Number($(`[data-wave="${name}"]`, row).value);
+        return { shape, amplitude: field('amplitude'), frequency: field('frequency'), phaseDegrees: shape === 'noise' ? 0 : field('phaseDegrees'),
+            dutyCycle: shape === 'square' ? field('dutyCycle') : 0, seed: shape === 'noise' ? field('seed') : 0 };
+    };
+    const currentDuration = () => (durationInput.value === '' ? 0 : Number(durationInput.value));
+    const shown = (number) => String(Number(Number(number).toPrecision(4)));
+    // What the preview is drawing now: the waveform and centre it was drawn for, and how time and value map onto the plot.
+    let view = null;
+    let lastTime = null;
+    const cursorAt = (position, y) => {
+        const cursor = $('.waveformCursor', row);
+        const dot = $('.waveformDot', row);
+        // An SVG element has no `hidden` property (only an HTML element does), so the attribute is what is set.
+        cursor.toggleAttribute('hidden', position === null);
+        dot.toggleAttribute('hidden', position === null);
+        if (position === null) return;
+        cursor.setAttribute('x1', position);
+        cursor.setAttribute('x2', position);
+        dot.setAttribute('cx', position);
+        dot.setAttribute('cy', y);
+    };
+    // The running waveform's present value, marked on the plot while the simulation runs. It wraps round the window drawn,
+    // so a periodic wave's marker travels along the line and starts again, and shows the true value even for noise.
+    const updateCursor = () => {
+        const caption = $('.waveformCaption', row);
+        const now = $('.waveformNow', caption);
+        const run = liveWaveformRuns.get(parameter.id);
+        const sameAsRunning = run && view && JSON.stringify([run.waveform, run.centre, run.duration]) === JSON.stringify([view.waveform, view.centre, view.duration]);
+        const elapsed = sameAsRunning && lastTime !== null ? lastTime - run.startTime : -1;
+        if (elapsed < 0 || (run?.duration > 0 && elapsed >= run.duration)) {
+            cursorAt(null);
+            now?.remove();
+            return;
+        }
+        const value = waveformValue({ ...run.waveform, duration: run.duration }, run.centre, elapsed);
+        cursorAt(((elapsed % view.window) / view.window) * 240, view.y(value));
+        const readout = now ?? caption.appendChild(Object.assign(document.createElement('span'), { className: 'waveformNow' }));
+        readout.textContent = ` · now ${shown(value)}`;
+    };
+    row.updateWaveformCursor = (time) => { lastTime = time; if (view) updateCursor(); };
+    const redrawPreview = () => {
+        const waveform = currentWaveform();
+        const plot = $('.waveformPreview', row);
+        const caption = $('.waveformCaption', row);
+        view = null;
+        // The plot stands where the slider does while a waveform is shown; the value box (and − and +) still set what it swings around.
+        slider.hidden = false;
+        if (!waveform) { caption.textContent = ''; plot.toggleAttribute('hidden', true); return; }
+        const centre = Number(numberInput.value) || 0;
+        const duration = currentDuration();
+        const problem = waveformProblem({ ...waveform, duration });
+        const drawing = problem ? null : waveformPreview({ ...waveform, duration }, centre);
+        plot.toggleAttribute('hidden', !drawing);
+        cursorAt(null);
+        if (!drawing) { caption.textContent = problem; return; }
+        // A little room above and below; a flat wave (no amplitude) gets a plot to sit in all the same.
+        const spread = drawing.high - drawing.low || 2;
+        const low = drawing.low - spread * 0.15;
+        const high = drawing.high + spread * 0.15;
+        const y = (value) => 52 - ((value - low) / (high - low)) * 48;
+        const count = drawing.values.length;
+        $('.waveformLine', plot).setAttribute('points', drawing.values.map((value, index) => `${((index / (count - 1)) * 240).toFixed(1)},${y(value).toFixed(1)}`).join(' '));
+        $('.waveformCentre', plot).setAttribute('y1', y(centre).toFixed(1));
+        $('.waveformCentre', plot).setAttribute('y2', y(centre).toFixed(1));
+        slider.hidden = true;
+        view = { waveform, centre, duration, window: drawing.window, y };
+        caption.textContent = `Around ${shown(centre)}: ${shown(drawing.low)} to ${shown(drawing.high)}, ${shown(drawing.window)} s shown${
+            drawing.low < minimum || drawing.high > maximum ? ' · goes beyond the live range' : ''}`;
+        updateCursor();
+    };
+    if (modeSelect) {
+        modeSelect.addEventListener('change', () => {
+            const shape = waveformShape();
+            durationField.hidden = modeSelect.value === 'step';
+            // A waveform lasts until the run ends unless given a duration; the others need one.
+            durationInput.placeholder = shape ? 'until the run ends' : 'seconds';
+            waveformFields.hidden = !shape;
+            $('[data-wave="dutyCycle"]', row).closest('label').hidden = shape !== 'square';
+            $('[data-wave="seed"]', row).closest('label').hidden = shape !== 'noise';
+            $('[data-wave="phaseDegrees"]', row).closest('label').hidden = shape === 'noise';
+            redrawPreview();
+        });
+        row.addEventListener('input', () => redrawPreview());
+    }
     const setValue = (nextValue, immediate = false) => {
         const normalized = Math.min(maximum, Math.max(minimum, Number(nextValue)));
+        // The live range is a limit, not a suggestion: say so when what was typed is outside it, instead of changing it silently.
+        if (Number.isFinite(Number(nextValue)) && normalized !== Number(nextValue)) {
+            $('#statusText').textContent = `${parameter.name} is limited to its live range, ${minimum} to ${maximum}; change the range in the parameter's editor.`;
+        }
         slider.value = normalized;
         numberInput.value = normalized;
         if (!immediate) return;
@@ -6041,10 +6183,21 @@ function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedu
             onChange(normalized, immediate);
             return;
         }
+        const shape = waveformShape();
+        if (shape) {
+            // The value is what the waveform swings around. It lasts until the run ends unless given a duration.
+            const waveform = currentWaveform();
+            const duration = currentDuration();
+            const problem = waveformProblem({ ...waveform, duration });
+            if (problem) { $('#statusText').textContent = problem; return; }
+            onSchedule({ mode: 'waveform', duration, targetValue: 0, baseValue: normalized, waveform });
+            return;
+        }
         const duration = Number(durationInput.value);
         if (!(duration > 0)) { durationInput.focus(); return; }
         onSchedule({ mode, duration, targetValue: normalized, baseValue });
     };
+    if (allowSchedule) $('[data-schedule-start]', row).addEventListener('click', () => setValue(numberInput.value, true));
     slider.addEventListener('input', () => setValue(slider.value));
     slider.addEventListener('change', () => setValue(slider.value, true));
     numberInput.addEventListener('change', () => setValue(numberInput.value, true));
@@ -6108,6 +6261,7 @@ function applyLiveResult(jobId, result) {
         projectResultSample(followLatest ? result.samples.length - 1 : Math.min(activeResultSampleIndex, result.samples.length - 1));
         updateLiveResultControls();
     }
+    updateLiveWaveformCursors(result.samples.at(-1)?.time);
 }
 
 async function discardResultPlayback({ markProjectChanged = false } = {}) {
@@ -6510,6 +6664,7 @@ async function initializeAddonRailContributions() {
 async function startSimulation() {
     if (simulationRunning || !currentValidation.valid) return;
     simulationRunning = true;
+    liveWaveformRuns.clear();
     liveParameterValues = new Map(parameterOwnersInModel()
         .filter(({ parameter }) => parameter.mode === 'live')
         .map(({ parameter }) => [parameter.id, Number(parameter.value) || 0]));
@@ -12109,9 +12264,7 @@ function addGroupParameterRow(container, parameter, group) {
         <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
         <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
-            <label class="parameterField"><span>Slider minimum</span><input data-control-field="minimum" type="number" value="${control.minimum}"></label>
-            <label class="parameterField"><span>Slider maximum</span><input data-control-field="maximum" type="number" value="${control.maximum}"></label>
-            <label class="parameterField"><span>Slider step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>
+            ${liveRangeFields(control)}
             <span class="parameterControlError" role="status"></span>
         </div>
     `;

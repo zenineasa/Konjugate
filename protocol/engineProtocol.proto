@@ -11,6 +11,10 @@ message Capabilities {
     // will accept in this build -- the UI's backend picker can populate itself from this rather
     // than hardcoding a list.
     repeated string optimizer_backend_ids = 3;
+    // Every ParameterScheduleMode this build evaluates, by name (step, ramp, pulse, piecewise,
+    // waveform), so the UI offers only what the engine it is talking to can do. An engine from before
+    // this field reports none, which the UI reads as the original three.
+    repeated string parameter_schedule_modes = 4;
 }
 
 message StateDescriptor {
@@ -70,6 +74,28 @@ enum ParameterScheduleMode {
     // also used for the "externally sampled input" intervention kind, which is a piecewise
     // schedule supplied in full rather than authored as step/ramp/pulse.
     PARAMETER_SCHEDULE_MODE_PIECEWISE = 4;
+    // A periodic or random signal around base_value, from start_time for duration (until the run ends
+    // when duration is 0), reading base_value again outside that window. Which one is waveform_shape;
+    // amplitude, frequency, phase_degrees, duty_cycle and seed shape it. A pure function of simulation
+    // time (noise included: it is drawn from seed and the sample's index, not from state), so it
+    // evaluates the same at any step, restarts exactly from a checkpoint and needs nothing saved.
+    PARAMETER_SCHEDULE_MODE_WAVEFORM = 5;
+}
+
+enum WaveformShape {
+    WAVEFORM_SHAPE_UNSPECIFIED = 0;
+    // sin, starting at base_value and rising.
+    WAVEFORM_SHAPE_SINE = 1;
+    // base_value + amplitude for duty_cycle of each period, then base_value - amplitude.
+    WAVEFORM_SHAPE_SQUARE = 2;
+    // Linear up and down between base_value +/- amplitude, starting at base_value and rising.
+    WAVEFORM_SHAPE_TRIANGLE = 3;
+    // Rises linearly from base_value - amplitude to base_value + amplitude each period, then drops;
+    // a quarter-period offset aside, starting at base_value.
+    WAVEFORM_SHAPE_SAWTOOTH = 4;
+    // A new value uniformly in [base_value - amplitude, base_value + amplitude) drawn from seed every
+    // 1 / frequency seconds and held until the next.
+    WAVEFORM_SHAPE_NOISE = 5;
 }
 
 message ParameterScheduleSample {
@@ -94,6 +120,18 @@ message ScheduleParameterValue {
     double base_value = 6;
     // Piecewise only: explicit, chronologically sorted {time, value} points.
     repeated ParameterScheduleSample samples = 7;
+    // Waveform only. duration (above) is how long it lasts, 0 for the rest of the run.
+    WaveformShape waveform_shape = 8;
+    // Peak deviation from base_value; not negative.
+    double amplitude = 9;
+    // Cycles per second, not negative. For noise, how many values are drawn per second, and positive.
+    double frequency = 10;
+    // Where in its cycle it starts, in degrees. Unused by noise.
+    double phase_degrees = 11;
+    // Square only: the fraction of each period spent high, strictly between 0 and 1; 0 means one half.
+    double duty_cycle = 12;
+    // Noise only: the same seed gives the same sequence, which is what makes a run repeatable.
+    uint64 seed = 13;
 }
 
 message EngineCommand {

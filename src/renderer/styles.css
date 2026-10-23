@@ -985,6 +985,24 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterScheduleRow select { flex: 0 0 auto; height: 24px; padding: 0 4px; color: #8297a1; background: #101e27; border: 1px solid #2d414c; border-radius: 4px; font-size: 7px; }
 .parameterScheduleRow input[type="number"] { flex: 1; width: auto; height: 24px; padding: 0 6px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
 .parameterScheduleRow input[hidden] { display: none; }
+.parameterScheduleRow { flex-wrap: wrap; }
+.parameterWaveformFields { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
+.parameterWaveformFields[hidden] { display: none; }
+.scheduleField { display: grid; gap: 2px; flex: 1 1 64px; min-width: 56px; color: #7d929c; font-size: 7px; }
+.scheduleField[hidden] { display: none; }
+.scheduleField > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.parameterScheduleRow { align-items: end; }
+.parameterWaveformFields { align-items: end; }
+.scheduleField input[type="number"] { width: 100%; min-width: 0; }
+.liveParameterRow .waveformPreview { display: block; width: 100%; min-width: 0; height: auto; background: #0a151d; border: 1px solid #263b45; border-radius: 4px; }
+.liveParameterRow .waveformPreview[hidden] { display: none; }
+.waveformLine { fill: none; stroke: var(--accent, #42c9bc); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.waveformCentre { stroke: #3a4d58; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.waveformCursor { stroke: #d8b24a; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.waveformDot { fill: #d8b24a; }
+.waveformCaption { flex: 1 1 100%; color: #7d929c; font-size: 7px; line-height: 1.4; }
+.waveformNow { color: #d8b24a; }
+.parameterWaveformFields button { flex: 0 0 auto; width: auto; height: 24px; padding: 0 9px; border-radius: 4px; font-size: 8px; }
 .liveParameterPanel > footer { position: sticky; bottom: 0; padding: 10px 12px; background: #0b1922; border-top: 1px solid #263b46; }
 .liveParameterPanel > footer button { width: 100%; height: 28px; border-radius: 5px; font-size: 8px; }
 /* The branches menu and the fork-parameter panel open directly above #branchesButton; their

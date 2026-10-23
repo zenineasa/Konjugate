@@ -49,7 +49,7 @@ test('a bundle rejects malformed endpoints, edges and shared parameters', () => 
     rejects((t) => { t.sharedParameters.push({ ...t.sharedParameters[0] }); }, /unique key/);
     rejects((t) => { t.sharedParameters[0].value = 'two'; }, /finite value/);
     rejects((t) => { t.sharedParameters[0].scope = 'galaxy'; }, /scope/);
-    rejects((t) => { t.sharedParameters[0].mode = 'live'; }, /slider control/);
+    rejects((t) => { t.sharedParameters[0].mode = 'live'; }, /live range/);
 });
 
 const nodeWithTerms = () => ({
@@ -124,10 +124,10 @@ test('a fragment template that links to a shared parameter it does not carry is 
     assert.throws(() => validateComponentTemplate(template), /does not carry/);
 });
 
-test('a fragment template\'s live shared parameter needs a usable slider range', () => {
+test('a fragment template\'s live shared parameter needs a usable live range', () => {
     const template = fragmentTemplate();
     template.fragment.sharedParameters[0].control.maximum = -1;
-    assert.throws(() => validateComponentTemplate(template), /slider control/);
+    assert.throws(() => validateComponentTemplate(template), /live range/);
 });
 
 test('a fragment template may carry only inline programs', () => {

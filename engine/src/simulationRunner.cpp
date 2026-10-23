@@ -387,6 +387,10 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
                 throw std::runtime_error("The engine received an invalid live parameter value.");
             }
             current.parameterValues[update.parameter_id()] = update.value();
+            // Setting a value is the newest decision about this parameter, so it supersedes the schedules and waveforms
+            // recorded for it until now. Without this a schedule that has begun would govern forever (a waveform has no
+            // end of its own), and the slider could never take the parameter back.
+            std::erase_if(current.activeSchedules, [&](const ParameterSchedule& schedule) { return schedule.parameterId == update.parameter_id(); });
         } else if (command.has_schedule_parameter_value()) {
             const auto& update = command.schedule_parameter_value();
             if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL) {
@@ -406,6 +410,35 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
             case protocol::PARAMETER_SCHEDULE_MODE_STEP: schedule.mode = ParameterSchedule::Mode::step; break;
             case protocol::PARAMETER_SCHEDULE_MODE_RAMP: schedule.mode = ParameterSchedule::Mode::ramp; break;
             case protocol::PARAMETER_SCHEDULE_MODE_PULSE: schedule.mode = ParameterSchedule::Mode::pulse; break;
+            case protocol::PARAMETER_SCHEDULE_MODE_WAVEFORM: {
+                schedule.mode = ParameterSchedule::Mode::waveform;
+                const double amplitude = update.amplitude();
+                const double frequency = update.frequency();
+                const double duty = update.duty_cycle();
+                if (!std::isfinite(amplitude) || amplitude < 0 || !std::isfinite(frequency) || frequency < 0 ||
+                    !std::isfinite(update.phase_degrees()) || !std::isfinite(duty) || duty < 0 || duty >= 1) {
+                    throw std::runtime_error("The engine received an invalid waveform parameter schedule.");
+                }
+                switch (update.waveform_shape()) {
+                case protocol::WAVEFORM_SHAPE_SINE: schedule.shape = ParameterSchedule::Shape::sine; break;
+                case protocol::WAVEFORM_SHAPE_SQUARE: schedule.shape = ParameterSchedule::Shape::square; break;
+                case protocol::WAVEFORM_SHAPE_TRIANGLE: schedule.shape = ParameterSchedule::Shape::triangle; break;
+                case protocol::WAVEFORM_SHAPE_SAWTOOTH: schedule.shape = ParameterSchedule::Shape::sawtooth; break;
+                case protocol::WAVEFORM_SHAPE_NOISE:
+                    // Noise draws `frequency` values per second, so none at all is not a signal.
+                    if (!(frequency > 0)) throw std::runtime_error("A noise parameter schedule needs a positive frequency.");
+                    schedule.shape = ParameterSchedule::Shape::noise;
+                    break;
+                default:
+                    throw std::runtime_error("The engine received an unsupported waveform shape.");
+                }
+                schedule.amplitude = amplitude;
+                schedule.frequency = frequency;
+                schedule.phaseDegrees = update.phase_degrees();
+                schedule.dutyCycle = duty;
+                schedule.seed = update.seed();
+                break;
+            }
             case protocol::PARAMETER_SCHEDULE_MODE_PIECEWISE:
                 schedule.mode = ParameterSchedule::Mode::piecewise;
                 schedule.samples.reserve(update.samples_size());

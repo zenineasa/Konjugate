@@ -31,7 +31,7 @@ function validateSharedParameters(sharedParameters, owner) {
         if (shared.mode === 'live') {
             const { minimum, maximum, step } = shared.control ?? {};
             if (![minimum, maximum, step].every(Number.isFinite) || !(minimum < maximum) || !(step > 0) || shared.value < minimum || shared.value > maximum) {
-                throw new Error(`A live ${owner} shared parameter needs a slider control with minimum < maximum, step > 0 and its value within the bounds.`);
+                throw new Error(`A live ${owner} shared parameter needs a live range with minimum < maximum, step > 0 and its value within the bounds.`);
             }
         }
         sharedKeys.add(shared.key);

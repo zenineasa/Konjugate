@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
+import { scheduleModeNumbers, waveformProblem } from './parameterSchedule.mjs';
 import { decodeFittingReport, decodeInferenceReport, decodeValidationReport } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
 import { resolveInstalledFmus } from './fmiResolver.mjs';
@@ -505,7 +506,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         // (and required, at least two) for mode "piecewise".
         scheduleParameterValue: async (parameterId, schedule) => {
             if (!liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
-            if (!['step', 'ramp', 'pulse', 'piecewise'].includes(schedule?.mode)) throw new Error('Unsupported parameter schedule mode.');
+            if (!(schedule?.mode in scheduleModeNumbers)) throw new Error('Unsupported parameter schedule mode.');
             const startTime = Number(schedule.startTime ?? 0);
             const duration = Number(schedule.duration ?? 0);
             const targetValue = Number(schedule.targetValue ?? 0);
@@ -522,7 +523,12 @@ export async function startEngineRun(content, configuration, options, { onUpdate
                     throw new Error('A piecewise parameter schedule requires finite numeric samples.');
                 }
             }
-            await sendCommand({ type: 'scheduleParameterValue', parameterId, mode: schedule.mode, startTime, duration, targetValue, baseValue, samples });
+            const waveform = schedule.mode === 'waveform' ? schedule.waveform : undefined;
+            if (schedule.mode === 'waveform') {
+                const problem = waveformProblem({ ...waveform, duration });
+                if (problem) throw new Error(problem);
+            }
+            await sendCommand({ type: 'scheduleParameterValue', parameterId, mode: schedule.mode, startTime, duration, targetValue, baseValue, samples, waveform });
             return { parameterId, ...schedule };
         },
         shutdown,

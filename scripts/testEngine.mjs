@@ -22,4 +22,5 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'causalInfer
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'postRunStabilityDiagnostics.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'duringRunStabilityMonitoring.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'pidTemplates.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterWaveforms.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'scripts', 'checkNodeProviderExample.mjs')]);

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <numbers>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -908,8 +909,52 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     return evaluated;
 }
 
+namespace {
+// splitmix64: a well-mixed 64-bit value from any 64-bit input, so noise needs no stored state.
+std::uint64_t mixBits(std::uint64_t value) {
+    value += 0x9E3779B97F4A7C15ULL;
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31);
+}
+
+// A waveform at a time inside its window, as a fraction of its amplitude in [-1, 1].
+double waveformUnitValue(const ParameterSchedule& schedule, double elapsed) {
+    if (schedule.shape == ParameterSchedule::Shape::noise) {
+        // The nth value drawn since the start: the same seed and index always give the same number, so the signal is a
+        // function of time alone -- the same at any step size, and unchanged by restoring a checkpoint.
+        const auto index = static_cast<std::uint64_t>(std::floor(elapsed * schedule.frequency));
+        const auto bits = mixBits(schedule.seed ^ mixBits(index)) >> 11;
+        return static_cast<double>(bits) * (2.0 / 9007199254740992.0) - 1.0;
+    }
+    const double cycles = elapsed * schedule.frequency + schedule.phaseDegrees / 360.0;
+    const double fraction = cycles - std::floor(cycles);
+    switch (schedule.shape) {
+    case ParameterSchedule::Shape::sine:
+        return std::sin(2.0 * std::numbers::pi * cycles);
+    case ParameterSchedule::Shape::square:
+        return fraction < (schedule.dutyCycle > 0 ? schedule.dutyCycle : 0.5) ? 1.0 : -1.0;
+    case ParameterSchedule::Shape::triangle:
+        if (fraction < 0.25) return 4.0 * fraction;
+        return fraction < 0.75 ? 2.0 - 4.0 * fraction : 4.0 * fraction - 4.0;
+    case ParameterSchedule::Shape::sawtooth: {
+        const double shifted = fraction + 0.5 - std::floor(fraction + 0.5);
+        return 2.0 * shifted - 1.0;
+    }
+    case ParameterSchedule::Shape::noise:
+        break;
+    }
+    return 0;
+}
+}
+
 double evaluateParameterSchedule(const ParameterSchedule& schedule, double simulationTime) {
     switch (schedule.mode) {
+    case ParameterSchedule::Mode::waveform: {
+        const double elapsed = simulationTime - schedule.startTime;
+        if (elapsed < 0 || (schedule.duration > 0 && elapsed >= schedule.duration)) return schedule.baseValue;
+        return schedule.baseValue + schedule.amplitude * waveformUnitValue(schedule, elapsed);
+    }
     case ParameterSchedule::Mode::step:
         return schedule.targetValue;
     case ParameterSchedule::Mode::ramp: {

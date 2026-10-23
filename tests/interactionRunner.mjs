@@ -1072,7 +1072,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#edgeEditor .doneButton') === null`), true);
     });
 
-    await run('live parameters expose labelled slider bounds with validation', async () => {
+    await run('live parameters expose labelled live-range bounds with validation', async () => {
         const labels = await evaluate(window, `[...document.querySelectorAll('.editorParameterRow:first-child .parameterField > span')].map((label) => label.textContent)`);
         assert.deepEqual(labels.slice(0, 5), ['Name', 'Symbol', 'Initial value', 'Unit', 'Mode']);
         await evaluate(window, `(() => {
@@ -1082,7 +1082,7 @@ export async function runInteractionTests(driver) {
         })()`);
         assert.equal(await evaluate(window, `!document.querySelector('.editorParameterRow:first-child .parameterControlFields').hidden`), true);
         const controlLabels = await evaluate(window, `[...document.querySelectorAll('.editorParameterRow:first-child .parameterControlFields .parameterField > span')].map((label) => label.textContent)`);
-        assert.deepEqual(controlLabels, ['Slider minimum', 'Slider maximum', 'Slider step']);
+        assert.deepEqual(controlLabels, ['Live minimum', 'Live maximum', 'Live step']);
         await evaluate(window, `(() => {
             const minimum = document.querySelector('.editorParameterRow:first-child [data-control-field="minimum"]');
             minimum.value = '30';
@@ -2513,6 +2513,62 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
     });
+
+    await run('component library places an assembly: a node with its own C++ program and the live shared parameters it reads', async () => {
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        // The document leaves the list out altogether while there are no shared parameters.
+        const sharedOf = (project) => project.sharedParameters ?? [];
+        const controllers = (document_) => document_.nodes.filter((node) => node.name === 'PID controller (parallel)');
+        const nodesBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
+        const sharedBefore = sharedOf(await saved()).length;
+
+        if (await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`)) await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+        await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'Component library panel did not open.');
+        await waitFor(window, `Boolean(document.querySelector('[data-template-id="pidParallel"]'))`, 'The parallel PID assembly is not in the library.');
+        assert.ok(await evaluate(window, `[...document.querySelectorAll('#componentLibraryTypeChips button')].some((chip) => chip.textContent === 'Assemblies')`), 'The library has no Assemblies filter.');
+        assert.match(await evaluate(window, `document.querySelector('[data-template-id="pidParallel"] small').textContent`), /Assembly · 1 node/);
+        assert.notEqual(await evaluate(window, `document.querySelector('[data-template-id="pidIsa"]')`), null, 'The ISA PID assembly is not in the library.');
+
+        await evaluate(window, `document.querySelector('[data-template-id="pidParallel"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('PID controller (parallel)'))`, 'The assembly was not placed.');
+        assert.equal(await evaluate(window, `!document.querySelector('#componentLibraryPanel').hidden`), true, 'The library panel closed itself after placing an assembly.');
+        let document_ = await saved();
+        const [first] = controllers(document_);
+        assert.equal(controllers(document_).length, 1);
+        assert.equal(first.implementation.kind, 'cpp');
+        assert.match(first.implementation.source, /class PidParallel/);
+        assert.match(first.description, /parallel \(independent\) form/);
+        assert.deepEqual(first.states.map((state) => state.name), ['Measurement', 'Control output', 'Error']);
+        // Every link reaches a shared parameter the placement made, with the slider range it was authored with.
+        const byId = new Map(sharedOf(document_).map((shared) => [shared.id, shared]));
+        const linked = first.implementation.bindings.filter((binding) => binding.kind === 'parameter').map((binding) => byId.get(binding.sharedParameterId));
+        assert.ok(linked.every(Boolean), 'A binding of the placed program links to a shared parameter that does not exist.');
+        assert.deepEqual(linked.map((shared) => shared.symbol), ['setpoint', 'kp', 'ki', 'kd', 'filterTime', 'outputMin', 'outputMax']);
+        assert.deepEqual(linked.filter((shared) => shared.mode === 'live').map((shared) => shared.symbol), ['setpoint', 'kp', 'ki', 'kd']);
+        assert.deepEqual(byId.get(first.implementation.bindings.find((binding) => binding.key === 'kp').sharedParameterId).control, { minimum: 0, maximum: 100, step: 0.01 });
+        assert.equal(sharedOf(document_).length, sharedBefore + 7);
+
+        // A second placement makes its own parameters under symbols not yet taken, and links to those, not the first's.
+        await evaluate(window, `document.querySelector('[data-template-id="pidParallel"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((label) => label.textContent.includes('PID controller (parallel)')).length === 2`, 'The second assembly was not placed.');
+        document_ = await saved();
+        const [, second] = controllers(document_);
+        const symbolsOf = (node) => node.implementation.bindings.filter((binding) => binding.kind === 'parameter')
+            .map((binding) => sharedOf(document_).find((shared) => shared.id === binding.sharedParameterId).symbol);
+        assert.deepEqual(symbolsOf(second), ['setpoint2', 'kp2', 'ki2', 'kd2', 'filterTime2', 'outputMin2', 'outputMax2']);
+        assert.deepEqual(symbolsOf(first), ['setpoint', 'kp', 'ki', 'kd', 'filterTime', 'outputMin', 'outputMax']);
+        assert.notEqual(second.id, first.id);
+
+        // One undo takes a placement and its parameters away together.
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(controllers(await saved()).length, 1);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        document_ = await saved();
+        assert.equal(controllers(document_).length, 0);
+        assert.equal(sharedOf(document_).length, sharedBefore, 'Undoing the placements left their shared parameters behind.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), nodesBefore);
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+    }, { skip: !driver.capabilities.cppProviders && 'places the bundled PID assemblies, which carry a C++ program the web edition cannot compile, so its library leaves them out' });
 
     // Shared with the two run() calls below (see the analogous analysisHandle comment above scenario
     // #15's split for why): the Pose Visualizer add-on has no web-edition equivalent, but the
@@ -4245,7 +4301,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `${modeSelect}.value`), 'live', 'An in-range value can switch to live.');
         const ordinaryValue = `document.querySelector('#parametersBody tr:not(.sharedRow):not(.sharedUserRow) input[data-field="value"]')`;
         await evaluate(opened, `(() => { const input = ${ordinaryValue}; input.value = '1e9'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-        assert.equal(await evaluate(opened, `${ordinaryValue}.classList.contains('invalid')`), true, 'A value outside the live slider range must be flagged.');
+        assert.equal(await evaluate(opened, `${ordinaryValue}.classList.contains('invalid')`), true, 'A value outside the live range must be flagged.');
 
         // Filtering and search.
         await evaluate(opened, `(() => { const filter = document.querySelector('#parametersFilter'); filter.value = 'shared'; filter.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -4785,6 +4841,162 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('#componentLibraryEmpty').textContent`), /Nothing saved yet/);
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
     });
+
+    await run('a selection that reads a node it does not include is refused with what to select, and saves once that node is selected too', async () => {
+        const userTemplates = () => evaluate(window, `window.componentLibrary.list().then((templates) => templates.filter((template) => template.source === 'user'))`);
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        // Mass runs a C++ program that reads the angle state of Probe.
+        await loadAuthoringProject({
+            nodes: [
+                {
+                    id: 1, name: 'Mass', position: [-4, 0, 0], appearance: box,
+                    states: [{ id: 2, name: 'position', symbol: 'position', initialValue: 1 }, { id: 3, name: 'speed', symbol: 'speed', initialValue: 0 }], sourceTerms: [],
+                    implementation: { kind: 'cpp', providerApiVersion: 1, source: 'int unused;', bindings: [{ key: 'angle', kind: 'state', nodeId: 4, stateId: 5 }], outputs: [{ key: 'out', stateId: 3 }] }
+                },
+                {
+                    id: 4, name: 'Probe', position: [4, 0, 0], appearance: box,
+                    states: [{ id: 5, name: 'angle', symbol: 'angle', initialValue: 0 }, { id: 6, name: 'reading', symbol: 'reading', initialValue: 0 }], sourceTerms: []
+                }
+            ]
+        });
+        const saveSelection = async (name) => {
+            await evaluate(window, `document.querySelector('#saveTemplateButton').click()`);
+            await waitFor(window, `document.querySelector('#templateDialog').open`, 'The save dialog did not open.');
+            await evaluate(window, `(() => { const input = document.querySelector('#templateName'); input.value = ${JSON.stringify(name)}; input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#templateSubmit').click(); })()`);
+        };
+
+        // Only Mass selected: refused, and the dialog stays open saying what is missing and whose it is.
+        await openNode('Mass');
+        await saveSelection('Reads a probe');
+        await waitFor(window, `document.querySelector('#templateDialogError').textContent !== ''`, 'A selection that reads an unselected node was accepted.');
+        const reason = await evaluate(window, `document.querySelector('#templateDialogError').textContent`);
+        assert.match(reason, /Node "Mass" refers to the node "Probe"/);
+        assert.match(reason, /the state "angle" of the node "Probe"/);
+        assert.equal(await evaluate(window, `document.querySelector('#templateDialog').open`), true);
+        assert.equal((await userTemplates()).length, 0, 'A refused selection was saved anyway.');
+        await evaluate(window, `document.querySelector('#templateCancel').click()`);
+
+        // Both selected: the same program now reads something that is in the template, and it saves.
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Select all did not select both nodes.');
+        await saveSelection('Reads a probe');
+        await waitFor(window, `!document.querySelector('#templateDialog').open`, 'The save dialog did not close once both nodes were selected.');
+        const [saved] = await userTemplates();
+        assert.equal(saved.name, 'Reads a probe');
+        const mass = saved.fragment.nodes.find((node) => node.name === 'Mass');
+        const probe = saved.fragment.nodes.find((node) => node.name === 'Probe');
+        assert.deepEqual([mass.implementation.bindings[0].nodeId, mass.implementation.bindings[0].stateId], [probe.id, probe.states[0].id], 'The saved program does not read the saved probe.');
+
+        await evaluate(window, `(async () => { await window.componentLibrary.removeUser(${JSON.stringify(saved.id)}); })()`);
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+    });
+
+    await run('a live parameter is given a waveform while a run is going', async () => {
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        // One state that integrates a live parameter k (dx/dt = k): where it ends is the area under k.
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{
+                id: 1, name: 'Integrator', position: [0, 0, 0], appearance: box,
+                states: [{ id: 2, name: 'X', symbol: 'x', initialValue: 0, unit: '' }],
+                sourceTerms: [{
+                    id: 3, state: 'x', expression: 'k',
+                    parameters: [{ id: 4, name: 'k', symbol: 'k', value: 0, unit: '', mode: 'live', control: { minimum: -10, maximum: 10, step: 0.1 } }],
+                    expressionModel: { latex: 'k', bindings: [{ kind: 'parameter', parameterId: 4, symbol: 'k' }], output: { stateId: 2 }, mathJson: 'k' }
+                }]
+            }],
+            edges: []
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)})`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The integrator did not load.');
+        const field = (name) => `document.querySelector('#liveParameterRows [data-wave="${name}"]')`;
+        const choose = (mode) => evaluate(window, `(() => { const select = document.querySelector('#liveParameterRows [data-schedule-mode]'); select.value = ${JSON.stringify(mode)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        const set = (name, value) => evaluate(window, `(() => { const input = ${field(name)}; input.value = ${JSON.stringify(String(value))}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+
+        await openRunDialog(window);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '4'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `!document.querySelector('#liveParameterButton').hidden`, 'The live controls were not offered during the run.', 10000);
+        await evaluate(window, `document.querySelector('#liveParameterButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows [data-schedule-mode]'))`, 'The live parameter has no transition controls.');
+
+        // The menu offers the waveforms, each with the fields that shape it and no others.
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#liveParameterRows [data-schedule-mode] optgroup[label="Waveform"] option')].map((option) => option.value)`),
+            ['waveform:sine', 'waveform:square', 'waveform:triangle', 'waveform:sawtooth', 'waveform:noise']);
+        const visible = (names) => evaluate(window, `${JSON.stringify(names)}.map((name) => document.querySelector('#liveParameterRows [data-wave="' + name + '"]').getBoundingClientRect().width > 0)`);
+        const labelsShown = () => evaluate(window, `[...document.querySelectorAll('#liveParameterRows .scheduleField > span')].filter((label) => label.getBoundingClientRect().width > 0).map((label) => label.textContent)`);
+        assert.equal(await evaluate(window, `document.querySelector('#liveParameterRows .parameterWaveformFields').hidden`), true, 'Waveform fields are shown before a waveform is chosen.');
+        await choose('waveform:sine');
+        assert.deepEqual(await visible(['amplitude', 'frequency', 'phaseDegrees', 'dutyCycle', 'seed']), [true, true, true, false, false]);
+        // Every number in the row says what it is, in words that stay when it holds a value.
+        assert.deepEqual(await labelsShown(), ['Duration (s)', 'Amplitude', 'Frequency (Hz)', 'Phase (°)']);
+        await choose('waveform:square');
+        assert.deepEqual(await visible(['amplitude', 'frequency', 'phaseDegrees', 'dutyCycle', 'seed']), [true, true, true, true, false]);
+        assert.deepEqual(await labelsShown(), ['Duration (s)', 'Amplitude', 'Frequency (Hz)', 'Phase (°)', 'Duty cycle']);
+        await choose('waveform:noise');
+        assert.deepEqual(await visible(['amplitude', 'frequency', 'phaseDegrees', 'dutyCycle', 'seed']), [true, true, false, false, true]);
+        assert.deepEqual(await labelsShown(), ['Duration (s)', 'Amplitude', 'Frequency (Hz)', 'Seed']);
+        await choose('step');
+        assert.equal(await evaluate(window, `document.querySelector('#liveParameterRows .parameterWaveformFields').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#liveParameterRows input[type=range]').hidden`), false, 'The slider is gone with no waveform chosen.');
+
+        // The live range (-10 to 10) is a limit: a value typed outside it is held to it, and the row says so.
+        const centre = `document.querySelector('#liveParameterRows input[type="number"]:not([data-wave]):not([data-schedule-duration])')`;
+        const type = (value) => evaluate(window, `(() => { const input = ${centre}; input.value = ${JSON.stringify(String(value))}; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await type(100);
+        assert.equal(await evaluate(window, `${centre}.value`), '10');
+        assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /limited to its live range, -10 to 10/);
+        await type(0);
+        assert.equal(await evaluate(window, `${centre}.value`), '0');
+
+        // A waveform is drawn before it is started: its line, and a caption saying what it swings between and whether that
+        // leaves the live range (-10 to 10 here), updated as the fields change.
+        const plot = (expression) => evaluate(window, `(() => { const plot = document.querySelector('#liveParameterRows .waveformPreview'); const caption = document.querySelector('#liveParameterRows .waveformCaption'); return ${expression}; })()`);
+        await choose('waveform:sine');
+        await set('amplitude', 2);
+        await set('frequency', 0.5);
+        assert.equal(await plot('plot.querySelector(".waveformLine").getAttribute("points").split(" ").length'), 240);
+        // It is really on screen, in the slider's place, and the slider is out of the way while it is.
+        assert.ok(await plot('plot.getBoundingClientRect().height > 30 && plot.getBoundingClientRect().width > 100'), 'The plot has no size on screen.');
+        assert.equal(await plot('document.querySelector("#liveParameterRows input[type=range]").hidden'), true);
+        assert.equal(await plot('plot.previousElementSibling === document.querySelector("#liveParameterRows input[type=range]")'), true, 'The plot is not where the slider is.');
+        assert.equal(await plot('caption.textContent'), 'Around 0: -2 to 2, 4 s shown');
+        await set('amplitude', 15);
+        assert.match(await plot('caption.textContent'), /-15 to 15, 4 s shown · goes beyond the live range/);
+        await set('amplitude', -1);
+        assert.equal(await plot('plot.getBoundingClientRect().height'), 0, 'A waveform that cannot be started is still drawn.');
+        assert.equal(await plot('document.querySelector("#liveParameterRows input[type=range]").hidden'), false, 'With nothing to draw, the slider should be back.');
+        assert.match(await plot('caption.textContent'), /amplitude/);
+        await choose('waveform:square');
+        await set('amplitude', 1);
+        assert.ok(await plot('plot.getBoundingClientRect().height > 30'), 'A square wave is not drawn.');
+
+        // A waveform that cannot be is refused with a reason, and nothing starts.
+        await choose('waveform:noise');
+        await set('amplitude', -1);
+        await evaluate(window, `document.querySelector('#liveParameterRows [data-schedule-start]').click()`);
+        assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /amplitude/);
+
+        // Seeded noise around 0 now: the area under it is a random walk, which moves X away from 0.
+        await set('amplitude', 5);
+        await set('frequency', 5);
+        await set('seed', 3);
+        await evaluate(window, `document.querySelector('#liveParameterRows [data-schedule-start]').click()`);
+        // While it runs, a marker follows the simulation time along the preview, with the value it has right now.
+        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows .waveformNow')) && document.querySelector('#liveParameterRows .waveformDot').getBoundingClientRect().width > 0`, 'No marker followed the running waveform.', 10000);
+        const markerAt = async () => evaluate(window, `Number(document.querySelector('#liveParameterRows .waveformDot').getAttribute('cx'))`);
+        const firstMarker = await markerAt();
+        await waitFor(window, `Number(document.querySelector('#liveParameterRows .waveformDot').getAttribute('cx')) !== ${firstMarker}`, 'The marker did not move as the simulation advanced.', 5000);
+        assert.match(await plot('caption.querySelector(".waveformNow").textContent'), /^ · now -?\d/);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The run did not complete.', 15000);
+        const finalValue = Number((await evaluate(window, `document.querySelector('.node-label-container dd').textContent`)).replace(/[^0-9eE+.-]/g, ''));
+        assert.ok(Number.isFinite(finalValue) && finalValue !== 0, `The noise did not move X: it ended at ${finalValue}.`);
+        assert.ok(Math.abs(finalValue) <= 5 * 4, `X ended further than the noise could take it: ${finalValue}.`);
+        // Closing the results asks first; leave nothing open for the next scenario.
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+        await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
+    }, { skip: !driver.capabilities.parameterWaveforms && 'needs a web engine built with waveform schedules; the checked-in web build predates them' });
 
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();

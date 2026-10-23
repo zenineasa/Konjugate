@@ -131,6 +131,7 @@ export function createElectronDriver(mainWindow) {
             aiProviderCredentials: true,
             providerExecutionModeSelector: true,
             cppProviders: true,
+            parameterWaveforms: true,
             renderedExampleGuide: true,
             aiAssistant: true,
             cancellableValidation: true

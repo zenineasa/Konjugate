@@ -170,9 +170,12 @@ Live changes should be recorded as events rather than transient UI mutations. An
 - ramp;
 - pulse;
 - piecewise schedule;
+- waveform (sine, square, triangle, sawtooth or seeded noise around the parameter's value);
 - enable or disable;
 - controller setpoint;
 - externally sampled input.
+
+A waveform is a signal around the parameter's value at the moment it starts, defined by a shape, an amplitude (the largest deviation either side), a frequency in hertz, a phase in degrees, for a square wave a duty cycle (the fraction of each period spent high; one half when unset) and for noise a seed. It runs from its start time for its duration, or until the run ends when it has none, and the parameter reads its own value again outside that window. Sine, triangle and sawtooth begin at the parameter's value and rise; a square wave begins high. Noise draws a new value uniformly within the amplitude `frequency` times per second and holds it between draws; it is computed from the seed and the index of the draw, not from any state, so it is the same at any step size, needs nothing saved in a checkpoint, and gives the same values every time the same intervention (with its seed) is replayed, in a fork or a rerun. While a waveform is being set up its row draws it: the line over a couple of periods (or the duration, or a few dozen draws of noise, shown exactly as the seed will give them), what it swings between and around, and a note when that goes beyond the live range. While the run goes, a marker follows the simulation time along that line and wraps round it, with the value the parameter has right now. The drawing is computed in JavaScript (`waveformValue` in `src/parameterSchedule.mjs`), a second copy of the engine's evaluator, and `tests/engine/parameterWaveforms.mjs` compares the two against a real run for every shape so they cannot drift apart. The controls offer waveforms only when the engine says it evaluates them (`parameterScheduleModes` in its capabilities), so an older engine, such as the checked-in web build until it is rebuilt, shows the original three. Setting a value outright supersedes every schedule and waveform recorded for that parameter before it: the newest decision governs, which is also how a waveform that has no end of its own is stopped.
 
 Interventions appear as markers or tracks on the timeline. A child branch keeps the parent event history before its fork and owns a distinct future event sequence.
 

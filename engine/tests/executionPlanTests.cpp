@@ -223,6 +223,92 @@ void parameterScheduleEvaluatesEachModeAndSupersedesEarlierSchedules() {
         "With no active schedules at all, resolution must fall through to the compiled constant unchanged.");
 }
 
+void parameterWaveformsEvaluateEachShapeAroundTheirBaseValue() {
+    using konjugate::ParameterSchedule;
+    using konjugate::evaluateParameterSchedule;
+    const auto near = [](double actual, double expected) { return std::abs(actual - expected) < 1e-9; };
+
+    ParameterSchedule wave;
+    wave.mode = ParameterSchedule::Mode::waveform;
+    wave.baseValue = 10;
+    wave.amplitude = 3;
+    wave.frequency = 0.5;  // a 2 s period
+    wave.startTime = 4;
+
+    wave.shape = ParameterSchedule::Shape::sine;
+    require(near(evaluateParameterSchedule(wave, 3.9), 10), "A waveform must read as its base value before it starts.");
+    require(near(evaluateParameterSchedule(wave, 4), 10), "A sine must start at its base value.");
+    require(near(evaluateParameterSchedule(wave, 4.5), 13), "A sine must reach base + amplitude a quarter period in.");
+    require(near(evaluateParameterSchedule(wave, 5), 10), "A sine must be back at its base value half a period in.");
+    require(near(evaluateParameterSchedule(wave, 5.5), 7), "A sine must reach base - amplitude three quarters of a period in.");
+    wave.phaseDegrees = 90;
+    require(near(evaluateParameterSchedule(wave, 4), 13), "A phase of 90 degrees must start a sine at its peak.");
+    wave.phaseDegrees = 0;
+
+    wave.shape = ParameterSchedule::Shape::square;
+    require(near(evaluateParameterSchedule(wave, 4), 13) && near(evaluateParameterSchedule(wave, 4.99), 13), "A square wave must be high for the first half of a period.");
+    require(near(evaluateParameterSchedule(wave, 5), 7) && near(evaluateParameterSchedule(wave, 5.99), 7), "A square wave must be low for the second half.");
+    wave.dutyCycle = 0.25;
+    require(near(evaluateParameterSchedule(wave, 4.4), 13) && near(evaluateParameterSchedule(wave, 4.6), 7), "A square wave must be high for its duty cycle of the period.");
+    wave.dutyCycle = 0;
+
+    wave.shape = ParameterSchedule::Shape::triangle;
+    require(near(evaluateParameterSchedule(wave, 4), 10) && near(evaluateParameterSchedule(wave, 4.5), 13) && near(evaluateParameterSchedule(wave, 5), 10)
+        && near(evaluateParameterSchedule(wave, 5.5), 7) && near(evaluateParameterSchedule(wave, 6), 10),
+        "A triangle wave must pass base, peak, base, trough, base over a period, starting at its base value.");
+    require(near(evaluateParameterSchedule(wave, 4.25), 11.5), "A triangle wave must rise linearly.");
+
+    wave.shape = ParameterSchedule::Shape::sawtooth;
+    require(near(evaluateParameterSchedule(wave, 4), 10), "A sawtooth must start at its base value.");
+    require(near(evaluateParameterSchedule(wave, 4.5), 11.5), "A sawtooth must rise linearly from its base value.");
+    require(evaluateParameterSchedule(wave, 4.999) > 12.99 && evaluateParameterSchedule(wave, 4.999) < 13, "A sawtooth must be nearly at base + amplitude just before it drops.");
+    require(near(evaluateParameterSchedule(wave, 5), 7), "A sawtooth must drop to base - amplitude half a period in.");
+    require(near(evaluateParameterSchedule(wave, 5.5), 8.5) && near(evaluateParameterSchedule(wave, 6), 10), "A sawtooth must rise again from base - amplitude back to its base value.");
+
+    // The window: it ends after `duration` and reads the base value again, and a duration of 0 never ends.
+    wave.shape = ParameterSchedule::Shape::sine;
+    wave.duration = 1;
+    require(near(evaluateParameterSchedule(wave, 4.5), 13) && near(evaluateParameterSchedule(wave, 5), 10) && near(evaluateParameterSchedule(wave, 5.5), 10),
+        "A waveform with a duration must read its base value after the window.");
+    wave.duration = 0;
+    require(near(evaluateParameterSchedule(wave, 4004.5), 13), "A waveform with no duration must go on for the rest of the run.");
+}
+
+void parameterNoiseIsSeededBoundedAndAFunctionOfTimeAlone() {
+    using konjugate::ParameterSchedule;
+    using konjugate::evaluateParameterSchedule;
+    ParameterSchedule noise;
+    noise.mode = ParameterSchedule::Mode::waveform;
+    noise.shape = ParameterSchedule::Shape::noise;
+    noise.baseValue = 100;
+    noise.amplitude = 5;
+    noise.frequency = 10;  // a new value every 0.1 s
+    noise.seed = 42;
+
+    // Held between draws, bounded by base +/- amplitude, and not constant.
+    require(evaluateParameterSchedule(noise, 0.0) == evaluateParameterSchedule(noise, 0.099), "Noise must hold its value until the next draw.");
+    double lowest = 1e9, highest = -1e9;
+    for (int draw = 0; draw < 5000; ++draw) {
+        const double value = evaluateParameterSchedule(noise, draw * 0.1 + 0.05);
+        lowest = std::min(lowest, value);
+        highest = std::max(highest, value);
+        require(value >= 95 && value < 105, "Noise must stay within base +/- amplitude.");
+    }
+    require(lowest < 95.2 && highest > 104.8, "Noise must use its whole range.");
+    require(evaluateParameterSchedule(noise, 0.05) != evaluateParameterSchedule(noise, 0.15), "Noise must change from one draw to the next.");
+
+    // The same seed gives the same signal however it is asked for, and another seed gives another.
+    ParameterSchedule again = noise;
+    require(evaluateParameterSchedule(noise, 123.456) == evaluateParameterSchedule(again, 123.456), "Noise must be the same each time it is evaluated.");
+    again.seed = 43;
+    require(evaluateParameterSchedule(noise, 123.456) != evaluateParameterSchedule(again, 123.456), "A different seed must give a different signal.");
+
+    // The mean of uniform noise is its base value.
+    double sum = 0;
+    for (int draw = 0; draw < 20000; ++draw) sum += evaluateParameterSchedule(noise, draw * 0.1 + 0.05);
+    require(std::abs(sum / 20000 - 100) < 0.1, "Noise must average out to its base value.");
+}
+
 konjugate::ContributionTask literalAlgebraicTask(konjugate::EntityId outputStateId, std::size_t outputStateIndex, double literal) {
     konjugate::ContributionTask task;
     task.outputStateId = outputStateId;
@@ -831,6 +917,8 @@ int main() {
         evaluationSeparatesLocalSnapshotAndLiveParameterInputs();
         timeBindingReadsSubstepStartForDerivativesAndTheEvaluationTimeForAlgebraicStates();
         parameterScheduleEvaluatesEachModeAndSupersedesEarlierSchedules();
+        parameterWaveformsEvaluateEachShapeAroundTheirBaseValue();
+        parameterNoiseIsSeededBoundedAndAFunctionOfTimeAlone();
         storedParameterSchedulesDriveTheParameterBeneathLiveControl();
         applyAlgebraicTasksSnapsMismatchedStateToTargetImmediately();
         applyAlgebraicTasksResolveDependencyOrderWithinOnePass();

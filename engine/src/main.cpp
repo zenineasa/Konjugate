@@ -181,6 +181,8 @@ int main(int argc, char** argv) {
     // flush()).
     // Every optimizer backend runParameterFit() will accept in this build.
     const auto optimizerBackendIds = konjugate::nloptAlgorithmIds();
+    // Every parameter schedule mode this build evaluates (executionPlan.cpp's evaluateParameterSchedule).
+    const std::vector<std::string> parameterScheduleModes = {"step", "ramp", "pulse", "piecewise", "waveform"};
 
     if (argc == 3 && std::string(argv[1]) == "capabilities" && std::string(argv[2]) == "--protobuf") {
         konjugate::protocol::EngineEvent event;
@@ -189,6 +191,7 @@ int main(int argc, char** argv) {
         capabilities->set_metis_available(konjugate::metisPartitionerAvailable());
         capabilities->set_metis_version(konjugate::metisPartitionerVersion());
         for (const auto& id : optimizerBackendIds) capabilities->add_optimizer_backend_ids(id);
+        for (const auto& mode : parameterScheduleModes) capabilities->add_parameter_schedule_modes(mode);
         writeFramedMessage(std::cout, event);
         std::_Exit(0);
     }
@@ -204,10 +207,16 @@ int main(int argc, char** argv) {
             if (index > 0) backendIdsJson << ",";
             backendIdsJson << "\"" << optimizerBackendIds[index] << "\"";
         }
+        std::ostringstream scheduleModesJson;
+        for (std::size_t index = 0; index < parameterScheduleModes.size(); ++index) {
+            if (index > 0) scheduleModesJson << ",";
+            scheduleModesJson << "\"" << parameterScheduleModes[index] << "\"";
+        }
         std::cout << "{\"metis\":{\"available\":"
                   << (konjugate::metisPartitionerAvailable() ? "true" : "false")
                   << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}"
-                  << ",\"optimizerBackendIds\":[" << backendIdsJson.str() << "]}\n";
+                  << ",\"optimizerBackendIds\":[" << backendIdsJson.str() << "]"
+                  << ",\"parameterScheduleModes\":[" << scheduleModesJson.str() << "]}\n";
         std::cout.flush();
         std::_Exit(0);
     }

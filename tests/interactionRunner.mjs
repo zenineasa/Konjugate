@@ -4712,6 +4712,80 @@ export async function runInteractionTests(driver) {
         assert.equal(reopened.edges[0].description, 'Reads the mass angle.');
     });
 
+    await run('a selection is saved to my library, filed in sections, placed again, edited, moved and deleted', async () => {
+        const userTemplates = () => evaluate(window, `window.componentLibrary.list().then((templates) => templates.filter((template) => template.source === 'user'))`);
+        const nodeCount = () => evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
+        const fillAndSubmit = async (fields) => {
+            await evaluate(window, `(() => {
+                const fields = ${JSON.stringify(fields)};
+                for (const [id, value] of Object.entries(fields)) { const input = document.querySelector('#' + id); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); }
+                document.querySelector('#templateSubmit').click();
+            })()`);
+        };
+        const action = (label) => `document.querySelector('.componentLibraryRowAction[aria-label=${JSON.stringify(label)}]').click()`;
+
+        await loadAuthoringProject();
+        assert.equal(await evaluate(window, `document.querySelector('#saveTemplateButton').disabled`), true, 'Saving is offered with nothing selected.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Select all did not select both nodes.');
+        assert.equal(await evaluate(window, `document.querySelector('#saveTemplateButton').disabled`), false);
+        const nodesBefore = await nodeCount();
+
+        // Saving: the dialog asks for a name, a description and a section, and refuses a section it cannot use.
+        await evaluate(window, `document.querySelector('#saveTemplateButton').click()`);
+        await waitFor(window, `document.querySelector('#templateDialog').open`, 'The save dialog did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#templateName').value`), 'My component');
+        await fillAndSubmit({ templateName: 'Spring pair', templateDescription: 'Two nodes and a link.', templateSection: 'Mechanics / a/b/c/d/e' });
+        await waitFor(window, `document.querySelector('#templateDialogError').textContent !== ''`, 'A section nested too deep was accepted.');
+        assert.match(await evaluate(window, `document.querySelector('#templateDialogError').textContent`), /at most 4 deep/);
+        assert.equal(await evaluate(window, `document.querySelector('#templateDialog').open`), true);
+        await fillAndSubmit({ templateSection: 'Mechanics / Springs' });
+        await waitFor(window, `!document.querySelector('#templateDialog').open`, 'The save dialog did not close.');
+        await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden && Boolean(document.querySelector('[data-template-id="user_spring_pair"]'))`, 'The saved template did not appear in the library.');
+
+        // It is listed under the sections it was filed in, and kept as it was selected.
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('[data-my-library] [data-section-path="Mechanics"] [data-section-path="Mechanics / Springs"] [data-template-id="user_spring_pair"]'))`), true, 'The template is not under its sections.');
+        let [saved] = await userTemplates();
+        assert.deepEqual([saved.name, saved.description, saved.section, saved.kind], ['Spring pair', 'Two nodes and a link.', ['Mechanics', 'Springs'], 'fragment']);
+        assert.deepEqual([saved.fragment.nodes.length, saved.fragment.edges.length], [2, 1]);
+
+        // Placing it adds its nodes under their own names, in one undoable step, and leaves the saved one alone.
+        await evaluate(window, `document.querySelector('[data-template-id="user_spring_pair"]').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].filter((label) => label.textContent.includes('Mass')).length === 2`, 'The saved template was not placed.');
+        assert.equal(await nodeCount(), `${Number.parseInt(nodesBefore, 10) + 2} nodes`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await nodeCount(), nodesBefore);
+
+        // Editing renames, re-describes and moves it; the section it left disappears with its last template.
+        await evaluate(window, action('Edit Spring pair'));
+        await waitFor(window, `document.querySelector('#templateDialog').open && document.querySelector('#templateName').value === 'Spring pair'`, 'The edit dialog did not open on the template.');
+        await fillAndSubmit({ templateName: 'Spring pair v2', templateDescription: '', templateSection: 'Mechanics' });
+        await waitFor(window, `!document.querySelector('#templateDialog').open`, 'The edit dialog did not close.');
+        [saved] = await userTemplates();
+        assert.deepEqual([saved.id, saved.name, saved.description, saved.section], ['user_spring_pair', 'Spring pair v2', undefined, ['Mechanics']]);
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('[data-section-path="Mechanics / Springs"]'))`), false, 'An emptied section is still listed.');
+
+        // Renaming a section files everything in it under the new name.
+        await evaluate(window, action('Rename section Mechanics'));
+        await waitFor(window, `document.querySelector('#templateDialog').open && document.querySelector('#templateSection').value === 'Mechanics'`, 'The rename dialog did not open on the section.');
+        assert.equal(await evaluate(window, `document.querySelector('[data-template-field="name"]').hidden`), true);
+        await fillAndSubmit({ templateSection: 'Machines / Mechanics' });
+        await waitFor(window, `!document.querySelector('#templateDialog').open`, 'The rename dialog did not close.');
+        [saved] = await userTemplates();
+        assert.deepEqual(saved.section, ['Machines', 'Mechanics']);
+
+        // Deleting asks first, then removes it from the library and the panel.
+        await evaluate(window, `(() => { window.confirm = () => false; })()`);
+        await evaluate(window, action('Delete Spring pair v2'));
+        assert.equal((await userTemplates()).length, 1, 'A declined delete removed the template.');
+        await evaluate(window, `(() => { window.confirm = () => true; })()`);
+        await evaluate(window, action('Delete Spring pair v2'));
+        await waitFor(window, `!document.querySelector('[data-template-id="user_spring_pair"]')`, 'The deleted template is still listed.');
+        assert.equal((await userTemplates()).length, 0);
+        assert.match(await evaluate(window, `document.querySelector('#componentLibraryEmpty').textContent`), /Nothing saved yet/);
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+    });
+
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');

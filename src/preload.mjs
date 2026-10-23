@@ -132,7 +132,11 @@ contextBridge.exposeInMainWorld('launcherHost', {
 });
 
 contextBridge.exposeInMainWorld('componentLibrary', {
-    list: () => ipcRenderer.invoke('componentLibraryList')
+    list: () => ipcRenderer.invoke('componentLibraryList'),
+    saveUser: (template) => ipcRenderer.invoke('componentLibrarySaveUser', template),
+    updateUser: (id, changes) => ipcRenderer.invoke('componentLibraryUpdateUser', { id, changes }),
+    moveUserSection: (from, to) => ipcRenderer.invoke('componentLibraryMoveUserSection', { from, to }),
+    removeUser: (id) => ipcRenderer.invoke('componentLibraryRemoveUser', id)
 });
 
 contextBridge.exposeInMainWorld('providerEditor', {

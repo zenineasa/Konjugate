@@ -39,6 +39,11 @@ function fragmentEntityIds(fragment) {
     return collectEntityIds([fragment.nodes, fragment.edges, fragment.sharedParameters ?? []]);
 }
 
+// Every id a fragment gives to something of its own, for telling a reference to inside it from one to outside.
+export function fragmentIdSet(fragment) {
+    return new Set(fragmentEntityIds(fragment));
+}
+
 // Every shared parameter a fragment's nodes and relationships link to, by id, whether or not the fragment carries it.
 export function fragmentSharedParameterReferences(fragment) {
     const found = new Set();
@@ -65,7 +70,9 @@ export function validateGraphFragment(fragment) {
     return fragment.edges.every((edge) => nodeIds.has(edge.source?.nodeId) && nodeIds.has(edge.target?.nodeId));
 }
 
-export function createGraphFragment(document, selectedNodeIds) {
+// `includeSharedParameters` carries the shared parameters the copied nodes and relationships link to, so the fragment can
+// stand alone (a library template has to); a paste into the model it came from links to the originals instead.
+export function createGraphFragment(document, selectedNodeIds, { includeSharedParameters = false } = {}) {
     const selected = new Set(selectedNodeIds);
     const nodes = (document.nodes ?? []).filter((node) => selected.has(node.id)).map((node) => structuredClone(node));
     const includedNodeIds = new Set(nodes.map((node) => node.id));
@@ -73,7 +80,13 @@ export function createGraphFragment(document, selectedNodeIds) {
         includedNodeIds.has(edge.source?.nodeId) && includedNodeIds.has(edge.target?.nodeId)
     )).map((edge) => structuredClone(edge));
     if (!nodes.length) return null;
-    return { format: graphFragmentFormat, version: graphFragmentVersion, nodes, edges };
+    const fragment = { format: graphFragmentFormat, version: graphFragmentVersion, nodes, edges };
+    if (includeSharedParameters) {
+        const linked = new Set(fragmentSharedParameterReferences(fragment));
+        const carried = (document.sharedParameters ?? []).filter((shared) => linked.has(shared.id)).map((shared) => structuredClone(shared));
+        if (carried.length) fragment.sharedParameters = carried;
+    }
+    return fragment;
 }
 
 // `nameSuffix` is appended to every copied name (a pasted copy says it is one; a library template placed on the canvas

@@ -129,6 +129,9 @@ input, select, textarea { user-select: text; }
 .passwordDialog :is(input, select) { height: 30px; padding: 0 8px; color: #d4e0e5; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; outline: 0; }
 .passwordDialog :is(input, select):focus { border-color: #478177; }
 .passwordError { min-height: 16px; padding-top: 6px; color: #d48288; font-size: 8px; }
+.passwordDialog textarea { padding: 6px 8px; color: #d4e0e5; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; outline: 0; font: inherit; font-size: 8px; resize: vertical; }
+.passwordDialog textarea:focus { border-color: #478177; }
+#templateDialogError { white-space: pre-wrap; }
 .passwordDialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
 .passwordDialog footer .footerLeftButton { margin-right: auto; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
@@ -342,6 +345,16 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .componentLibrarySection { display: grid; gap: 6px; }
 .componentLibrarySection h3 { margin: 0; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
 .componentLibraryItem { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 9px; padding: 8px 9px; text-align: left; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 5px; }
+.componentLibraryRow { position: relative; display: grid; }
+.componentLibraryRowActions { position: absolute; top: 5px; right: 6px; display: none; gap: 2px; }
+.componentLibraryRow:hover .componentLibraryRowActions, .componentLibraryRow:focus-within .componentLibraryRowActions { display: flex; }
+.componentLibraryRowAction { width: 20px; height: 20px; padding: 0; color: #8199a3; background: #0f1c24; border: 1px solid #263b45; border-radius: 4px; font-size: 9px; line-height: 1; cursor: pointer; }
+.componentLibraryRowAction:hover { color: #d8e4e9; border-color: #47736f; }
+.componentLibrarySubsection { display: grid; gap: 6px; }
+.componentLibrarySubsection > summary { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 0; color: #8199a3; font-size: 8px; cursor: pointer; }
+.componentLibrarySubsection > summary .componentLibraryRowAction { width: 18px; height: 18px; visibility: hidden; }
+.componentLibrarySubsection > summary:hover .componentLibraryRowAction, .componentLibrarySubsection > summary:focus-within .componentLibraryRowAction { visibility: visible; }
+.componentLibrarySubsectionBody { display: grid; gap: 6px; margin-left: 9px; padding-left: 8px; border-left: 1px solid #263b45; }
 .componentLibraryItem:hover { background: rgb(66 201 188 / 6%); border-color: #47736f; }
 .componentLibraryItem:disabled { opacity: .5; cursor: default; }
 .componentLibraryItem .componentLibrarySwatch { width: 10px; height: 10px; border-radius: 3px; }

@@ -164,6 +164,20 @@
     </dialog>
 
 
+    <dialog id="templateDialog" class="passwordDialog">
+        <form method="dialog">
+            <span id="templateDialogKicker" class="contextKicker">Selected nodes</span>
+            <strong id="templateDialogTitle">Save to my library</strong>
+            <p id="templateDialogHint">The selected nodes and the relationships between them are kept with their programs and the parameters they link to, ready to place in any model.</p>
+            <label data-template-field="name"><span>Name</span><input id="templateName" autocomplete="off" maxlength="120"></label>
+            <label data-template-field="description"><span>Description</span><textarea id="templateDescription" rows="3" placeholder="Optional: what it is and how to use it"></textarea></label>
+            <label data-template-field="section"><span id="templateSectionLabel">Section</span><input id="templateSection" list="templateSectionChoices" autocomplete="off" placeholder="Optional, such as Pumps / Centrifugal"></label>
+            <datalist id="templateSectionChoices"></datalist>
+            <div id="templateDialogError" class="passwordError" role="alert"></div>
+            <footer><button id="templateCancel" type="button">Cancel</button><button id="templateSubmit" class="doneButton" type="submit">Save</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="shapeLibraryDialog" class="passwordDialog shapeLibraryDialog">
         <form method="dialog">
             <span class="contextKicker">Node appearance</span>
@@ -489,6 +503,7 @@
                 <button id="createEdgeGroup" class="squareTool" type="button" aria-label="Create edge group from selected nodes" data-tooltip="Create edge group" disabled>⬡</button>
                 <button id="copySelection" class="squareTool clipboardTool" type="button" aria-label="Copy selected nodes" data-tooltip="Copy selected" disabled>⧉</button>
                 <button id="pasteSelection" class="squareTool clipboardTool" type="button" aria-label="Paste copied nodes" data-tooltip="Paste" disabled>▣</button>
+                <button id="saveTemplateButton" class="squareTool" type="button" aria-label="Save selected nodes to my component library" data-tooltip="Save to my library" disabled>⊞</button>
                 <button class="squareTool" data-action="delete" type="button" aria-label="Delete selected" data-tooltip="Delete selected" disabled>⌫</button>
             </div>
         </div>
@@ -969,6 +984,7 @@
             <button id="nodeContextToggle" type="button"><i class="primitiveIcon">⏻</i><span><strong id="nodeContextToggleLabel">Disable node</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
             <button id="nodeContextAddToGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Add to edge group</strong><small>Join the group currently open for editing</small></span><b>›</b></button>
             <button id="nodeContextDetachFromGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Detach from edge group</strong><small>Its edges to the group stay, as ordinary edges</small></span><b>›</b></button>
+            <button id="nodeContextSaveTemplate" type="button"><i class="primitiveIcon">⊞</i><span><strong>Save to my library</strong><small>Keep the selection as a reusable component</small></span><b>›</b></button>
             <button id="nodeContextDisableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Disable all</strong><small>Disable every selected node</small></span><b>›</b></button>
             <button id="nodeContextEnableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Enable all</strong><small>Enable every selected node</small></span><b>›</b></button>
             <button id="nodeContextCreateEdgeGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Create edge group</strong><small>One relationship, meshed across the selection</small></span><b>›</b></button>

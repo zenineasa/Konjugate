@@ -15,6 +15,8 @@
 
 import { threads, version } from './buildInfo.mjs';
 import { normalizeShapeLibraryEntry } from '../../shapeLibraryCatalog.mjs';
+import { validateComponentTemplate } from '../../componentTemplate.mjs';
+import { createUserLibraryStore } from '../../userLibraryStore.mjs';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -75,12 +77,69 @@ export const shapeLibrary = {
     saveUpload: async () => ({ available: false })
 };
 
+// The user's own templates live in the browser (IndexedDB), the counterpart of the desktop app's user data folder. What is
+// allowed with them is not decided here but in src/userLibraryStore.mjs, the same code the desktop uses; this is only where
+// they are kept.
+const userLibraryDatabaseName = 'konjugate-user-component-library';
+
+function openUserLibraryDatabase() {
+    return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') {
+            reject(new Error('This browser cannot keep templates here (private browsing, or storage turned off).'));
+            return;
+        }
+        const request = indexedDB.open(userLibraryDatabaseName, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('templates', { keyPath: 'id' });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error ?? new Error('The browser could not open its template storage.'));
+    });
+}
+
+async function userLibraryRequest(mode, action) {
+    const database = await openUserLibraryDatabase();
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction('templates', mode);
+        const request = action(transaction.objectStore('templates'));
+        transaction.oncomplete = () => { database.close(); resolve(request?.result); };
+        transaction.onerror = transaction.onabort = () => {
+            database.close();
+            reject(transaction.error ?? new Error('The browser could not store the template.'));
+        };
+    });
+}
+
+async function bundledComponentTemplates() {
+    const response = await fetch(new URL('../../assets/componentLibrary/webManifest.json', import.meta.url));
+    return response.ok ? response.json() : [];
+}
+
+async function readUserTemplates() {
+    const stored = await userLibraryRequest('readonly', (store) => store.getAll()).catch(() => []);
+    return stored.flatMap((template) => {
+        try {
+            return [validateComponentTemplate(template)];
+        } catch {
+            return [];
+        }
+    });
+}
+
+const userComponentLibrary = createUserLibraryStore({
+    readAll: readUserTemplates,
+    write: (template) => userLibraryRequest('readwrite', (store) => store.put(template)),
+    remove: (id) => userLibraryRequest('readwrite', (store) => store.delete(id)),
+    otherTemplateIds: async () => (await bundledComponentTemplates()).map((template) => template.id)
+});
+
 export const componentLibrary = {
     list: async () => {
-        const response = await fetch(new URL('../../assets/componentLibrary/webManifest.json', import.meta.url));
-        if (!response.ok) return [];
-        return response.json();
-    }
+        const [bundled, user] = await Promise.all([bundledComponentTemplates(), readUserTemplates()]);
+        return [...bundled.map((template) => ({ ...template, source: 'bundled' })), ...user.map((template) => ({ ...template, source: 'user' }))];
+    },
+    saveUser: async (template) => ({ ...await userComponentLibrary.save(template), source: 'user' }),
+    updateUser: async (id, changes) => ({ ...await userComponentLibrary.update(id, changes), source: 'user' }),
+    moveUserSection: (from, to) => userComponentLibrary.moveSection(from, to),
+    removeUser: (id) => userComponentLibrary.remove(id)
 };
 
 export const extensions = {

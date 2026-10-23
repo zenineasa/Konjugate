@@ -8,7 +8,8 @@
 // a malformed bundled template is rejected the same way in both places instead of only on
 // desktop.
 
-import { fragmentSharedParameterReferences, validateGraphFragment } from './graphClipboard.mjs';
+import { fragmentIdSet, fragmentSharedParameterReferences, validateGraphFragment } from './graphClipboard.mjs';
+import { sectionPathProblem } from './librarySections.mjs';
 
 const componentTemplateIdPattern = /^[a-zA-Z][\w-]*$/;
 
@@ -43,32 +44,67 @@ function validateSharedParameters(sharedParameters, owner) {
 // shared parameters they link to -- so it can express whatever a user can build there, with nothing for the template
 // format to keep in step with the canvas. It must stand alone: everything it links to travels with it. A program in it is
 // source it carries (cpp or python), never a reference to something installed on one machine (an FMU, a plugin).
-function validateFragmentTemplate(template) {
-    const { fragment } = template;
-    if (!validateGraphFragment(fragment)) throw new Error('A fragment template needs a valid graph fragment: nodes with unique positive integer ids, and relationships between them.');
+// Why a fragment cannot stand alone as a template, each reason as a sentence a person can act on. `describeReference`
+// (key, id) may turn an id the fragment does not contain into words (the node or state it names); without it the key and
+// id are shown. Used both to refuse a bad template and to tell someone saving a selection what to change.
+export function fragmentTemplateProblems(fragment, { describeReference = (key, id) => `${key.replace(/Id$/, '')} ${id}` } = {}) {
+    const problems = [];
     const carried = new Set((fragment.sharedParameters ?? []).map((shared) => shared.id));
     fragmentSharedParameterReferences(fragment).forEach((id) => {
-        if (!carried.has(id)) throw new Error(`A fragment template links to shared parameter ${id}, which it does not carry.`);
+        if (!carried.has(id)) problems.push(`A fragment template links to shared parameter ${id}, which it does not carry.`);
     });
-    validateSharedParameters((fragment.sharedParameters ?? []).map((shared) => ({ ...shared, key: `shared${shared.id}` })), 'fragment template');
     const checkProgram = (implementation, owner) => {
         if (!implementation) return;
         if (!['cpp', 'python'].includes(implementation.kind) || typeof implementation.source !== 'string' || !implementation.source.trim()) {
-            throw new Error(`${owner} has a program that is not inline cpp or python source.`);
+            problems.push(`${owner} has a program that is not inline cpp or python source.`);
         }
     };
+    const inside = fragmentIdSet(fragment);
+    // Anything else it refers to by id must be inside it, since the place it is put will not have that.
+    const outsideReferences = (value, found = new Set()) => {
+        if (Array.isArray(value)) value.forEach((item) => outsideReferences(item, found));
+        else if (value && typeof value === 'object') {
+            for (const [key, child] of Object.entries(value)) {
+                if (key.endsWith('Id') && !templateOwnReferenceKeys.has(key) && typeof child === 'number' && !inside.has(child)) found.add(describeReference(key, child));
+                else outsideReferences(child, found);
+            }
+        }
+        return found;
+    };
+    const checkReferences = (entity, owner) => {
+        outsideReferences(entity).forEach((reference) => problems.push(`${owner} refers to ${reference}, which is not in the template.`));
+    };
+    fragment.nodes.forEach((node) => {
+        checkProgram(node.implementation, `Node "${node.name}"`);
+        (node.sourceTerms ?? []).forEach((term) => checkProgram(term.implementation, `A source term of node "${node.name}"`));
+        checkReferences(node, `Node "${node.name}"`);
+    });
+    fragment.edges.forEach((edge) => {
+        checkProgram(edge.implementation, `Relationship "${edge.name}"`);
+        checkReferences(edge, `Relationship "${edge.name}"`);
+    });
+    return problems;
+}
+
+// References by id that are not to something a fragment has to contain: shared parameters are checked on their own, and
+// where a node sits (a subsystem, an edge group) is a matter of the model it is placed in.
+const templateOwnReferenceKeys = new Set(['sharedParameterId', 'subsystemId', 'groupId']);
+
+function validateFragmentTemplate(template) {
+    const { fragment } = template;
+    if (!validateGraphFragment(fragment)) throw new Error('A fragment template needs a valid graph fragment: nodes with unique positive integer ids, and relationships between them.');
+    validateSharedParameters((fragment.sharedParameters ?? []).map((shared) => ({ ...shared, key: `shared${shared.id}` })), 'fragment template');
     fragment.nodes.forEach((node) => {
         if (!node.name) throw new Error('A fragment template node needs a name.');
         (node.states ?? []).forEach((state) => {
             if (!componentTemplateIdPattern.test(state?.symbol ?? '') || !state.name) throw new Error(`Node "${node.name}" has a state without a name and symbol.`);
         });
-        checkProgram(node.implementation, `Node "${node.name}"`);
-        (node.sourceTerms ?? []).forEach((term) => checkProgram(term.implementation, `A source term of node "${node.name}"`));
     });
     fragment.edges.forEach((edge) => {
         if (!edge.name) throw new Error('A fragment template relationship needs a name.');
-        checkProgram(edge.implementation, `Relationship "${edge.name}"`);
     });
+    const [problem] = fragmentTemplateProblems(fragment);
+    if (problem) throw new Error(problem);
 }
 
 // A bundle stamps out several edges at once among N named endpoint nodes, optionally with shared
@@ -119,6 +155,10 @@ export function validateComponentTemplate(template) {
     if (!componentTemplateIdPattern.test(template.id ?? '')) throw new Error('A template needs a valid id.');
     if (!template.name) throw new Error('A template needs a name.');
     if (template.description !== undefined && typeof template.description !== 'string') throw new Error('A template description must be a string.');
+    if (template.section !== undefined) {
+        const problem = sectionPathProblem(template.section);
+        if (problem) throw new Error(problem);
+    }
     const domains = template.domains ?? [];
     if (!Array.isArray(domains) || !domains.length || !domains.every((domain) => typeof domain === 'string' && domain)) {
         throw new Error('A template needs a non-empty domains array.');

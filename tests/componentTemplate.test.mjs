@@ -169,3 +169,19 @@ test('the bundled PID assemblies carry a C++ program, so the web library leaves 
         assert.equal(componentTemplateHasCppProgram(validateComponentTemplate(JSON.parse(await readFile(join(directory, `${id}.json`), 'utf8')))), true, id);
     }
 });
+
+test('a template may name the section it is filed in, and a bad section is refused', () => {
+    const template = fragmentTemplate();
+    template.section = ['Pumps', 'Centrifugal'];
+    assert.deepEqual(validateComponentTemplate(template).section, ['Pumps', 'Centrifugal']);
+    template.section = ['a/b'];
+    assert.throws(() => validateComponentTemplate(template), /cannot contain/);
+    template.section = 'Pumps';
+    assert.throws(() => validateComponentTemplate(template), /list of names/);
+});
+
+test('a fragment template that refers to something outside itself is refused', () => {
+    const template = fragmentTemplate();
+    template.fragment.nodes[0].implementation.bindings.push({ key: 'other', kind: 'state', nodeId: 77, stateId: 78 });
+    assert.throws(() => validateComponentTemplate(template), /refers to node 77, which is not in the template/);
+});

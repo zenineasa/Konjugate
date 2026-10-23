@@ -52,6 +52,7 @@ import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
+import { createUserLibraryStore } from './userLibraryStore.mjs';
 import { registerLauncherHandlers } from './launcherHost.mjs';
 import { addonCacheDirectory } from './addonCache.mjs';
 import { createAddonSettingsStore } from './addonSettingsStore.mjs';
@@ -1376,20 +1377,56 @@ ipcMain.handle('shapeLibrarySaveUpload', async (_event, { fileName, data }) => {
 
 const componentLibraryRegistry = new Map();
 
+const userComponentLibraryDirectory = () => join(app.getPath('userData'), 'componentLibrary');
+
+// The user's own templates, each with the file it came from, so changing one rewrites that file and not a second one.
+async function readUserTemplateFiles() {
+    const directory = userComponentLibraryDirectory();
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const found = [];
+    for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+        try {
+            found.push({ file: entry.name, template: validateComponentTemplate(JSON.parse(await readFile(join(directory, entry.name), 'utf8'))) });
+        } catch {
+            // Skipped, and reported by discoverComponentLibrary, which reads the same files.
+        }
+    }
+    return found;
+}
+
+// Saving, changing and deleting the user's templates; the rules are in src/userLibraryStore.mjs, shared with the web edition.
+const userComponentLibrary = createUserLibraryStore({
+    readAll: async () => (await readUserTemplateFiles()).map(({ template }) => template),
+    write: async (template) => {
+        const existing = (await readUserTemplateFiles()).find((saved) => saved.template.id === template.id);
+        await mkdir(userComponentLibraryDirectory(), { recursive: true });
+        await atomicWriteFile(join(userComponentLibraryDirectory(), existing?.file ?? `${template.id}.json`), `${JSON.stringify(template, null, 2)}\n`);
+    },
+    remove: async (id) => {
+        const existing = (await readUserTemplateFiles()).find((saved) => saved.template.id === id);
+        if (existing) await unlink(join(userComponentLibraryDirectory(), existing.file));
+    },
+    otherTemplateIds: async () => {
+        await discoverComponentLibrary();
+        return [...componentLibraryRegistry.values()].filter((template) => template.source !== 'user').map((template) => template.id);
+    }
+});
+
 async function discoverComponentLibrary() {
     componentLibraryRegistry.clear();
     const componentLibraryRoots = [
-        join(currentDir, '..', 'assets', 'componentLibrary'),
-        join(app.getPath('userData'), 'componentLibrary')
+        [join(currentDir, '..', 'assets', 'componentLibrary'), 'bundled'],
+        [userComponentLibraryDirectory(), 'user']
     ];
-    for (const componentLibraryDirectory of componentLibraryRoots) {
+    for (const [componentLibraryDirectory, source] of componentLibraryRoots) {
         const entries = await readdir(componentLibraryDirectory, { withFileTypes: true }).catch(() => []);
         for (const entry of entries) {
             if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
             try {
                 const template = validateComponentTemplate(JSON.parse(await readFile(join(componentLibraryDirectory, entry.name), 'utf8')));
                 if (componentLibraryRegistry.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
-                componentLibraryRegistry.set(template.id, template);
+                componentLibraryRegistry.set(template.id, { ...template, source });
             } catch (error) {
                 console.warn(`Skipping component template ${entry.name}: ${error.message}`);
             }
@@ -1434,6 +1471,10 @@ ipcMain.handle('componentLibraryList', async () => {
     await discoverComponentLibrary();
     return [...componentLibraryRegistry.values()];
 });
+ipcMain.handle('componentLibrarySaveUser', async (_event, template) => ({ ...await userComponentLibrary.save(template), source: 'user' }));
+ipcMain.handle('componentLibraryUpdateUser', async (_event, { id, changes }) => ({ ...await userComponentLibrary.update(id, changes), source: 'user' }));
+ipcMain.handle('componentLibraryMoveUserSection', async (_event, { from, to }) => userComponentLibrary.moveSection(from, to));
+ipcMain.handle('componentLibraryRemoveUser', async (_event, id) => userComponentLibrary.remove(id));
 
 ipcMain.handle('shapeLibraryLoad', async (_event, id) => {
     const shape = (await shapeLibraryManifest()).find((candidate) => candidate.id === id);

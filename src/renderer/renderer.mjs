@@ -53,6 +53,8 @@ import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
+import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '../librarySections.mjs';
+import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
@@ -570,6 +572,7 @@ function updateHistoryControls() {
 function updateSelectionActionControls() {
     const locked = Boolean(activeResult);
     $('#copySelection').disabled = locked || !selectedNodeIds.size;
+    $('#saveTemplateButton').disabled = locked || !selectedNodeIds.size;
     $('#createSubsystem').disabled = locked || !selectedNodeIds.size;
     $('#createEdgeGroup').disabled = locked || selectedNodeIds.size < 2;
     $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship);
@@ -3880,6 +3883,24 @@ function componentLibraryKindLabel(template) {
     return template.kind === 'node' ? 'Node' : 'Edge';
 }
 
+// Sections of the user's own library the person has folded away, by their path as text; the rest are open.
+const componentLibraryClosedSections = new Set();
+
+function libraryRowAction(symbol, label, handler) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'componentLibraryRowAction';
+    button.textContent = symbol;
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handler();
+    });
+    return button;
+}
+
 function renderComponentLibraryItem(template) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -3888,38 +3909,87 @@ function renderComponentLibraryItem(template) {
     button.title = template.description ?? '';
     button.innerHTML = `<span class="componentLibrarySwatch" style="background:${escapeHtml(template.color ?? '#42c9bc')}"></span><span><b>${escapeHtml(template.name)}</b><small>${componentLibraryKindLabel(template)} · ${escapeHtml(template.domains.map(domainLabel).join(', '))}</small></span>`;
     button.addEventListener('click', () => applyComponentTemplate(template));
-    return button;
+    if (template.source !== 'user') return button;
+    // A template of the user's own can be changed and deleted; a bundled or plugin one cannot.
+    const row = document.createElement('div');
+    row.className = 'componentLibraryRow';
+    const actions = document.createElement('span');
+    actions.className = 'componentLibraryRowActions';
+    actions.append(
+        libraryRowAction('✎', `Edit ${template.name}`, () => openTemplateDialog({ kind: 'edit', template })),
+        libraryRowAction('✕', `Delete ${template.name}`, () => deleteUserTemplate(template))
+    );
+    row.append(button, actions);
+    return row;
+}
+
+// The user's templates as their sections: what is filed directly in a section first, then its subsections, folded or open.
+function renderUserLibraryNode(node) {
+    const body = document.createElement('div');
+    body.className = node.path.length ? 'componentLibrarySubsectionBody' : 'componentLibrarySection';
+    node.templates.forEach((template) => body.appendChild(renderComponentLibraryItem(template)));
+    node.children.forEach((child) => {
+        const key = sectionPathText(child.path);
+        const details = document.createElement('details');
+        details.className = 'componentLibrarySubsection';
+        details.dataset.sectionPath = key;
+        details.open = !componentLibraryClosedSections.has(key);
+        details.addEventListener('toggle', () => {
+            if (details.open) componentLibraryClosedSections.delete(key);
+            else componentLibraryClosedSections.add(key);
+        });
+        const summary = document.createElement('summary');
+        const label = document.createElement('span');
+        label.textContent = child.name;
+        summary.append(label, libraryRowAction('✎', `Rename section ${key}`, () => openTemplateDialog({ kind: 'section', path: child.path })));
+        details.append(summary, renderUserLibraryNode(child));
+        body.appendChild(details);
+    });
+    return body;
 }
 
 function renderComponentLibraryResults() {
     const query = $('#componentLibrarySearch').value.trim().toLowerCase();
     const matches = componentLibraryEntries.filter((template) => {
-        if (componentLibraryType !== 'all' && template.kind !== componentLibraryType) return false;
+        if (componentLibraryType === 'mine' ? template.source !== 'user' : componentLibraryType !== 'all' && template.kind !== componentLibraryType) return false;
         if (componentLibraryDomains.size && !template.domains.some((domain) => componentLibraryDomains.has(domain))) return false;
         if (!query) return true;
-        const haystack = [template.name, template.description ?? '', ...template.domains].join(' ').toLowerCase();
+        const haystack = [template.name, template.description ?? '', ...template.domains, sectionPathText(template.section ?? [])].join(' ').toLowerCase();
         return haystack.includes(query);
     });
     const container = $('#componentLibraryResults');
+    const mine = matches.filter((template) => template.source === 'user');
     if (query || componentLibraryDomains.size) {
         container.replaceChildren(...matches.map(renderComponentLibraryItem));
     } else {
-        const domains = [...new Set(componentLibraryEntries.flatMap((template) => template.domains))].sort();
-        container.replaceChildren(...domains.map((domain) => {
-            const items = matches.filter((template) => template.domains.includes(domain));
+        // Browsing: the user's own templates by the sections they made, then everything else by domain.
+        const domains = [...new Set(componentLibraryEntries.filter((template) => template.source !== 'user').flatMap((template) => template.domains))].sort();
+        const myLibrary = mine.length ? (() => {
+            const section = document.createElement('div');
+            section.className = 'componentLibrarySection';
+            section.dataset.myLibrary = '';
+            section.innerHTML = '<h3>My library</h3>';
+            section.appendChild(renderUserLibraryNode(sectionTree(mine)));
+            return section;
+        })() : null;
+        container.replaceChildren(...[myLibrary, ...domains.map((domain) => {
+            const items = matches.filter((template) => template.source !== 'user' && template.domains.includes(domain));
             if (!items.length) return null;
             const section = document.createElement('div');
             section.className = 'componentLibrarySection';
             section.innerHTML = `<h3>${escapeHtml(domainLabel(domain))}</h3>`;
             items.forEach((template) => section.appendChild(renderComponentLibraryItem(template)));
             return section;
-        }).filter(Boolean));
+        })].filter(Boolean));
     }
+    $('#componentLibraryEmpty').textContent = componentLibraryType === 'mine' && !query && !componentLibraryDomains.size
+        ? 'Nothing saved yet. Select nodes and press ⊞ (or right-click them) to keep them here.'
+        : 'No components match your search.';
     $('#componentLibraryEmpty').hidden = matches.length > 0;
 }
 
 function renderComponentLibraryChips() {
-    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges'], ['bundle', 'Bundles'], ['fragment', 'Assemblies']];
+    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges'], ['bundle', 'Bundles'], ['fragment', 'Assemblies'], ['mine', 'My library']];
     $('#componentLibraryTypeChips').replaceChildren(...types.map(([type, label]) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -3932,7 +4002,7 @@ function renderComponentLibraryChips() {
         });
         return button;
     }));
-    const domains = [...new Set(componentLibraryEntries.flatMap((template) => template.domains))].sort();
+    const domains = [...new Set(componentLibraryEntries.filter((template) => template.source !== 'user').flatMap((template) => template.domains))].sort();
     $('#componentLibraryDomainChips').replaceChildren(...domains.map((domain) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -3948,10 +4018,10 @@ function renderComponentLibraryChips() {
     }));
 }
 
-async function openComponentLibraryPanel() {
+async function openComponentLibraryPanel({ type = 'all' } = {}) {
     componentLibraryEntries = await window.componentLibrary.list();
     componentLibraryDomains = new Set();
-    componentLibraryType = 'all';
+    componentLibraryType = type;
     $('#componentLibrarySearch').value = '';
     renderComponentLibraryChips();
     renderComponentLibraryResults();
@@ -12542,6 +12612,100 @@ $('#subsystemCancel').addEventListener('click', () => $('#subsystemDialog').clos
 $('#subsystemDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
     if (createSubsystemFromSelection($('#subsystemName').value)) $('#subsystemDialog').close();
+});
+
+// ---- The user's own library of components ---------------------------------------------------------------------------
+// A selection is kept as a template of kind "fragment" with the section it is filed in (src/userLibrary.mjs); where it
+// is kept, and what may be done with it, is the same code on the desktop and in the web edition (src/userLibraryStore.mjs).
+let templateDialogMode = null;
+
+// An error that crossed from the main process arrives wrapped in Electron's own words; show only the part that is ours.
+const friendlyError = (error) => String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+
+async function refreshComponentLibrary() {
+    componentLibraryEntries = await window.componentLibrary.list();
+    renderComponentLibraryChips();
+    renderComponentLibraryResults();
+}
+
+// Opens the panel on the user's own templates, as they now are.
+async function showUserLibrary() {
+    await openComponentLibraryPanel({ type: 'mine' });
+}
+
+async function openTemplateDialog(mode) {
+    if (mode.kind === 'create' && (activeResult || !selectedNodeIds.size)) return;
+    templateDialogMode = mode;
+    const mine = (await window.componentLibrary.list()).filter((template) => template.source === 'user');
+    const creating = mode.kind === 'create';
+    const filing = mode.kind === 'section';
+    $('#templateDialogKicker').textContent = creating ? 'Selected nodes' : 'My library';
+    $('#templateDialogTitle').textContent = creating ? 'Save to my library' : filing ? 'Rename section' : 'Edit component';
+    $('#templateDialogHint').textContent = creating
+        ? 'The selected nodes and the relationships between them are kept with their programs and the parameters they link to, ready to place in any model.'
+        : filing ? 'Every component in this section, and in any section inside it, is filed under the new name.'
+            : 'Change how this component is named, described and filed. The nodes and relationships in it stay as saved.';
+    $$('[data-template-field="name"], [data-template-field="description"]').forEach((field) => { field.hidden = filing; });
+    $('#templateSectionLabel').textContent = filing ? 'Section name' : 'Section';
+    const firstSelected = model.nodes.find((node) => selectedNodeIds.has(node.id));
+    $('#templateName').value = creating ? (selectedNodeIds.size === 1 ? firstSelected?.title ?? '' : 'My component') : filing ? '' : mode.template.name;
+    $('#templateDescription').value = creating || filing ? '' : mode.template.description ?? '';
+    $('#templateSection').value = sectionPathText(filing ? mode.path : creating ? [] : mode.template.section ?? []);
+    $('#templateSectionChoices').replaceChildren(...sectionPaths(mine).map((path) => {
+        const option = document.createElement('option');
+        option.value = sectionPathText(path);
+        return option;
+    }));
+    $('#templateSubmit').textContent = creating ? 'Save' : 'Save changes';
+    $('#templateDialogError').textContent = '';
+    $('#templateDialog').showModal();
+    (filing ? $('#templateSection') : $('#templateName')).select();
+}
+
+async function submitTemplateDialog() {
+    const mode = templateDialogMode;
+    const section = parseSectionPath($('#templateSection').value);
+    const name = $('#templateName').value;
+    const description = $('#templateDescription').value;
+    if (mode.kind === 'create') {
+        const takenIds = (await window.componentLibrary.list()).map((template) => template.id);
+        const template = buildUserTemplate({ document: serializeProjectDocument(), selectedNodeIds: [...selectedNodeIds], name, description, section, takenIds });
+        const saved = await window.componentLibrary.saveUser(template);
+        $('#statusText').textContent = `Saved “${saved.name}” to my library`;
+    } else if (mode.kind === 'edit') {
+        await window.componentLibrary.updateUser(mode.template.id, { name, description, section });
+    } else {
+        await window.componentLibrary.moveUserSection(mode.path, section);
+    }
+}
+
+async function deleteUserTemplate(template) {
+    if (!window.confirm(`Delete “${template.name}” from your library? This cannot be undone.`)) return;
+    try {
+        await window.componentLibrary.removeUser(template.id);
+        await refreshComponentLibrary();
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+    }
+}
+
+$('#saveTemplateButton').addEventListener('click', () => openTemplateDialog({ kind: 'create' }));
+$('#nodeContextSaveTemplate').addEventListener('click', () => {
+    hideCards();
+    openTemplateDialog({ kind: 'create' });
+});
+$('#templateCancel').addEventListener('click', () => $('#templateDialog').close());
+$('#templateDialog form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const error = $('#templateDialogError');
+    error.textContent = '';
+    try {
+        await submitTemplateDialog();
+        $('#templateDialog').close();
+        await showUserLibrary();
+    } catch (failure) {
+        error.textContent = failure instanceof UnstorableSelectionError ? failure.problems.join('\n') : friendlyError(failure);
+    }
 });
 
 $('#createEdgeGroup').addEventListener('click', () => createEdgeGroupFromSelection());

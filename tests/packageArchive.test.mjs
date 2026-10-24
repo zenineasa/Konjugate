@@ -2,9 +2,9 @@
 
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { validateAddonManifest } from '../src/addonHost.mjs';
@@ -179,6 +179,18 @@ test('cleans the temporary install after a write failure', async () => {
     }
 });
 
+test('installing a new version removes the older ones, since two versions of one add-on cannot both load', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugate-packages-'));
+    try {
+        const old = await installPackageArchive(addonArchive(), { extension: '.kja', directory });
+        const installed = await installPackageArchive(addonArchive({ version: '0.1.1' }), { extension: '.kja', directory });
+        assert.deepEqual(await readdir(dirname(installed.installPath)), ['0.1.1']);
+        await assert.rejects(readFile(join(old.installPath, 'package.json')), { code: 'ENOENT' });
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
 test('lists installed packages, empty then populated across both types', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'konjugate-packages-'));
     try {
@@ -210,7 +222,7 @@ test('uninstall removes exactly the targeted version and leaves siblings', async
     const directory = await mkdtemp(join(tmpdir(), 'konjugate-packages-'));
     try {
         await installPackageArchive(addonArchive(), { extension: '.kja', directory });
-        await installPackageArchive(addonArchive({ version: '0.2.0' }), { extension: '.kja', directory });
+        await installPackageArchive(addonArchive({ version: '0.2.0' }), { extension: '.kja', directory, replaceOtherVersions: false });
         await uninstallPackage({ directory, packageType: 'addon', packageId: 'example.helloWorld', version: '0.1.0' });
         const results = await listInstalledPackages(directory);
         assert.equal(results.length, 1);

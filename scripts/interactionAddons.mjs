@@ -38,7 +38,7 @@ export async function installInteractionAddons(rootDirectory, userDataDirectory)
     const installed = [];
     for (const [packageId, { archive, version }] of newest) {
         await installPackageArchive(archive, {
-            extension: '.kja', directory: join(userDataDirectory, 'packages'), overwrite: true, replaceOtherVersions: true
+            extension: '.kja', directory: join(userDataDirectory, 'packages'), overwrite: true
         });
         installed.push(packageId);
     }

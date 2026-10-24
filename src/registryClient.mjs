@@ -106,7 +106,7 @@ export async function installFromRegistryEntry(entry, { namespaces, directory, o
         // A registry install is always "this is the version to have" -- installing a newer release of
         // something already installed is exactly how Update works -- so older versions are replaced
         // rather than left installed alongside it.
-        const installed = await installPackageArchive(bytes, { extension, directory, overwrite, replaceOtherVersions: true, appVersion });
+        const installed = await installPackageArchive(bytes, { extension, directory, overwrite, appVersion });
         results.push({
             packageType: installed.packageManifest.packageType, packageId: installed.packageManifest.packageId,
             version: installed.packageManifest.version, verification, ...(heldBack ? { heldBack } : {})

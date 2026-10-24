@@ -222,12 +222,12 @@ export function inspectPackageArchive(archive, { extension = null, appVersion = 
     return { packageManifest, contributionManifest, files };
 }
 
-// replaceOtherVersions: remove every other installed version of the same package once this one is
+// replaceOtherVersions (on unless turned off): remove every other installed version of the same package once this one is
 // in place. Install paths are per-version (<type>s/<packageId>/<version>), so without this an
 // update leaves the old version on disk next to the new one -- both then get discovered and loaded,
 // and the update check keeps reporting the old one as outdated. Only removed after the new version
 // has been written successfully, so a failed install never leaves the package missing entirely.
-export async function installPackageArchive(archive, { extension, directory, overwrite = false, replaceOtherVersions = false, appVersion = null } = {}) {
+export async function installPackageArchive(archive, { extension, directory, overwrite = false, replaceOtherVersions = true, appVersion = null } = {}) {
     if (!directory) throw new PackageArchiveError('A package installation directory is required.', 'INVALID_DESTINATION');
     const inspected = inspectPackageArchive(archive, { extension, appVersion });
     const { packageManifest, files } = inspected;

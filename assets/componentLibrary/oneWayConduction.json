@@ -1,0 +1,16 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "oneWayConduction",
+    "kind": "edge",
+    "name": "One-way conduction",
+    "domains": ["thermal"],
+    "description": "Heat flow in one direction only: the target's temperature changes at Conductance × (source temperature − target temperature) / Thermal capacitance, and the source is not touched. Connect it from a Temperature boundary (it reads the boundary's Temperature) to a Thermal mass or a Battery (it changes their Temperature). Because nothing flows back, the boundary stays exactly at its starting temperature, which is what makes it a fixed ambient. Conductance (W/K, default 50) is how readily heat moves for each kelvin of difference. Thermal capacitance (J/K, default 1000) is how much heat the target needs to warm by one kelvin; use the target's own value. For two bodies that both change, use Thermal link instead.",
+    "color": "#9c83c4",
+    "ports": { "source": "temperature", "target": "temperature" },
+    "output": { "role": "target", "state": "temperature" },
+    "latex": "\\frac{\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)}{\\mathrm{thermalCapacitance}}",
+    "parameters": [
+        { "name": "Conductance", "symbol": "conductance", "value": 50, "unit": "W/K", "mode": "constant" },
+        { "name": "Thermal capacitance", "symbol": "thermalCapacitance", "value": 1000, "unit": "J/K", "mode": "constant" }
+    ]
+}

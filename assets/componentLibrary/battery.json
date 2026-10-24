@@ -4,7 +4,7 @@
     "kind": "node",
     "name": "Battery",
     "domains": ["electrical", "thermal"],
-    "description": "A battery pack with three states. Voltage (V, starts at 24) is the supply it offers to whatever it feeds; it stays at its starting value unless an edge changes it. State of charge (%, starts at 100) is how full it is; it only falls when an edge drains it. Temperature (K, starts at 293.15, about 20 °C) is the pack's own temperature. The node has no equations of its own, so connect edges to give it behaviour: Armature dynamics reads its Voltage to drive a motor, Discharge lowers its State of charge in proportion to the motor's current, and Conduction exchanges heat between its Temperature and another thermal body. It spans the electrical and thermal domains because a real battery's two behaviours are coupled.",
+    "description": "A battery pack with three states. Voltage (V, starts at 24) is the supply it offers to whatever it feeds; it stays at its starting value unless an edge changes it. State of charge (%, starts at 100) is how full it is; it only falls when an edge drains it. Temperature (K, starts at 293.15, about 20 °C) is the pack's own temperature. The node has no equations of its own, so connect edges to give it behaviour: Armature dynamics reads its Voltage to drive a motor, Discharge lowers its State of charge in proportion to the motor's current, Thermal link exchanges heat between its Temperature and another thermal body, and One-way conduction lets a Temperature boundary warm or cool it without changing the boundary. It spans the electrical and thermal domains because a real battery's two behaviours are coupled.",
     "shape": "box",
     "color": "#2f6970",
     "states": [

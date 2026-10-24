@@ -5009,6 +5009,66 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
     }, { skip: !driver.capabilities.parameterWaveforms && 'needs a web engine built with waveform schedules; the checked-in web build predates them' });
 
+    await run('a thermal link joins two bodies with two directed edges sharing one conductance, and one-way conduction leaves a boundary alone', async () => {
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        const thermal = (id, name, x, temperature) => ({ id, name, position: [x, 0, 0], appearance: box, states: [{ id: id + 1, name: 'Temperature', symbol: 'temperature', initialValue: temperature, unit: 'K' }], sourceTerms: [] });
+        const project = (nodes) => ({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes, edges: [] });
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        const load = async (nodes) => {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(project(nodes))})`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === ${nodes.length}`, 'The thermal bodies did not load.');
+        };
+        const openLibrary = async () => {
+            if (await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`)) await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+            await waitFor(window, `Boolean(document.querySelector('[data-template-id="thermalLink"]')) && Boolean(document.querySelector('[data-template-id="oneWayConduction"]'))`, 'The thermal templates are not in the library.');
+        };
+        const selectBoth = async () => {
+            await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, ctrlKey: true, bubbles: true }))`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Select all did not select both bodies.');
+        };
+
+        // The bundle: two directed edges, one each way, sharing one conductance, each explaining itself.
+        await load([thermal(1, 'Pack', -2, 350), thermal(10, 'Housing', 2, 300)]);
+        await openLibrary();
+        await selectBoth();
+        await evaluate(window, `document.querySelector('[data-template-id="thermalLink"]').click()`);
+        await waitFor(window, `window.__debugProject.serialize().edges.length === 2`, 'The Thermal link did not create its two edges.');
+        let document_ = await saved();
+        assert.deepEqual(document_.edges.map((edge) => edge.directionality), ['directed', 'directed']);
+        assert.deepEqual(document_.edges.map((edge) => edge.name).sort(), ['Heat into first body', 'Heat into second body']);
+        // They run in opposite directions between the same two bodies.
+        const [first, second] = document_.edges;
+        assert.deepEqual([first.source.nodeId, first.target.nodeId], [second.target.nodeId, second.source.nodeId]);
+        assert.ok(document_.edges.every((edge) => edge.description?.length > 30), 'An edge of the link carries no explanation.');
+        // One shared Conductance, linked from both, and a thermal capacitance of each edge's own.
+        assert.deepEqual(document_.sharedParameters.map((shared) => shared.name), ['Conductance']);
+        assert.deepEqual(document_.edges.map((edge) => edge.parameters.find((parameter) => parameter.symbol === 'conductance').sharedParameterId), [document_.sharedParameters[0].id, document_.sharedParameters[0].id]);
+        assert.deepEqual(document_.edges.map((edge) => edge.parameters.find((parameter) => parameter.symbol === 'thermalCapacitance').name).sort(), ["First body's thermal capacitance", "Second body's thermal capacitance"]);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        document_ = await saved();
+        assert.equal(document_.edges.length, 0, 'Undo left a thermal link edge behind.');
+        assert.equal((document_.sharedParameters ?? []).length, 0, 'Undo left the shared conductance behind.');
+
+        // One-way conduction: picked from the boundary to the mass, directed, so nothing is done to the boundary.
+        await load([thermal(1, 'Boundary', -2, 350), thermal(10, 'Mass', 2, 300)]);
+        await openLibrary();
+        await evaluate(window, `document.querySelector('[data-template-id="oneWayConduction"]').click()`);
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the edge template did not arm endpoint picking.');
+        const pick = (name) => evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}))?.click()`);
+        await pick('Boundary');
+        await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not move on to the target.');
+        await pick('Mass');
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not appear once both bodies were picked.');
+        assert.equal(await evaluate(window, `document.querySelector('#newEdgeDirectionality').value`), 'directed');
+        await evaluate(window, `document.querySelector('#createEdge').click()`);
+        await waitFor(window, `window.__debugProject.serialize().edges.length === 1`, 'One-way conduction did not create its edge.');
+        const [edge] = (await saved()).edges;
+        assert.equal(edge.directionality, 'directed');
+        assert.deepEqual([edge.source.nodeId, edge.target.nodeId], [1, 10], 'The heat does not flow from the boundary to the mass.');
+        assert.ok(edge.description.length > 30);
+        await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
+    });
+
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');

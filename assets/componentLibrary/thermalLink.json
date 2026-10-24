@@ -1,0 +1,92 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "id": "thermalLink",
+    "kind": "bundle",
+    "name": "Thermal link",
+    "domains": [
+        "thermal"
+    ],
+    "description": "Joins two thermal bodies so that heat flows between them correctly whatever their sizes. Select the two nodes (Thermal masses or Batteries), then click this bundle; the first node you select is the First body. It creates two directed edges, Heat into second body and Heat into first body. Each divides the heat flow by the thermal capacitance of the body it warms, so the body with the smaller capacitance changes temperature faster and energy is conserved exactly. Both edges share one Conductance (W/K, default 50), so heat moves equally easily each way. Set each edge's Thermal capacitance to the capacitance of the body it warms (J/K, default 1000). To hold one end at a fixed temperature, use One-way conduction from a Temperature boundary instead.",
+    "color": "#c98a5b",
+    "endpoints": [
+        {
+            "id": "first",
+            "label": "First body"
+        },
+        {
+            "id": "second",
+            "label": "Second body"
+        }
+    ],
+    "sharedParameters": [
+        {
+            "key": "conductance",
+            "name": "Conductance",
+            "symbol": "conductance",
+            "value": 50,
+            "unit": "W/K",
+            "mode": "constant",
+            "scope": "instance"
+        }
+    ],
+    "edges": [
+        {
+            "name": "Heat into second body",
+            "from": "first",
+            "to": "second",
+            "ports": {
+                "source": "temperature",
+                "target": "temperature"
+            },
+            "output": {
+                "role": "target",
+                "state": "temperature"
+            },
+            "latex": "\\frac{\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)}{\\mathrm{thermalCapacitance}}",
+            "description": "Warms or cools the second body: its Temperature changes at Conductance × (first body's temperature − second body's temperature) / the second body's thermal capacitance. Set Second body's thermal capacitance to that body's own value.",
+            "parameters": [
+                {
+                    "name": "Conductance",
+                    "symbol": "conductance",
+                    "shared": "conductance"
+                },
+                {
+                    "name": "Second body's thermal capacitance",
+                    "symbol": "thermalCapacitance",
+                    "value": 1000,
+                    "unit": "J/K",
+                    "mode": "constant"
+                }
+            ]
+        },
+        {
+            "name": "Heat into first body",
+            "from": "second",
+            "to": "first",
+            "ports": {
+                "source": "temperature",
+                "target": "temperature"
+            },
+            "output": {
+                "role": "target",
+                "state": "temperature"
+            },
+            "latex": "\\frac{\\mathrm{conductance} \\cdot \\left(\\mathrm{sourceTemperature} - \\mathrm{targetTemperature}\\right)}{\\mathrm{thermalCapacitance}}",
+            "description": "Warms or cools the first body: its Temperature changes at Conductance × (second body's temperature − first body's temperature) / the first body's thermal capacitance. Set First body's thermal capacitance to that body's own value.",
+            "parameters": [
+                {
+                    "name": "Conductance",
+                    "symbol": "conductance",
+                    "shared": "conductance"
+                },
+                {
+                    "name": "First body's thermal capacitance",
+                    "symbol": "thermalCapacitance",
+                    "value": 1000,
+                    "unit": "J/K",
+                    "mode": "constant"
+                }
+            ]
+        }
+    ]
+}

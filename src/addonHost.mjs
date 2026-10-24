@@ -194,7 +194,7 @@ export function publicToolstripContributions(manifest) {
     }));
 }
 
-export function createVisualizerSession({ sessionId, projectName, result, nodes, edges = [], selectedNodeId, engineJobId = null, time = 0 }) {
+export function createVisualizerSession({ sessionId, projectName, result, nodes, edges = [], parameters = [], selectedNodeId, engineJobId = null, time = 0 }) {
     const signals = nodes.flatMap((node) => node.states.map((state) => ({
         signalId: state.id,
         entityId: node.id,
@@ -218,12 +218,15 @@ export function createVisualizerSession({ sessionId, projectName, result, nodes,
             pacing: structuredClone(result.pacing ?? { mode: 'fastest', simulationSecondsPerWallSecond: 1 })
         },
         signals,
+        // What each live parameter is called and holds without any change; with the result's record of the changes, how each moved.
+        parameters: structuredClone(parameters),
         // Structural model metadata (appearance, topology) -- static for the life of the
         // session, unlike signals/samples, so it's read once here rather than through a
         // separate time-varying endpoint.
         nodes: nodes.map(({ id, title, shape, color, rotation, scale, mesh, parts }) => ({ id, title, shape, color, rotation, scale, mesh, ...(parts ? { parts } : {}) })),
         edges: edges.map(({ id, title, sourceNodeId, targetNodeId }) => ({ id, title, sourceNodeId, targetNodeId })),
         samples: structuredClone(result.samples),
+        interventions: structuredClone(result.interventions ?? []),
         selectedNodeId,
         time: Number(time)
     };

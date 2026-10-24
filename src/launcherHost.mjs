@@ -460,7 +460,10 @@ async function runToCompletion(content, config, engineOptions, prepare) {
 export async function runScenarioBranches({ content, config, scenario, interventions, baseline, engineOptions }) {
     const checkpoint = baseline.result.checkpoints.reduce((closest, candidate) =>
         Math.abs(candidate.time - scenario.forkAt) < Math.abs(closest.time - scenario.forkAt) ? candidate : closest);
-    const child = await runToCompletion(content, { ...config, targetTime: scenario.runTime, startCheckpoint: structuredClone(checkpoint) }, engineOptions, async (execution) => {
+    // `startPaused` holds the child before its first step, which a pause command sent after the start cannot promise: a fast run
+    // can be over before the command is read, and its changes would then be lost. The command stays for an engine that does not
+    // know the setting.
+    const child = await runToCompletion(content, { ...config, targetTime: scenario.runTime, startCheckpoint: structuredClone(checkpoint), startPaused: true }, engineOptions, async (execution) => {
         await execution.setExecutionState('paused');
         for (const change of interventions) {
             // A path of values is followed as a piecewise schedule, its times counted from the fork; a change with a

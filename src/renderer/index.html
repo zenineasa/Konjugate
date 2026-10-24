@@ -558,6 +558,12 @@
             <p id="componentLibraryHint" class="componentLibraryHint" hidden></p>
         </aside>
 
+        <aside id="controlHistoryPanel" class="componentLibraryPanel controlHistoryPanel" aria-label="How the controls were changed" hidden>
+            <header><div><span class="contextKicker">Parameters changed during the run</span><strong>Control changes</strong></div><button id="closeControlHistoryPanel" type="button" aria-label="Close control changes">×</button></header>
+            <div id="controlHistoryList" class="controlHistoryList"></div>
+            <p id="controlHistoryEmpty" class="emptyEditorState" hidden>No control was changed during this run.</p>
+        </aside>
+
         <aside id="assistantPanel" class="assistantPanel" aria-labelledby="assistantPanelTitle" hidden>
             <header id="assistantPanelHeader">
                 <div><span class="contextKicker">Model assistant</span><strong id="assistantPanelTitle">Describe a model change</strong><small id="assistantCollapsedStatus">Your model remains unchanged</small></div>
@@ -1152,6 +1158,7 @@
                 <div class="transportActionsGroup">
                     <button id="branchesButton" class="executionButton branchesButton" type="button" aria-label="Branches and forking" aria-haspopup="true" aria-expanded="false" data-tooltip="Branches · fork" hidden><i></i><span id="branchesButtonLabel">Baseline</span><small id="branchesButtonCount"></small><b aria-hidden="true">▾</b></button>
                     <button id="liveParameterButton" class="executionButton liveControl" type="button" aria-label="Open live parameter controls" aria-expanded="false" hidden><span aria-hidden="true">◉</span> Controls <small id="liveParameterCount"></small></button>
+                    <button id="controlHistoryButton" class="executionButton" type="button" aria-label="Show how the controls were changed" aria-expanded="false" aria-controls="controlHistoryPanel" data-tooltip="How the controls were changed" hidden><span aria-hidden="true">∿</span> Changes <small id="controlHistoryCount"></small></button>
                     <button id="closeResults" class="closeResults reviewControl" type="button" aria-label="Close and remove results" data-tooltip="Close and edit"><span aria-hidden="true">×</span>Close and edit</button>
                 </div>
             </div>

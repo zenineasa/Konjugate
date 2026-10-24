@@ -61,6 +61,24 @@ test('creates a public visualizer context without exposing result storage', () =
     });
 });
 
+test('a visualizer session keeps what the parameters are called and the changes made to them, but publishes neither in its context', () => {
+    const interventions = [{ time: 0, kind: 'value', parameterId: 4, value: 3 }];
+    const session = createVisualizerSession({
+        sessionId: 'session', projectName: 'vehicleStudy', selectedNodeId: 1,
+        nodes: [{ id: 1, title: 'Vehicle', states: [{ id: 2, label: 'X position', symbol: 'x', unit: 'm' }] }],
+        parameters: [{ parameterId: 4, name: 'Drive', ownerLabel: 'Pump', unit: 'm/s', ownValue: 1 }],
+        result: { configurationName: 'Default', targetTime: 1, outputInterval: 0.5, samples: [{ time: 0, states: [{ stateId: 2, value: 2 }] }], interventions }
+    });
+    assert.deepEqual(session.parameters, [{ parameterId: 4, name: 'Drive', ownerLabel: 'Pump', unit: 'm/s', ownValue: 1 }]);
+    assert.deepEqual(session.interventions, interventions);
+    assert.notEqual(session.interventions, interventions, 'The session shares its record with the result.');
+    const context = publicVisualizerContext(session);
+    assert.equal('parameters' in context || 'interventions' in context, false);
+    // A result from before the record existed, and a session opened without parameters, have none.
+    const older = createVisualizerSession({ sessionId: 's', projectName: 'p', nodes: [], result: { configurationName: 'D', targetTime: 1, outputInterval: 1, samples: [] } });
+    assert.deepEqual([older.parameters, older.interventions], [[], []]);
+});
+
 test('publishes live run metadata without exposing the private engine job identity', () => {
     const session = createVisualizerSession({
         sessionId: 'session', engineJobId: 'private-job', projectName: 'liveStudy', selectedNodeId: null,

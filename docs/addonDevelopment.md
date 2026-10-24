@@ -126,7 +126,7 @@ Permissions are declared explicitly. Unknown permissions cause the manifest to b
 
 | Permission | Capability |
 | --- | --- |
-| `results.read` | Read run context, discover signals, and request signal samples. |
+| `results.read` | Read run context, discover signals, request signal samples, and read how the controls were changed (`getParameterChanges()`, below). |
 | `timeline.read` | Receive timeline-position changes from the main result player. |
 | `timeline.seek` | Request that the main result player seek to a time. |
 | `selection.read` | Receive selected-node changes from the main canvas. |
@@ -143,6 +143,18 @@ Permissions are declared explicitly. Unknown permissions cause the manifest to b
 | `analysis.infer` | Launcher only. Run causal inference on a table of time series the launcher supplies and get the inferred edges back. |
 
 Only request capabilities the visualizer uses. The bundled preload may expose a method whose corresponding permission was not granted, but the host will not provide the protected data or event.
+
+## How the controls were changed
+
+A run's live controls (a value, a ramp, a pulse, a waveform) are recorded by the engine with the result. A visualizer with `results.read` gets them from `getParameterChanges()`, which returns one entry for each parameter that was changed during the run, in the order they were first changed, and an empty list when none was. On a run that is still going it reflects the changes made so far, so call it again on a `results.live` notification. Each entry is:
+
+- `parameterId`, `name`, `ownerLabel` and `unit`: which parameter, as the model names it;
+- `ownValue`: the value it has in the model, without any change;
+- `endTime`: the simulation time the series runs to;
+- `series`: `{ times, values }`, the value of the parameter from 0 to `endTime`. It has a point where the history jumps and one just before it, so drawing straight lines between the points draws a step as an edge, and a waveform is sampled finely enough to draw. Plot it as it is;
+- `changes`: what was done, in order, each with the simulation `time` it took effect at (the first step at or after the command arrived, so a multiple of the global timestep), a one-line `description` ("Set to 3 m/s", "Ramp from 0 to 4 over 0.2 s", "Sine around 3, ±1.5 at 8 Hz for 2.5 s"), and the details of the change: `kind: 'value'` with `value`, or `kind: 'schedule'` with `mode` (`step`, `ramp`, `pulse`, `piecewise` or `waveform`), `startTime`, `duration`, `targetValue`, `baseValue`, and for a waveform `waveform: { shape, amplitude, frequency, phaseDegrees, dutyCycle, seed }`.
+
+Only changes to parameters are recorded. A run that was continued from a checkpoint starts from the model's parameter values again, which is reflected in the series. The same record is in a saved result, so a result opened later shows it.
 
 ## Runtime environment
 

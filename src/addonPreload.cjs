@@ -39,6 +39,7 @@ window.addEventListener('DOMContentLoaded', installAddonTitlebar, { once: true }
 contextBridge.exposeInMainWorld('konjugateVisualizer', Object.freeze({
     getContext: () => ipcRenderer.invoke('visualizerGetContext'),
     listSignals: () => ipcRenderer.invoke('visualizerListSignals'),
+    getParameterChanges: () => ipcRenderer.invoke('visualizerGetParameterChanges'),
     readSeries: (signalIds, options) => ipcRenderer.invoke('visualizerReadSeries', { signalIds, options }),
     seek: (time) => ipcRenderer.send('visualizerSeek', Number(time)),
     requestPacing: (pacing) => ipcRenderer.invoke('visualizerRequestPacing', pacing),

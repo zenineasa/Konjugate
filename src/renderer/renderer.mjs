@@ -8,6 +8,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import 'mathlive';
 import { DocumentController } from './documentController.mjs';
+import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
@@ -497,6 +498,11 @@ let activeResultPersistedInProject = false;
 let liveParameterValues = new Map();
 // Set when a run is started paused, until the live controls have been opened for it.
 let openLiveControlsOnStart = false;
+// Set when a run starts, until the control-changes panel has been opened for it (once: closing it is respected).
+let openControlHistoryOnLive = false;
+// The redraw of the control-changes panel that is waiting its turn while results arrive quickly, and when it last ran.
+let controlHistoryTimer = null;
+let controlHistoryDrawnAt = 0;
 const liveParameterUpdateTimers = new Map();
 let runLaunchSettings = {
     startPaused: false,
@@ -4877,6 +4883,7 @@ function projectResultSample(index) {
     activeResultSampleIndex = Math.max(0, Math.min(index, activeResult.samples.length - 1));
     projectResultSampleValue(activeResult.samples[activeResultSampleIndex]);
     if (!$('#branchesPanel').hidden) updateForkHereLabel();
+    updateControlHistoryCursor();
 }
 
 function projectResultSampleValue(sample) {
@@ -5448,9 +5455,16 @@ $('#closeStabilityFindings').addEventListener('click', () => {
     $('#stabilitySummaryButton').ariaExpanded = 'false';
 });
 
+// Whether the live controls are on offer: a run that is going, online, in a model that has live parameters.
+function liveControlsOffered() {
+    const live = simulationRunning && ['running', 'paused'].includes(activeResult?.lifecycle);
+    return live && runLaunchSettings.online && parameterOwnersInModel().some(({ parameter }) => parameter.mode === 'live');
+}
+
 function updateLiveResultControls() {
     // The parameters table locks while results are open (the model is read-only then).
     refreshParametersPanel();
+    renderControlHistory();
     const lifecycle = activeResult?.lifecycle;
     const live = simulationRunning && ['running', 'paused'].includes(lifecycle);
     const paused = lifecycle === 'paused';
@@ -5471,8 +5485,13 @@ function updateLiveResultControls() {
     $('#resultPlaybackRate').hidden = live;
     $('#simulationPacing').hidden = !live || activeResult?.pacing?.mode === 'fastest';
     const liveParameters = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
-    const hasLiveControls = live && runLaunchSettings.online && liveParameters.length > 0;
+    const hasLiveControls = liveControlsOffered();
     $('#liveParameterButton').hidden = !hasLiveControls;
+    // Entering live mode opens the panel that plots how the controls are moved, so each change shows as it is made.
+    if (hasLiveControls && openControlHistoryOnLive) {
+        openControlHistoryOnLive = false;
+        setControlHistoryOpen(true);
+    }
     $('#liveParameterCount').textContent = liveParameters.length ? String(liveParameters.length) : '';
     // A run started paused is for setting these: open them as soon as they are there.
     if (hasLiveControls && openLiveControlsOnStart) {
@@ -6034,6 +6053,135 @@ function updateLiveWaveformCursors(time) {
     if (!Number.isFinite(time)) return;
     $$('#liveParameterRows .liveParameterRow').forEach((row) => row.updateWaveformCursor?.(time));
 }
+
+// ---- How the controls were changed ------------------------------------------------------------------------------------
+// The result carries the record the engine kept of every parameter change it applied (`interventions`); this turns it into one
+// plot per parameter that was changed, in the panel at the left, and into the same series for add-ons. The rules for what a
+// parameter's value was at a given time are in src/parameterHistory.mjs.
+const controlHistoryFrame = { width: 300, height: 96, left: 30, right: 6, top: 8, bottom: 18 };
+
+// The parameters a run's controls can change, as the model names them: what each is called, and its own value without any change.
+function liveParameterDescriptions() {
+    return parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live').map(({ parameter, ownerLabel }) => ({
+        parameterId: parameter.id, name: parameter.name, ownerLabel, unit: parameter.unit ?? '', ownValue: Number(parameter.value) || 0
+    }));
+}
+
+function controlHistoryEntries() {
+    return parameterChangeEntries(liveParameterDescriptions(), activeResult?.interventions ?? [], activeResult?.samples?.at(-1)?.time ?? 0,
+        { axisEnd: Number(activeResult?.targetTime) || 0 });
+}
+
+const shownNumber = (number) => String(Number(Number(number).toPrecision(4)));
+
+function controlHistoryCard(entry) {
+    const { width, height, left, right, top, bottom } = controlHistoryFrame;
+    const { times, values } = entry.series;
+    // What the parameter reached, which the labels and the caption report; the plot is drawn to take in its own value as well.
+    const reached = { low: Math.min(...values), high: Math.max(...values) };
+    let low = Math.min(reached.low, entry.ownValue);
+    let high = Math.max(reached.high, entry.ownValue);
+    if (!(high > low)) { low -= 1; high += 1; }
+    const pad = (high - low) * 0.1;
+    low -= pad;
+    high += pad;
+    // The axis spans the whole run, so it does not move as the run goes on; the line grows along it as time passes.
+    const span = entry.axisEnd > 0 ? entry.axisEnd : 1;
+    const x = (time) => left + (time / span) * (width - left - right);
+    const y = (value) => top + (1 - (value - low) / (high - low)) * (height - top - bottom);
+    const points = times.map((time, index) => `${x(time).toFixed(1)},${y(values[index]).toFixed(1)}`).join(' ');
+    const unit = entry.unit ? ` ${escapeHtml(entry.unit)}` : '';
+    const marks = entry.changes.filter((change) => change.kind !== 'restart').map((change) => (
+        `<circle class="controlHistoryMark" cx="${x(change.time).toFixed(1)}" cy="${height - bottom + 7}" r="2.6"><title>${escapeHtml(`${shownNumber(change.time)} s · ${describeIntervention(change, entry.unit)}`)}</title></circle>`)).join('');
+    const restarts = entry.changes.filter((change) => change.kind === 'restart').map((change) => (
+        `<line class="controlHistoryRestart" x1="${x(change.time).toFixed(1)}" x2="${x(change.time).toFixed(1)}" y1="${top}" y2="${height - bottom}"><title>${escapeHtml(describeIntervention(change))}</title></line>`)).join('');
+    const listed = entry.changes.filter((change) => change.kind !== 'restart');
+    const items = listed.slice(0, 6).map((change) => `<li><time>${shownNumber(change.time)} s</time>${escapeHtml(describeIntervention(change, entry.unit))}</li>`).join('')
+        + (listed.length > 6 ? `<li>and ${listed.length - 6} more</li>` : '');
+    const card = document.createElement('section');
+    card.className = 'controlHistoryCard';
+    card.dataset.parameterId = String(entry.parameterId);
+    card.dataset.axisEnd = String(entry.axisEnd);
+    card.innerHTML = `
+        <header><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.ownerLabel)}${entry.unit ? ` · ${escapeHtml(entry.unit)}` : ''}</small></header>
+        <svg class="controlHistoryPlot" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(entry.name)} over the run">
+            <line class="controlHistoryOwn" x1="${left}" x2="${width - right}" y1="${y(entry.ownValue).toFixed(1)}" y2="${y(entry.ownValue).toFixed(1)}"><title>${escapeHtml(`The model's own value, ${shownNumber(entry.ownValue)}${entry.unit ? ` ${entry.unit}` : ''}`)}</title></line>
+            ${restarts}
+            <polyline class="controlHistoryLine" points="${points}"></polyline>
+            <circle class="controlHistoryNow" cx="${x(times.at(-1)).toFixed(1)}" cy="${y(values.at(-1)).toFixed(1)}" r="2.4"><title>${escapeHtml(`${shownNumber(times.at(-1))} s: ${shownNumber(values.at(-1))}${entry.unit ? ` ${entry.unit}` : ''}`)}</title></circle>
+            <line class="controlHistoryCursor" y1="${top}" y2="${height - bottom}" x1="${left}" x2="${left}" hidden></line>
+            ${marks}
+            <text class="controlHistoryAxis" x="${left - 3}" y="${y(reached.high) + 3}" text-anchor="end">${shownNumber(reached.high)}</text>
+            ${reached.high > reached.low ? `<text class="controlHistoryAxis" x="${left - 3}" y="${y(reached.low) + 3}" text-anchor="end">${shownNumber(reached.low)}</text>` : ''}
+            <text class="controlHistoryAxis" x="${left}" y="${height - 1}">0 s</text>
+            <text class="controlHistoryAxis" x="${width - right}" y="${height - 1}" text-anchor="end">${shownNumber(entry.axisEnd)} s</text>
+        </svg>
+        <p class="controlHistoryCaption">${listed.length} change${listed.length === 1 ? '' : 's'} · from ${shownNumber(reached.low)} to ${shownNumber(reached.high)}${unit}</p>
+        <ul class="controlHistoryChanges">${items}</ul>`;
+    return card;
+}
+
+// The playback position on each plot.
+function updateControlHistoryCursor() {
+    const panel = $('#controlHistoryPanel');
+    if (panel.hidden || !activeResult?.samples?.length) return;
+    const time = activeResult.samples[activeResultSampleIndex]?.time ?? 0;
+    const { width, left, right } = controlHistoryFrame;
+    $$('.controlHistoryCard', panel).forEach((card) => {
+        const cursor = $('.controlHistoryCursor', card);
+        const end = Number(card.dataset.axisEnd);
+        const position = left + (Math.min(time, end) / (end > 0 ? end : 1)) * (width - left - right);
+        cursor.setAttribute('x1', position.toFixed(1));
+        cursor.setAttribute('x2', position.toFixed(1));
+        cursor.toggleAttribute('hidden', !(end > 0));
+    });
+}
+
+function drawControlHistory() {
+    controlHistoryDrawnAt = performance.now();
+    const entries = controlHistoryEntries();
+    $('#controlHistoryList').replaceChildren(...entries.map(controlHistoryCard));
+    $('#controlHistoryEmpty').textContent = liveControlsOffered()
+        ? 'No control has been changed yet. What you change with the live controls is plotted here as you make it.'
+        : 'No control was changed during this run.';
+    $('#controlHistoryEmpty').hidden = entries.length > 0;
+    updateControlHistoryCursor();
+}
+
+// Keeps the button, and the panel when it is open, in step with the result. While results arrive many times a second the panel is
+// redrawn at most a few times a second.
+function renderControlHistory() {
+    const entries = activeResult?.interventions?.some((change) => change.kind !== 'restart') ? changedParameterIds(activeResult.interventions) : [];
+    // While the live controls are on offer the button and the panel stay, even before the first change; otherwise they are there
+    // only for a result in which something was changed.
+    const offered = entries.length > 0 || liveControlsOffered();
+    $('#controlHistoryButton').hidden = !offered;
+    $('#controlHistoryCount').textContent = entries.length ? String(entries.length) : '';
+    if (!offered) {
+        clearTimeout(controlHistoryTimer);
+        controlHistoryTimer = null;
+        $('#controlHistoryPanel').hidden = true;
+        $('#controlHistoryButton').ariaExpanded = 'false';
+        return;
+    }
+    if ($('#controlHistoryPanel').hidden) return;
+    const wait = 250 - (performance.now() - controlHistoryDrawnAt);
+    if (wait <= 0) drawControlHistory();
+    else if (!controlHistoryTimer) controlHistoryTimer = setTimeout(() => { controlHistoryTimer = null; if (!$('#controlHistoryPanel').hidden) drawControlHistory(); }, wait);
+}
+
+function setControlHistoryOpen(open) {
+    $('#controlHistoryPanel').hidden = !open;
+    $('#controlHistoryButton').ariaExpanded = String(open);
+    $('#controlHistoryButton').classList.toggle('active', open);
+    if (!open) return;
+    // It takes the left side the component library uses.
+    closeComponentLibraryPanel();
+    drawControlHistory();
+}
+$('#controlHistoryButton').addEventListener('click', () => setControlHistoryOpen($('#controlHistoryPanel').hidden));
+$('#closeControlHistoryPanel').addEventListener('click', () => setControlHistoryOpen(false));
+
 async function loadAvailableScheduleModes() {
     try {
         const response = await window.engine.capabilities();
@@ -6258,7 +6406,9 @@ function applyLiveResult(jobId, result) {
         result = {
             ...result,
             samples: [...pendingRestart.samples, ...result.samples],
-            checkpoints: [...pendingRestart.checkpoints, ...result.checkpoints]
+            checkpoints: [...pendingRestart.checkpoints, ...result.checkpoints],
+            // The continued run starts from the model's own parameter values, which the record shows as a restart.
+            interventions: [...(pendingRestart.interventions ?? []), { time: pendingRestart.checkpoint.time, kind: 'restart' }, ...(result.interventions ?? [])]
         };
     }
     if (!activeResult || pendingRestart?.starting || pendingFork) {
@@ -6285,6 +6435,7 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
     })));
     window.addons.closeContext('resultSession');
     activeResult = null;
+    renderControlHistory();
     activeEngineJobId = null;
     activeResultPersistedInProject = false;
     branches = new Map();
@@ -6460,7 +6611,8 @@ $('#continueRun').addEventListener('click', () => {
         starting: true,
         checkpoint: structuredClone(checkpoint),
         samples: structuredClone(activeResult.samples.slice(0, -1)),
-        checkpoints: structuredClone(activeResult.checkpoints.slice(0, -1))
+        checkpoints: structuredClone(activeResult.checkpoints.slice(0, -1)),
+        interventions: structuredClone(activeResult.interventions ?? [])
     };
     const continueSource = fillRunConfigurationFields({ continuing: true });
     runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, checkpoint.time + continueSource.globalTimeStep);
@@ -6591,6 +6743,9 @@ function createAddonContext(contextNames) {
             projectName: filenameStem(currentProjectFilename),
             engineJobId: activeEngineJobId,
             result: activeResult,
+            // What each parameter the controls can change is called and holds without any change; with the changes recorded in the
+            // result, the host works out how each moved (see src/parameterHistory.mjs).
+            parameters: liveParameterDescriptions(),
             nodes: model.nodes.map((node) => {
                 const object = nodeObjects.get(node.id);
                 return {
@@ -6675,6 +6830,7 @@ async function startSimulation() {
     if (simulationRunning || !currentValidation.valid) return;
     simulationRunning = true;
     openLiveControlsOnStart = false;
+    openControlHistoryOnLive = true;
     liveWaveformRuns.clear();
     liveParameterValues = new Map(parameterOwnersInModel()
         .filter(({ parameter }) => parameter.mode === 'live')

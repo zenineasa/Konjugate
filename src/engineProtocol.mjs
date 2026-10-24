@@ -332,6 +332,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
     let stateIds = [];
     const checkpoints = [];
     const stabilityFindings = [];
+    const interventions = [];
     for (const field of fields(buffer.subarray(8, headerEnd))) {
         if (field.number === 1 && field.wireType === 0) resultVersion = field.value;
         else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(decodeUtf8(field.value));
@@ -351,6 +352,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
             }
             stabilityFindings.push(finding);
         }
+        else if (field.number === 7 && field.wireType === 2) interventions.push(decodedIntervention(field.value));
         else if (field.number === 5 && field.wireType === 2) {
             const checkpoint = { uuid: '', time: 0, values: [], solver: { kind: '', version: 0 }, providerStates: [] };
             for (const item of fields(field.value)) {
@@ -447,6 +449,7 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
         sampleCount,
         samples,
         stabilityFindings,
+        interventions,
         checkpoints: checkpoints.map((checkpoint) => {
             if (checkpoint.values.length !== stateIds.length) throw new Error('A KJR checkpoint has an inconsistent state vector.');
             return {
@@ -458,6 +461,54 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
             };
         })
     };
+}
+
+const scheduleModeNames = Object.fromEntries(Object.entries(scheduleModeNumbers).map(([name, number]) => [number, name]));
+const waveformShapeNames = Object.fromEntries(Object.entries(waveformShapes).map(([name, { number }]) => [number, name]));
+
+// A parameter change the engine applied (protocol Intervention): { time, kind: 'value', parameterId, value } for a value set, or
+// { time, kind: 'schedule', parameterId, mode, startTime, duration, targetValue, baseValue, samples?, waveform? } for a step, ramp,
+// pulse, piecewise schedule or waveform, shaped like the command that was sent, plus the simulation time it took effect at.
+function decodedIntervention(buffer) {
+    const intervention = { time: 0 };
+    for (const field of fields(buffer)) {
+        if (field.number === 1 && field.wireType === 1) intervention.time = readDoubleLE(field.value);
+        else if (field.number === 2 && field.wireType === 2) {
+            Object.assign(intervention, { kind: 'value', parameterId: 0, value: 0 });
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 0) intervention.parameterId = item.value;
+                else if (item.number === 2 && item.wireType === 1) intervention.value = readDoubleLE(item.value);
+            }
+        } else if (field.number === 3 && field.wireType === 2) {
+            Object.assign(intervention, { kind: 'schedule', parameterId: 0, mode: 'step', startTime: 0, duration: 0, targetValue: 0, baseValue: 0 });
+            const samples = [];
+            const waveform = { shape: 'sine', amplitude: 0, frequency: 0, phaseDegrees: 0, dutyCycle: 0, seed: 0 };
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 0) intervention.parameterId = item.value;
+                else if (item.number === 2 && item.wireType === 0) intervention.mode = scheduleModeNames[item.value] ?? 'step';
+                else if (item.number === 3 && item.wireType === 1) intervention.startTime = readDoubleLE(item.value);
+                else if (item.number === 4 && item.wireType === 1) intervention.duration = readDoubleLE(item.value);
+                else if (item.number === 5 && item.wireType === 1) intervention.targetValue = readDoubleLE(item.value);
+                else if (item.number === 6 && item.wireType === 1) intervention.baseValue = readDoubleLE(item.value);
+                else if (item.number === 7 && item.wireType === 2) {
+                    const sample = { time: 0, value: 0 };
+                    for (const part of fields(item.value)) {
+                        if (part.number === 1 && part.wireType === 1) sample.time = readDoubleLE(part.value);
+                        else if (part.number === 2 && part.wireType === 1) sample.value = readDoubleLE(part.value);
+                    }
+                    samples.push(sample);
+                } else if (item.number === 8 && item.wireType === 0) waveform.shape = waveformShapeNames[item.value] ?? 'sine';
+                else if (item.number === 9 && item.wireType === 1) waveform.amplitude = readDoubleLE(item.value);
+                else if (item.number === 10 && item.wireType === 1) waveform.frequency = readDoubleLE(item.value);
+                else if (item.number === 11 && item.wireType === 1) waveform.phaseDegrees = readDoubleLE(item.value);
+                else if (item.number === 12 && item.wireType === 1) waveform.dutyCycle = readDoubleLE(item.value);
+                else if (item.number === 13 && item.wireType === 0) waveform.seed = item.value;
+            }
+            if (intervention.mode === 'piecewise') intervention.samples = samples;
+            if (intervention.mode === 'waveform') intervention.waveform = waveform;
+        }
+    }
+    return intervention;
 }
 
 export function decodeEngineEvent(buffer) {

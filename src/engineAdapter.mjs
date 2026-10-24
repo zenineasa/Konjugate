@@ -364,7 +364,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             if (snapshot.snapshotMode === 'live') {
                 snapshot = { ...snapshot, samples: latestSamples };
             }
-            const key = `${snapshot.lifecycle}:${snapshot.samples?.at(-1)?.time ?? snapshot.availableResultTime}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
+            const key = `${snapshot.lifecycle}:${snapshot.samples?.at(-1)?.time ?? snapshot.availableResultTime}:${snapshot.interventions?.length ?? 0}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
             if (key !== lastSnapshotKey) {
                 lastSnapshotKey = key;
                 onUpdate?.(structuredClone(snapshot));

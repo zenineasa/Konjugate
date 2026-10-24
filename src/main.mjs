@@ -53,6 +53,7 @@ import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
 import { createUserLibraryStore } from './userLibraryStore.mjs';
+import { describeIntervention, parameterChangeEntries } from './parameterHistory.mjs';
 import { registerLauncherHandlers } from './launcherHost.mjs';
 import { addonCacheDirectory } from './addonCache.mjs';
 import { createAddonSettingsStore } from './addonSettingsStore.mjs';
@@ -1081,6 +1082,21 @@ ipcMain.handle('visualizerListSignals', (event) => {
     const state = projectWindow && projectWindowState.get(projectWindow);
     if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.read')) return [];
     return structuredClone(state.visualizerSession.signals);
+});
+
+// How each parameter the run's controls changed moved: its value over time and the changes made, worked out from the latest result
+// so that a run still going stays current. Empty when nothing was changed.
+ipcMain.handle('visualizerGetParameterChanges', (event) => {
+    const projectWindow = projectWindowForAuxSender(event, 'analysisWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (!state?.visualizerSession || !visualizerCan(state.visualizerManifest, 'results.read')) return [];
+    const session = state.visualizerSession;
+    const latest = activeEngineJobs.get(session.engineJobId)?.latestResult ?? completedEngineResults.get(session.engineJobId)?.result ?? null;
+    const interventions = latest?.interventions ?? session.interventions ?? [];
+    const endTime = latest?.samples?.at(-1)?.time ?? session.samples.at(-1)?.time ?? 0;
+    return parameterChangeEntries(session.parameters, interventions, endTime).map((entry) => ({
+        ...entry, changes: entry.changes.filter((change) => change.kind !== 'restart').map((change) => ({ ...change, description: describeIntervention(change, entry.unit) }))
+    }));
 });
 
 ipcMain.handle('visualizerReadSeries', (event, { signalIds, options }) => {

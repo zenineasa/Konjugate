@@ -172,6 +172,17 @@ message StabilityFindingReport {
     double global_time = 5;
 }
 
+// A parameter change the engine applied during a run, in the order it applied them: what was asked, and the simulation
+// time of the synchronization step at which it took effect (the first step at or after the command arrived). The record
+// of how the controls were moved, kept with the result so a saved result can show it. Parameter changes only.
+message Intervention {
+    double applied_time = 1;
+    oneof change {
+        SetParameterValue set_value = 2;
+        ScheduleParameterValue schedule = 3;
+    }
+}
+
 message ResultFile {
     uint32 result_version = 1;
     bytes metadata_json = 2;
@@ -179,6 +190,7 @@ message ResultFile {
     reserved 4;
     repeated ResultCheckpoint checkpoints = 5;
     repeated StabilityFindingReport stability_findings = 6;
+    repeated Intervention interventions = 7;
 }
 
 message ResultBatchIndex {

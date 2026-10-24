@@ -5117,6 +5117,90 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
     }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine built with the startPaused run setting; the checked-in web build predates it' });
 
+    await run('the changes made to the controls during a run are plotted for each parameter in a panel at the left', async () => {
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{
+                id: 1, name: 'Integrator', position: [0, 0, 0], appearance: box,
+                states: [{ id: 2, name: 'X', symbol: 'x', initialValue: 0, unit: '' }],
+                sourceTerms: [{
+                    id: 3, state: 'x', expression: 'k',
+                    parameters: [{ id: 4, name: 'Drive', symbol: 'k', value: 1, unit: 'm/s', mode: 'live', control: { minimum: -10, maximum: 10, step: 0.1 } }],
+                    expressionModel: { latex: 'k', bindings: [{ kind: 'parameter', parameterId: 4, symbol: 'k' }], output: { stateId: 2 }, mathJson: 'k' }
+                }]
+            }],
+            edges: []
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)})`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The integrator did not load.');
+        const centre = `document.querySelector('#liveParameterRows input[type="number"]:not([data-wave]):not([data-schedule-duration])')`;
+        const type = (value) => evaluate(window, `(() => { const input = ${centre}; input.value = ${JSON.stringify(String(value))}; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        const visible = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().width > 0`);
+
+        // Entering live mode opens the panel at once, with nothing in it yet, and says so.
+        await openRunDialog(window);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '2.5'; const online = document.querySelector('#runOnlineMode'); online.checked = true; online.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; })()`);
+        await evaluate(window, `document.querySelector('#startRunPaused').click()`);
+        await waitFor(window, `!document.querySelector('#liveParameterPanel').hidden && Boolean(document.querySelector('#liveParameterRows input[type="number"]'))`, 'The live controls did not open.');
+        await waitFor(window, `document.querySelector('#controlHistoryPanel').getBoundingClientRect().width > 0`, 'The changes panel did not open by default in live mode.');
+        assert.equal(await visible('#controlHistoryButton'), true, 'The changes button is not offered in live mode.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#controlHistoryList .controlHistoryCard').length`), 0);
+        assert.match(await evaluate(window, `document.querySelector('#controlHistoryEmpty').textContent`), /No control has been changed yet/);
+        assert.ok(await visible('#controlHistoryEmpty'));
+
+        // One change while held: its plot appears by itself, in the panel that is already open.
+        await type(5);
+        await waitFor(window, `document.querySelectorAll('#controlHistoryList .controlHistoryCard').length === 1`, 'The change was not plotted in the panel that was open.', 10000);
+        assert.equal(await visible('#controlHistoryEmpty'), false);
+        assert.equal(await evaluate(window, `document.querySelector('#controlHistoryCount').textContent`), '1');
+
+        // Closing the panel is respected: it does not open itself again when the run goes on and the controls are used again.
+        await evaluate(window, `document.querySelector('#closeControlHistoryPanel').click()`);
+        assert.equal(await visible('#controlHistoryPanel'), false);
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(window, `Number(document.querySelector('#resultCurrentTime').value.replace(' s', '')) > 0.5`, 'The run did not get going.', 10000);
+        await type(2);
+        assert.equal(await visible('#controlHistoryPanel'), false, 'The panel opened itself again after it was closed.');
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The run did not complete.', 20000);
+        assert.equal(await evaluate(window, `document.querySelector('#controlHistoryCount').textContent`), '1', 'One parameter was changed.');
+
+        // Opened again, the panel has one card for the one parameter, a plot with a size, and a marker for each change saying what it was.
+        await evaluate(window, `document.querySelector('#controlHistoryButton').click()`);
+        await waitFor(window, `document.querySelector('#controlHistoryPanel').getBoundingClientRect().width > 0`, 'The changes panel did not open.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#controlHistoryList .controlHistoryCard').length`), 1);
+        assert.equal(await evaluate(window, `document.querySelector('#controlHistoryList .controlHistoryCard header strong').textContent`), 'Drive');
+        assert.ok(await evaluate(window, `document.querySelector('.controlHistoryPlot').getBoundingClientRect().height > 40`), 'The plot has no size on screen.');
+        assert.ok(await evaluate(window, `document.querySelector('.controlHistoryLine').getAttribute('points').split(' ').length > 100`));
+        const marks = await evaluate(window, `[...document.querySelectorAll('.controlHistoryMark title')].map((title) => title.textContent)`);
+        assert.equal(marks.length, 2);
+        assert.equal(marks[0], '0 s · Set to 5 m/s');
+        assert.match(marks[1], /^[0-9.]+ s · Set to 2 m\/s$/);
+        assert.ok(Number(marks[1].split(' s')[0]) > 0.4, `The second change was recorded at ${marks[1]}.`);
+        assert.match(await evaluate(window, `document.querySelector('.controlHistoryCaption').textContent`), /2 changes · from 2 to 5 m\/s/);
+        assert.equal((await evaluate(window, `document.querySelectorAll('.controlHistoryChanges li').length`)), 2);
+
+        // It starts from the model's own value (1) and ends at 2: the line is drawn from the left edge to the right.
+        const slope = await evaluate(window, `(() => { const points = document.querySelector('.controlHistoryLine').getAttribute('points').split(' ').map((point) => point.split(',').map(Number)); return { first: points[0], last: points.at(-1) }; })()`);
+        assert.ok(slope.first[0] < 35 && slope.last[0] > 290, 'The line does not run the width of the plot.');
+
+        // The cursor follows the playback position.
+        await evaluate(window, `(() => { const timeline = document.querySelector('#resultTimeline'); timeline.value = '0'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        const cursorAt = () => evaluate(window, `Number(document.querySelector('.controlHistoryCursor').getAttribute('x1'))`);
+        const atStart = await cursorAt();
+        await evaluate(window, `(() => { const timeline = document.querySelector('#resultTimeline'); timeline.value = timeline.max; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        assert.ok(await cursorAt() > atStart + 200, 'The cursor did not move along the plot with the playback position.');
+
+        // Add-ons are given the same series.
+        // Closing the results takes the panel and the button away.
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+        await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
+        assert.equal(await visible('#controlHistoryPanel'), false);
+        assert.equal(await visible('#controlHistoryButton'), false);
+    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine that records the changes it applies; the checked-in web build predates it' });
+
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');

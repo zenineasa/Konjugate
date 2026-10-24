@@ -63,6 +63,9 @@ struct RunControl {
     // Appended to, never overwritten -- see ParameterSchedule's own doc comment for why more than
     // one schedule per parameter is expected (a later intervention layered onto an earlier one).
     std::vector<ParameterSchedule> activeSchedules;
+    // Every parameter change applied so far, in order, with the simulation time of the step it took effect at; written into the
+    // result (protocol::Intervention) so the record of how the controls were moved is kept with it.
+    std::vector<std::pair<double, protocol::EngineCommand>> interventions;
 };
 struct ControlInbox {
     std::mutex mutex;
@@ -357,7 +360,7 @@ std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
 }
 #endif
 
-RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunControl current) {
+RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunControl current, double now) {
     std::vector<protocol::EngineCommand> commands;
     {
         std::lock_guard lock(inbox->mutex);
@@ -391,6 +394,7 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
             // recorded for it until now. Without this a schedule that has begun would govern forever (a waveform has no
             // end of its own), and the slider could never take the parameter back.
             std::erase_if(current.activeSchedules, [&](const ParameterSchedule& schedule) { return schedule.parameterId == update.parameter_id(); });
+            current.interventions.emplace_back(now, command);
         } else if (command.has_schedule_parameter_value()) {
             const auto& update = command.schedule_parameter_value();
             if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL) {
@@ -454,6 +458,7 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
                 throw std::runtime_error("The engine received an unsupported parameter schedule mode.");
             }
             current.activeSchedules.push_back(std::move(schedule));
+            current.interventions.emplace_back(now, command);
         }
     }
     return current;
@@ -883,6 +888,12 @@ void runSimulation(const boost::property_tree::ptree& document,
         protocol::ResultFile result;
         result.set_result_version(2);
         result.set_metadata_json(json.str());
+        for (const auto& [appliedTime, command] : runControl.interventions) {
+            auto* intervention = result.add_interventions();
+            intervention->set_applied_time(appliedTime);
+            if (command.has_set_parameter_value()) *intervention->mutable_set_value() = command.set_parameter_value();
+            else *intervention->mutable_schedule() = command.schedule_parameter_value();
+        }
         for (const auto stateId : stateIds) result.mutable_state_table()->add_states()->set_state_id(stateId);
         // During-run phase of docs/proposals/numericalStabilityDiagnostics.md -- a real protobuf
         // field on ResultFile, not a JSON string: doubles (globalTime, and any future numeric
@@ -972,7 +983,7 @@ void runSimulation(const boost::property_tree::ptree& document,
 #ifdef __EMSCRIPTEN__
             pollEmscriptenControlBytes(*controlInbox, emscriptenControlBuffer);
 #endif
-            runControl = drainRunControl(controlInbox, std::move(runControl));
+            runControl = drainRunControl(controlInbox, std::move(runControl), currentTime);
             lastControlReadAt = now;
         }
     };
@@ -985,7 +996,10 @@ void runSimulation(const boost::property_tree::ptree& document,
             writeResult("paused", currentTime);
             while (runControl.executionState == RunState::paused) {
                 pacingWait(std::chrono::milliseconds(40));
+                const auto changesBefore = runControl.interventions.size();
                 refreshRunControl(true);
+                // A value set while the run is held shows in the result at once, not only when it is resumed.
+                if (runControl.interventions.size() != changesBefore) writeResult("paused", currentTime);
             }
             pacing = runControl.pacing;
             if (runControl.executionState == RunState::stopped) {

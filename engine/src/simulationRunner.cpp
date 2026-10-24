@@ -988,6 +988,8 @@ void runSimulation(const boost::property_tree::ptree& document,
         }
     };
     auto nextOutputTime = startTime + outputInterval;
+    // How many parameter changes the algebraic states were last set with (see below).
+    auto settledInterventions = runControl.interventions.size();
     for (std::size_t step = 0; step < steps; ++step) {
         refreshRunControl();
         pacing = runControl.pacing;
@@ -1011,6 +1013,18 @@ void runSimulation(const boost::property_tree::ptree& document,
             captureBoundary();
             writeResult("stopped", currentTime, true);
             return;
+        }
+        // A parameter changed since the algebraic states were last set (a fork's changes, made while it was held before
+        // its first step; a slider moved during the run): they are set again from the new values before the step reads
+        // them, so the step starts from states that agree with its parameters, as a run started with those values would,
+        // rather than from states set with the old values a step before. At a time already recorded (the fork point),
+        // the sample and the checkpoint there show them too.
+        if (runControl.interventions.size() != settledInterventions) {
+            settledInterventions = runControl.interventions.size();
+            settleAlgebraicStates(executionPlan, states, runControl.parameterValues, currentTime, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
+            evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime);
+            if (!samples.empty() && samples.back().time == currentTime) samples.back().states = states;
+            if (!checkpoints.empty() && checkpoints.back().time == currentTime) checkpoints.back().states = states;
         }
         const auto wallStepStarted = std::chrono::steady_clock::now();
         const auto synchronizationStep = wholeSteps || step + 1 < steps

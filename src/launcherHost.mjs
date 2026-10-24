@@ -453,6 +453,43 @@ async function runToCompletion(content, config, engineOptions, prepare) {
     return { result, resultPath: execution.resultPath, cleanup: execution.cleanup };
 }
 
+// One baseline per run length, kept in the launcher's workspace. Runs that ask for it at the same time share one engine
+// run, and a run that needs a different length waits for the one in progress. Changing the length replaces the
+// baseline, so a batch of runs must all use the same length. `run(contentText, config)` runs the model to the end and
+// answers { result, resultPath, cleanup } (the host's is the engine; a test's may be anything).
+export async function ensureBaseline(workspace, runTime, notify, run) {
+    for (;;) {
+        if (workspace.baseline?.runTime === runTime) return workspace.baseline;
+        const pending = workspace.baselinePending;
+        if (!pending) break;
+        if (pending.runTime === runTime) return pending.promise;
+        await pending.promise.catch(() => {});
+    }
+    if (workspace.baseline) await Promise.all([workspace.baseline.cleanup?.()].filter(Boolean));
+    workspace.baseline = null;
+    const { document, contentText } = workspace.imported;
+    const configuration = document.runConfigurations[0];
+    const config = { name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval };
+    notify({ stage: 'baseline', message: 'Running the baseline…' });
+    const entry = { runTime, promise: null };
+    entry.promise = (async () => {
+        const result = await run(contentText, config);
+        workspace.baseline = { runTime, config, uuid: randomUUID(), ...result };
+        return workspace.baseline;
+    })().finally(() => { if (workspace.baselinePending === entry) workspace.baselinePending = null; });
+    workspace.baselinePending = entry;
+    return entry.promise;
+}
+
+// The run length of a plain run (runBaseline): the one the window asks for, or else the model's own (its first run
+// configuration's target time), checked as a scenario's is. Throws a message a user can act on.
+export function baselineRunTime(runTime, document) {
+    const configuration = document.runConfigurations?.[0];
+    const length = runTime ?? configuration?.targetTime;
+    if (length === undefined || length === null) throw new Error('Say how long to run: the model has no run length of its own.');
+    return checkRunLength(length, 0, configuration?.globalTimeStep);
+}
+
 // Runs the model once as a baseline (cached by the caller) and once forked from it at the scenario's
 // time with its interventions applied: the same fork the canvas makes, headless. The child is started
 // paused so every change is in place before its first step (the engine drains queued control commands
@@ -978,31 +1015,24 @@ export function registerLauncherHandlers(deps) {
         return { imported: true, report: result.report, entities, data: result.data };
     }));
 
-    // One baseline per run length. Runs that ask for it at the same time share one engine run, and a run that needs a different length waits
-    // for the one in progress. Changing the length replaces the baseline, so a batch of runs must all use the same length.
-    async function ensureBaseline(workspace, runTime, notify) {
-        for (;;) {
-            if (workspace.baseline?.runTime === runTime) return workspace.baseline;
-            const pending = workspace.baselinePending;
-            if (!pending) break;
-            if (pending.runTime === runTime) return pending.promise;
-            await pending.promise.catch(() => {});
-        }
-        if (workspace.baseline) await Promise.all([workspace.baseline.cleanup?.()].filter(Boolean));
-        workspace.baseline = null;
-        const { document, contentText } = workspace.imported;
-        const configuration = document.runConfigurations[0];
-        const config = { name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval };
-        notify({ stage: 'baseline', message: 'Running the baseline…' });
-        const entry = { runTime, promise: null };
-        entry.promise = (async () => {
-            const run = await runToCompletion(contentText, config, await engineOptions());
-            workspace.baseline = { runTime, config, uuid: randomUUID(), ...run };
-            return workspace.baseline;
-        })().finally(() => { if (workspace.baselinePending === entry) workspace.baselinePending = null; });
-        workspace.baselinePending = entry;
-        return entry.promise;
-    }
+    // The baseline of a run length (ensureBaseline, above), run by the engine.
+    const baselineOf = async (workspace, runTime, notify) => {
+        const options = await engineOptions();
+        return ensureBaseline(workspace, runTime, notify, (contentText, config) => runToCompletion(contentText, config, options));
+    };
+
+    // A plain run of the imported model, as Run is in the canvas (with the baselineRun feature): the model run once from
+    // its start, its series answered as a scenario's are. It is the baseline a scenario of the same length forks from, so
+    // running one after it runs no baseline again, and openInCanvas opens it as the model's baseline branch.
+    ipcMain.handle('launcherRunBaseline', guarded(async ({ addon, workspace, state }, { runTime = null, signals = [] }) => {
+        needs(addon, 'scenario.run');
+        if (!workspace.imported) throw new Error('Import your data first.');
+        const length = baselineRunTime(runTime, workspace.imported.document);
+        const notify = (progress) => { if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', progress); };
+        const baseline = await baselineOf(workspace, length, notify);
+        notify({ stage: 'done', message: 'Done' });
+        return { runTime: length, branches: [{ id: 'baseline', label: 'Baseline', series: extractSeries(baseline.result.samples, workspace.imported.document, signals) }] };
+    }));
 
     ipcMain.handle('launcherRunScenario', guarded(async ({ addon, workspace, state }, { scenarioId, entity = null, signals = [], runTime = null, forkAt = null, supplied = null, overrides = null, retain = true }) => {
         needs(addon, 'scenario.run');
@@ -1019,7 +1049,7 @@ export function registerLauncherHandlers(deps) {
         if (overrides !== null && JSON.stringify(overrides).length > maximumOptionsBytes) throw new Error('The changes are larger than the host accepts.');
         const interventions = applyOverrides(resolveInterventions(scenario, workspace.imported.parameterIndex, scenario.choose ? entity : null, supplied), workspace.imported.parameterIndex, overrides);
         const { document, contentText } = workspace.imported;
-        const baseline = await ensureBaseline(workspace, scenario.runTime, notify);
+        const baseline = await baselineOf(workspace, scenario.runTime, notify);
         notify({ stage: 'scenario', message: `Running “${scenario.name}”…` });
         const key = `${scenarioId}|${entity ?? ''}`;
         // A run that is not retained (one of many in a batch) is summarized and then released, so a batch does not keep a result file each.

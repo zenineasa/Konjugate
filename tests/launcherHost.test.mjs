@@ -10,7 +10,7 @@ import {
     binaryChoice, checkedDerived, storedFileKinds, checkedProgress, importerInputs, unreadableFile, maximumBinaryInputBytes, maximumBinaryTotalBytes,
     attachAddonData, buildSessionEntry, sessionInputs,
     checkForkTime, checkPythonModules, maximumPythonModules,
-    checkRunLength,
+    checkRunLength, baselineRunTime, ensureBaseline,
     addressAllowed, applyOverrides, buildRunManifest, composeBranchSamples, decodeText, extractSeries, fetchAllowed, safeFileName, resolveInterventions, resultsToCsv, runImporter, runScenarioBranches, sha256
 } from '../src/launcherHost.mjs';
 
@@ -412,6 +412,57 @@ test('the window may choose when a scenario starts, from the run\'s start up to 
     for (const forkAt of [-1, 90 * 86400, Number.NaN, Infinity]) assert.throws(() => checkForkTime(forkAt, 90 * 86400), /The scenario must start at or after 0 and before the end of the run/);
     const manifest = launcher();
     manifest.requires = ['scenarioForkTime'];
+    assert.doesNotThrow(() => validateAddonManifest(manifest));
+});
+
+// A plain run (runBaseline) and a scenario's baseline are one and the same, kept per run length.
+test('a plain run is the baseline scenarios fork from: one run per length, shared while it runs, replaced for another length', async () => {
+    const document = { runConfigurations: [{ globalTimeStep: 0.01, outputInterval: 0.1, targetTime: 6 }] };
+    const workspace = { imported: { document, contentText: '{}' }, baseline: null, baselinePending: null };
+    const runs = [];
+    const cleaned = [];
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const run = async (contentText, config) => {
+        runs.push(config.targetTime);
+        if (runs.length === 1) await gate;
+        return { result: { samples: [] }, resultPath: `run${runs.length}`, cleanup: async () => { cleaned.push(config.targetTime); } };
+    };
+    const heard = [];
+    const notify = (progress) => heard.push(progress.stage);
+    // Asked for twice while the first is running: one engine run, the same baseline for both.
+    const first = ensureBaseline(workspace, 6, notify, run);
+    const second = ensureBaseline(workspace, 6, notify, run);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a, b);
+    assert.deepEqual(runs, [6]);
+    assert.deepEqual(a.config, { name: 'Baseline', targetTime: 6, globalTimeStep: 0.01, outputInterval: 0.1 });
+    assert.deepEqual(heard, ['baseline']);
+    // Asked for again, after: kept, not run again.
+    assert.equal(await ensureBaseline(workspace, 6, notify, run), a);
+    assert.deepEqual(runs, [6]);
+    // Another length replaces it, and the one replaced is released.
+    const longer = await ensureBaseline(workspace, 8, notify, run);
+    assert.deepEqual(runs, [6, 8]);
+    assert.deepEqual(cleaned, [6]);
+    assert.equal(workspace.baseline, longer);
+    // A run that fails leaves nothing pending, so the next ask runs again.
+    const failing = async () => { throw new Error('The engine stopped.'); };
+    await assert.rejects(ensureBaseline(workspace, 3, notify, failing), /The engine stopped/);
+    assert.equal(workspace.baselinePending, null);
+    assert.equal((await ensureBaseline(workspace, 3, notify, run)).runTime, 3);
+});
+
+test('a plain run lasts as long as the window asks, or else the model\'s own run, within the host\'s limit', () => {
+    const document = { runConfigurations: [{ globalTimeStep: 0.001, outputInterval: 0.01, targetTime: 10 }] };
+    assert.equal(baselineRunTime(null, document), 10);
+    assert.equal(baselineRunTime(4, document), 4);
+    assert.throws(() => baselineRunTime(null, { runConfigurations: [{ globalTimeStep: 0.001 }] }), /Say how long to run/);
+    assert.throws(() => baselineRunTime(0, document), /The run length must be more than 0/);
+    assert.throws(() => baselineRunTime(501, document), /at most 500/);
+    const manifest = launcher();
+    manifest.requires = ['baselineRun'];
     assert.doesNotThrow(() => validateAddonManifest(manifest));
 });
 

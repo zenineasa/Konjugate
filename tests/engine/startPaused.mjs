@@ -2,7 +2,10 @@
 
 // A run configured with `startPaused` is held before its first step, so values set while it is held apply from step zero:
 // no race with a pause command sent after the start, and the result is the exact integral, not a close one. The model
-// is one state that integrates a live parameter (dx/dt = k), so where it ends is the area under k.
+// is one state that integrates a live parameter (dx/dt = k), so where it ends is the area under k. The same holds for a
+// state set from the live parameter (r = k, set as a value) and read by another node (dy/dt = r): a value set while the run
+// is held sets r again before the first step, so that step reads the new r, not the one set before the change, and the
+// first sample, the point the run was held at, records it.
 //
 // Run manually (after `npm run build:engine`):
 //   node tests/engine/startPaused.mjs [path/to/konjugateEngine]
@@ -30,15 +33,34 @@ const model = {
     }],
     edges: []
 };
+const appearance = { type: 'primitive', shape: 'box', color: '#34727a' };
+const algebraic = {
+    format: 'konjugate', version: 1,
+    nodes: [
+        {
+            id: 1, name: 'Setting', appearance, states: [{ id: 2, name: 'R', symbol: 'r', initialValue: 0, unit: '' }],
+            sourceTerms: [{
+                id: 3, state: 'r', expression: 'k', setsValue: true,
+                parameters: [{ id: 4, name: 'k', symbol: 'k', value: 0, unit: '', mode: 'live', control: { minimum: -100, maximum: 100, step: 1 } }],
+                expressionModel: { latex: 'k', bindings: [{ kind: 'parameter', parameterId: 4, symbol: 'k' }], output: { stateId: 2 }, mathJson: 'k' }
+            }]
+        },
+        { id: 5, name: 'Reader', appearance, sourceTerms: [], states: [{ id: 6, name: 'Y', symbol: 'y', initialValue: 0, unit: '' }] }
+    ],
+    edges: [{
+        id: 7, name: 'Read', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 5, stateId: 6 }, directionality: 'directed', equation: 'sourceR', parameters: [],
+        equationModel: { latex: '\\mathrm{sourceR}', output: { role: 'target', stateId: 6 }, mathJson: 'sourceR', bindings: [{ kind: 'state', role: 'source', nodeId: 1, stateId: 2, symbol: 'sourceR' }] }
+    }]
+};
 
 const directory = await mkdtemp(join(tmpdir(), 'konjugateStartPaused-'));
 let runNumber = 0;
-async function run(configuration, commands) {
+async function run(configuration, commands, project = model) {
     runNumber += 1;
     const input = join(directory, `run${runNumber}.kjt`);
     const settings = join(directory, `run${runNumber}.json`);
     const output = join(directory, `run${runNumber}.bin`);
-    await writeFile(input, await encodeProjectFile(`${JSON.stringify(model)}\n`));
+    await writeFile(input, await encodeProjectFile(`${JSON.stringify(project)}\n`));
     await writeFile(settings, JSON.stringify({ name: 'Start paused', targetTime: 0.3, globalTimeStep: 0.001, outputInterval: 0.05, pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 }, execution: { backend: 'serial' }, ...configuration }));
     await new Promise((resolve, reject) => {
         const child = spawn(executable, ['run', input, '--configuration', settings, '--output', output, '--control-stream', 'protobuf'], { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -67,6 +89,12 @@ try {
     // Without the setting, the same commands are a race with the run, and a fast run is over before they are read.
     const ordinary = await run({}, []);
     assert.ok(Math.abs(x(ordinary.samples.at(-1))) < 1e-12, 'A run not started paused should integrate k = 0.');
+
+    // A state set from the value, read by another node: the first step reads the new value, and the held point records it.
+    const read = await run({ startPaused: true }, [{ type: 'setParameterValue', parameterId: 4, value: 3 }, { type: 'setRunState', state: 'running' }], algebraic);
+    const value = (sample, stateId) => sample.states.find((state) => state.stateId === stateId).value;
+    assert.ok(Math.abs(value(read.samples.at(-1), 6) - 0.9) < 1e-9, `Expected the reader to integrate 3 x 0.3 = 0.9 exactly, got ${value(read.samples.at(-1), 6)}.`);
+    assert.equal(value(read.samples[0], 2), 3, 'The point the run was held at should record the state set from the new value.');
 
     console.log('A run started paused is held before its first step and applies values set while held from step zero.');
 } finally {

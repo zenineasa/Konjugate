@@ -32,6 +32,8 @@ export const maximumVisualizerDataBytes = 1024 * 1024;
 // parameterSchedules: the engine follows a shared parameter's stored schedule (docs/projectSchema.md),
 // so a launcher whose importer writes schedules can refuse a version that would run them as constants.
 // scenarioForkTime: runScenario accepts the window's own fork time (forkAt).
+// baselineRun: runBaseline runs the imported model once, as Run does in the canvas, and answers with its series; it is
+// the baseline a scenario of the same length forks from.
 // suppliedPerParameter: supplied data may be given per parameter (supplied.byParameter), so one scenario can change
 // several parameters, each for its own entities along its own paths.
 // scenarioEveryBackend: a scenario's changes apply whichever execution backend the engine chooses for the model. Up to
@@ -43,7 +45,7 @@ export const maximumVisualizerDataBytes = 1024 * 1024;
 // importProgress: an importer may say how far it has got (helpers.progress), and the window hears it with onProgress.
 // storedFiles: a launcher with files.store keeps large files for the user (downloaded, or brought in from disk) and
 // gives them to its importer as binary inputs (addonFileStore.mjs).
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress', 'storedFiles', 'nodeProviderInputs', 'pythonCheck', 'algebraicRelationships']);
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress', 'storedFiles', 'nodeProviderInputs', 'pythonCheck', 'algebraicRelationships']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open', 'files.store']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 

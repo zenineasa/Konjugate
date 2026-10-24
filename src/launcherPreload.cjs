@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('konjugateLauncher', Object.freeze({
     infer: (csv, config) => ipcRenderer.invoke('launcherInfer', { csv, config }),
     runImport: (importerId, options) => ipcRenderer.invoke('launcherRunImport', { importerId, options }),
     runScenario: (scenarioId, options) => ipcRenderer.invoke('launcherRunScenario', { scenarioId, ...options }),
+    runBaseline: (options = {}) => ipcRenderer.invoke('launcherRunBaseline', { runTime: options.runTime ?? null, signals: options.signals ?? [] }),
     openInCanvas: (scenarioId, options = {}) => ipcRenderer.invoke('launcherOpenInCanvas', { scenarioId, ...options }),
     restoreSession: () => ipcRenderer.invoke('launcherRestoreSession'),
     exportResults: (scenarioId, options) => ipcRenderer.invoke('launcherExportResults', { scenarioId, ...options }),

@@ -97,7 +97,7 @@ async function waitForStableRect(window, expression, message, timeout = 3000) {
             stableStreak = 0;
         }
         previous = current;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+                await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new Error(message);
 }
@@ -107,12 +107,13 @@ async function waitForStableRect(window, expression, message, timeout = 3000) {
 // camera still easing after a view change or a drag (its snap animation, or OrbitControls' damping). A screen point read
 // during either is where the thing was, not where it will be when the click lands, so anything aiming at the canvas
 // waits for both to stop first. `getAnimations()` flushes style, so a slide a click just started is already counted;
-// the camera is at rest once the view cube's readout (distance, target and turn, to four places: the turn's
-// matrix keeps drifting in its 40th decimal as damping decays) holds for a few frames.
+// the camera is at rest once the view cube's readout holds for a few frames: distance and target to two places (zoom
+// to the cursor's damping leaves a tail that takes several seconds to fall below a ten-thousandth of a unit, far under
+// a pixel) and the turn to four (its matrix keeps drifting in its 40th decimal as damping decays).
 async function waitForCanvasAtRest(window, timeout = 5000) {
     await waitFor(window, `!document.getAnimations().some((animation) => ['webglContainer', 'css2dContainer'].includes(animation.effect?.target?.id) && animation.playState !== 'finished')`,
         'The canvas did not stop sliding.', timeout);
-    await waitForStableRect(window, `(() => { const cube = document.querySelector('#viewCube'); return [cube.dataset.cameraDistance, cube.dataset.cameraTarget, document.querySelector('#viewCubeObject').style.transform.replace(/(?<![a-z])-?[\\d.]+(e[-+]?\\d+)?/g, (number) => String(Math.round(Number(number) * 1e4) / 1e4 || 0))].join('|'); })()`,
+    await waitForStableRect(window, `(() => { const cube = document.querySelector('#viewCube'); const coarse = (text) => text.split(',').map((number) => (Math.round(Number(number) * 100) / 100 || 0)).join(','); return [coarse(cube.dataset.cameraDistance), coarse(cube.dataset.cameraTarget), document.querySelector('#viewCubeObject').style.transform.replace(/(?<![a-z])-?[\\d.]+(e[-+]?\\d+)?/g, (number) => String(Math.round(Number(number) * 1e4) / 1e4 || 0))].join('|'); })()`,
         'The camera did not come to rest.', timeout);
 }
 
@@ -5269,11 +5270,16 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(edge.equationModel.bindings.map(({ symbol }) => symbol).sort(), ['gain', 'sourceSpeed']);
         assert.equal(await engineVerdict('The model with several equations was not validated.'), true, 'The engine should accept the equations written in the canvas.');
 
-        // A reference chip inserts into the field last focused.
-        await evaluate(window, `${rowSelector('output', 0)}.querySelector('textarea').focus()`);
-        await evaluate(window, `(() => { const field = ${rowSelector('output', 0)}.querySelector('textarea'); field.setSelectionRange(field.value.length, field.value.length); })()`);
-        await evaluate(window, `[...document.querySelectorAll('#editStateReferenceChips button')].find((chip) => chip.textContent === 'twice').click()`);
-        await waitFor(window, `${rowSelector('output', 0)}.querySelector('textarea').value.endsWith('\\\\mathrm{twice}')`, 'The chip did not insert into the focused equation.');
+        // A reference chip inserts into the field last focused. The chips are rebuilt whenever the native check of the edit
+        // settles, so a click that lands in the middle of a rebuild is lost: focus and click again until it takes.
+        await waitFor(window, `(() => {
+            const field = ${rowSelector('output', 0)}.querySelector('textarea');
+            if (field.value.endsWith('\\mathrm{twice}')) return true;
+            field.focus();
+            field.setSelectionRange(field.value.length, field.value.length);
+            [...document.querySelectorAll('#editStateReferenceChips button')].find((chip) => chip.textContent === 'twice')?.click();
+            return field.value.endsWith('\\mathrm{twice}');
+        })()`, 'The chip did not insert into the focused equation.', 8000);
 
         // Two equations setting one state are refused on the row, by name.
         await select(`${rowSelector('output', 1)}.querySelector('select')`, (await evaluate(window, `${rowSelector('output', 0)}.querySelector('select').value`)));

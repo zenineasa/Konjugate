@@ -495,8 +495,11 @@ let activeResult = null;
 let activeEngineJobId = null;
 let activeResultPersistedInProject = false;
 let liveParameterValues = new Map();
+// Set when a run is started paused, until the live controls have been opened for it.
+let openLiveControlsOnStart = false;
 const liveParameterUpdateTimers = new Map();
 let runLaunchSettings = {
+    startPaused: false,
     targetTime: 1,
     online: false,
     pacing: { mode: 'fastest', simulationSecondsPerWallSecond: 1 },
@@ -5471,6 +5474,13 @@ function updateLiveResultControls() {
     const hasLiveControls = live && runLaunchSettings.online && liveParameters.length > 0;
     $('#liveParameterButton').hidden = !hasLiveControls;
     $('#liveParameterCount').textContent = liveParameters.length ? String(liveParameters.length) : '';
+    // A run started paused is for setting these: open them as soon as they are there.
+    if (hasLiveControls && openLiveControlsOnStart) {
+        openLiveControlsOnStart = false;
+        $('#liveParameterPanel').hidden = false;
+        $('#liveParameterButton').ariaExpanded = 'true';
+        renderLiveParameterControls();
+    }
     if (!hasLiveControls) {
         $('#liveParameterPanel').hidden = true;
         $('#liveParameterButton').ariaExpanded = 'false';
@@ -6664,6 +6674,7 @@ async function initializeAddonRailContributions() {
 async function startSimulation() {
     if (simulationRunning || !currentValidation.valid) return;
     simulationRunning = true;
+    openLiveControlsOnStart = false;
     liveWaveformRuns.clear();
     liveParameterValues = new Map(parameterOwnersInModel()
         .filter(({ parameter }) => parameter.mode === 'live')
@@ -6689,6 +6700,7 @@ async function startSimulation() {
             // Checked (the default) omits the field so engineAdapter.mjs's own "monitor every
             // node" default applies unchanged; unchecked explicitly disables it for this run.
             ...(runLaunchSettings.stabilityMonitoring ? {} : { stabilityMonitoring: { nodeIds: [] } }),
+            ...(runLaunchSettings.startPaused ? { startPaused: true } : {}),
             ...(pendingFork ? { startCheckpoint: pendingFork.checkpoint } : pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
@@ -6699,6 +6711,12 @@ async function startSimulation() {
             window.engine.releaseResult(previousResultSessionId).catch((error) => {
                 console.error('Previous result session could not be released.', error);
             });
+        }
+        if (runLaunchSettings.startPaused) {
+            // The engine holds a run that asks to start paused before its first step. An engine that does not know the setting
+            // (the web build's, until it is rebuilt) is paused by the command instead, a moment later.
+            openLiveControlsOnStart = true;
+            await window.engine.setExecutionState(execution.jobId, 'paused');
         }
         const overrides = pendingFork?.overrides ?? [];
         if (overrides.length) {
@@ -6757,6 +6775,9 @@ function updateRunModeFields() {
         : 'Run at maximum speed without wall-clock synchronization.';
     $('#runPacingModeField').hidden = !online;
     $('#runPacingRatioField').hidden = !online || $('#runPacingMode').value !== 'limitedRatio';
+    // The live controls are offered only to an online run, so starting paused to set them is too: the button is there once
+    // online simulation is on, and not before.
+    $('#startRunPaused').hidden = !online;
 }
 $('#runOnlineMode').addEventListener('change', updateRunModeFields);
 $('#runPacingMode').addEventListener('change', (event) => {
@@ -6852,6 +6873,7 @@ $('#runLaunchDialog form').addEventListener('submit', async (event) => {
     }
     const configurationChanged = !continuing && saveRunConfigurationFields(values);
     runLaunchSettings = {
+        startPaused: event.submitter?.id === 'startRunPaused' && online,
         targetTime,
         online,
         pacing: { mode: pacingMode, simulationSecondsPerWallSecond: pacingRatio },

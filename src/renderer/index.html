@@ -436,7 +436,7 @@
                 <label><span>Maximum automatic cut fraction</span><input id="runAutomaticMaximumPartitionCutFraction" type="number" min="0" max="1" step="0.01" required></label>
             </details>
             <div class="passwordError" id="runLaunchError" role="alert"></div>
-            <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="saveRunConfiguration" type="button">Save settings</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
+            <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="saveRunConfiguration" type="button">Save settings</button><button id="startRunPaused" type="submit" hidden title="Start the run and hold it before its first step, so the live controls can be set before anything moves. Shown when online simulation is on.">Start paused</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
         </form>
     </dialog>
 

@@ -183,6 +183,10 @@ An intervention applies whichever execution backend runs the model: serial, thre
 
 The engine applies accepted interventions at global synchronization boundaries. The UI distinguishes a requested intervention from one acknowledged and applied by the engine.
 
+## Starting paused
+
+The Run dialog has a Start paused button beside Start, shown once online simulation is on (the live controls are offered only to an online run). The run configuration it sends carries `startPaused: true`, and the engine holds the run before its first step: the starting state is written as the first sample and nothing is integrated until the run is resumed. The live controls open by themselves, so values can be set (a value, a ramp, a waveform with its seed) and the run resumed with the transport's Resume button. Because the hold is part of the configuration and not a pause command sent after the start, there is no race: values set while it is held apply from step zero, and `tests/engine/startPaused.mjs` checks the result against the exact integral. An engine that does not know the setting is paused by a command sent just after the start instead, a moment late.
+
 ## Playback rate and simulation pacing
 
 Playback rate controls the presentation of existing samples. Simulation pacing controls how quickly the engine is permitted to advance relative to wall-clock time. They are independent.

@@ -24,4 +24,5 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'duringRunSt
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'pidTemplates.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterWaveforms.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'thermalLinks.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'startPaused.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'scripts', 'checkNodeProviderExample.mjs')]);

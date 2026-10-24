@@ -492,7 +492,9 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto outputInterval = configuration.get<double>("outputInterval", globalTimeStep);
     const auto outputRatio = outputInterval / globalTimeStep;
     auto pacing = pacingFromTree(configuration);
-    RunControl runControl{pacing, RunState::running, {}};
+    // `startPaused` holds the run at its first step (the state is written, nothing is integrated) until it is resumed, so
+    // live values can be set before anything moves; unlike a pause command sent just after the start, it cannot lose a race.
+    RunControl runControl{pacing, configuration.get<bool>("startPaused", false) ? RunState::paused : RunState::running, {}};
 #ifdef __EMSCRIPTEN__
     // See pollEmscriptenControlBytes()'s own header comment for why the web build never spawns
     // startControlReader()'s thread at all here (not just why it wouldn't work): a thread that can

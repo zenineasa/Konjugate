@@ -5069,6 +5069,54 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
     });
 
+    await run('a run started paused opens the live controls before anything moves, and a value set there applies from the first step', async () => {
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        // One state that integrates a live parameter k (dx/dt = k): where it ends is the area under k.
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{
+                id: 1, name: 'Integrator', position: [0, 0, 0], appearance: box,
+                states: [{ id: 2, name: 'X', symbol: 'x', initialValue: 0, unit: '' }],
+                sourceTerms: [{
+                    id: 3, state: 'x', expression: 'k',
+                    parameters: [{ id: 4, name: 'k', symbol: 'k', value: 0, unit: '', mode: 'live', control: { minimum: -10, maximum: 10, step: 0.1 } }],
+                    expressionModel: { latex: 'k', bindings: [{ kind: 'parameter', parameterId: 4, symbol: 'k' }], output: { stateId: 2 }, mathJson: 'k' }
+                }]
+            }],
+            edges: []
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)})`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The integrator did not load.');
+        const shownValue = async () => Number((await evaluate(window, `document.querySelector('.node-label-container dd').textContent`)).replace(/[^0-9eE+.-]/g, ''));
+
+        // The button appears with the online switch, which is what the live controls need, and not before.
+        await openRunDialog(window);
+        await evaluate(window, `(() => { const online = document.querySelector('#runOnlineMode'); online.checked = false; online.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#startRunPaused').getBoundingClientRect().width`), 0, 'Start paused is shown for an offline run, which has no live controls.');
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1.5'; const online = document.querySelector('#runOnlineMode'); online.checked = true; online.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; })()`);
+        assert.ok(await evaluate(window, `document.querySelector('#startRunPaused').getBoundingClientRect().width > 0`), 'Start paused did not appear once online simulation was on.');
+        await evaluate(window, `document.querySelector('#startRunPaused').click()`);
+
+        // Held before the first step, with the controls already open.
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Paused · model locked'`, 'The run was not paused.', 10000);
+        await waitFor(window, `!document.querySelector('#liveParameterPanel').hidden && Boolean(document.querySelector('#liveParameterRows input[type="number"]'))`, 'The live controls did not open by themselves.');
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        assert.equal(await evaluate(window, `document.querySelector('#resultCurrentTime').value`), '0 s', 'The run moved while it was meant to be held.');
+        assert.match(await evaluate(window, `document.querySelector('#simulationProgress').value`), /^0 s \/ 1\.5 s$/);
+        assert.equal(await shownValue(), 0);
+
+        // A value set while held, then resume: it applied from step zero, so the area is exactly 5 x 1.5.
+        await evaluate(window, `(() => { const input = document.querySelector('#liveParameterRows input[type="number"]:not([data-wave]):not([data-schedule-duration])'); input.value = '5'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The run did not complete after it was resumed.', 15000);
+        assert.ok(Math.abs(await shownValue() - 7.5) < 1e-6, `Expected 5 x 1.5 = 7.5, got ${await shownValue()}.`);
+
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+        await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
+    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine built with the startPaused run setting; the checked-in web build predates it' });
+
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');

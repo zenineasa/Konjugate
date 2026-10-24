@@ -153,6 +153,8 @@ export function createPlaywrightWebDriver(context, initialPage) {
             // them and says so in its capabilities, so the controls rightly do not offer them there. Turn this on
             // once `npm run build:web:threads` has been run again.
             parameterWaveforms: false,
+            // Likewise: the `startPaused` run setting is read by the engine, so it needs a web build made after it was added.
+            startPausedRuns: false,
             // src/renderer/webShims/projectFiles.mjs's openExampleGuide() opens the raw .md file
             // directly rather than a rendered guide page -- a real, separate gap (see
             // docs/proposals/webEdition.md), not a driver limitation like the others above.

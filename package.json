@@ -73,7 +73,7 @@
     },
     "devDependencies": {
         "@electron/packager": "^20.3.0",
-        "electron": "^43.7.9",
+        "electron": "^43.8.3",
         "js-yaml": "^5.4.3",
         "playwright": "^1.64.0",
         "protobufjs-cli": "^2.7.1"
@@ -88,7 +88,7 @@
         "@cortex-js/compute-engine": "^0.99.0",
         "@wasmer/sdk": "^0.13.0",
         "codemirror": "^6.0.2",
-        "fast-xml-parser": "^4.5.7",
+        "fast-xml-parser": "^5.11.2",
         "fflate": "0.8.3",
         "mathlive": "^0.110.0",
         "occt-import-js": "^0.0.23",

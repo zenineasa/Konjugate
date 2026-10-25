@@ -52,7 +52,10 @@ jobs:
                   make iconsWeb
             - run: npm run setup:web
             - run: npm run build:web
+            # Optional: the GoatCounter site code (repository variable), which turns on the cookieless page-view counter.
             - run: npm run build:webShell
+              env:
+                  GOATCOUNTER_CODE: ${{ vars.GOATCOUNTER_CODE }}
             - name: Upload the built shell for inspection
               uses: actions/upload-artifact@v4
               with:

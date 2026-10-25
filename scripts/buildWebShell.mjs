@@ -29,6 +29,10 @@ const engineWebDirectory = join(rootDirectory, 'out', threads ? 'engineWebThread
 // webEditionMetadata.mjs). Override with KONJUGATE_WEB_URL when hosting somewhere else; it must end with a slash.
 const webEditionUrl = process.env.KONJUGATE_WEB_URL ?? 'https://web.konjugate.com/';
 if (!/^https?:\/\/.+\/$/.test(webEditionUrl)) throw new Error(`KONJUGATE_WEB_URL must be an http(s) URL ending with a slash, not "${webEditionUrl}".`);
+// GoatCounter site code (the "<code>" of <code>.goatcounter.com) for the cookieless page-view counter. Unset in local builds, which
+// then ship no counter at all; the deploy workflow supplies it from a repository variable.
+const goatCounterCode = process.env.GOATCOUNTER_CODE ?? '';
+if (goatCounterCode && !/^[a-z0-9][a-z0-9-]*$/.test(goatCounterCode)) throw new Error(`GOATCOUNTER_CODE must be a GoatCounter site code such as "konjugate", not "${goatCounterCode}".`);
 
 if (!await pathExists(join(engineWebDirectory, 'konjugateEngine.js'))) {
     throw new Error(`The web engine is not built. Run npm run build:web${threads ? ':threads' : ''} first.`);
@@ -133,6 +137,9 @@ const cspMatch = html.match(/'sha256-[^']+'/);
 if (!cspMatch) throw new Error('Could not locate the CSP script-src hash to replace.');
 html = html.replace(cspMatch[0], `'sha256-${importmapHash}'`);
 
+// Origins the page may contact beyond itself, added to the CSP below.
+const extraConnectSources = [];
+
 // C++ providers (docs/proposals/webEdition.md, phase 5, threads variant only -- see
 // webShims/misc.mjs's providerToolchains) fetch a real clang toolchain from Wasmer's registry/CDN
 // at runtime via src/webCppProviderBridge.mjs -- the one dependency in the whole web edition that
@@ -141,12 +148,24 @@ html = html.replace(cspMatch[0], `'sha256-${importmapHash}'`);
 // the fuller writeup of this tradeoff). A deliberate, narrow default-src exception -- only on the
 // threads variant, where @wasmer/sdk can even run at all (it needs the same cross-origin
 // isolation this variant is already served with for SharedArrayBuffer).
-if (threads) {
-    html = html.replace(
-        "default-src 'self';",
-        "default-src 'self'; connect-src 'self' https://registry.wasmer.io https://cdn.wasmer.io;"
-    );
-    if (!html.includes('registry.wasmer.io')) {
+if (threads) extraConnectSources.push('https://registry.wasmer.io', 'https://cdn.wasmer.io');
+
+// GoatCounter (https://www.goatcounter.com): a cookieless page-view counter that stores no personal data. Its script comes from
+// gc.zgo.at and reports each view to the site's own goatcounter.com address, which the CSP must therefore allow.
+if (goatCounterCode) {
+    const goatCounterEndpoint = `https://${goatCounterCode}.goatcounter.com`;
+    html = html.replace('</head>',
+        `    <script data-goatcounter="${goatCounterEndpoint}/count" async src="https://gc.zgo.at/count.js"></script>\n</head>`);
+    html = html.replace("script-src 'self'", "script-src 'self' https://gc.zgo.at");
+    html = html.replace("img-src 'self' data:", `img-src 'self' data: ${goatCounterEndpoint}`);
+    extraConnectSources.push(goatCounterEndpoint);
+    if (!html.includes('count.js') || !html.includes("script-src 'self' https://gc.zgo.at")) {
+        throw new Error('GoatCounter transform failed -- src/renderer/index.html\'s <head> or CSP may have changed shape since this script was written.');
+    }
+}
+if (extraConnectSources.length > 0) {
+    html = html.replace("default-src 'self';", `default-src 'self'; connect-src 'self' ${extraConnectSources.join(' ')};`);
+    if (!html.includes(extraConnectSources[0])) {
         throw new Error('CSP connect-src transform failed -- src/renderer/index.html\'s CSP may have changed shape since this script was written.');
     }
 }

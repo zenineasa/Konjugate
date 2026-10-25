@@ -3,7 +3,8 @@ type: Proposal
 title: A guided first-model tour
 description: Design for an optional, skippable in-app tour that takes a new user from an empty canvas to a first running model, in the desktop and web editions, and that can be started again from the Welcome window.
 tags: [proposals, onboarding, welcome, tour]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

@@ -3,7 +3,8 @@ type: Proposal
 title: "Time-series graph inference: constructing a model from data"
 description: "Foundational proposal for continuous-time causal graph inference and structure discovery."
 tags: [proposals, causal-inference, machine-learning]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

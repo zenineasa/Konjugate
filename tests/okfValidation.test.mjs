@@ -44,7 +44,7 @@ test('every non-reserved documentation file conforms to OKF specification', asyn
         assert(typeof frontmatter.title === 'string' && frontmatter.title.length > 0, `${file} must contain a non-empty 'title' field.`);
         assert(typeof frontmatter.description === 'string' && frontmatter.description.length > 0, `${file} must contain a non-empty 'description' field.`);
         assert(Array.isArray(frontmatter.tags) && frontmatter.tags.length > 0, `${file} should contain a non-empty 'tags' array.`);
-        assert(typeof frontmatter.status === 'string', `${file} should specify a 'status' field.`);
+        assert(['draft', 'stable', 'deprecated'].includes(frontmatter.status), `${file} 'status' must be draft, stable or deprecated (OKF lifecycle values).`);
     }
 });
 

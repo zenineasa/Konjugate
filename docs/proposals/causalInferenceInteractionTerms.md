@@ -3,7 +3,8 @@ type: Proposal
 title: "Causal inference: recovering non-separable source/target interaction terms"
 description: "Extending causal inference to identify bilinear and nonlinear interaction terms between state variables."
 tags: [proposals, causal-inference, nonlinear]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

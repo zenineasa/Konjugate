@@ -3,7 +3,8 @@ type: Proposal
 title: The Welcome window as Konjugate's standing space
 description: Design for the Welcome window as a surface people see at every launch — the permanent On-Ramp tutorials, a time-limited Featured slot for announcements and promotions, and the rules that keep both trustworthy and fast.
 tags: [proposals, welcome, onboarding, content]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

@@ -3,7 +3,8 @@ type: Proposal
 title: Toolbox mechanisms, model merging and design optimisation
 description: RFC for three core capabilities a robotics toolbox needs, each useful to every toolbox - rebuilding only a toolbox's own part of a model, relationships that set their endpoints' states at each instant (so coupled dynamics stay in the graph), and optimisation towards a design objective with constraints.
 tags: [proposals, addons, launcher, providers, optimisation, robotics]
-status: proposed
+status: draft
+implementation: none
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

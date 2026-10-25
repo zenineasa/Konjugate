@@ -3,7 +3,8 @@ type: Proposal
 title: Numerical stability diagnostics
 description: Architecture for pre-run checkSubstepConvergence, during-run divergence detection, and post-run diagnostics.
 tags: [proposals, numerics, diagnostics, stability]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

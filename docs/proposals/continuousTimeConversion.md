@@ -3,7 +3,8 @@ type: Proposal
 title: "Discrete fit vs. continuous rate: the math, side by side"
 description: "Derivation and conversion method from discrete regression coefficients to continuous differential rate equations."
 tags: [proposals, math, numerics, differential-equations]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

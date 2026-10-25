@@ -3,7 +3,8 @@ type: Proposal
 title: "Component library: reusable node and edge templates"
 description: "RFC for a declarative library of reusable component templates and standard physical ports."
 tags: [proposals, components, templates]
-status: implemented
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

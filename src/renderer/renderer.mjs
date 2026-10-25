@@ -8,6 +8,8 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import 'mathlive';
 import { DocumentController } from './documentController.mjs';
+import { createTour } from './tour.mjs';
+import { tourModel } from '../tour/tourSteps.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
@@ -10282,6 +10284,105 @@ async function loadOpenedProjectFile(file) {
     $('#exampleGuideButton').hidden = true;
     $('#statusText').textContent = file.embeddedResult ? 'Project and simulation results loaded' : 'Project loaded';
 }
+
+// ---- The guided first-model tour (docs/proposals/guidedTour.md) ------------------------------------------------------------
+// The steps and their checks are in ../tour/tourSteps.mjs; this wires them to this page: the facts a check needs, and the "Fill this
+// in for me" actions, which do what a person would do in the builders, through the builders' own fields.
+let tourTimelineMoved = false;
+let tourBlockPlotShown = false; // once the target node's plot has been on screen; kept, so a later deselection does not undo the step
+const tourNodeLabel = (name) => [...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(name)) ?? null;
+$('#resultTimeline').addEventListener('input', () => { if (activeResult) tourTimelineMoved = true; });
+
+const setField = (selector, value, eventName = 'input') => {
+    const field = $(selector);
+    field.value = value;
+    field.dispatchEvent(new Event(eventName, { bubbles: true }));
+};
+const chooseOption = (selector, text) => {
+    const field = $(selector);
+    const option = [...field.options].find((candidate) => candidate.textContent === text);
+    if (option) setField(selector, option.value, 'change');
+};
+const openAddBuilder = (kind) => {
+    $('#addButton').click();
+    $(`[data-add-kind="${kind}"]`).click();
+};
+function fillNodeBuilder({ name, temperature }) {
+    if ($('#nodeBuilder').classList.contains('hidden')) openAddBuilder('node');
+    setField('#newNodeName', name);
+    const row = $('#stateVariableRows .stateVariableRow');
+    const values = { name: tourModel.state.name, symbol: tourModel.state.symbol, value: String(temperature), unit: tourModel.state.unit };
+    for (const [field, value] of Object.entries(values)) {
+        const input = row.querySelector(`[data-field="${field}"]`);
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+function fillEdgeEndpoints() {
+    if ($('#edgeBuilder').classList.contains('hidden')) openAddBuilder('edge');
+    chooseOption('#edgeSource', tourModel.source.name);
+    chooseOption('#edgeTarget', tourModel.target.name);
+    setField('#newEdgeName', 'Heat flow');
+}
+
+const tour = createTour({
+    edition: document.documentElement.hasAttribute('data-web-edition') ? 'web' : 'desktop',
+    getFacts: () => {
+        const edgeBuilderOpen = !$('#edgeBuilder').classList.contains('hidden');
+        const plotRect = $('#nodeResultPlot').getBoundingClientRect();
+        const nodePlotVisible = Boolean(activeResult) && plotRect.width > 0 && plotRect.height > 0;
+        if (nodePlotVisible && $('#editNodeName').value === tourModel.target.name) tourBlockPlotShown = true;
+        return {
+            document: serializeProjectDocument(),
+            ui: {
+                nodeBuilderOpen: !$('#nodeBuilder').classList.contains('hidden'),
+                edgeBuilderOpen,
+                edgeSourceNodeId: edgeBuilderOpen ? $('#edgeSource').value : '',
+                edgeTargetNodeId: edgeBuilderOpen ? $('#edgeTarget').value : '',
+                runDialogOpen: $('#runLaunchDialog').open,
+                hasResult: Boolean(activeResult),
+                timelineMoved: tourTimelineMoved,
+                nodePlotVisible,
+                blockPlotShown: tourBlockPlotShown,
+                labelOf: tourNodeLabel
+            }
+        };
+    },
+    fill: {
+        sourceNode: async () => fillNodeBuilder(tourModel.source),
+        targetNode: async () => fillNodeBuilder(tourModel.target),
+        edgeEndpoints: async () => fillEdgeEndpoints(),
+        edgeEquation: async () => {
+            if ($('#edgeBuilder').classList.contains('hidden') || !$('#edgeSource').value || $('#edgeSource').value === $('#edgeTarget').value) fillEdgeEndpoints();
+            // The builder's references follow the endpoints a moment after they are chosen; the equation is entered once they have.
+            await new Promise((resolve) => setTimeout(resolve, 150));
+            const target = [...$('#edgeEquationOutput').options].find((option) => option.textContent.startsWith('target.'));
+            if (target) setField('#edgeEquationOutput', target.value, 'change');
+            $('#edgeMathField').setValue(tourModel.equationLatex);
+            $('#edgeMathField').dispatchEvent(new Event('input', { bubbles: true }));
+        },
+        runTime: async () => {
+            if (!$('#runLaunchDialog').open) $('#runButton').click();
+            setField('#runTargetTime', String(tourModel.runSeconds));
+        }
+    },
+    onFinish: (outcome) => {
+        $('#statusText').textContent = outcome === 'completed' ? 'Tour finished' : `Tour skipped · you can take it again from the ${document.documentElement.hasAttribute('data-web-edition') ? 'Konjugate button' : 'Welcome window'}`;
+        if (outcome === 'completed') window.tour?.recordCompleted();
+    }
+});
+
+// Starts the tour on a new, empty project, after the usual question if there is work in this one.
+async function startTour() {
+    if (simulationRunning || tour.active) return;
+    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
+    await loadProjectDocument(structuredClone(emptyProjectDocument), { fileName: 'First model.kjt' });
+    tourTimelineMoved = false;
+    tourBlockPlotShown = false;
+    tour.start();
+}
+window.tour?.onStart(startTour);
+window.__debugTour = { blockers: () => ({ simulationRunning, hasResult: Boolean(activeResult), dirty: documentController.dirty, addonDataUnsaved, selected: selectedNode?.userData.definition.name ?? null, plotWidth: $('#nodeResultPlot').getBoundingClientRect().width, shown: tourBlockPlotShown }), start: startTour, step: () => tour.step, active: () => tour.active, stop: () => tour.stop() };
 
 async function openProject() {
     if (simulationRunning) return;

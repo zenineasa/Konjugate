@@ -43,9 +43,26 @@ export const windowControls = {
     onMaximizedChange: () => {}
 };
 
+// The first-model tour (docs/proposals/guidedTour.md). The web edition has no Welcome window, so it offers the tour itself: once, on a
+// first visit, and again whenever the Konjugate button is pressed (what opens the Welcome window on the desktop). Whether it was
+// offered is kept in this browser's local storage, which may be unavailable (a private window), in which case it is offered every visit.
+const tourOfferedKey = 'konjugate.tourOffered';
+const tourStarters = [];
+const storage = (action) => { try { return action(window.localStorage); } catch { return null; } };
+export const tour = {
+    onStart: (callback) => {
+        tourStarters.push(callback);
+        if (storage((local) => local.getItem(tourOfferedKey))) return;
+        storage((local) => local.setItem(tourOfferedKey, '1'));
+        // After the renderer has finished setting itself up.
+        setTimeout(callback, 800);
+    },
+    recordCompleted: async () => true
+};
+
 export const applicationInfo = {
     get: async () => ({ version }),
-    openWelcome: async () => {}
+    openWelcome: async () => { tourStarters.forEach((start) => start()); }
 };
 
 export const diagnostics = {

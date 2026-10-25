@@ -11,5 +11,6 @@
 * [OpenStreetMap Traffic Simulation](openStreetMapTrafficSimulation.md) - Geographic network import and traffic twin simulation
 * [In-App Auto-Updates](autoUpdates.md) - Background update checking and differential updates
 * [Welcome Window](welcomeWindow.md) - The Welcome window as a standing space: the permanent On-Ramp tutorials, a time-limited Featured slot, and the trust rules for promotions
+* [Guided Tour](guidedTour.md) - An optional, skippable first-model tour for the desktop and web editions, offered on first launch and from the Welcome window
 * [Package Compatibility](packageCompatibility.md) - Minimum Konjugate version for packages, and installing the newest release the running app can use
 * [Toolbox Mechanisms and Design Optimisation](toolboxMechanismsAndDesignOptimisation.md) - Toolbox-owned regions of a model rebuilt by merging, providers that solve a group of nodes and edges together, and optimisation towards a design objective with constraints

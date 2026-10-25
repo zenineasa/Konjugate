@@ -6,14 +6,14 @@ import test from 'node:test';
 import { featuredLabel, onRampVisibleLimit, releaseNotesUrl, visibleEpisodes, welcomeLinks, welcomeSectionOrder, whatsNewFor } from '../src/welcomeModel.mjs';
 
 test('the page always has its core sections, in order, and nothing conditional until it has content', () => {
-    assert.deepEqual(welcomeSectionOrder(), ['heading', 'status', 'onRamp', 'community', 'footer']);
+    assert.deepEqual(welcomeSectionOrder(), ['heading', 'status', 'tour', 'onRamp', 'community', 'footer']);
 });
 
 test('conditional sections slot into their place, with the On-Ramp between Featured and More to watch', () => {
     assert.deepEqual(welcomeSectionOrder({ hasRecommended: true, hasWhatsNew: true, hasFeatured: true, hasMoreToWatch: true, hasPosts: true }),
-        ['heading', 'status', 'recommended', 'whatsNew', 'featured', 'onRamp', 'moreToWatch', 'blog', 'community', 'footer']);
-    assert.deepEqual(welcomeSectionOrder({ hasFeatured: true }), ['heading', 'status', 'featured', 'onRamp', 'community', 'footer']);
-    assert.deepEqual(welcomeSectionOrder({ hasPosts: true }), ['heading', 'status', 'onRamp', 'blog', 'community', 'footer']);
+        ['heading', 'status', 'tour', 'recommended', 'whatsNew', 'featured', 'onRamp', 'moreToWatch', 'blog', 'community', 'footer']);
+    assert.deepEqual(welcomeSectionOrder({ hasFeatured: true }), ['heading', 'status', 'tour', 'featured', 'onRamp', 'community', 'footer']);
+    assert.deepEqual(welcomeSectionOrder({ hasPosts: true }), ['heading', 'status', 'tour', 'onRamp', 'blog', 'community', 'footer']);
 });
 
 test('whatever else appears, the On-Ramp is always present and always after Featured, never conditional', () => {

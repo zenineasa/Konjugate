@@ -1602,3 +1602,31 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .nodePartProblem:empty { display: none; }
 .severalSummary { min-height: 8px; color: #d2767f; font-size: 7px; }
 #editEdgeEquationsList > h3 button { margin-left: 6px; }
+
+/* The guided first-model tour (src/renderer/tour.mjs): a ring around the control a step is about, and the card that says what to do. */
+.tourRing { position: fixed; z-index: 9000; box-sizing: border-box; border: 2px solid #42c9bc; border-radius: 8px; box-shadow: 0 0 0 4px rgb(66 201 188 / 22%), 0 0 24px rgb(66 201 188 / 35%); pointer-events: none; transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease; }
+.tourRing[hidden], .tourFloating[hidden] { display: none; }
+.tourFloating { position: fixed; z-index: 9001; left: 94px; top: 160px; width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 16px 18px; color: #dbe7ec; background: #0f1d27; border: 1px solid #2f6f6a; border-radius: 10px; box-shadow: 0 12px 40px rgb(0 0 0 / 55%); }
+.tourFloating .tourProgress { display: block; color: #7fa3ad; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.tourFloating .tourProgress:empty { display: none; }
+.tourFloating .tourTitle { display: block; cursor: grab; touch-action: none; margin: 2px 0 6px; font-size: 15px; }
+.tourFloating .tourText { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: #b9ccd4; }
+.tourFloating .tourNotice { margin: 0 0 4px; font-size: 12px; color: #e9b872; }
+.tourFloating .tourActions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.tourFloating .tourActions .tourLink { margin-right: auto; }
+.tourFloating button { height: 30px; padding: 0 14px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; }
+.tourFloating .tourPrimary { color: #061412; background: #42c9bc; border: 1px solid #42c9bc; }
+.tourFloating .tourSecondary { color: #dbe7ec; background: transparent; border: 1px solid #3b5460; }
+.tourFloating .tourLink { padding: 0; height: auto; color: #8fb3bd; background: none; border: 0; font-weight: 500; text-decoration: underline; }
+.tourFloating button[hidden] { display: none; }
+.tourFloating button:disabled { opacity: .5; cursor: default; }
+
+/* A pulsing ring on a control the step wants pressed: the glow swells and fades, and the ring itself breathes, so the eye goes there. */
+.tourRing.tourRingPulse { animation: tourRingPulse 1.4s ease-in-out infinite; }
+@keyframes tourRingPulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgb(66 201 188 / 30%), 0 0 10px rgb(66 201 188 / 35%); border-color: #42c9bc; }
+    50% { box-shadow: 0 0 0 12px rgb(66 201 188 / 0%), 0 0 30px rgb(66 201 188 / 80%); border-color: #9ff0e8; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .tourRing.tourRingPulse { animation: none; }
+}

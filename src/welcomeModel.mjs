@@ -16,13 +16,14 @@ export const welcomeLinks = Object.freeze({
 
 export const releaseNotesUrl = (version) => `https://github.com/zenineasa/Konjugate/releases/tag/v${version}`;
 
-// The sections of the page, top to bottom. The heading, the status line, the On-Ramp, Community & help
+// The sections of the page, top to bottom. The heading, the status line, the tour card, the On-Ramp, Community & help
 // and the footer are always there; the rest appear only when they have something to show. The On-Ramp
 // is never conditional and never reordered relative to the sections around it: it is the tutorial.
 export function welcomeSectionOrder({ hasRecommended = false, hasWhatsNew = false, hasFeatured = false, hasMoreToWatch = false, hasPosts = false } = {}) {
     return [
         'heading',
         'status',
+        'tour',
         hasRecommended && 'recommended',
         hasWhatsNew && 'whatsNew',
         hasFeatured && 'featured',

@@ -9,7 +9,7 @@ const maxDismissed = 200;
 const maxOpenedEpisodes = 100;
 const maxShownEntries = 200;
 
-export const emptyWelcomeState = () => ({ version: welcomeStateVersion, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null });
+export const emptyWelcomeState = () => ({ version: welcomeStateVersion, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false });
 
 const strings = (value, max) => (Array.isArray(value) ? [...new Set(value.filter((entry) => typeof entry === 'string' && entry !== ''))].slice(-max) : []);
 
@@ -26,6 +26,8 @@ export function normalizeWelcomeState(raw) {
         }
     }
     if (typeof raw.lastSeenVersion === 'string' && raw.lastSeenVersion !== '') state.lastSeenVersion = raw.lastSeenVersion;
+    state.tourOffered = raw.tourOffered === true;
+    state.tourCompleted = raw.tourCompleted === true;
     return state;
 }
 
@@ -35,6 +37,9 @@ export const withDismissed = (state, id) => ({ ...state, dismissedFeatured: stri
 export const withEpisodeOpened = (state, videoId) => ({ ...state, openedEpisodes: strings([...state.openedEpisodes, videoId], maxOpenedEpisodes) });
 export const withFeaturedShown = (state, id) => ({ ...state, featuredShown: { ...state.featuredShown, [id]: (state.featuredShown[id] ?? 0) + 1 } });
 export const withLastSeenVersion = (state, version) => ({ ...state, lastSeenVersion: version });
+// The first-model tour (docs/proposals/guidedTour.md): offered once, on the first launch, whether or not it was taken; completed when its last step was reached.
+export const withTourOffered = (state) => ({ ...state, tourOffered: true });
+export const withTourCompleted = (state) => ({ ...state, tourOffered: true, tourCompleted: true });
 
 // What the Welcome window remembers between launches, in one small file in the user data folder: which
 // Featured items were dismissed, how many launches each has been shown on, which tutorial episodes

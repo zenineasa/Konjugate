@@ -37,7 +37,7 @@ import { bugReportUrl } from './bugReport.mjs';
 import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } from './aiRequestTiming.mjs';
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
-import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion } from './welcomeStateStore.mjs';
+import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered } from './welcomeStateStore.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -656,6 +656,28 @@ ipcMain.handle('welcomeEpisodeOpened', async (_event, videoId) => {
     await welcomeState().update((current) => withEpisodeOpened(current, videoId));
     return true;
 });
+// The first-model tour (docs/proposals/guidedTour.md). The first launch starts it in place of the Welcome window; the Welcome window's
+// card starts it again, in the window it was opened from, and closes itself so the tour has the screen.
+function startTourIn(projectWindow) {
+    if (!projectWindow || projectWindow.isDestroyed()) return;
+    const send = () => projectWindow.webContents.send('tourStart');
+    if (projectWindow.webContents.isLoading()) projectWindow.webContents.once('did-finish-load', send); else send();
+}
+async function openWelcomeOrOfferTour(projectWindow) {
+    if ((await welcomeState().get()).tourOffered) return openWelcomeWindow(projectWindow, { automatic: true });
+    await welcomeState().update(withTourOffered);
+    startTourIn(projectWindow);
+    return true;
+}
+ipcMain.handle('welcomeStartTour', (event) => {
+    const guideWindow = BrowserWindow.fromWebContents(event.sender);
+    const projectWindow = [...projectWindows].find((window) => projectWindowState.get(window)?.exampleGuideWindow === guideWindow);
+    if (!projectWindow) return false;
+    guideWindow.close();
+    startTourIn(projectWindow);
+    return true;
+});
+ipcMain.handle('tourRecordCompleted', async () => { await welcomeState().update(withTourCompleted); return true; });
 ipcMain.handle('welcomeDismissFeatured', async (_event, id) => {
     if (typeof id !== 'string' || !currentWelcomeFeed.featured.some((item) => item.id === id)) return false;
     await welcomeState().update((current) => withDismissed(current, id));
@@ -2932,7 +2954,7 @@ app.whenReady().then(async () => {
             }
         });
     }
-    if (!shouldSkipWelcomeTrigger()) openWelcomeWindow(firstWindow, { automatic: true });
+    if (!shouldSkipWelcomeTrigger()) openWelcomeOrOfferTour(firstWindow);
 
     app.on('activate', () => {
         if (projectWindows.size === 0) {

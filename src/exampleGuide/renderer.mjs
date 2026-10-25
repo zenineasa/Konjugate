@@ -148,6 +148,7 @@ function renderCommunity() {
 const sectionRenderers = {
     heading: () => `<h1>Welcome to Konjugate v${escapeHtml(welcome.version)}</h1>`,
     status: () => '<section id="updatesSection" class="updatesSection" aria-live="polite" hidden></section>',
+    tour: () => `<section class="tourCard"><div><strong>Take the 3-minute tour</strong><p>Build and run your first model, step by step, right in the app. You can skip it at any point.</p></div><button type="button" data-start-tour>Start the tour</button></section>`,
     recommended: () => renderRecommendedAddons(welcome.recommendedAddons, welcome.recommendedStatus),
     whatsNew: () => renderWhatsNew(welcome.whatsNew),
     featured: () => renderFeatured(welcome.featured),
@@ -197,6 +198,7 @@ function wireWelcome() {
             renderWelcome();
         }
     });
+    content.querySelector('[data-start-tour]')?.addEventListener('click', () => window.exampleGuide.startTour());
     content.querySelector('[data-report-problem]')?.addEventListener('click', () => window.exampleGuide.openBugReport());
     content.querySelector('#restartKonjugate')?.addEventListener('click', () => window.exampleGuide.restart());
     content.querySelector('#installRecommendedAddons')?.addEventListener('click', async () => {

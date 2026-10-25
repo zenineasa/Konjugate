@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-    createWelcomeStateStore, emptyWelcomeState, normalizeWelcomeState, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion
+    createWelcomeStateStore, emptyWelcomeState, normalizeWelcomeState, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered
 } from '../src/welcomeStateStore.mjs';
 
 async function withDirectory(run) {
@@ -38,7 +38,7 @@ test('each change does what it says', () => {
     state = withFeaturedShown(withFeaturedShown(withFeaturedShown(state, 'a'), 'a'), 'b');
     assert.deepEqual(state.featuredShown, { a: 2, b: 1 });
     assert.equal(withLastSeenVersion(state, '1.3.0').lastSeenVersion, '1.3.0');
-    assert.deepEqual(emptyWelcomeState(), { version: 1, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null }, 'the original is untouched');
+    assert.deepEqual(emptyWelcomeState(), { version: 1, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false }, 'the original is untouched');
 });
 
 test('a damaged or wrong-version file means an empty state, never an error', async () => {
@@ -108,4 +108,14 @@ test('the file is written whole, owner-only, and no temporary file is left', asy
 
 test('a directory is required', () => {
     assert.throws(() => createWelcomeStateStore(), /requires a directory/);
+});
+
+test('the tour is offered once, completing it counts as having been offered, and damaged flags read as not set', () => {
+    assert.deepEqual([emptyWelcomeState().tourOffered, emptyWelcomeState().tourCompleted], [false, false]);
+    const offered = withTourOffered(emptyWelcomeState());
+    assert.deepEqual([offered.tourOffered, offered.tourCompleted], [true, false]);
+    const completed = withTourCompleted(emptyWelcomeState());
+    assert.deepEqual([completed.tourOffered, completed.tourCompleted], [true, true]);
+    assert.equal(normalizeWelcomeState({ ...completed }).tourCompleted, true);
+    assert.deepEqual([normalizeWelcomeState({ version: 1, tourOffered: 'yes' }).tourOffered, normalizeWelcomeState({ version: 1, tourCompleted: 1 }).tourCompleted], [false, false]);
 });

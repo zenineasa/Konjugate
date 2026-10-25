@@ -5535,5 +5535,85 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: driver.kind !== 'playwright' && 'stands in for an installed plugin, which the desktop bridge does not let a test replace' });
 
+    await run('the guided tour takes a new user from an empty canvas to a first run, and can be skipped or gone back in', async () => {
+        const step = () => evaluate(window, `window.__debugTour.step()`);
+        const waitForStep = async (id) => {
+            try { await waitFor(window, `window.__debugTour.step() === ${JSON.stringify(id)}`, `The tour did not reach "${id}".`, 15000); } catch (error) {
+                const facts = await evaluate(window, `JSON.stringify({ step: window.__debugTour.step(), error: document.querySelector('#addNodeError').textContent, dialog: document.querySelector('#runLaunchDialog').open, runError: document.querySelector('#runLaunchError').textContent, status: document.querySelector('#statusText').textContent, builder: !document.querySelector('#nodeBuilder').classList.contains('hidden'), nodes: window.__debugProject.serialize().nodes.map((node) => [node.name, node.states.length]), blockers: window.__debugTour.blockers() })`);
+                throw new Error(`${error.message} ${facts}`);
+            }
+        };
+        const press = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
+        const fill = () => press('.tourFloating .tourSecondary');
+        const emptyDocument = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] };
+        const start = async () => {
+            // A run an earlier test started may still be finishing, and would put its result back after the project is replaced.
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'An earlier simulation did not finish.', 30000);
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(emptyDocument)}, 'tour.kjt')`);
+            await waitFor(window, `document.querySelector('.modelStatus')?.textContent.includes('0 nodes') && !window.__debugTour.blockers().hasResult && !window.__debugTour.blockers().dirty`, 'The empty project did not load.');
+            await evaluate(window, `window.__debugTour.start()`);
+            await waitForStep('welcome').catch(async (error) => { throw new Error(`${error.message} ${JSON.stringify(await evaluate(window, 'window.__debugTour.blockers()'))}`); });
+        };
+
+        // Skipping: the card goes away, says where to find the tour again, and leaves the model alone.
+        await start();
+        await press('.tourFloating .tourActions .tourLink');
+        await waitFor(window, `!window.__debugTour.active() && document.querySelector('.tourFloating').hidden`, 'Skipping did not end the tour.');
+
+        // The whole way, by the "Fill this in for me" buttons and the builders' own buttons.
+        await start();
+        await press('.tourFloating .tourPrimary');
+        await waitForStep('addNode');
+        await press('#addButton');
+        await press('[data-add-kind="node"]');
+        await waitForStep('firstNode');
+        // The card never sits over what the person is working in: the builder that opened, or the editor that opens at the side.
+        const cardOverlaps = (selector) => evaluate(window, `(() => { const a = document.querySelector('.tourFloating').getBoundingClientRect(); const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top); })()`);
+        await waitFor(window, `document.querySelector('.tourFloating .tourTitle').textContent.startsWith('Define')`, 'The card did not describe the node builder.');
+        assert.equal(await cardOverlaps('#nodeBuilder'), false, 'The tour card covers the node builder.');
+        await fill();
+        await press('#createNode');
+        await waitForStep('secondNode');
+        await fill();
+        await press('#createNode');
+        await waitForStep('addEdge');
+        await fill();
+        await waitForStep('equation');
+        assert.equal(await cardOverlaps('#edgeBuilder'), false, 'The tour card covers the edge builder.');
+        await fill();
+        await waitFor(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`, 'The tour\'s equation was not valid.', 15000);
+        await press('#createEdge');
+        await waitForStep('run');
+        await waitFor(window, `document.querySelector('#runButton').title === 'Run simulation'`, 'The model was not validated for a run.', 15000);
+        await fill();
+        await waitFor(window, `document.querySelector('#runTargetTime').value === '10'`, 'The run time was not filled in.');
+        await press('#startRun');
+        await waitForStep('plotBlock');
+        // Clicking the block's label opens its editor with the plot of its temperature.
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Block')).click()`);
+        await waitForStep('results');
+        assert.ok(await evaluate(window, `document.querySelector('#nodeResultPlot').getBoundingClientRect().width > 0`), 'The block\'s plot was not on screen.');
+        const saved = await savedProject();
+        assert.deepEqual(saved.nodes.map((node) => [node.name, node.states[0].symbol, node.states[0].initialValue]), [['Heater', 'temperature', 350], ['Block', 'temperature', 300]]);
+        assert.equal(saved.edges.length, 1);
+        assert.match(saved.edges[0].equation, /sourceTemperature/);
+        await evaluate(window, `(() => { const slider = document.querySelector('#resultTimeline'); slider.value = slider.max; slider.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitForStep('finish');
+        assert.match(await evaluate(window, `document.querySelector('.tourFloating .tourText').textContent`), driver.capabilities.multiWindow ? /Extensions dialog/ : /desktop app adds/);
+        await press('.tourFloating .tourPrimary');
+        await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tour.');
+
+        // Undoing an earlier step is noticed: a model with its second node gone sends a person at "run" back to it.
+        await start();
+        await press('.tourFloating .tourPrimary');
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(saved)}, 'tour.kjt')`);
+        await waitForStep('run');
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({ ...saved, nodes: saved.nodes.slice(0, 1), edges: [] })}, 'tour.kjt')`);
+        await waitFor(window, `!document.querySelector('.tourFloating .tourNotice').hidden`, 'The tour did not notice the missing node.');
+        await press('.tourFloating > .tourLink');
+        await waitForStep('secondNode');
+        await evaluate(window, `window.__debugTour.stop()`);
+    });
+
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

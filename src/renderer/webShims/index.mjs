@@ -12,7 +12,7 @@ import projectFiles, { setPendingDroppedFile } from './projectFiles.mjs';
 import providerEditor from './providerEditor.mjs';
 import {
     addons, aiProviders, applicationInfo, componentLibrary, diagnostics, extensions,
-    modelClipboard, providerToolchains, shapeLibrary, uiZoom, windowControls
+    modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
 } from './misc.mjs';
 
 window.engine = engine;
@@ -29,6 +29,7 @@ window.providerToolchains = providerToolchains;
 window.modelClipboard = modelClipboard;
 window.aiProviders = aiProviders;
 window.addons = addons;
+window.tour = tour;
 
 // Drag-drop project load: reuses openProject()'s real flow (its confirmDiscard() check included)
 // by stashing the dropped file's bytes for projectFiles.open() to pick up, then synthesizing a

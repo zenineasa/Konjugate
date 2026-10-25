@@ -76,6 +76,10 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .updatesMeta { color: #778d98; font-size: 11px; }
 .sectionIntro { margin: 0; color: #778d98; }
 .whatsNew, .featured { position: relative; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 6%); border: 1px solid #243944; border-radius: 7px; }
+.tourCard { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 10%); border: 1px solid #2f6f6a; border-radius: 7px; }
+.tourCard p { margin: 4px 0 0; color: #a9bcc5; font-size: 13px; }
+.tourCard button { flex: none; height: 32px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.tourCard button:hover, .tourCard button:focus-visible { background: #74ddd3; border-color: #74ddd3; }
 .whatsNew h2 { margin: 0 0 6px; padding-top: 0; border-top: 0; }
 .whatsNew ul { margin: 6px 0; }
 .featured { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding-right: 44px; }

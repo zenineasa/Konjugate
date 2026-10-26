@@ -3,6 +3,8 @@
 #include "partitionPlan.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -26,6 +28,20 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#endif
+
+#if KONJUGATE_HAS_METIS && !defined(__EMSCRIPTEN__)
+#if defined(_MSC_VER)
+#include <io.h>
+#define KONJUGATE_DUP _dup
+#define KONJUGATE_DUP2 _dup2
+#define KONJUGATE_CLOSE _close
+#else
+#include <unistd.h>
+#define KONJUGATE_DUP dup
+#define KONJUGATE_DUP2 dup2
+#define KONJUGATE_CLOSE close
+#endif
 #endif
 
 namespace konjugate {
@@ -188,6 +204,38 @@ std::string metisPartitionerVersion() {
 #if KONJUGATE_HAS_METIS
 namespace {
 
+// METIS reports some failures (e.g. "***Cannot bisect a graph with 0 vertices!") with printf to
+// stdout before returning an error code. stdout carries the framed binary event stream when the
+// engine runs with --event-stream, so those stray bytes make the reader take them for a frame
+// length (surfacing as "The engine protocol frame is too large"). Point stdout at stderr for
+// the duration of a METIS call.
+class MetisStdoutRedirect {
+public:
+    MetisStdoutRedirect() {
+#if !defined(__EMSCRIPTEN__)
+        std::cout.flush();
+        std::fflush(stdout);
+        saved_ = KONJUGATE_DUP(1);
+        if (saved_ >= 0 && KONJUGATE_DUP2(2, 1) < 0) {
+            KONJUGATE_CLOSE(saved_);
+            saved_ = -1;
+        }
+#endif
+    }
+    ~MetisStdoutRedirect() {
+#if !defined(__EMSCRIPTEN__)
+        if (saved_ < 0) return;
+        std::fflush(stdout);
+        KONJUGATE_DUP2(saved_, 1);
+        KONJUGATE_CLOSE(saved_);
+#endif
+    }
+    MetisStdoutRedirect(const MetisStdoutRedirect&) = delete;
+    MetisStdoutRedirect& operator=(const MetisStdoutRedirect&) = delete;
+private:
+    int saved_ = -1;
+};
+
 #if defined(_MSC_VER)
 static int safeMetisSetDefaultOptions(idx_t* options) {
     __try {
@@ -296,6 +344,7 @@ PartitionPlan createMetisPartitionPlan(const DependencyGraph& graph,
     options[METIS_OPTION_NUMBERING] = 0;
     options[METIS_OPTION_SEED] = 0;
     options[METIS_OPTION_NCUTS] = 1;
+    const MetisStdoutRedirect redirectStdout;
 #if defined(_MSC_VER)
     const auto result = safeMetisPartGraphKway(
         &nodeCount, &constraints, xadj.data(), adjncy.empty() ? nullptr : adjncy.data(), vertexWeights.data(), nullptr,

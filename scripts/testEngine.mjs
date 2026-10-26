@@ -27,4 +27,5 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'thermalLink
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'startPaused.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'interventionRecord.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterHistory.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'metisStdoutIsolation.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'scripts', 'checkNodeProviderExample.mjs')]);

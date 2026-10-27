@@ -1,0 +1,1242 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "setBatteryTemperature",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Set the battery module temperature to 320 K.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 320,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "heaterPowerKilowatts",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Increase the heater power to 3 kW.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 3000,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambientCelsius",
+      "family": "units",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the ambient air to 30 degrees Celsius.",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 303.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bedroomCelsius",
+      "family": "units",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Make the bedroom 18 °C.",
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bedroom",
+            "symbol": "temperature",
+            "initialValue": 291.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "disableHeater",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Disable the electric heater.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Electric heater",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "disableConvectionLoss",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Turn off the Battery convection loss relationship.",
+      "expect": {
+        "touches": [
+          "Battery convection loss"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Battery convection loss",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "renameOutdoorAir",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Rename the Outdoor air node to Outside air.",
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Outside air"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankSubsteps",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Use 4 substeps per global step on the Water tank.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Water tank",
+            "path": "numerics.substepsPerGlobalStep",
+            "value": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankSphere",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make the Water tank a sphere.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Water tank",
+            "path": "appearance.shape",
+            "value": "sphere"
+          }
+        ]
+      }
+    },
+    {
+      "id": "addPackVoltage",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Add a state called Pack voltage with symbol packVoltage and a value of 400 V to the Battery module.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "packVoltage",
+            "initialValue": 400,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "addContactArea",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Add a parameter named Contact area with symbol contactArea, 0.5 m², to the Ambient heat loss relationship.",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "symbol": "contactArea",
+            "value": 0.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeHeater",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Remove the electric heater.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Electric heater"
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeBedroomLoss",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Delete the Bedroom envelope loss relationship.",
+      "expect": {
+        "touches": [
+          "Bedroom envelope loss"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Bedroom envelope loss"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambiguousTemperature",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Set the temperature to 310 K.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Battery module",
+          "Enclosed air"
+        ]
+      }
+    },
+    {
+      "id": "vagueWarmer",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make it warmer.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "missingPump",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Remove the pump.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "answerClarification",
+      "family": "history",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "The battery module.",
+      "history": [
+        {
+          "request": "Set the temperature to 310 K.",
+          "outcome": "Asked: Which node should I update?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reviseValue",
+      "family": "history",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Actually make it 305 K instead.",
+      "history": [
+        {
+          "request": "Set the ambient air to 300 K.",
+          "outcome": "Proposed: Update the initial temperature of Ambient air."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 305,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "heaterTwoAndAHalf",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Could you make the heater 2.5 kW instead of 2 kW? Thanks.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 2500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankStartsCold",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "The water starts too cold for my test; it should begin at 320 K.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 320,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankFiftyCelsius",
+      "family": "units",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "put the tank at 50 celsius",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 323.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambientFifteenTypos",
+      "family": "units",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Chnage the ambiant air temprature to 15 degrees C.",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 288.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "livingRoomFahrenheit",
+      "family": "units",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Can you set the living room to 72 °F?",
+      "expect": {
+        "touches": [
+          "Living room"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "symbol": "temperature",
+            "initialValue": 295.372222,
+            "unit": "K",
+            "tolerance": 0.0001
+          }
+        ]
+      }
+    },
+    {
+      "id": "heatLossCoefficient",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the heat loss coefficient on the ambient heat loss relationship to 25 W/K.",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "symbol": "heatLossCoefficient",
+            "value": 25,
+            "unit": "W/K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "livingRoomEnvelope",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Living room envelope conductance 200 W/K.",
+      "expect": {
+        "touches": [
+          "Living room envelope loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Outdoor air",
+            "to": "Living room",
+            "symbol": "envelopeConductance",
+            "value": 200
+          }
+        ]
+      }
+    },
+    {
+      "id": "batteryConvectionArea",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "On the Battery convection loss relationship, change the surface area to 2 m².",
+      "expect": {
+        "touches": [
+          "Battery convection loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Enclosed air",
+            "to": "Battery module",
+            "symbol": "surfaceArea",
+            "value": 2,
+            "unit": "m²"
+          }
+        ]
+      }
+    },
+    {
+      "id": "conductionEquation",
+      "family": "setEquation",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "The conduction between the hot body and the cold body should ignore the thermal capacitance for this test. Please change its equation to just the conductance times the temperature difference.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Hot body",
+            "to": "Cold body",
+            "uses": [
+              "conductance"
+            ],
+            "excludes": [
+              "thermalCapacitance"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "addCoolant",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Add a third body called Coolant at 280 K and connect it to the cold body with a conductance of 20 W/K, with heat flowing from the cold body into the coolant.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Coolant",
+            "initialValue": 280,
+            "unit": "K"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Cold body",
+            "to": "Coolant"
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Cold body",
+            "to": "Coolant",
+            "value": 20,
+            "unit": "W/K"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Cold body",
+            "to": "Coolant",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "oilBath",
+      "family": "addNode",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "blank",
+      "request": "Thermal mass \"Oil bath\", 340 K.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Oil bath"
+          },
+          {
+            "op": "state",
+            "node": "Oil bath",
+            "initialValue": 340,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankScenario",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "multiPart",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the tank to 300 K, the ambient to 280 K and disable the heater.",
+      "expect": {
+        "touches": [
+          "Water tank",
+          "Ambient air",
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 300,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          },
+          {
+            "op": "enabled",
+            "node": "Electric heater",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "lossBidirectional",
+      "family": "updateEdge",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make the ambient heat loss relationship bidirectional.",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "directionality": "bidirectional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reverseConduction",
+      "family": "updateEdge",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Reverse the Conduction relationship so that it is defined from the cold body to the hot body.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Cold body",
+            "to": "Hot body"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Cold body",
+            "to": "Hot body",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "dropBedroom",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "get rid of the bedroom",
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Bedroom"
+          }
+        ]
+      }
+    },
+    {
+      "id": "changeTemperatureForMe",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Can you change the temperature for me?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "tooHotInThere",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "It's too hot in there.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "bareNumberReply",
+      "family": "history",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "330",
+      "history": [
+        {
+          "request": "Raise the battery temperature",
+          "outcome": "Asked: What temperature (in K) should Battery module be set to?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 330,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "batteryTestStart",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "We ran a test last night and the battery pack was sitting at about 25 degrees Celsius when we started, not the 80 it is set to in the model. Please correct that.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 298.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "airHumidity",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Give the Enclosed air a humidity state with symbol humidity, 45 %.",
+      "expect": {
+        "touches": [
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "symbol": "humidity",
+            "initialValue": 45,
+            "unit": "%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "insulationFactor",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Please add a parameter called Insulation factor, symbol insulationFactor, value 0.8, to the heater input relationship.",
+      "expect": {
+        "touches": [
+          "Heater input"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Electric heater",
+            "to": "Water tank",
+            "symbol": "insulationFactor",
+            "value": 0.8
+          }
+        ]
+      }
+    },
+    {
+      "id": "renameTank",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Please call the water tank 'Hot water cylinder' from now on.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Hot water cylinder"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambientCylinder",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Show the ambient air as a cylinder.",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Ambient air",
+            "path": "appearance.shape",
+            "value": "cylinder"
+          }
+        ]
+      }
+    },
+    {
+      "id": "managementTrio",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "multiPart",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Make the battery module 310 K, the enclosed air 290 K and the electrical losses 500 W.",
+      "expect": {
+        "touches": [
+          "Battery module",
+          "Enclosed air",
+          "Electrical losses"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "symbol": "temperature",
+            "initialValue": 290,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Electrical losses",
+            "symbol": "qDot",
+            "initialValue": 500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "askRaiseTemperatureTen",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Raise the temperature by 10 K.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Battery module",
+          "Enclosed air"
+        ]
+      }
+    },
+    {
+      "id": "askRoomTwentyOneCelsius",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Could you make it 21 degrees Celsius?",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Living room",
+          "Bedroom"
+        ]
+      }
+    },
+    {
+      "id": "askWarmRoomUp",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "warm the room up to 24 C",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Living room",
+          "Bedroom"
+        ]
+      }
+    },
+    {
+      "id": "askTemperatureThreeTen",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the temperature to 315 K.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Water tank",
+          "Ambient air"
+        ]
+      }
+    },
+    {
+      "id": "askCoolDown",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Cool it down to 280 K.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Hot body",
+          "Cold body"
+        ]
+      }
+    },
+    {
+      "id": "askHeaterMorePowerful",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make the heater more powerful.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askChangeWaterTemperature",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Change the water temperature.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askHeaterTemperature",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the heater temperature to 400 K.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askRemoveThermostat",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Remove the thermostat.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askCoolantFlow",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Set the coolant flow rate to 0.2 kg/s.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askTurnOffKitchen",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Turn off the kitchen.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Living room",
+          "Bedroom"
+        ]
+      }
+    },
+    {
+      "id": "askTwoTemperatures",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the water to 300 K and also to 350 K.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askRemoveEverything",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Remove everything.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askSwapRooms",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Swap the rooms.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "actLivingRoomTwentyThree",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Could you set the living room to 23 °C?",
+      "expect": {
+        "touches": [
+          "Living room"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "symbol": "temperature",
+            "initialValue": 296.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "actWaterThreeTen",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "water at 310 K",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "actCoolHotBody",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "The hot body should only be at 330 K to start with.",
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Hot body",
+            "symbol": "temperature",
+            "initialValue": 330,
+            "unit": "K"
+          }
+        ]
+      }
+    }
+  ]
+}

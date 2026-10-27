@@ -1,0 +1,667 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "accountBalance300k",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Set the operating account balance to 300000 USD.",
+      "expect": {
+        "touches": [
+          "Operating account"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating account",
+            "symbol": "balance",
+            "initialValue": 300000,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "loanPrincipal650k",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Loan principal 650k.",
+      "expect": {
+        "touches": [
+          "Business loan"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Business loan",
+            "symbol": "principal",
+            "initialValue": 650000
+          }
+        ]
+      }
+    },
+    {
+      "id": "salesTwoHundredK",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Could we assume sales of 200k a month instead?",
+      "expect": {
+        "touches": [
+          "Sales"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Sales",
+            "symbol": "revenueRate",
+            "initialValue": 200000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "costsUp",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "We've hired five more people, so running costs are up to about 165,000 a month.",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "symbol": "costRate",
+            "initialValue": 165000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "marketEightTenths",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "make the market return 0.8% monthly",
+      "expect": {
+        "touches": [
+          "Capital market"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Capital market",
+            "symbol": "returnRate",
+            "initialValue": 0.008
+          }
+        ]
+      }
+    },
+    {
+      "id": "loanPaymentTypos",
+      "family": "updateParameter",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Incerase the loan paymnet to 15000 per month.",
+      "expect": {
+        "touches": [
+          "Loan repayment",
+          "Debt service"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Business loan",
+            "symbol": "monthlyPayment",
+            "value": 15000
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Business loan",
+            "to": "Operating account",
+            "symbol": "monthlyPayment",
+            "value": 15000
+          }
+        ]
+      }
+    },
+    {
+      "id": "creditSpread",
+      "family": "updateParameter",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Set the credit spread on the loan interest to 0.3% per month.",
+      "expect": {
+        "touches": [
+          "Loan interest"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Capital market",
+            "to": "Business loan",
+            "symbol": "creditSpread",
+            "value": 0.003
+          }
+        ]
+      }
+    },
+    {
+      "id": "sweepFivePercent",
+      "family": "updateParameter",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Sweep 5% of the operating account into the portfolio each month, please.",
+      "expect": {
+        "touches": [
+          "Treasury sweep"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Investment portfolio",
+            "symbol": "sweepFraction",
+            "value": 0.05
+          }
+        ]
+      }
+    },
+    {
+      "id": "taxReserve",
+      "family": "addNode",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add an account called Tax reserve holding 50000 USD.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Tax reserve"
+          },
+          {
+            "op": "state",
+            "node": "Tax reserve",
+            "initialValue": 50000,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "taxReserveFlow",
+      "family": "multiStep",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "We need to set money aside for tax. Add a Tax reserve account holding 50000 USD and connect the operating account to it so that 10% of the balance moves across each month.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Tax reserve",
+            "initialValue": 50000,
+            "unit": "USD"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Operating account",
+            "to": "Tax reserve"
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Tax reserve",
+            "value": 0.1
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Operating account",
+            "to": "Tax reserve",
+            "uses": [
+              "sourceBalance"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "collectionRate",
+      "family": "setEquation",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Change the Sales income relationship so the account receives only 90% of the revenue rate.",
+      "expect": {
+        "touches": [
+          "Sales income"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Sales",
+            "to": "Operating account",
+            "uses": [
+              "sourceRevenueRate"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "stopSweep",
+      "family": "enableDisable",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Stop the treasury sweep.",
+      "expect": {
+        "touches": [
+          "Treasury sweep"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Treasury sweep",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeLoan",
+      "family": "remove",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "We paid the loan off, so take it out of the model altogether.",
+      "expect": {
+        "touches": [
+          "Business loan"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Business loan"
+          }
+        ]
+      }
+    },
+    {
+      "id": "updateTheRate",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Update the rate.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "removeMortgage",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Remove the mortgage.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "revenue150k",
+      "family": "history",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Make it 150000",
+      "history": [
+        {
+          "request": "What if revenue changed?",
+          "outcome": "Asked: What revenue rate (in USD/month) should Sales use?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Sales"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Sales",
+            "symbol": "revenueRate",
+            "initialValue": 150000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "recession",
+      "family": "multiStep",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Scenario: recession. Sales fall to 120k a month, costs stay as they are, the market return goes negative at -1% a month, and the loan principal is unchanged.",
+      "expect": {
+        "touches": [
+          "Sales",
+          "Capital market"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Sales",
+            "symbol": "revenueRate",
+            "initialValue": 120000,
+            "unit": "USD/month"
+          },
+          {
+            "op": "state",
+            "node": "Capital market",
+            "symbol": "returnRate",
+            "initialValue": -0.01
+          }
+        ]
+      }
+    },
+    {
+      "id": "salesPerYear",
+      "family": "units",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Set the sales to 2 million dollars a year.",
+      "expect": {
+        "touches": [
+          "Sales"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Sales",
+            "symbol": "revenueRate",
+            "initialValue": 166666.667,
+            "unit": "USD/month",
+            "tolerance": 0.0001
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio1500k",
+      "family": "reference",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Set the portfolio value to 1.5 million.",
+      "expect": {
+        "touches": [
+          "Investment portfolio"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Investment portfolio",
+            "symbol": "value",
+            "initialValue": 1500000
+          }
+        ]
+      }
+    },
+    {
+      "id": "renameAccount",
+      "family": "updateNode",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Rename the operating account to Main current account.",
+      "expect": {
+        "touches": [
+          "Operating account"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Main current account"
+          }
+        ]
+      }
+    },
+    {
+      "id": "savingsChecking",
+      "family": "multiStep",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "blank",
+      "request": "Make two accounts, Savings holding 1000 USD and Checking holding 200 USD, and add a flow from Savings to Checking where Checking gains 1% of the Savings balance each month.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Savings",
+            "initialValue": 1000,
+            "unit": "USD"
+          },
+          {
+            "op": "state",
+            "node": "Checking",
+            "initialValue": 200,
+            "unit": "USD"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Savings",
+            "to": "Checking"
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Savings",
+            "to": "Checking",
+            "value": 0.01
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Savings",
+            "to": "Checking",
+            "uses": [
+              "source"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "balanceSheet",
+      "family": "multiStep",
+      "domain": "finance",
+      "style": "multiPart",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Set the account to 100000 USD, the portfolio to 2 million and the loan to 500000.",
+      "expect": {
+        "touches": [
+          "Operating account",
+          "Investment portfolio",
+          "Business loan"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating account",
+            "symbol": "balance",
+            "initialValue": 100000,
+            "unit": "USD"
+          },
+          {
+            "op": "state",
+            "node": "Investment portfolio",
+            "symbol": "value",
+            "initialValue": 2000000
+          },
+          {
+            "op": "state",
+            "node": "Business loan",
+            "symbol": "principal",
+            "initialValue": 500000
+          }
+        ]
+      }
+    },
+    {
+      "id": "askRateSixThousandths",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Rate 0.006.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Sales",
+          "Operating costs",
+          "Capital market"
+        ]
+      }
+    },
+    {
+      "id": "askIncreaseSales",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Could we increase sales a bit?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askChangeLoan",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "change the loan",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askTaxRate",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Could you set the tax rate to 21%?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askPayOffAndKeep",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Pay off the business loan completely, and keep its principal at 800000 USD as well.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askDeleteIt",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Delete it.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "actCostRate",
+      "family": "reference",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Cost rate 150000.",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "symbol": "costRate",
+            "initialValue": 150000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    }
+  ]
+}

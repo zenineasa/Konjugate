@@ -1,0 +1,1626 @@
+[
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a population called Deer herd with 250 animals.",
+    "expectedOutcome": "A node named Deer herd is added with a head count of 250 animals. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "terse",
+    "request": "Lake, 3.2 million m3.",
+    "expectedOutcome": "A node named Lake is added with a water volume of 3200000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Could you add a patient compartment called Liver holding 0 mg of the drug, please?",
+    "expectedOutcome": "A node named Liver is added with a drug amount of 0 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "loose",
+    "request": "new server pool, 12 servers",
+    "expectedOutcome": "A node named Server pool is added with a server count of 12 servers. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "typos",
+    "request": "Creat a nod caled Greenhouse with a humidty of 65 %",
+    "expectedOutcome": "A node named Greenhouse is added with a humidity of 65 %. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "indirect",
+    "request": "We need somewhere to hold the unsold goods, starting at 3000 units.",
+    "expectedOutcome": "A node (for example named Unsold stock) is added with a quantity of 3000 units. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "verbose",
+    "request": "I am modelling a small bakery. First, please add an oven node called Oven that starts at 453.15 K, since that is the temperature we preheat to.",
+    "expectedOutcome": "A node named Oven is added with a temperature of 453.15 K. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Create a node named Subscribers with 1500 accounts.",
+    "expectedOutcome": "A node named Subscribers is added with an account count of 1500 accounts. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Please add a rooftop solar array rated at 4 kW.",
+    "expectedOutcome": "A node (for example named Solar array) is added with an output power of 4000 W. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "terse",
+    "request": "Greenhouse CO2, 800 ppm.",
+    "expectedOutcome": "A node (for example named Greenhouse) is added with a CO2 concentration of 800 ppm. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "loose",
+    "request": "add a queue called Helpdesk Tickets, 35 open",
+    "expectedOutcome": "A node named Helpdesk Tickets is added with a ticket count of 35 tickets. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a crop called Wheat with a biomass of 220 g/m2.",
+    "expectedOutcome": "A node named Wheat is added with a biomass of 220 g/m2. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "indirect",
+    "request": "The model needs the people who have been vaccinated; start them at zero.",
+    "expectedOutcome": "A node (for example named Vaccinated) is added with a people count of 0. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "verbose",
+    "request": "For the school project I want a reservoir node. Call it Mill Pond. It currently holds about 120000 cubic metres of water.",
+    "expectedOutcome": "A node named Mill Pond is added with a water volume of 120000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "typos",
+    "request": "Add a batary called Home Storage with 10 kWh stored",
+    "expectedOutcome": "A node named Home Storage is added with a stored energy of 36000000 J (10 kWh). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "plain",
+    "request": "Add a Rain gauge node with a rain rate of 12 mm per hour.",
+    "expectedOutcome": "A node named Rain gauge is added with a rain rate of 12 mm/h. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "conversational",
+    "request": "Could you add a cyclist called Rider with a speed of 36 km/h?",
+    "expectedOutcome": "A node named Rider is added with a speed of 10 m/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "terse",
+    "request": "Cabin, 22 C.",
+    "expectedOutcome": "A node named Cabin is added with a temperature of 295.15 K. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "loose",
+    "request": "add a fuel tank w/ 50 litres",
+    "expectedOutcome": "A node (for example named Fuel tank) is added with a volume of 0.05 m3 (50 L). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "plain",
+    "request": "Add a freezer called Chest Freezer at -18 °C.",
+    "expectedOutcome": "A node named Chest Freezer is added with a temperature of 255.15 K. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "I want a simple epidemic model. Create nodes for Susceptible (9500 people), Infected (500 people) and Recovered (0 people), and connect Susceptible to Infected and Infected to Recovered.",
+    "expectedOutcome": "Three nodes are added (Susceptible 9500 people, Infected 500 people, Recovered 0 people) with a relationship from Susceptible to Infected and one from Infected to Recovered, each with an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "plain",
+    "request": "Create a node Rabbits with 300 animals and a node Foxes with 20 animals, and add a relationship from Rabbits to Foxes for predation.",
+    "expectedOutcome": "Nodes Rabbits (300 animals) and Foxes (20 animals) are added with a predation relationship from Rabbits to Foxes that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "conversational",
+    "request": "Could you set up a bathtub for me: a Tap at 0.2 L/s and a Tub holding 20 L, with the tap filling the tub?",
+    "expectedOutcome": "Nodes Tap (flow rate 0.0002 m3/s or 0.2 L/s) and Tub (volume 0.02 m3 or 20 L) are added with a relationship from Tap to Tub that has an equation adding the tap flow to the tub volume. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Add a Prospects node with 4000 leads, add a Customers node with 800 accounts, and link Prospects to Customers.",
+    "expectedOutcome": "Nodes Prospects (4000 leads) and Customers (800 accounts) are added with a relationship from Prospects to Customers that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "indirect",
+    "request": "I want to see how a pill reaches the blood. Start with 250 mg in the stomach, nothing in the blood, and the stomach feeding the blood.",
+    "expectedOutcome": "Nodes (for example Stomach with 250 mg and Blood with 0 mg) are added with a relationship from the stomach to the blood that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "loose",
+    "request": "solar + battery: panel 3 kW, battery 8 kWh, panel charges battery",
+    "expectedOutcome": "Nodes Solar panel (3000 W) and Battery (28800000 J) are added with a relationship from the panel to the battery that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "I run a small web shop. Please create a Visitors node at 50 visits per minute, an Orders node at 0 orders, and link the visitors to the orders so that some of the visits turn into orders.",
+    "expectedOutcome": "Nodes Visitors (50 visits/min) and Orders (0 orders) are added with a relationship from Visitors to Orders that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "plain",
+    "request": "Add a Rain node at 3 mm/day and a Soil node holding 90 mm of water, with rain wetting the soil.",
+    "expectedOutcome": "Nodes Rain (3 mm/day) and Soil (90 mm) are added with a relationship from Rain to Soil that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "terse",
+    "request": "Cart 1200 kg at 15 m/s, Engine 2500 N, engine pushes cart.",
+    "expectedOutcome": "Nodes Cart (speed 15 m/s, mass 1200 kg) and Engine (force 2500 N) are added with a relationship from Engine to Cart that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "typos",
+    "request": "Creat tow tanks, Left at 400 L and Right at 100 L, and conect them so water moves from left to right.",
+    "expectedOutcome": "Nodes Left (volume 0.4 m3) and Right (0.1 m3) are added with a relationship from Left to Right that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "conversational",
+    "request": "Could you build a savings pot for me? One node for my Salary at 3200 EUR/month and one for my Savings with 5000 EUR, and the salary paying into the savings.",
+    "expectedOutcome": "Nodes Salary (3200 EUR/month) and Savings (5000 EUR) are added with a relationship from Salary to Savings that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Add a Heater at 1500 W, add a Room at 290 K, connect heater to room.",
+    "expectedOutcome": "Nodes Heater (1500 W) and Room (290 K) are added with a relationship from Heater to Room that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "indirect",
+    "request": "Customers keep leaving. Show me Customers at 900 accounts and a Churned group at zero, with customers moving into churned.",
+    "expectedOutcome": "Nodes Customers (900 accounts) and Churned (0 accounts) are added with a relationship from Customers to Churned that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "loose",
+    "request": "lake 5e6 m3 and a river with 3 m3/s, lake feeds river",
+    "expectedOutcome": "Nodes Lake (5000000 m3) and River (3 m3/s) are added with a relationship from Lake to River that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Connect the two tanks.",
+    "expectedOutcome": "The model is empty, so there are no tanks to connect. The assistant should ask what the tanks are, or offer to create them."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "terse",
+    "request": "Increase the infection rate.",
+    "expectedOutcome": "The model is empty and has no infection rate. The assistant should ask what to build first."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "conversational",
+    "request": "Could you add a patient?",
+    "expectedOutcome": "The request gives no detail. The assistant should ask what quantity the patient node should carry and its starting value."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "indirect",
+    "request": "The population grows too fast.",
+    "expectedOutcome": "The model is empty; there is no population to slow down. The assistant should ask what to model."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "loose",
+    "request": "add something for the stock market",
+    "expectedOutcome": "The request is too vague to add a useful node. The assistant should ask which quantity to track and its starting value."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "verbose",
+    "request": "I am writing a thesis on urban traffic and would like to include the effect of a new bypass road on congestion in the model. Can you add that?",
+    "expectedOutcome": "The request names no concrete node, quantity or number. The assistant should ask what to represent (for example road flow and capacity) and with what values."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Delete the pump.",
+    "expectedOutcome": "The model is empty and has no pump, so the assistant should say so and ask what is meant."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Would you mind adding a node called Moon with a mass of 7.35e22 kg?",
+    "expectedOutcome": "A node named Moon is added with a mass of 7.35e22 kg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a Server with a CPU load of 0.45.",
+    "expectedOutcome": "A node named Server is added with a CPU load of 0.45 (dimensionless). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "terse",
+    "request": "Orchard, 40 ha.",
+    "expectedOutcome": "A node named Orchard is added with an area of 40 ha. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "verbose",
+    "request": "The farm data is in US units. Please add a Silo node holding 1200 bushels of grain, and use cubic metres, about 42.3 m3.",
+    "expectedOutcome": "A node named Silo is added with a grain volume of about 42.3 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "plain",
+    "request": "Add a Dam with a water volume of 2.4 million cubic metres.",
+    "expectedOutcome": "A node named Dam is added with a water volume of 2400000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Start with 250 infected people.",
+    "expectedOutcome": "The Infected people count becomes 250. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateValue",
+    "style": "terse",
+    "request": "Susceptible 4800.",
+    "expectedOutcome": "The Susceptible people count becomes 4800. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateValue",
+    "style": "indirect",
+    "request": "A second wave is under way; about 3% of the 10000 people already recovered earlier.",
+    "expectedOutcome": "The Recovered people count becomes 300. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Raise the recovery rate to 0.14 per day.",
+    "expectedOutcome": "The recovery rate becomes 0.14 1/day on both relationships that carry it (Recovery and Recovery outflow). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateParameter",
+    "style": "conversational",
+    "request": "Could you lower the transmission rate to 0.22 please?",
+    "expectedOutcome": "The transmission rate becomes 0.22 1/day on both relationships that carry it (Infection spread and Susceptible depletion). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateParameter",
+    "style": "verbose",
+    "request": "After lockdown measures the contact rate dropped. Change the transmission rate to 0.12 per day, everywhere it is used.",
+    "expectedOutcome": "The transmission rate becomes 0.12 1/day on Infection spread and Susceptible depletion. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateParameter",
+    "style": "loose",
+    "request": "total pop 50k",
+    "expectedOutcome": "The total population becomes 50000 people on both relationships that carry it (Infection spread and Susceptible depletion). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "units",
+    "style": "plain",
+    "request": "Set the recovery rate to 0.35 per week.",
+    "expectedOutcome": "The recovery rate becomes 0.05 1/day (0.35 per week) on both relationships that carry it (Recovery and Recovery outflow). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "addState",
+    "style": "plain",
+    "request": "Give the Infected group a state called Hospitalised with 12 people.",
+    "expectedOutcome": "The Infected node gains a state called Hospitalised with an initial value of 12 people. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Could you add a Vaccinated group of 0 people?",
+    "expectedOutcome": "A node named Vaccinated is added with a people count of 0. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "Add a Vaccinated group starting at 0 people and connect Susceptible to it with a vaccination rate of 0.02 per day, so susceptible people move into the vaccinated group.",
+    "expectedOutcome": "A node Vaccinated (0 people) is added with a relationship from Susceptible to Vaccinated that has a parameter vaccination rate = 0.02 1/day and an equation using it. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "remove",
+    "style": "plain",
+    "request": "Remove the Recovered group.",
+    "expectedOutcome": "The Recovered node is removed together with the relationships Recovery and Recovery outflow that connect to it."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "enableDisable",
+    "style": "terse",
+    "request": "Switch off recovery.",
+    "expectedOutcome": "The Recovery and Recovery outflow relationships are disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "setEquation",
+    "style": "verbose",
+    "request": "I want the infection to slow down as people become cautious. Halve the transmission in both the Infection spread and Susceptible depletion equations.",
+    "expectedOutcome": "The Infection spread and Susceptible depletion equations each become 0.5 times their present form (half of transmission rate times the susceptible and infected counts, divided by the total population). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateNode",
+    "style": "plain",
+    "request": "Rename Infected to Cases.",
+    "expectedOutcome": "The node Infected is renamed Cases. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Set the rate to 0.2.",
+    "expectedOutcome": "There are several rates (transmission and recovery), so the assistant should ask which one is meant."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "history",
+    "style": "terse",
+    "request": "Yes, 0.25.",
+    "history": [
+      {
+        "request": "Make the virus more contagious",
+        "outcome": "Asked: What transmission rate (per day) should I use?"
+      }
+    ],
+    "expectedOutcome": "The transmission rate becomes 0.25 1/day on both relationships that carry it."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Set the rabbit population to 650.",
+    "expectedOutcome": "The Rabbits head count becomes 650. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateValue",
+    "style": "conversational",
+    "request": "Could we start with 45 foxes, please?",
+    "expectedOutcome": "The Foxes head count becomes 45. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateValue",
+    "style": "indirect",
+    "request": "After the drought the meadow only has about 32 tonnes of grass left.",
+    "expectedOutcome": "The Meadow grass biomass becomes 32000 kg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateValue",
+    "style": "terse",
+    "request": "Winter 0.7.",
+    "expectedOutcome": "The Winter severity index becomes 0.7. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "units",
+    "style": "plain",
+    "request": "Make the grass biomass 80 tonnes.",
+    "expectedOutcome": "The Meadow grass biomass becomes 80000 kg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Change the predation rate to 0.004.",
+    "expectedOutcome": "The predation rate becomes 0.004 on both relationships that carry it (Predation loss and Predation gain). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateParameter",
+    "style": "loose",
+    "request": "rabbits breed faster, growth 0.8",
+    "expectedOutcome": "The growth rate on Grazing growth becomes 0.8 1/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateParameter",
+    "style": "verbose",
+    "request": "Foxes in this region have an easier life. Lower their baseline death rate to 0.03 per month.",
+    "expectedOutcome": "The base mortality on Fox mortality becomes 0.03 1/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateParameter",
+    "style": "conversational",
+    "request": "Would you make each rabbit need 55 kg of forage rather than 40?",
+    "expectedOutcome": "The forage per rabbit on Grazing growth becomes 55 kg/rabbit. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a Hunters node with a head count of 8.",
+    "expectedOutcome": "A node named Hunters is added with a head count of 8. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "Hunters now cull the foxes. Add a Hunters node with 8 people and a relationship from Hunters to Foxes with a culling rate of 0.01 per hunter per month, so each hunter removes foxes.",
+    "expectedOutcome": "A node Hunters (8 people) is added with a relationship from Hunters to Foxes that has a parameter culling rate = 0.01 and an equation removing foxes in proportion to hunters and foxes. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "addState",
+    "style": "plain",
+    "request": "Give the Meadow a Rainfall state of 60 mm.",
+    "expectedOutcome": "The Meadow gains a state called Rainfall with an initial value of 60 mm. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "enableDisable",
+    "style": "plain",
+    "request": "Turn off predation losses for now.",
+    "expectedOutcome": "The Predation loss relationship is disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "enableDisable",
+    "style": "terse",
+    "request": "Disable winter.",
+    "expectedOutcome": "The Winter severity node is disabled (and so its Fox mortality relationship has no effect); nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "remove",
+    "style": "loose",
+    "request": "drop the winter thing",
+    "expectedOutcome": "The Winter severity node and its Fox mortality relationship are removed."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "reference",
+    "style": "plain",
+    "request": "Set the starting head count of the predators to 12.",
+    "expectedOutcome": "The Foxes head count becomes 12; the Rabbits head count is unchanged."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Double the population.",
+    "expectedOutcome": "There are two populations (rabbits and foxes), so the assistant should ask which one is meant."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "setEquation",
+    "style": "plain",
+    "request": "Make the fox mortality independent of winter, just the base mortality times the fox count.",
+    "expectedOutcome": "The Fox mortality equation becomes minus base mortality times the foxes count, with no winter term."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "history",
+    "style": "conversational",
+    "request": "Actually make it 500, thanks.",
+    "history": [
+      {
+        "request": "Set the rabbit population to 650.",
+        "outcome": "Proposed: Update the head count of Rabbits."
+      }
+    ],
+    "expectedOutcome": "The Rabbits head count becomes 500. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Set the incoming traffic to 200 requests per second.",
+    "expectedOutcome": "The Incoming traffic arrival rate becomes 200 requests/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateValue",
+    "style": "terse",
+    "request": "Servers 10.",
+    "expectedOutcome": "The Server pool server count becomes 10. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateValue",
+    "style": "indirect",
+    "request": "It is Black Friday and we expect 4 times the normal traffic.",
+    "expectedOutcome": "The Incoming traffic arrival rate becomes 480 requests/s (4 times 120). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateValue",
+    "style": "conversational",
+    "request": "Can we start with an empty queue?",
+    "expectedOutcome": "The Request queue length becomes 0. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "units",
+    "style": "plain",
+    "request": "Set the traffic to 3000 requests per minute.",
+    "expectedOutcome": "The Incoming traffic arrival rate becomes 50 requests/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "units",
+    "style": "loose",
+    "request": "each server handles like 9000 req/hr",
+    "expectedOutcome": "The Server pool capacity per server becomes 2.5 requests/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Change the saturation length to 25 requests.",
+    "expectedOutcome": "The saturation length on Request service becomes 25 requests. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "addState",
+    "style": "conversational",
+    "request": "Could you give the server pool a CPU load state of 0.55?",
+    "expectedOutcome": "The Server pool gains a CPU load state with an initial value of 0.55. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a Cache node with a hit ratio of 0.85.",
+    "expectedOutcome": "A node named Cache is added with a hit ratio of 0.85. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "We are adding a second queue for background jobs. Create a node Job queue with 0 jobs and connect the Incoming traffic to it so a share of the traffic ends up there.",
+    "expectedOutcome": "A node Job queue (0 jobs) is added with a relationship from Incoming traffic to Job queue that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "remove",
+    "style": "terse",
+    "request": "Remove the queue.",
+    "expectedOutcome": "The Request queue node is removed together with the relationships Request arrivals and Request service."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "enableDisable",
+    "style": "plain",
+    "request": "Disable the request service relationship.",
+    "expectedOutcome": "The Request service relationship is disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "setEquation",
+    "style": "verbose",
+    "request": "The servers never exceed their capacity, so the service should just be the pool capacity (servers times capacity per server) while the queue is non-empty. Simplify the Request service equation to servers times capacity per server.",
+    "expectedOutcome": "The Request service equation becomes minus servers times capacity per server, with no saturation term."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateNode",
+    "style": "loose",
+    "request": "call the pool Backend",
+    "expectedOutcome": "The node Server pool is renamed Backend. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "reference",
+    "style": "plain",
+    "request": "Raise the capacity to 40 requests per second.",
+    "expectedOutcome": "The Server pool capacity per server becomes 40 requests/s; the Incoming traffic arrival rate is unchanged."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Add two more.",
+    "expectedOutcome": "The request does not say what to add two more of (servers? queues?). The assistant should ask."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "history",
+    "style": "terse",
+    "request": "Servers.",
+    "history": [
+      {
+        "request": "Add some more capacity.",
+        "outcome": "Asked: Do you want more servers or more capacity per server, and what value?"
+      },
+      {
+        "request": "More servers, up to 14",
+        "outcome": "Asked: Please confirm the quantity to change."
+      }
+    ],
+    "expectedOutcome": "The Server pool server count becomes 14."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Set the solar output to 4200 W.",
+    "expectedOutcome": "The Solar array output power becomes 4200 W. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "units",
+    "style": "plain",
+    "request": "Set the house load to 2.4 kW.",
+    "expectedOutcome": "The House load demand power becomes 2400 W. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "units",
+    "style": "conversational",
+    "request": "Could you set the battery to start at 12 kWh?",
+    "expectedOutcome": "The Home battery stored energy becomes 43200000 J (12 kWh). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "units",
+    "style": "terse",
+    "request": "Battery capacity 13.5 kWh.",
+    "expectedOutcome": "The Home battery capacity becomes 48600000 J (13.5 kWh). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "units",
+    "style": "indirect",
+    "request": "We installed a second battery, so the total storage is now 20 kWh.",
+    "expectedOutcome": "The Home battery capacity becomes 72000000 J (20 kWh). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Set the charge efficiency to 0.92.",
+    "expectedOutcome": "The charge efficiency on Solar charging becomes 0.92. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "updateParameter",
+    "style": "loose",
+    "request": "inverter eff 94%",
+    "expectedOutcome": "The inverter efficiency on House consumption becomes 0.94. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Could you add an Electric car node drawing 7.4 kW?",
+    "expectedOutcome": "A node named Electric car is added with a demand power of 7400 W. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "We bought an electric car. Add a node called Electric car drawing 7.4 kW and connect it to the Home battery in the same way as the house load.",
+    "expectedOutcome": "A node Electric car (7400 W) is added with a relationship from Electric car to Home battery whose equation draws energy from the battery in the same form as House consumption (including an efficiency parameter). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Set the solar to 2800 W, the house to 1800 W and the battery to 20 MJ.",
+    "expectedOutcome": "The Solar array output power becomes 2800 W, the House load demand power 1800 W and the Home battery stored energy 20000000 J. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "addState",
+    "style": "plain",
+    "request": "Add a State of health state of 0.97 to the Home battery.",
+    "expectedOutcome": "The Home battery gains a state called State of health with an initial value of 0.97. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "enableDisable",
+    "style": "terse",
+    "request": "Panels off.",
+    "expectedOutcome": "The Solar array node is disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "remove",
+    "style": "plain",
+    "request": "Remove the house consumption relationship.",
+    "expectedOutcome": "The House consumption relationship is removed."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "setEquation",
+    "style": "verbose",
+    "request": "The battery is lossless on charging in our test. Change Solar charging so the battery receives the full solar power, with no efficiency and no capacity limit.",
+    "expectedOutcome": "The Solar charging equation becomes just the source output power (no efficiency or capacity term)."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Set the power to 900 W.",
+    "expectedOutcome": "This is ambiguous (solar output or house demand), so the assistant should ask which node is meant."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "clarification",
+    "style": "terse",
+    "request": "Charge it up.",
+    "expectedOutcome": "It is unclear what to change (the stored energy, the solar output?), so the assistant should ask."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Set the stomach dose to 250 mg.",
+    "expectedOutcome": "The Stomach drug amount becomes 250 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "units",
+    "style": "plain",
+    "request": "Give a dose of 1 gram.",
+    "expectedOutcome": "The Stomach drug amount becomes 1000 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "units",
+    "style": "conversational",
+    "request": "Could the distribution volume be 0.8 L/kg for a 70 kg patient, please?",
+    "expectedOutcome": "The Bloodstream distribution volume becomes 56 L (0.8 L/kg times 70 kg). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "units",
+    "style": "terse",
+    "request": "Clearance 120 mL/min.",
+    "expectedOutcome": "The clearance becomes 7.2 L/h on both relationships that carry it (Elimination and Plasma clearance). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "units",
+    "style": "indirect",
+    "request": "The drug is absorbed with a half-life of about 30 minutes, i.e. a rate near 1.386 per hour; use 1.4.",
+    "expectedOutcome": "The absorption rate becomes 1.4 1/h on both relationships that carry it (Absorption and Stomach depletion). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Change the clearance to 6 L/h.",
+    "expectedOutcome": "The clearance becomes 6 L/h on both Elimination and Plasma clearance. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "updateValue",
+    "style": "loose",
+    "request": "blood volume 55 L",
+    "expectedOutcome": "The Bloodstream distribution volume becomes 55 L. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a Liver node with a drug amount of 0 mg.",
+    "expectedOutcome": "A node named Liver is added with a drug amount of 0 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "A second route of elimination exists through the liver. Add a Liver compartment at 0 mg and connect the Bloodstream to it with a hepatic clearance of 2 L/h.",
+    "expectedOutcome": "A node Liver (0 mg) is added with a relationship from Bloodstream to Liver that has a parameter hepatic clearance = 2 L/h and an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "addState",
+    "style": "conversational",
+    "request": "Could you add a Peak limit state of 15 mg/L to the Bloodstream?",
+    "expectedOutcome": "The Bloodstream gains a state called Peak limit with an initial value of 15 mg/L. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "enableDisable",
+    "style": "terse",
+    "request": "Stop absorption.",
+    "expectedOutcome": "The Absorption and Stomach depletion relationships are disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "remove",
+    "style": "plain",
+    "request": "Remove the Kidneys.",
+    "expectedOutcome": "The Kidneys node is removed together with its Elimination and Plasma clearance relationships."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "clarification",
+    "style": "plain",
+    "request": "The amount should be 5 mg.",
+    "expectedOutcome": "This is ambiguous (stomach, bloodstream or kidneys all carry an amount), so the assistant should ask which one is meant."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "clarification",
+    "style": "verbose",
+    "request": "My patient is a child, so please adjust the dose accordingly.",
+    "expectedOutcome": "The weight of the child and the dosing guidance are not given; the assistant should ask what dose to use."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "setEquation",
+    "style": "plain",
+    "request": "Make elimination ignore the distribution volume, so it is clearance times the amount.",
+    "expectedOutcome": "The Elimination equation becomes clearance times the source amount, with no division by the distribution volume."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "history",
+    "style": "conversational",
+    "request": "Make it 750 mg, thanks.",
+    "history": [
+      {
+        "request": "Set the stomach dose to 250 mg.",
+        "outcome": "Applied: Set the Stomach drug amount to 250 mg."
+      }
+    ],
+    "expectedOutcome": "The Stomach drug amount becomes 750 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Set the lake volume to 3 million cubic metres.",
+    "expectedOutcome": "The Lake water volume becomes 3000000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "updateValue",
+    "style": "terse",
+    "request": "Rain 2.5.",
+    "expectedOutcome": "The Rainfall inflow rate becomes 2.5 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "units",
+    "style": "plain",
+    "request": "Make the rainfall inflow 90 litres per second.",
+    "expectedOutcome": "The Rainfall inflow rate becomes 0.09 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "units",
+    "style": "conversational",
+    "request": "Could the surface area be 120 hectares?",
+    "expectedOutcome": "The Lake surface area becomes 1200000 m2. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "units",
+    "style": "indirect",
+    "request": "The downstream reservoir is nearly empty, only about half a million litres.",
+    "expectedOutcome": "The Downstream reservoir water volume becomes 500 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Raise the spill coefficient to 8e-7 per second.",
+    "expectedOutcome": "The spill coefficient becomes 8e-7 1/s on Spillway release and Spillway draw-down. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "addState",
+    "style": "plain",
+    "request": "Give the Lake a maximum depth state of 14 m.",
+    "expectedOutcome": "The Lake gains a state for maximum depth with an initial value of 14 m. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Could you add an Aquifer node holding 9 million cubic metres?",
+    "expectedOutcome": "A node named Aquifer is added with a water volume of 9000000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "The town draws water from the lake. Add a Town node with 0 m3 of water supplied and connect the Lake to it with a withdrawal coefficient of 1e-7 per second.",
+    "expectedOutcome": "A node Town (0 m3) is added with a relationship from Lake to Town that has a parameter withdrawal coefficient = 1e-7 1/s and an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "enableDisable",
+    "style": "plain",
+    "request": "Disable the rainfall.",
+    "expectedOutcome": "The Rainfall node is disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "remove",
+    "style": "loose",
+    "request": "delete the downstream thing",
+    "expectedOutcome": "The Downstream reservoir node and its Spillway release and Spillway draw-down relationships are removed."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "setEquation",
+    "style": "plain",
+    "request": "Make the rain inflow only a quarter of the rainfall.",
+    "expectedOutcome": "The Rain inflow equation becomes 0.25 times the rainfall inflow rate."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "updateNode",
+    "style": "terse",
+    "request": "Rename the lake to Loch.",
+    "expectedOutcome": "The node Lake is renamed Loch. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Set the volume to 1.5 million m3.",
+    "expectedOutcome": "This is ambiguous (the lake or the downstream reservoir), so the assistant should ask which one is meant."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "clarification",
+    "style": "indirect",
+    "request": "The lake is evaporating too much.",
+    "expectedOutcome": "The model has no evaporation. The assistant should ask whether to add an evaporation relationship and with what rate."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "history",
+    "style": "terse",
+    "request": "The lake.",
+    "history": [
+      {
+        "request": "Set the volume to 1.8 million m3.",
+        "outcome": "Asked: Which node should I update: the Lake or the Downstream reservoir?"
+      }
+    ],
+    "expectedOutcome": "The Lake water volume becomes 1800000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Set the monthly marketing spend to 35000.",
+    "expectedOutcome": "The Marketing monthly spend becomes 35000 USD/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateValue",
+    "style": "terse",
+    "request": "Price 39.",
+    "expectedOutcome": "The Subscribers monthly price becomes 39 USD/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateValue",
+    "style": "loose",
+    "request": "we have like 2k subs now",
+    "expectedOutcome": "The Subscribers account count becomes 2000. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateValue",
+    "style": "indirect",
+    "request": "We just closed a big deal; add 300 to the subscriber base.",
+    "expectedOutcome": "The Subscribers account count becomes 1500 (1200 plus 300). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "units",
+    "style": "plain",
+    "request": "Set the marketing spend to 18k.",
+    "expectedOutcome": "The Marketing monthly spend becomes 18000 USD/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "units",
+    "style": "conversational",
+    "request": "Could the price be 349 per year instead?",
+    "expectedOutcome": "The Subscribers monthly price becomes about 29.08 USD/month (349 per year). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Change the churn rate to 4% per month.",
+    "expectedOutcome": "The churn rate becomes 0.04 1/month on both Churn and Subscriber loss. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateParameter",
+    "style": "verbose",
+    "request": "Our paid ads got more expensive. A lead now costs 55 dollars instead of 40; please update that.",
+    "expectedOutcome": "The cost per lead on Lead generation becomes 55 USD/lead. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateParameter",
+    "style": "terse",
+    "request": "Conversion 10%.",
+    "expectedOutcome": "The conversion rate becomes 0.1 1/month on both Conversion and Prospect depletion. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a Trial users node with 650 accounts.",
+    "expectedOutcome": "A node named Trial users is added with an account count of 650. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "We are introducing a free trial. Add a Trial users node with 650 accounts, and connect Prospects to it with a sign-up rate of 0.12 per month.",
+    "expectedOutcome": "A node Trial users (650 accounts) is added with a relationship from Prospects to Trial users that has a parameter sign-up rate = 0.12 1/month and an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "addState",
+    "style": "plain",
+    "request": "Give Subscribers an Average tenure state of 14 months.",
+    "expectedOutcome": "The Subscribers node gains a state called Average tenure with an initial value of 14 months. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "enableDisable",
+    "style": "plain",
+    "request": "Turn off churn.",
+    "expectedOutcome": "The Churn and Subscriber loss relationships are disabled; nothing is deleted."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "remove",
+    "style": "terse",
+    "request": "Drop marketing.",
+    "expectedOutcome": "The Marketing node and its Lead generation relationship are removed."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "setEquation",
+    "style": "plain",
+    "request": "Let lead generation be a flat 400 leads per month, whatever the spend.",
+    "expectedOutcome": "The Lead generation equation becomes the constant 400 leads/month (or a parameter set to 400), no longer depending on the marketing spend."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Change the count to 3000.",
+    "expectedOutcome": "This is ambiguous (prospects, subscribers or churned accounts), so the assistant should ask which one is meant."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "clarification",
+    "style": "loose",
+    "request": "make growth faster",
+    "expectedOutcome": "It is unclear which quantity to change (marketing spend, conversion rate, cost per lead), so the assistant should ask."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "history",
+    "style": "conversational",
+    "request": "Sorry, I meant 42, not 39.",
+    "history": [
+      {
+        "request": "Price 39.",
+        "outcome": "Applied: Set the Subscribers monthly price to 39 USD/month."
+      }
+    ],
+    "expectedOutcome": "The Subscribers monthly price becomes 42 USD/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "Set the infectd group to 300 peple",
+    "expectedOutcome": "The Infected people count becomes 300. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "updateParameter",
+    "style": "typos",
+    "request": "chnage the recovry rate to 0.2",
+    "expectedOutcome": "The recovery rate becomes 0.2 1/day on both relationships that carry it (Recovery and Recovery outflow). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "sirEpidemic",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Make susceptible 7000, infected 300, recovered 2700.",
+    "expectedOutcome": "The Susceptible people count becomes 7000, the Infected 300 and the Recovered 2700. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "make the rabits 520 and foxs 25",
+    "expectedOutcome": "The Rabbits head count becomes 520 and the Foxes head count 25. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Foxes 18, rabbits 700, and put winter at 0.4.",
+    "expectedOutcome": "The Foxes head count becomes 18, the Rabbits head count 700 and the Winter severity index 0.4. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "predatorPrey",
+    "family": "updateParameter",
+    "style": "typos",
+    "request": "incrase the predaton rate to 0.003",
+    "expectedOutcome": "The predation rate becomes 0.003 on both relationships that carry it (Predation loss and Predation gain). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "incomming traffic 250 requets per second",
+    "expectedOutcome": "The Incoming traffic arrival rate becomes 250 requests/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Set the traffic to 90 req/s, servers to 4, capacity per server 30 req/s, and empty the queue.",
+    "expectedOutcome": "The Incoming traffic arrival rate becomes 90 requests/s, the Server pool server count 4, its capacity per server 30 requests/s, and the Request queue length 0. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "webServiceQueue",
+    "family": "updateParameter",
+    "style": "typos",
+    "request": "saturaton lenght 20",
+    "expectedOutcome": "The saturation length on Request service becomes 20 requests. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "set the batery to 5 kWh",
+    "expectedOutcome": "The Home battery stored energy becomes 18000000 J (5 kWh). Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Solar 5 kW, house load 800 W, and disable the car... sorry, battery charging relationship.",
+    "expectedOutcome": "The Solar array output power becomes 5000 W, the House load demand power 800 W, and the Solar charging relationship is disabled. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "solarHomeEnergy",
+    "family": "units",
+    "style": "verbose",
+    "request": "Our new panels are rated at 6.6 kilowatts peak, and the old inverter was replaced by one with 97% efficiency. Please reflect both in the model.",
+    "expectedOutcome": "The Solar array output power becomes 6600 W and the inverter efficiency on House consumption becomes 0.97. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "put 300 mg in the stomch",
+    "expectedOutcome": "The Stomach drug amount becomes 300 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Dose 400 mg, absorption 0.9 per hour, clearance 5 L/h.",
+    "expectedOutcome": "The Stomach drug amount becomes 400 mg, the absorption rate 0.9 1/h on Absorption and Stomach depletion, and the clearance 5 L/h on Elimination and Plasma clearance. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "drugDose",
+    "family": "updateParameter",
+    "style": "indirect",
+    "request": "The patient has weak kidneys, so only about half of the usual clearance applies.",
+    "expectedOutcome": "The clearance becomes 2 L/h (half of 4) on both Elimination and Plasma clearance. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "rainfal 1.8 m3/s plese",
+    "expectedOutcome": "The Rainfall inflow rate becomes 1.8 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Lake 2 million, downstream 600000, rain 1.",
+    "expectedOutcome": "The Lake water volume becomes 2000000 m3, the Downstream reservoir water volume 600000 m3 and the Rainfall inflow rate 1 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "lakeCatchment",
+    "family": "updateValue",
+    "style": "indirect",
+    "request": "It has been a very wet spring, so the lake is at about 3.4 million cubic metres.",
+    "expectedOutcome": "The Lake water volume becomes 3400000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "marketng spend 25000 per mnth",
+    "expectedOutcome": "The Marketing monthly spend becomes 25000 USD/month. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Prospects 8000, subscribers 1500, price 35 and churn 2.5%.",
+    "expectedOutcome": "The Prospects lead count becomes 8000, the Subscribers account count 1500 and monthly price 35 USD/month, and the churn rate 0.025 1/month on Churn and Subscriber loss. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "saasSubscribers",
+    "family": "updateParameter",
+    "style": "indirect",
+    "request": "Fewer people are cancelling since the loyalty programme, down to roughly 1.8 percent a month.",
+    "expectedOutcome": "The churn rate becomes 0.018 1/month on both Churn and Subscriber loss. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "typos",
+    "request": "Creta a nod calld Reservior with 800000 m3",
+    "expectedOutcome": "A node named Reservoir is added with a water volume of 800000 m3. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "typos",
+    "request": "Add a Prospect node (2000 leads) and a Subscribr node (300 acounts) and connct them",
+    "expectedOutcome": "Nodes Prospect (2000 leads) and Subscriber (300 accounts) are added with a relationship from Prospect to Subscriber that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Add Rabbits 500, add Grass 40000 kg, add Foxes 25, link grass to rabbits and rabbits to foxes.",
+    "expectedOutcome": "Nodes Rabbits (500), Grass (40000 kg) and Foxes (25) are added with a relationship from Grass to Rabbits and one from Rabbits to Foxes, each with an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Create Battery 5 kWh, Panels 2 kW, Home 600 W, panels charge battery, home drains it.",
+    "expectedOutcome": "Nodes Battery (18000000 J), Panels (2000 W) and Home (600 W) are added with a relationship from Panels to Battery and one from Home to Battery, each with an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "multiPart",
+    "request": "New node Stomach 500 mg, new node Blood 0 mg.",
+    "expectedOutcome": "Two nodes are added: Stomach with a drug amount of 500 mg and Blood with a drug amount of 0 mg. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "typos",
+    "request": "Add a pasteurisr at 72 C",
+    "expectedOutcome": "A node named Pasteuriser is added with a temperature of 345.15 K. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "units",
+    "style": "multiPart",
+    "request": "Add Boiler 85 °C and Radiator 60 °C and connect boiler to radiator.",
+    "expectedOutcome": "Nodes Boiler (358.15 K) and Radiator (333.15 K) are added with a relationship from Boiler to Radiator that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "addNode",
+    "style": "indirect",
+    "request": "I need the hospital beds in use, currently 180.",
+    "expectedOutcome": "A node (for example named Occupied beds) is added with a count of 180 beds. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "indirect",
+    "request": "Patients arrive at 6 an hour and leave after treatment; I want to see the waiting room fill up from empty.",
+    "expectedOutcome": "Nodes (for example Arrivals at 6 patients/h and Waiting room at 0 patients) are added with a relationship from Arrivals to Waiting room that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "I am studying a coffee shop queue. Create a Customers node at 20 people, a Barista node with a service rate of 3 people per minute, and connect the barista to the customers so that the line shrinks as the barista serves.",
+    "expectedOutcome": "Nodes Customers (20 people) and Barista (3 people/min or 0.05 people/s) are added with a relationship from Barista to Customers that has an equation reducing the customer count. Nothing else changes."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "multiPart",
+    "request": "Add a battery and a panel and connect them.",
+    "expectedOutcome": "No values are given for the battery or the panel, so the assistant should ask for the starting values (or propose defaults it states clearly)."
+  },
+  {
+    "domain": "general",
+    "model": "blank",
+    "family": "clarification",
+    "style": "typos",
+    "request": "Conect the resevoir to the town",
+    "expectedOutcome": "The model is empty, so there is no reservoir or town. The assistant should ask what to create."
+  }
+]

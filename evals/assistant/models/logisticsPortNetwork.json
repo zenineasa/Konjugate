@@ -1,0 +1,4959 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "id": 15,
+      "name": "Port",
+      "type": "Port",
+      "position": [
+        -8,
+        0,
+        0
+      ],
+      "sourceTerms": [
+        {
+          "id": 19,
+          "state": "yard",
+          "expression": "\\frac{\\mathrm{vesselArrivals}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 17,
+              "name": "Vessel arrivals",
+              "symbol": "vesselArrivals",
+              "value": 100,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 2
+            },
+            {
+              "id": 18,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{vesselArrivals}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 15,
+                "stateId": 16,
+                "symbol": "yard"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 17,
+                "symbol": "vesselArrivals"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 18,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 16
+            },
+            "mathJson": [
+              "Divide",
+              "vesselArrivals",
+              "secondsPerDay"
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "id": 16,
+          "name": "Yard stock",
+          "symbol": "yard",
+          "initialValue": 300,
+          "unit": "TEU"
+        }
+      ],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      }
+    },
+    {
+      "id": 20,
+      "name": "Warehouse A",
+      "type": "Warehouse",
+      "position": [
+        0,
+        3,
+        0
+      ],
+      "sourceTerms": [
+        {
+          "id": 33,
+          "state": "lane1",
+          "expression": "-\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane1}",
+          "parameters": [
+            {
+              "id": 29,
+              "name": "Warehouse A lead time",
+              "symbol": "leadTime",
+              "value": 2,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 26
+            },
+            {
+              "id": 30,
+              "name": "Warehouse A expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 27
+            },
+            {
+              "id": 31,
+              "name": "Warehouse A expedite below",
+              "symbol": "expediteBelow",
+              "value": 80,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 28
+            },
+            {
+              "id": 32,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "-\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane1}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 21,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 22,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 23,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 24,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 25,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 29,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 30,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 31,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 32,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 22
+            },
+            "mathJson": [
+              "Negate",
+              [
+                "Multiply",
+                "lane1",
+                [
+                  "Divide",
+                  3,
+                  "secondsPerDay"
+                ],
+                [
+                  "Which",
+                  [
+                    "Less",
+                    "onHand",
+                    "expediteBelow"
+                  ],
+                  [
+                    "Divide",
+                    1,
+                    "expeditedLeadTime"
+                  ],
+                  "True",
+                  [
+                    "Divide",
+                    1,
+                    "leadTime"
+                  ]
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 38,
+          "state": "lane2",
+          "expression": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane1} - \\mathrm{lane2})",
+          "parameters": [
+            {
+              "id": 34,
+              "name": "Warehouse A lead time",
+              "symbol": "leadTime",
+              "value": 2,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 26
+            },
+            {
+              "id": 35,
+              "name": "Warehouse A expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 27
+            },
+            {
+              "id": 36,
+              "name": "Warehouse A expedite below",
+              "symbol": "expediteBelow",
+              "value": 80,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 28
+            },
+            {
+              "id": 37,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane1} - \\mathrm{lane2})",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 21,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 22,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 23,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 24,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 25,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 34,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 35,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 36,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 37,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 23
+            },
+            "mathJson": [
+              "Multiply",
+              [
+                "Divide",
+                3,
+                "secondsPerDay"
+              ],
+              [
+                "Add",
+                "lane1",
+                [
+                  "Negate",
+                  "lane2"
+                ]
+              ],
+              [
+                "Which",
+                [
+                  "Less",
+                  "onHand",
+                  "expediteBelow"
+                ],
+                [
+                  "Divide",
+                  1,
+                  "expeditedLeadTime"
+                ],
+                "True",
+                [
+                  "Divide",
+                  1,
+                  "leadTime"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 43,
+          "state": "lane3",
+          "expression": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane2} - \\mathrm{lane3})",
+          "parameters": [
+            {
+              "id": 39,
+              "name": "Warehouse A lead time",
+              "symbol": "leadTime",
+              "value": 2,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 26
+            },
+            {
+              "id": 40,
+              "name": "Warehouse A expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 27
+            },
+            {
+              "id": 41,
+              "name": "Warehouse A expedite below",
+              "symbol": "expediteBelow",
+              "value": 80,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 28
+            },
+            {
+              "id": 42,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane2} - \\mathrm{lane3})",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 21,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 22,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 23,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 24,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 25,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 39,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 40,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 41,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 42,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 24
+            },
+            "mathJson": [
+              "Multiply",
+              [
+                "Divide",
+                3,
+                "secondsPerDay"
+              ],
+              [
+                "Add",
+                "lane2",
+                [
+                  "Negate",
+                  "lane3"
+                ]
+              ],
+              [
+                "Which",
+                [
+                  "Less",
+                  "onHand",
+                  "expediteBelow"
+                ],
+                [
+                  "Divide",
+                  1,
+                  "expeditedLeadTime"
+                ],
+                "True",
+                [
+                  "Divide",
+                  1,
+                  "leadTime"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 48,
+          "state": "onHand",
+          "expression": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane3}",
+          "parameters": [
+            {
+              "id": 44,
+              "name": "Warehouse A lead time",
+              "symbol": "leadTime",
+              "value": 2,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 26
+            },
+            {
+              "id": 45,
+              "name": "Warehouse A expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 27
+            },
+            {
+              "id": 46,
+              "name": "Warehouse A expedite below",
+              "symbol": "expediteBelow",
+              "value": 80,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 28
+            },
+            {
+              "id": 47,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane3}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 21,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 22,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 23,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 24,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 25,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 44,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 45,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 46,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 47,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 21
+            },
+            "mathJson": [
+              "Multiply",
+              "lane3",
+              [
+                "Divide",
+                3,
+                "secondsPerDay"
+              ],
+              [
+                "Which",
+                [
+                  "Less",
+                  "onHand",
+                  "expediteBelow"
+                ],
+                [
+                  "Divide",
+                  1,
+                  "expeditedLeadTime"
+                ],
+                "True",
+                [
+                  "Divide",
+                  1,
+                  "leadTime"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 51,
+          "state": "forecast",
+          "expression": "-\\frac{\\mathrm{forecast}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+          "parameters": [
+            {
+              "id": 49,
+              "name": "Demand smoothing time",
+              "symbol": "smoothingDays",
+              "value": 5,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 10
+            },
+            {
+              "id": 50,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "-\\frac{\\mathrm{forecast}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 21,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 22,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 23,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 24,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 20,
+                "stateId": 25,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 49,
+                "symbol": "smoothingDays"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 50,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 25
+            },
+            "mathJson": [
+              "Negate",
+              [
+                "Divide",
+                "forecast",
+                [
+                  "Multiply",
+                  "secondsPerDay",
+                  "smoothingDays"
+                ]
+              ]
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "id": 21,
+          "name": "On hand",
+          "symbol": "onHand",
+          "initialValue": 210,
+          "unit": "TEU"
+        },
+        {
+          "id": 22,
+          "name": "In transit, stage 1",
+          "symbol": "lane1",
+          "initialValue": 46.666666666666664,
+          "unit": "TEU"
+        },
+        {
+          "id": 23,
+          "name": "In transit, stage 2",
+          "symbol": "lane2",
+          "initialValue": 46.666666666666664,
+          "unit": "TEU"
+        },
+        {
+          "id": 24,
+          "name": "In transit, stage 3",
+          "symbol": "lane3",
+          "initialValue": 46.666666666666664,
+          "unit": "TEU"
+        },
+        {
+          "id": 25,
+          "name": "Demand forecast",
+          "symbol": "forecast",
+          "initialValue": 70,
+          "unit": "TEU/day"
+        }
+      ],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#c16f55"
+      }
+    },
+    {
+      "id": 52,
+      "name": "Warehouse B",
+      "type": "Warehouse",
+      "position": [
+        0,
+        -3,
+        0
+      ],
+      "sourceTerms": [
+        {
+          "id": 65,
+          "state": "lane1",
+          "expression": "-\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane1}",
+          "parameters": [
+            {
+              "id": 61,
+              "name": "Warehouse B lead time",
+              "symbol": "leadTime",
+              "value": 3,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 58
+            },
+            {
+              "id": 62,
+              "name": "Warehouse B expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1.5,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 59
+            },
+            {
+              "id": 63,
+              "name": "Warehouse B expedite below",
+              "symbol": "expediteBelow",
+              "value": 30,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 60
+            },
+            {
+              "id": 64,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "-\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane1}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 53,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 54,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 55,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 56,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 57,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 61,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 62,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 63,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 64,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 54
+            },
+            "mathJson": [
+              "Negate",
+              [
+                "Multiply",
+                "lane1",
+                [
+                  "Divide",
+                  3,
+                  "secondsPerDay"
+                ],
+                [
+                  "Which",
+                  [
+                    "Less",
+                    "onHand",
+                    "expediteBelow"
+                  ],
+                  [
+                    "Divide",
+                    1,
+                    "expeditedLeadTime"
+                  ],
+                  "True",
+                  [
+                    "Divide",
+                    1,
+                    "leadTime"
+                  ]
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 70,
+          "state": "lane2",
+          "expression": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane1} - \\mathrm{lane2})",
+          "parameters": [
+            {
+              "id": 66,
+              "name": "Warehouse B lead time",
+              "symbol": "leadTime",
+              "value": 3,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 58
+            },
+            {
+              "id": 67,
+              "name": "Warehouse B expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1.5,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 59
+            },
+            {
+              "id": 68,
+              "name": "Warehouse B expedite below",
+              "symbol": "expediteBelow",
+              "value": 30,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 60
+            },
+            {
+              "id": 69,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane1} - \\mathrm{lane2})",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 53,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 54,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 55,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 56,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 57,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 66,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 67,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 68,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 69,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 55
+            },
+            "mathJson": [
+              "Multiply",
+              [
+                "Divide",
+                3,
+                "secondsPerDay"
+              ],
+              [
+                "Add",
+                "lane1",
+                [
+                  "Negate",
+                  "lane2"
+                ]
+              ],
+              [
+                "Which",
+                [
+                  "Less",
+                  "onHand",
+                  "expediteBelow"
+                ],
+                [
+                  "Divide",
+                  1,
+                  "expeditedLeadTime"
+                ],
+                "True",
+                [
+                  "Divide",
+                  1,
+                  "leadTime"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 75,
+          "state": "lane3",
+          "expression": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane2} - \\mathrm{lane3})",
+          "parameters": [
+            {
+              "id": 71,
+              "name": "Warehouse B lead time",
+              "symbol": "leadTime",
+              "value": 3,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 58
+            },
+            {
+              "id": 72,
+              "name": "Warehouse B expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1.5,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 59
+            },
+            {
+              "id": 73,
+              "name": "Warehouse B expedite below",
+              "symbol": "expediteBelow",
+              "value": 30,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 60
+            },
+            {
+              "id": 74,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot (\\mathrm{lane2} - \\mathrm{lane3})",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 53,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 54,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 55,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 56,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 57,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 71,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 72,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 73,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 74,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 56
+            },
+            "mathJson": [
+              "Multiply",
+              [
+                "Divide",
+                3,
+                "secondsPerDay"
+              ],
+              [
+                "Add",
+                "lane2",
+                [
+                  "Negate",
+                  "lane3"
+                ]
+              ],
+              [
+                "Which",
+                [
+                  "Less",
+                  "onHand",
+                  "expediteBelow"
+                ],
+                [
+                  "Divide",
+                  1,
+                  "expeditedLeadTime"
+                ],
+                "True",
+                [
+                  "Divide",
+                  1,
+                  "leadTime"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 80,
+          "state": "onHand",
+          "expression": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane3}",
+          "parameters": [
+            {
+              "id": 76,
+              "name": "Warehouse B lead time",
+              "symbol": "leadTime",
+              "value": 3,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 58
+            },
+            {
+              "id": 77,
+              "name": "Warehouse B expedited lead time",
+              "symbol": "expeditedLeadTime",
+              "value": 1.5,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 59
+            },
+            {
+              "id": 78,
+              "name": "Warehouse B expedite below",
+              "symbol": "expediteBelow",
+              "value": 30,
+              "unit": "TEU",
+              "mode": "constant",
+              "sharedParameterId": 60
+            },
+            {
+              "id": 79,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{3}{\\mathrm{secondsPerDay}} \\cdot \\begin{cases} \\frac{1}{\\mathrm{expeditedLeadTime}} & \\mathrm{onHand} < \\mathrm{expediteBelow} \\\\ \\frac{1}{\\mathrm{leadTime}} & \\text{otherwise} \\end{cases} \\cdot \\mathrm{lane3}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 53,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 54,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 55,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 56,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 57,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 76,
+                "symbol": "leadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 77,
+                "symbol": "expeditedLeadTime"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 78,
+                "symbol": "expediteBelow"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 79,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 53
+            },
+            "mathJson": [
+              "Multiply",
+              "lane3",
+              [
+                "Divide",
+                3,
+                "secondsPerDay"
+              ],
+              [
+                "Which",
+                [
+                  "Less",
+                  "onHand",
+                  "expediteBelow"
+                ],
+                [
+                  "Divide",
+                  1,
+                  "expeditedLeadTime"
+                ],
+                "True",
+                [
+                  "Divide",
+                  1,
+                  "leadTime"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": 83,
+          "state": "forecast",
+          "expression": "-\\frac{\\mathrm{forecast}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+          "parameters": [
+            {
+              "id": 81,
+              "name": "Demand smoothing time",
+              "symbol": "smoothingDays",
+              "value": 5,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 10
+            },
+            {
+              "id": 82,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "-\\frac{\\mathrm{forecast}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 53,
+                "symbol": "onHand"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 54,
+                "symbol": "lane1"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 55,
+                "symbol": "lane2"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 56,
+                "symbol": "lane3"
+              },
+              {
+                "kind": "state",
+                "nodeId": 52,
+                "stateId": 57,
+                "symbol": "forecast"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 81,
+                "symbol": "smoothingDays"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 82,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 57
+            },
+            "mathJson": [
+              "Negate",
+              [
+                "Divide",
+                "forecast",
+                [
+                  "Multiply",
+                  "secondsPerDay",
+                  "smoothingDays"
+                ]
+              ]
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "id": 53,
+          "name": "On hand",
+          "symbol": "onHand",
+          "initialValue": 90,
+          "unit": "TEU"
+        },
+        {
+          "id": 54,
+          "name": "In transit, stage 1",
+          "symbol": "lane1",
+          "initialValue": 30,
+          "unit": "TEU"
+        },
+        {
+          "id": 55,
+          "name": "In transit, stage 2",
+          "symbol": "lane2",
+          "initialValue": 30,
+          "unit": "TEU"
+        },
+        {
+          "id": 56,
+          "name": "In transit, stage 3",
+          "symbol": "lane3",
+          "initialValue": 30,
+          "unit": "TEU"
+        },
+        {
+          "id": 57,
+          "name": "Demand forecast",
+          "symbol": "forecast",
+          "initialValue": 30,
+          "unit": "TEU/day"
+        }
+      ],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#c16f55"
+      }
+    },
+    {
+      "id": 107,
+      "name": "Zone 1",
+      "type": "Demand zone",
+      "position": [
+        8,
+        5,
+        0
+      ],
+      "sourceTerms": [
+        {
+          "id": 116,
+          "state": "backlog",
+          "expression": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 112,
+              "name": "Zone 1 demand",
+              "symbol": "baseDemand",
+              "value": 30,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 111
+            },
+            {
+              "id": 113,
+              "name": "Demand step multiplier",
+              "symbol": "stepMultiplier",
+              "value": 1,
+              "unit": "",
+              "mode": "constant",
+              "sharedParameterId": 14
+            },
+            {
+              "id": 114,
+              "name": "Demand step day",
+              "symbol": "stepDay",
+              "value": 20,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 13
+            },
+            {
+              "id": 115,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 107,
+                "stateId": 108,
+                "symbol": "backlog"
+              },
+              {
+                "kind": "state",
+                "nodeId": 107,
+                "stateId": 109,
+                "symbol": "delivered"
+              },
+              {
+                "kind": "state",
+                "nodeId": 107,
+                "stateId": 110,
+                "symbol": "ordered"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 112,
+                "symbol": "baseDemand"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 113,
+                "symbol": "stepMultiplier"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 114,
+                "symbol": "stepDay"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 115,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 108
+            },
+            "mathJson": [
+              "Divide",
+              [
+                "Multiply",
+                "baseDemand",
+                [
+                  "Which",
+                  [
+                    "LessEqual",
+                    [
+                      "Multiply",
+                      "secondsPerDay",
+                      "stepDay"
+                    ],
+                    "t"
+                  ],
+                  "stepMultiplier",
+                  "True",
+                  1
+                ]
+              ],
+              "secondsPerDay"
+            ]
+          }
+        },
+        {
+          "id": 121,
+          "state": "ordered",
+          "expression": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 117,
+              "name": "Zone 1 demand",
+              "symbol": "baseDemand",
+              "value": 30,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 111
+            },
+            {
+              "id": 118,
+              "name": "Demand step multiplier",
+              "symbol": "stepMultiplier",
+              "value": 1,
+              "unit": "",
+              "mode": "constant",
+              "sharedParameterId": 14
+            },
+            {
+              "id": 119,
+              "name": "Demand step day",
+              "symbol": "stepDay",
+              "value": 20,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 13
+            },
+            {
+              "id": 120,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 107,
+                "stateId": 108,
+                "symbol": "backlog"
+              },
+              {
+                "kind": "state",
+                "nodeId": 107,
+                "stateId": 109,
+                "symbol": "delivered"
+              },
+              {
+                "kind": "state",
+                "nodeId": 107,
+                "stateId": 110,
+                "symbol": "ordered"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 117,
+                "symbol": "baseDemand"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 118,
+                "symbol": "stepMultiplier"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 119,
+                "symbol": "stepDay"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 120,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 110
+            },
+            "mathJson": [
+              "Divide",
+              [
+                "Multiply",
+                "baseDemand",
+                [
+                  "Which",
+                  [
+                    "LessEqual",
+                    [
+                      "Multiply",
+                      "secondsPerDay",
+                      "stepDay"
+                    ],
+                    "t"
+                  ],
+                  "stepMultiplier",
+                  "True",
+                  1
+                ]
+              ],
+              "secondsPerDay"
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "id": 108,
+          "name": "Backlog",
+          "symbol": "backlog",
+          "initialValue": 15,
+          "unit": "TEU"
+        },
+        {
+          "id": 109,
+          "name": "Delivered (cumulative)",
+          "symbol": "delivered",
+          "initialValue": 0,
+          "unit": "TEU"
+        },
+        {
+          "id": 110,
+          "name": "Ordered (cumulative)",
+          "symbol": "ordered",
+          "initialValue": 0,
+          "unit": "TEU"
+        }
+      ],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#52727a"
+      }
+    },
+    {
+      "id": 138,
+      "name": "Zone 2",
+      "type": "Demand zone",
+      "position": [
+        8,
+        1,
+        0
+      ],
+      "sourceTerms": [
+        {
+          "id": 147,
+          "state": "backlog",
+          "expression": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 143,
+              "name": "Zone 2 demand",
+              "symbol": "baseDemand",
+              "value": 40,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 142
+            },
+            {
+              "id": 144,
+              "name": "Demand step multiplier",
+              "symbol": "stepMultiplier",
+              "value": 1,
+              "unit": "",
+              "mode": "constant",
+              "sharedParameterId": 14
+            },
+            {
+              "id": 145,
+              "name": "Demand step day",
+              "symbol": "stepDay",
+              "value": 20,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 13
+            },
+            {
+              "id": 146,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 138,
+                "stateId": 139,
+                "symbol": "backlog"
+              },
+              {
+                "kind": "state",
+                "nodeId": 138,
+                "stateId": 140,
+                "symbol": "delivered"
+              },
+              {
+                "kind": "state",
+                "nodeId": 138,
+                "stateId": 141,
+                "symbol": "ordered"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 143,
+                "symbol": "baseDemand"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 144,
+                "symbol": "stepMultiplier"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 145,
+                "symbol": "stepDay"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 146,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 139
+            },
+            "mathJson": [
+              "Divide",
+              [
+                "Multiply",
+                "baseDemand",
+                [
+                  "Which",
+                  [
+                    "LessEqual",
+                    [
+                      "Multiply",
+                      "secondsPerDay",
+                      "stepDay"
+                    ],
+                    "t"
+                  ],
+                  "stepMultiplier",
+                  "True",
+                  1
+                ]
+              ],
+              "secondsPerDay"
+            ]
+          }
+        },
+        {
+          "id": 152,
+          "state": "ordered",
+          "expression": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 148,
+              "name": "Zone 2 demand",
+              "symbol": "baseDemand",
+              "value": 40,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 142
+            },
+            {
+              "id": 149,
+              "name": "Demand step multiplier",
+              "symbol": "stepMultiplier",
+              "value": 1,
+              "unit": "",
+              "mode": "constant",
+              "sharedParameterId": 14
+            },
+            {
+              "id": 150,
+              "name": "Demand step day",
+              "symbol": "stepDay",
+              "value": 20,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 13
+            },
+            {
+              "id": 151,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 138,
+                "stateId": 139,
+                "symbol": "backlog"
+              },
+              {
+                "kind": "state",
+                "nodeId": 138,
+                "stateId": 140,
+                "symbol": "delivered"
+              },
+              {
+                "kind": "state",
+                "nodeId": 138,
+                "stateId": 141,
+                "symbol": "ordered"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 148,
+                "symbol": "baseDemand"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 149,
+                "symbol": "stepMultiplier"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 150,
+                "symbol": "stepDay"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 151,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 141
+            },
+            "mathJson": [
+              "Divide",
+              [
+                "Multiply",
+                "baseDemand",
+                [
+                  "Which",
+                  [
+                    "LessEqual",
+                    [
+                      "Multiply",
+                      "secondsPerDay",
+                      "stepDay"
+                    ],
+                    "t"
+                  ],
+                  "stepMultiplier",
+                  "True",
+                  1
+                ]
+              ],
+              "secondsPerDay"
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "id": 139,
+          "name": "Backlog",
+          "symbol": "backlog",
+          "initialValue": 20,
+          "unit": "TEU"
+        },
+        {
+          "id": 140,
+          "name": "Delivered (cumulative)",
+          "symbol": "delivered",
+          "initialValue": 0,
+          "unit": "TEU"
+        },
+        {
+          "id": 141,
+          "name": "Ordered (cumulative)",
+          "symbol": "ordered",
+          "initialValue": 0,
+          "unit": "TEU"
+        }
+      ],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#52727a"
+      }
+    },
+    {
+      "id": 171,
+      "name": "Zone 3",
+      "type": "Demand zone",
+      "position": [
+        8,
+        -3,
+        0
+      ],
+      "sourceTerms": [
+        {
+          "id": 180,
+          "state": "backlog",
+          "expression": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 176,
+              "name": "Zone 3 demand",
+              "symbol": "baseDemand",
+              "value": 30,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 175
+            },
+            {
+              "id": 177,
+              "name": "Demand step multiplier",
+              "symbol": "stepMultiplier",
+              "value": 1,
+              "unit": "",
+              "mode": "constant",
+              "sharedParameterId": 14
+            },
+            {
+              "id": 178,
+              "name": "Demand step day",
+              "symbol": "stepDay",
+              "value": 20,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 13
+            },
+            {
+              "id": 179,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 171,
+                "stateId": 172,
+                "symbol": "backlog"
+              },
+              {
+                "kind": "state",
+                "nodeId": 171,
+                "stateId": 173,
+                "symbol": "delivered"
+              },
+              {
+                "kind": "state",
+                "nodeId": 171,
+                "stateId": 174,
+                "symbol": "ordered"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 176,
+                "symbol": "baseDemand"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 177,
+                "symbol": "stepMultiplier"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 178,
+                "symbol": "stepDay"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 179,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 172
+            },
+            "mathJson": [
+              "Divide",
+              [
+                "Multiply",
+                "baseDemand",
+                [
+                  "Which",
+                  [
+                    "LessEqual",
+                    [
+                      "Multiply",
+                      "secondsPerDay",
+                      "stepDay"
+                    ],
+                    "t"
+                  ],
+                  "stepMultiplier",
+                  "True",
+                  1
+                ]
+              ],
+              "secondsPerDay"
+            ]
+          }
+        },
+        {
+          "id": 185,
+          "state": "ordered",
+          "expression": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+          "parameters": [
+            {
+              "id": 181,
+              "name": "Zone 3 demand",
+              "symbol": "baseDemand",
+              "value": 30,
+              "unit": "TEU/day",
+              "mode": "constant",
+              "sharedParameterId": 175
+            },
+            {
+              "id": 182,
+              "name": "Demand step multiplier",
+              "symbol": "stepMultiplier",
+              "value": 1,
+              "unit": "",
+              "mode": "constant",
+              "sharedParameterId": 14
+            },
+            {
+              "id": 183,
+              "name": "Demand step day",
+              "symbol": "stepDay",
+              "value": 20,
+              "unit": "day",
+              "mode": "constant",
+              "sharedParameterId": 13
+            },
+            {
+              "id": 184,
+              "name": "Seconds per day",
+              "symbol": "secondsPerDay",
+              "value": 86400,
+              "unit": "s/day",
+              "mode": "constant",
+              "sharedParameterId": 1
+            }
+          ],
+          "expressionModel": {
+            "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay}}",
+            "bindings": [
+              {
+                "kind": "state",
+                "nodeId": 171,
+                "stateId": 172,
+                "symbol": "backlog"
+              },
+              {
+                "kind": "state",
+                "nodeId": 171,
+                "stateId": 173,
+                "symbol": "delivered"
+              },
+              {
+                "kind": "state",
+                "nodeId": 171,
+                "stateId": 174,
+                "symbol": "ordered"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 181,
+                "symbol": "baseDemand"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 182,
+                "symbol": "stepMultiplier"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 183,
+                "symbol": "stepDay"
+              },
+              {
+                "kind": "parameter",
+                "parameterId": 184,
+                "symbol": "secondsPerDay"
+              },
+              {
+                "kind": "time",
+                "symbol": "t",
+                "label": "t (time)"
+              }
+            ],
+            "output": {
+              "stateId": 174
+            },
+            "mathJson": [
+              "Divide",
+              [
+                "Multiply",
+                "baseDemand",
+                [
+                  "Which",
+                  [
+                    "LessEqual",
+                    [
+                      "Multiply",
+                      "secondsPerDay",
+                      "stepDay"
+                    ],
+                    "t"
+                  ],
+                  "stepMultiplier",
+                  "True",
+                  1
+                ]
+              ],
+              "secondsPerDay"
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "id": 172,
+          "name": "Backlog",
+          "symbol": "backlog",
+          "initialValue": 15,
+          "unit": "TEU"
+        },
+        {
+          "id": 173,
+          "name": "Delivered (cumulative)",
+          "symbol": "delivered",
+          "initialValue": 0,
+          "unit": "TEU"
+        },
+        {
+          "id": 174,
+          "name": "Ordered (cumulative)",
+          "symbol": "ordered",
+          "initialValue": 0,
+          "unit": "TEU"
+        }
+      ],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#52727a"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": 94,
+      "name": "Dispatch to Warehouse A",
+      "source": {
+        "nodeId": 15,
+        "stateId": 16
+      },
+      "target": {
+        "nodeId": 20,
+        "stateId": 22
+      },
+      "directionality": "bidirectional",
+      "equation": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\begin{cases} \\mathrm{targetForecast} + \\frac{\\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays}) - (\\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3})}{\\mathrm{adjustDays}} & \\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3} < \\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays} + \\mathrm{adjustDays}) \\\\ 0 & \\text{otherwise} \\end{cases}, \\min(\\mathrm{gateShare} \\cdot \\begin{cases} \\mathrm{outageCapacity} & \\mathrm{outageStart} \\cdot \\mathrm{secondsPerDay} \\le t < \\mathrm{outageEnd} \\cdot \\mathrm{secondsPerDay} \\\\ \\mathrm{gateCapacity} & \\text{otherwise} \\end{cases}, \\frac{\\mathrm{gateShare} \\cdot \\mathrm{sourceYard}}{\\mathrm{yardDrainDays}}))",
+      "equationModel": {
+        "latex": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\begin{cases} \\mathrm{targetForecast} + \\frac{\\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays}) - (\\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3})}{\\mathrm{adjustDays}} & \\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3} < \\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays} + \\mathrm{adjustDays}) \\\\ 0 & \\text{otherwise} \\end{cases}, \\min(\\mathrm{gateShare} \\cdot \\begin{cases} \\mathrm{outageCapacity} & \\mathrm{outageStart} \\cdot \\mathrm{secondsPerDay} \\le t < \\mathrm{outageEnd} \\cdot \\mathrm{secondsPerDay} \\\\ \\mathrm{gateCapacity} & \\text{otherwise} \\end{cases}, \\frac{\\mathrm{gateShare} \\cdot \\mathrm{sourceYard}}{\\mathrm{yardDrainDays}}))",
+        "output": {
+          "role": "target",
+          "stateId": 22
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 15,
+            "stateId": 16,
+            "symbol": "sourceYard",
+            "label": "source.yard"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "targetOnHand",
+            "label": "target.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "targetLane1",
+            "label": "target.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "targetLane2",
+            "label": "target.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "targetLane3",
+            "label": "target.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "targetForecast",
+            "label": "target.forecast"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 84,
+            "symbol": "gateShare",
+            "label": "gateShare"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 85,
+            "symbol": "leadTime",
+            "label": "leadTime"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 86,
+            "symbol": "coverDays",
+            "label": "coverDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 87,
+            "symbol": "adjustDays",
+            "label": "adjustDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 88,
+            "symbol": "gateCapacity",
+            "label": "gateCapacity"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 89,
+            "symbol": "outageCapacity",
+            "label": "outageCapacity"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 90,
+            "symbol": "outageStart",
+            "label": "outageStart"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 91,
+            "symbol": "outageEnd",
+            "label": "outageEnd"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 92,
+            "symbol": "yardDrainDays",
+            "label": "yardDrainDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 93,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          [
+            "Divide",
+            1,
+            "secondsPerDay"
+          ],
+          [
+            "Min",
+            [
+              "Which",
+              [
+                "Less",
+                [
+                  "Add",
+                  "targetLane1",
+                  "targetLane2",
+                  "targetLane3",
+                  "targetOnHand"
+                ],
+                [
+                  "Multiply",
+                  "targetForecast",
+                  [
+                    "Add",
+                    "adjustDays",
+                    "coverDays",
+                    "leadTime"
+                  ]
+                ]
+              ],
+              [
+                "Add",
+                [
+                  "Divide",
+                  [
+                    "Add",
+                    [
+                      "Multiply",
+                      "targetForecast",
+                      [
+                        "Add",
+                        "coverDays",
+                        "leadTime"
+                      ]
+                    ],
+                    [
+                      "Negate",
+                      "targetLane1"
+                    ],
+                    [
+                      "Negate",
+                      "targetLane2"
+                    ],
+                    [
+                      "Negate",
+                      "targetLane3"
+                    ],
+                    [
+                      "Negate",
+                      "targetOnHand"
+                    ]
+                  ],
+                  "adjustDays"
+                ],
+                "targetForecast"
+              ],
+              "True",
+              0
+            ],
+            [
+              "Min",
+              [
+                "Multiply",
+                "gateShare",
+                [
+                  "Which",
+                  [
+                    "And",
+                    [
+                      "LessEqual",
+                      [
+                        "Multiply",
+                        "outageStart",
+                        "secondsPerDay"
+                      ],
+                      "t"
+                    ],
+                    [
+                      "Less",
+                      "t",
+                      [
+                        "Multiply",
+                        "outageEnd",
+                        "secondsPerDay"
+                      ]
+                    ]
+                  ],
+                  "outageCapacity",
+                  "True",
+                  "gateCapacity"
+                ]
+              ],
+              [
+                "Divide",
+                [
+                  "Multiply",
+                  "gateShare",
+                  "sourceYard"
+                ],
+                "yardDrainDays"
+              ]
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 84,
+          "name": "Gate share",
+          "symbol": "gateShare",
+          "value": 0.7,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 85,
+          "name": "Warehouse A lead time",
+          "symbol": "leadTime",
+          "value": 2,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 26
+        },
+        {
+          "id": 86,
+          "name": "Stock cover target",
+          "symbol": "coverDays",
+          "value": 3,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 8
+        },
+        {
+          "id": 87,
+          "name": "Inventory adjustment time",
+          "symbol": "adjustDays",
+          "value": 4,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 9
+        },
+        {
+          "id": 88,
+          "name": "Gate capacity",
+          "symbol": "gateCapacity",
+          "value": 150,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 3
+        },
+        {
+          "id": 89,
+          "name": "Gate capacity during outage",
+          "symbol": "outageCapacity",
+          "value": 150,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 4
+        },
+        {
+          "id": 90,
+          "name": "Outage start",
+          "symbol": "outageStart",
+          "value": 20,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 5
+        },
+        {
+          "id": 91,
+          "name": "Outage end",
+          "symbol": "outageEnd",
+          "value": 50,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 6
+        },
+        {
+          "id": 92,
+          "name": "Yard drain time",
+          "symbol": "yardDrainDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 7
+        },
+        {
+          "id": 93,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#d98b54",
+        "offset": 0
+      }
+    },
+    {
+      "id": 105,
+      "name": "Dispatch to Warehouse B",
+      "source": {
+        "nodeId": 15,
+        "stateId": 16
+      },
+      "target": {
+        "nodeId": 52,
+        "stateId": 54
+      },
+      "directionality": "bidirectional",
+      "equation": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\begin{cases} \\mathrm{targetForecast} + \\frac{\\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays}) - (\\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3})}{\\mathrm{adjustDays}} & \\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3} < \\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays} + \\mathrm{adjustDays}) \\\\ 0 & \\text{otherwise} \\end{cases}, \\min(\\mathrm{gateShare} \\cdot \\begin{cases} \\mathrm{outageCapacity} & \\mathrm{outageStart} \\cdot \\mathrm{secondsPerDay} \\le t < \\mathrm{outageEnd} \\cdot \\mathrm{secondsPerDay} \\\\ \\mathrm{gateCapacity} & \\text{otherwise} \\end{cases}, \\frac{\\mathrm{gateShare} \\cdot \\mathrm{sourceYard}}{\\mathrm{yardDrainDays}}))",
+      "equationModel": {
+        "latex": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\begin{cases} \\mathrm{targetForecast} + \\frac{\\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays}) - (\\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3})}{\\mathrm{adjustDays}} & \\mathrm{targetOnHand} + \\mathrm{targetLane1} + \\mathrm{targetLane2} + \\mathrm{targetLane3} < \\mathrm{targetForecast} \\cdot (\\mathrm{leadTime} + \\mathrm{coverDays} + \\mathrm{adjustDays}) \\\\ 0 & \\text{otherwise} \\end{cases}, \\min(\\mathrm{gateShare} \\cdot \\begin{cases} \\mathrm{outageCapacity} & \\mathrm{outageStart} \\cdot \\mathrm{secondsPerDay} \\le t < \\mathrm{outageEnd} \\cdot \\mathrm{secondsPerDay} \\\\ \\mathrm{gateCapacity} & \\text{otherwise} \\end{cases}, \\frac{\\mathrm{gateShare} \\cdot \\mathrm{sourceYard}}{\\mathrm{yardDrainDays}}))",
+        "output": {
+          "role": "target",
+          "stateId": 54
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 15,
+            "stateId": 16,
+            "symbol": "sourceYard",
+            "label": "source.yard"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 53,
+            "symbol": "targetOnHand",
+            "label": "target.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 54,
+            "symbol": "targetLane1",
+            "label": "target.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 55,
+            "symbol": "targetLane2",
+            "label": "target.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 56,
+            "symbol": "targetLane3",
+            "label": "target.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 57,
+            "symbol": "targetForecast",
+            "label": "target.forecast"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 95,
+            "symbol": "gateShare",
+            "label": "gateShare"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 96,
+            "symbol": "leadTime",
+            "label": "leadTime"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 97,
+            "symbol": "coverDays",
+            "label": "coverDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 98,
+            "symbol": "adjustDays",
+            "label": "adjustDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 99,
+            "symbol": "gateCapacity",
+            "label": "gateCapacity"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 100,
+            "symbol": "outageCapacity",
+            "label": "outageCapacity"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 101,
+            "symbol": "outageStart",
+            "label": "outageStart"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 102,
+            "symbol": "outageEnd",
+            "label": "outageEnd"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 103,
+            "symbol": "yardDrainDays",
+            "label": "yardDrainDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 104,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          [
+            "Divide",
+            1,
+            "secondsPerDay"
+          ],
+          [
+            "Min",
+            [
+              "Which",
+              [
+                "Less",
+                [
+                  "Add",
+                  "targetLane1",
+                  "targetLane2",
+                  "targetLane3",
+                  "targetOnHand"
+                ],
+                [
+                  "Multiply",
+                  "targetForecast",
+                  [
+                    "Add",
+                    "adjustDays",
+                    "coverDays",
+                    "leadTime"
+                  ]
+                ]
+              ],
+              [
+                "Add",
+                [
+                  "Divide",
+                  [
+                    "Add",
+                    [
+                      "Multiply",
+                      "targetForecast",
+                      [
+                        "Add",
+                        "coverDays",
+                        "leadTime"
+                      ]
+                    ],
+                    [
+                      "Negate",
+                      "targetLane1"
+                    ],
+                    [
+                      "Negate",
+                      "targetLane2"
+                    ],
+                    [
+                      "Negate",
+                      "targetLane3"
+                    ],
+                    [
+                      "Negate",
+                      "targetOnHand"
+                    ]
+                  ],
+                  "adjustDays"
+                ],
+                "targetForecast"
+              ],
+              "True",
+              0
+            ],
+            [
+              "Min",
+              [
+                "Multiply",
+                "gateShare",
+                [
+                  "Which",
+                  [
+                    "And",
+                    [
+                      "LessEqual",
+                      [
+                        "Multiply",
+                        "outageStart",
+                        "secondsPerDay"
+                      ],
+                      "t"
+                    ],
+                    [
+                      "Less",
+                      "t",
+                      [
+                        "Multiply",
+                        "outageEnd",
+                        "secondsPerDay"
+                      ]
+                    ]
+                  ],
+                  "outageCapacity",
+                  "True",
+                  "gateCapacity"
+                ]
+              ],
+              [
+                "Divide",
+                [
+                  "Multiply",
+                  "gateShare",
+                  "sourceYard"
+                ],
+                "yardDrainDays"
+              ]
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 95,
+          "name": "Gate share",
+          "symbol": "gateShare",
+          "value": 0.3,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 96,
+          "name": "Warehouse B lead time",
+          "symbol": "leadTime",
+          "value": 3,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 58
+        },
+        {
+          "id": 97,
+          "name": "Stock cover target",
+          "symbol": "coverDays",
+          "value": 3,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 8
+        },
+        {
+          "id": 98,
+          "name": "Inventory adjustment time",
+          "symbol": "adjustDays",
+          "value": 4,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 9
+        },
+        {
+          "id": 99,
+          "name": "Gate capacity",
+          "symbol": "gateCapacity",
+          "value": 150,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 3
+        },
+        {
+          "id": 100,
+          "name": "Gate capacity during outage",
+          "symbol": "outageCapacity",
+          "value": 150,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 4
+        },
+        {
+          "id": 101,
+          "name": "Outage start",
+          "symbol": "outageStart",
+          "value": 20,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 5
+        },
+        {
+          "id": 102,
+          "name": "Outage end",
+          "symbol": "outageEnd",
+          "value": 50,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 6
+        },
+        {
+          "id": 103,
+          "name": "Yard drain time",
+          "symbol": "yardDrainDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 7
+        },
+        {
+          "id": 104,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#d98b54",
+        "offset": 0
+      }
+    },
+    {
+      "id": 126,
+      "name": "Deliver A to Zone 1",
+      "source": {
+        "nodeId": 20,
+        "stateId": 21
+      },
+      "target": {
+        "nodeId": 107,
+        "stateId": 109
+      },
+      "directionality": "bidirectional",
+      "equation": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+      "equationModel": {
+        "latex": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+        "output": {
+          "role": "target",
+          "stateId": 109
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "sourceOnHand",
+            "label": "source.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "sourceLane1",
+            "label": "source.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "sourceLane2",
+            "label": "source.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "sourceLane3",
+            "label": "source.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "sourceForecast",
+            "label": "source.forecast"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 107,
+            "stateId": 108,
+            "symbol": "targetBacklog",
+            "label": "target.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 107,
+            "stateId": 109,
+            "symbol": "targetDelivered",
+            "label": "target.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 107,
+            "stateId": 110,
+            "symbol": "targetOrdered",
+            "label": "target.ordered"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 122,
+            "symbol": "share",
+            "label": "share"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 123,
+            "symbol": "responseDays",
+            "label": "responseDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 124,
+            "symbol": "drawDownDays",
+            "label": "drawDownDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 125,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          [
+            "Divide",
+            1,
+            "secondsPerDay"
+          ],
+          [
+            "Min",
+            [
+              "Divide",
+              "targetBacklog",
+              "responseDays"
+            ],
+            [
+              "Divide",
+              [
+                "Multiply",
+                "share",
+                "sourceOnHand"
+              ],
+              "drawDownDays"
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 122,
+          "name": "Allocation share",
+          "symbol": "share",
+          "value": 0.5,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 123,
+          "name": "Order response time",
+          "symbol": "responseDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 11
+        },
+        {
+          "id": 124,
+          "name": "Stock draw-down time",
+          "symbol": "drawDownDays",
+          "value": 1,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 12
+        },
+        {
+          "id": 125,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#73b9c2",
+        "offset": 0
+      }
+    },
+    {
+      "id": 131,
+      "name": "Clear Zone 1 backlog",
+      "source": {
+        "nodeId": 20,
+        "stateId": 21
+      },
+      "target": {
+        "nodeId": 107,
+        "stateId": 108
+      },
+      "directionality": "directed",
+      "equation": "-\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+      "equationModel": {
+        "latex": "-\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+        "output": {
+          "role": "target",
+          "stateId": 108
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "sourceOnHand",
+            "label": "source.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "sourceLane1",
+            "label": "source.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "sourceLane2",
+            "label": "source.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "sourceLane3",
+            "label": "source.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "sourceForecast",
+            "label": "source.forecast"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 107,
+            "stateId": 108,
+            "symbol": "targetBacklog",
+            "label": "target.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 107,
+            "stateId": 109,
+            "symbol": "targetDelivered",
+            "label": "target.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 107,
+            "stateId": 110,
+            "symbol": "targetOrdered",
+            "label": "target.ordered"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 127,
+            "symbol": "share",
+            "label": "share"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 128,
+            "symbol": "responseDays",
+            "label": "responseDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 129,
+            "symbol": "drawDownDays",
+            "label": "drawDownDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 130,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            [
+              "Divide",
+              1,
+              "secondsPerDay"
+            ],
+            [
+              "Min",
+              [
+                "Divide",
+                "targetBacklog",
+                "responseDays"
+              ],
+              [
+                "Divide",
+                [
+                  "Multiply",
+                  "share",
+                  "sourceOnHand"
+                ],
+                "drawDownDays"
+              ]
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 127,
+          "name": "Allocation share",
+          "symbol": "share",
+          "value": 0.5,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 128,
+          "name": "Order response time",
+          "symbol": "responseDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 11
+        },
+        {
+          "id": 129,
+          "name": "Stock draw-down time",
+          "symbol": "drawDownDays",
+          "value": 1,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 12
+        },
+        {
+          "id": 130,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#73b9c2",
+        "offset": 0
+      }
+    },
+    {
+      "id": 137,
+      "name": "Zone 1 demand signal",
+      "source": {
+        "nodeId": 107,
+        "stateId": 108
+      },
+      "target": {
+        "nodeId": 20,
+        "stateId": 25
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+        "output": {
+          "role": "target",
+          "stateId": 25
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 107,
+            "stateId": 108,
+            "symbol": "sourceBacklog",
+            "label": "source.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 107,
+            "stateId": 109,
+            "symbol": "sourceDelivered",
+            "label": "source.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 107,
+            "stateId": 110,
+            "symbol": "sourceOrdered",
+            "label": "source.ordered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "targetOnHand",
+            "label": "target.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "targetLane1",
+            "label": "target.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "targetLane2",
+            "label": "target.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "targetLane3",
+            "label": "target.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "targetForecast",
+            "label": "target.forecast"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 132,
+            "symbol": "baseDemand",
+            "label": "baseDemand"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 133,
+            "symbol": "stepMultiplier",
+            "label": "stepMultiplier"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 134,
+            "symbol": "stepDay",
+            "label": "stepDay"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 135,
+            "symbol": "smoothingDays",
+            "label": "smoothingDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 136,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          [
+            "Multiply",
+            "baseDemand",
+            [
+              "Which",
+              [
+                "LessEqual",
+                [
+                  "Multiply",
+                  "secondsPerDay",
+                  "stepDay"
+                ],
+                "t"
+              ],
+              "stepMultiplier",
+              "True",
+              1
+            ]
+          ],
+          [
+            "Multiply",
+            "secondsPerDay",
+            "smoothingDays"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 132,
+          "name": "Zone 1 demand",
+          "symbol": "baseDemand",
+          "value": 30,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 111
+        },
+        {
+          "id": 133,
+          "name": "Demand step multiplier",
+          "symbol": "stepMultiplier",
+          "value": 1,
+          "unit": "",
+          "mode": "constant",
+          "sharedParameterId": 14
+        },
+        {
+          "id": 134,
+          "name": "Demand step day",
+          "symbol": "stepDay",
+          "value": 20,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 13
+        },
+        {
+          "id": 135,
+          "name": "Demand smoothing time",
+          "symbol": "smoothingDays",
+          "value": 5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 10
+        },
+        {
+          "id": 136,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#8aa0a8",
+        "offset": 0
+      }
+    },
+    {
+      "id": 158,
+      "name": "Deliver A to Zone 2",
+      "source": {
+        "nodeId": 20,
+        "stateId": 21
+      },
+      "target": {
+        "nodeId": 138,
+        "stateId": 140
+      },
+      "directionality": "bidirectional",
+      "equation": "\\begin{cases} \\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}}) & \\mathrm{sourceOnHand} > \\mathrm{safetyStock} \\\\ 0 & \\text{otherwise} \\end{cases}",
+      "equationModel": {
+        "latex": "\\begin{cases} \\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}}) & \\mathrm{sourceOnHand} > \\mathrm{safetyStock} \\\\ 0 & \\text{otherwise} \\end{cases}",
+        "output": {
+          "role": "target",
+          "stateId": 140
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "sourceOnHand",
+            "label": "source.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "sourceLane1",
+            "label": "source.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "sourceLane2",
+            "label": "source.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "sourceLane3",
+            "label": "source.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "sourceForecast",
+            "label": "source.forecast"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 138,
+            "stateId": 139,
+            "symbol": "targetBacklog",
+            "label": "target.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 138,
+            "stateId": 140,
+            "symbol": "targetDelivered",
+            "label": "target.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 138,
+            "stateId": 141,
+            "symbol": "targetOrdered",
+            "label": "target.ordered"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 153,
+            "symbol": "share",
+            "label": "share"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 154,
+            "symbol": "responseDays",
+            "label": "responseDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 155,
+            "symbol": "drawDownDays",
+            "label": "drawDownDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 156,
+            "symbol": "safetyStock",
+            "label": "safetyStock"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 157,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Which",
+          [
+            "Less",
+            "safetyStock",
+            "sourceOnHand"
+          ],
+          [
+            "Multiply",
+            [
+              "Divide",
+              1,
+              "secondsPerDay"
+            ],
+            [
+              "Min",
+              [
+                "Divide",
+                "targetBacklog",
+                "responseDays"
+              ],
+              [
+                "Divide",
+                [
+                  "Multiply",
+                  "share",
+                  "sourceOnHand"
+                ],
+                "drawDownDays"
+              ]
+            ]
+          ],
+          "True",
+          0
+        ]
+      },
+      "parameters": [
+        {
+          "id": 153,
+          "name": "Allocation share",
+          "symbol": "share",
+          "value": 0.5,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 154,
+          "name": "Order response time",
+          "symbol": "responseDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 11
+        },
+        {
+          "id": 155,
+          "name": "Stock draw-down time",
+          "symbol": "drawDownDays",
+          "value": 1,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 12
+        },
+        {
+          "id": 156,
+          "name": "Warehouse A safety stock",
+          "symbol": "safetyStock",
+          "value": 60,
+          "unit": "TEU",
+          "mode": "constant",
+          "sharedParameterId": 106
+        },
+        {
+          "id": 157,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#73b9c2",
+        "offset": 0
+      }
+    },
+    {
+      "id": 164,
+      "name": "Clear Zone 2 backlog",
+      "source": {
+        "nodeId": 20,
+        "stateId": 21
+      },
+      "target": {
+        "nodeId": 138,
+        "stateId": 139
+      },
+      "directionality": "directed",
+      "equation": "-(\\begin{cases} \\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}}) & \\mathrm{sourceOnHand} > \\mathrm{safetyStock} \\\\ 0 & \\text{otherwise} \\end{cases})",
+      "equationModel": {
+        "latex": "-(\\begin{cases} \\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}}) & \\mathrm{sourceOnHand} > \\mathrm{safetyStock} \\\\ 0 & \\text{otherwise} \\end{cases})",
+        "output": {
+          "role": "target",
+          "stateId": 139
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "sourceOnHand",
+            "label": "source.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "sourceLane1",
+            "label": "source.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "sourceLane2",
+            "label": "source.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "sourceLane3",
+            "label": "source.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "sourceForecast",
+            "label": "source.forecast"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 138,
+            "stateId": 139,
+            "symbol": "targetBacklog",
+            "label": "target.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 138,
+            "stateId": 140,
+            "symbol": "targetDelivered",
+            "label": "target.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 138,
+            "stateId": 141,
+            "symbol": "targetOrdered",
+            "label": "target.ordered"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 159,
+            "symbol": "share",
+            "label": "share"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 160,
+            "symbol": "responseDays",
+            "label": "responseDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 161,
+            "symbol": "drawDownDays",
+            "label": "drawDownDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 162,
+            "symbol": "safetyStock",
+            "label": "safetyStock"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 163,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Which",
+            [
+              "Less",
+              "safetyStock",
+              "sourceOnHand"
+            ],
+            [
+              "Multiply",
+              [
+                "Divide",
+                1,
+                "secondsPerDay"
+              ],
+              [
+                "Min",
+                [
+                  "Divide",
+                  "targetBacklog",
+                  "responseDays"
+                ],
+                [
+                  "Divide",
+                  [
+                    "Multiply",
+                    "share",
+                    "sourceOnHand"
+                  ],
+                  "drawDownDays"
+                ]
+              ]
+            ],
+            "True",
+            0
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 159,
+          "name": "Allocation share",
+          "symbol": "share",
+          "value": 0.5,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 160,
+          "name": "Order response time",
+          "symbol": "responseDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 11
+        },
+        {
+          "id": 161,
+          "name": "Stock draw-down time",
+          "symbol": "drawDownDays",
+          "value": 1,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 12
+        },
+        {
+          "id": 162,
+          "name": "Warehouse A safety stock",
+          "symbol": "safetyStock",
+          "value": 60,
+          "unit": "TEU",
+          "mode": "constant",
+          "sharedParameterId": 106
+        },
+        {
+          "id": 163,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#73b9c2",
+        "offset": 0
+      }
+    },
+    {
+      "id": 170,
+      "name": "Zone 2 demand signal",
+      "source": {
+        "nodeId": 138,
+        "stateId": 139
+      },
+      "target": {
+        "nodeId": 20,
+        "stateId": 25
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+        "output": {
+          "role": "target",
+          "stateId": 25
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 138,
+            "stateId": 139,
+            "symbol": "sourceBacklog",
+            "label": "source.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 138,
+            "stateId": 140,
+            "symbol": "sourceDelivered",
+            "label": "source.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 138,
+            "stateId": 141,
+            "symbol": "sourceOrdered",
+            "label": "source.ordered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 21,
+            "symbol": "targetOnHand",
+            "label": "target.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 22,
+            "symbol": "targetLane1",
+            "label": "target.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 23,
+            "symbol": "targetLane2",
+            "label": "target.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 24,
+            "symbol": "targetLane3",
+            "label": "target.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 20,
+            "stateId": 25,
+            "symbol": "targetForecast",
+            "label": "target.forecast"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 165,
+            "symbol": "baseDemand",
+            "label": "baseDemand"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 166,
+            "symbol": "stepMultiplier",
+            "label": "stepMultiplier"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 167,
+            "symbol": "stepDay",
+            "label": "stepDay"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 168,
+            "symbol": "smoothingDays",
+            "label": "smoothingDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 169,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          [
+            "Multiply",
+            "baseDemand",
+            [
+              "Which",
+              [
+                "LessEqual",
+                [
+                  "Multiply",
+                  "secondsPerDay",
+                  "stepDay"
+                ],
+                "t"
+              ],
+              "stepMultiplier",
+              "True",
+              1
+            ]
+          ],
+          [
+            "Multiply",
+            "secondsPerDay",
+            "smoothingDays"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 165,
+          "name": "Zone 2 demand",
+          "symbol": "baseDemand",
+          "value": 40,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 142
+        },
+        {
+          "id": 166,
+          "name": "Demand step multiplier",
+          "symbol": "stepMultiplier",
+          "value": 1,
+          "unit": "",
+          "mode": "constant",
+          "sharedParameterId": 14
+        },
+        {
+          "id": 167,
+          "name": "Demand step day",
+          "symbol": "stepDay",
+          "value": 20,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 13
+        },
+        {
+          "id": 168,
+          "name": "Demand smoothing time",
+          "symbol": "smoothingDays",
+          "value": 5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 10
+        },
+        {
+          "id": 169,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#8aa0a8",
+        "offset": 0
+      }
+    },
+    {
+      "id": 190,
+      "name": "Deliver B to Zone 3",
+      "source": {
+        "nodeId": 52,
+        "stateId": 53
+      },
+      "target": {
+        "nodeId": 171,
+        "stateId": 173
+      },
+      "directionality": "bidirectional",
+      "equation": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+      "equationModel": {
+        "latex": "\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+        "output": {
+          "role": "target",
+          "stateId": 173
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 53,
+            "symbol": "sourceOnHand",
+            "label": "source.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 54,
+            "symbol": "sourceLane1",
+            "label": "source.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 55,
+            "symbol": "sourceLane2",
+            "label": "source.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 56,
+            "symbol": "sourceLane3",
+            "label": "source.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 57,
+            "symbol": "sourceForecast",
+            "label": "source.forecast"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 171,
+            "stateId": 172,
+            "symbol": "targetBacklog",
+            "label": "target.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 171,
+            "stateId": 173,
+            "symbol": "targetDelivered",
+            "label": "target.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 171,
+            "stateId": 174,
+            "symbol": "targetOrdered",
+            "label": "target.ordered"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 186,
+            "symbol": "share",
+            "label": "share"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 187,
+            "symbol": "responseDays",
+            "label": "responseDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 188,
+            "symbol": "drawDownDays",
+            "label": "drawDownDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 189,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          [
+            "Divide",
+            1,
+            "secondsPerDay"
+          ],
+          [
+            "Min",
+            [
+              "Divide",
+              "targetBacklog",
+              "responseDays"
+            ],
+            [
+              "Divide",
+              [
+                "Multiply",
+                "share",
+                "sourceOnHand"
+              ],
+              "drawDownDays"
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 186,
+          "name": "Allocation share",
+          "symbol": "share",
+          "value": 1,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 187,
+          "name": "Order response time",
+          "symbol": "responseDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 11
+        },
+        {
+          "id": 188,
+          "name": "Stock draw-down time",
+          "symbol": "drawDownDays",
+          "value": 1,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 12
+        },
+        {
+          "id": 189,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#73b9c2",
+        "offset": 0
+      }
+    },
+    {
+      "id": 195,
+      "name": "Clear Zone 3 backlog",
+      "source": {
+        "nodeId": 52,
+        "stateId": 53
+      },
+      "target": {
+        "nodeId": 171,
+        "stateId": 172
+      },
+      "directionality": "directed",
+      "equation": "-\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+      "equationModel": {
+        "latex": "-\\frac{1}{\\mathrm{secondsPerDay}} \\cdot \\min(\\frac{\\mathrm{targetBacklog}}{\\mathrm{responseDays}}, \\frac{\\mathrm{share} \\cdot \\mathrm{sourceOnHand}}{\\mathrm{drawDownDays}})",
+        "output": {
+          "role": "target",
+          "stateId": 172
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 53,
+            "symbol": "sourceOnHand",
+            "label": "source.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 54,
+            "symbol": "sourceLane1",
+            "label": "source.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 55,
+            "symbol": "sourceLane2",
+            "label": "source.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 56,
+            "symbol": "sourceLane3",
+            "label": "source.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 52,
+            "stateId": 57,
+            "symbol": "sourceForecast",
+            "label": "source.forecast"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 171,
+            "stateId": 172,
+            "symbol": "targetBacklog",
+            "label": "target.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 171,
+            "stateId": 173,
+            "symbol": "targetDelivered",
+            "label": "target.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 171,
+            "stateId": 174,
+            "symbol": "targetOrdered",
+            "label": "target.ordered"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 191,
+            "symbol": "share",
+            "label": "share"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 192,
+            "symbol": "responseDays",
+            "label": "responseDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 193,
+            "symbol": "drawDownDays",
+            "label": "drawDownDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 194,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            [
+              "Divide",
+              1,
+              "secondsPerDay"
+            ],
+            [
+              "Min",
+              [
+                "Divide",
+                "targetBacklog",
+                "responseDays"
+              ],
+              [
+                "Divide",
+                [
+                  "Multiply",
+                  "share",
+                  "sourceOnHand"
+                ],
+                "drawDownDays"
+              ]
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 191,
+          "name": "Allocation share",
+          "symbol": "share",
+          "value": 1,
+          "unit": "",
+          "mode": "constant"
+        },
+        {
+          "id": 192,
+          "name": "Order response time",
+          "symbol": "responseDays",
+          "value": 0.5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 11
+        },
+        {
+          "id": 193,
+          "name": "Stock draw-down time",
+          "symbol": "drawDownDays",
+          "value": 1,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 12
+        },
+        {
+          "id": 194,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#73b9c2",
+        "offset": 0
+      }
+    },
+    {
+      "id": 201,
+      "name": "Zone 3 demand signal",
+      "source": {
+        "nodeId": 171,
+        "stateId": 172
+      },
+      "target": {
+        "nodeId": 52,
+        "stateId": 57
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{baseDemand} \\cdot \\begin{cases} \\mathrm{stepMultiplier} & t \\ge \\mathrm{stepDay} \\cdot \\mathrm{secondsPerDay} \\\\ 1 & \\text{otherwise} \\end{cases}}{\\mathrm{secondsPerDay} \\cdot \\mathrm{smoothingDays}}",
+        "output": {
+          "role": "target",
+          "stateId": 57
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 171,
+            "stateId": 172,
+            "symbol": "sourceBacklog",
+            "label": "source.backlog"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 171,
+            "stateId": 173,
+            "symbol": "sourceDelivered",
+            "label": "source.delivered"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 171,
+            "stateId": 174,
+            "symbol": "sourceOrdered",
+            "label": "source.ordered"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 53,
+            "symbol": "targetOnHand",
+            "label": "target.onHand"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 54,
+            "symbol": "targetLane1",
+            "label": "target.lane1"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 55,
+            "symbol": "targetLane2",
+            "label": "target.lane2"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 56,
+            "symbol": "targetLane3",
+            "label": "target.lane3"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 52,
+            "stateId": 57,
+            "symbol": "targetForecast",
+            "label": "target.forecast"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 196,
+            "symbol": "baseDemand",
+            "label": "baseDemand"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 197,
+            "symbol": "stepMultiplier",
+            "label": "stepMultiplier"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 198,
+            "symbol": "stepDay",
+            "label": "stepDay"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 199,
+            "symbol": "smoothingDays",
+            "label": "smoothingDays"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 200,
+            "symbol": "secondsPerDay",
+            "label": "secondsPerDay"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          [
+            "Multiply",
+            "baseDemand",
+            [
+              "Which",
+              [
+                "LessEqual",
+                [
+                  "Multiply",
+                  "secondsPerDay",
+                  "stepDay"
+                ],
+                "t"
+              ],
+              "stepMultiplier",
+              "True",
+              1
+            ]
+          ],
+          [
+            "Multiply",
+            "secondsPerDay",
+            "smoothingDays"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "id": 196,
+          "name": "Zone 3 demand",
+          "symbol": "baseDemand",
+          "value": 30,
+          "unit": "TEU/day",
+          "mode": "constant",
+          "sharedParameterId": 175
+        },
+        {
+          "id": 197,
+          "name": "Demand step multiplier",
+          "symbol": "stepMultiplier",
+          "value": 1,
+          "unit": "",
+          "mode": "constant",
+          "sharedParameterId": 14
+        },
+        {
+          "id": 198,
+          "name": "Demand step day",
+          "symbol": "stepDay",
+          "value": 20,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 13
+        },
+        {
+          "id": 199,
+          "name": "Demand smoothing time",
+          "symbol": "smoothingDays",
+          "value": 5,
+          "unit": "day",
+          "mode": "constant",
+          "sharedParameterId": 10
+        },
+        {
+          "id": 200,
+          "name": "Seconds per day",
+          "symbol": "secondsPerDay",
+          "value": 86400,
+          "unit": "s/day",
+          "mode": "constant",
+          "sharedParameterId": 1
+        }
+      ],
+      "appearance": {
+        "color": "#8aa0a8",
+        "offset": 0
+      }
+    }
+  ],
+  "sharedParameters": [
+    {
+      "id": 1,
+      "name": "Seconds per day",
+      "symbol": "secondsPerDay",
+      "value": 86400,
+      "unit": "s/day",
+      "mode": "constant"
+    },
+    {
+      "id": 2,
+      "name": "Vessel arrivals",
+      "symbol": "vesselArrivals",
+      "value": 100,
+      "unit": "TEU/day",
+      "mode": "constant"
+    },
+    {
+      "id": 3,
+      "name": "Gate capacity",
+      "symbol": "gateCapacity",
+      "value": 150,
+      "unit": "TEU/day",
+      "mode": "constant"
+    },
+    {
+      "id": 4,
+      "name": "Gate capacity during outage",
+      "symbol": "outageCapacity",
+      "value": 150,
+      "unit": "TEU/day",
+      "mode": "constant"
+    },
+    {
+      "id": 5,
+      "name": "Outage start",
+      "symbol": "outageStart",
+      "value": 20,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 6,
+      "name": "Outage end",
+      "symbol": "outageEnd",
+      "value": 50,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 7,
+      "name": "Yard drain time",
+      "symbol": "yardDrainDays",
+      "value": 0.5,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 8,
+      "name": "Stock cover target",
+      "symbol": "coverDays",
+      "value": 3,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 9,
+      "name": "Inventory adjustment time",
+      "symbol": "adjustDays",
+      "value": 4,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 10,
+      "name": "Demand smoothing time",
+      "symbol": "smoothingDays",
+      "value": 5,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 11,
+      "name": "Order response time",
+      "symbol": "responseDays",
+      "value": 0.5,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 12,
+      "name": "Stock draw-down time",
+      "symbol": "drawDownDays",
+      "value": 1,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 13,
+      "name": "Demand step day",
+      "symbol": "stepDay",
+      "value": 20,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 14,
+      "name": "Demand step multiplier",
+      "symbol": "stepMultiplier",
+      "value": 1,
+      "unit": "",
+      "mode": "constant"
+    },
+    {
+      "id": 26,
+      "name": "Warehouse A lead time",
+      "symbol": "aLeadTime",
+      "value": 2,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 27,
+      "name": "Warehouse A expedited lead time",
+      "symbol": "aExpeditedLeadTime",
+      "value": 1,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 28,
+      "name": "Warehouse A expedite below",
+      "symbol": "aExpediteBelow",
+      "value": 80,
+      "unit": "TEU",
+      "mode": "constant"
+    },
+    {
+      "id": 58,
+      "name": "Warehouse B lead time",
+      "symbol": "bLeadTime",
+      "value": 3,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 59,
+      "name": "Warehouse B expedited lead time",
+      "symbol": "bExpeditedLeadTime",
+      "value": 1.5,
+      "unit": "day",
+      "mode": "constant"
+    },
+    {
+      "id": 60,
+      "name": "Warehouse B expedite below",
+      "symbol": "bExpediteBelow",
+      "value": 30,
+      "unit": "TEU",
+      "mode": "constant"
+    },
+    {
+      "id": 106,
+      "name": "Warehouse A safety stock",
+      "symbol": "safetyStock",
+      "value": 60,
+      "unit": "TEU",
+      "mode": "constant"
+    },
+    {
+      "id": 111,
+      "name": "Zone 1 demand",
+      "symbol": "zone1Demand",
+      "value": 30,
+      "unit": "TEU/day",
+      "mode": "constant"
+    },
+    {
+      "id": 142,
+      "name": "Zone 2 demand",
+      "symbol": "zone2Demand",
+      "value": 40,
+      "unit": "TEU/day",
+      "mode": "constant"
+    },
+    {
+      "id": 175,
+      "name": "Zone 3 demand",
+      "symbol": "zone3Demand",
+      "value": 30,
+      "unit": "TEU/day",
+      "mode": "constant"
+    }
+  ],
+  "runConfigurations": [
+    {
+      "id": 202,
+      "name": "120 days",
+      "globalTimeStep": 4320,
+      "outputInterval": 86400
+    }
+  ],
+  "activeRunConfigurationId": 202
+}

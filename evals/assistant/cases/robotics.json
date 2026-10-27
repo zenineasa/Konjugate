@@ -1,0 +1,596 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "setpoint2",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Set the position setpoint to 2 rad.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Joint link",
+            "to": "Voltage source",
+            "symbol": "setpointAngle",
+            "value": 2,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "positionGain8",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Position gain 8.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Joint link",
+            "to": "Voltage source",
+            "symbol": "gain",
+            "value": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "elbowWristSupplies",
+      "family": "multiStep",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Could the elbow supply run at 20 volts and the wrist supply at 15?",
+      "expect": {
+        "touches": [
+          "Elbow supply",
+          "Wrist supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow supply",
+            "symbol": "voltage",
+            "initialValue": 20,
+            "unit": "V"
+          },
+          {
+            "op": "state",
+            "node": "Wrist supply",
+            "symbol": "voltage",
+            "initialValue": 15,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "shoulderInertia",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "The shoulder link is lighter in the model than in the real arm: the real moment of inertia is 0.04 kg·m².",
+      "expect": {
+        "touches": [
+          "Shoulder rotational drive"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Shoulder motor",
+            "to": "Shoulder link",
+            "symbol": "momentOfInertia",
+            "value": 0.04
+          }
+        ]
+      }
+    },
+    {
+      "id": "killElbowMotor",
+      "family": "enableDisable",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "kill the elbow motor",
+      "expect": {
+        "touches": [
+          "Elbow motor"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Elbow motor",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "wristSupplyTypos",
+      "family": "updateValue",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the wirst supply voltge to 9 V",
+      "expect": {
+        "touches": [
+          "Wrist supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Wrist supply",
+            "symbol": "voltage",
+            "initialValue": 9,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "proportionalOnly",
+      "family": "setEquation",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "I want the joint controller to be purely proportional. Rewrite the position control law so it is only the gain times the angle error, with no rate term.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Joint link",
+            "to": "Voltage source",
+            "uses": [
+              "gain",
+              "setpointAngle",
+              "sourceAngle"
+            ],
+            "excludes": [
+              "rateGain",
+              "sourceAngularVelocity"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "wristOffShoulder28",
+      "family": "multiStep",
+      "domain": "robotics",
+      "style": "multiPart",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Disable the wrist motor and the wrist link, and set the shoulder supply to 28 V.",
+      "expect": {
+        "touches": [
+          "Wrist motor",
+          "Wrist link",
+          "Shoulder supply"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Wrist motor",
+            "value": false
+          },
+          {
+            "op": "enabled",
+            "node": "Wrist link",
+            "value": false
+          },
+          {
+            "op": "state",
+            "node": "Shoulder supply",
+            "symbol": "voltage",
+            "initialValue": 28,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeWristAssembly",
+      "family": "remove",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "We are dropping the wrist from the design, so remove the whole wrist assembly: the supply, the motor and the link.",
+      "expect": {
+        "touches": [
+          "Wrist supply",
+          "Wrist motor",
+          "Wrist link"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Wrist supply"
+          },
+          {
+            "op": "removed",
+            "node": "Wrist motor"
+          },
+          {
+            "op": "removed",
+            "node": "Wrist link"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gripper",
+      "family": "addNode",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a rotational link called Gripper with an angle of 0 rad and an angular velocity of 0 rad/s.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Gripper"
+          },
+          {
+            "op": "state",
+            "node": "Gripper",
+            "initialValue": 0,
+            "unit": "rad"
+          },
+          {
+            "op": "state",
+            "node": "Gripper",
+            "initialValue": 0,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "wristCameraMount",
+      "family": "multiStep",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Add a Wrist camera mount node with a mass state of 0.3 kg and connect the wrist link to it.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Wrist camera mount",
+            "initialValue": 0.3,
+            "unit": "kg"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Wrist link",
+            "to": "Wrist camera mount",
+            "either": true
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Wrist link",
+            "to": "Wrist camera mount",
+            "uses": [],
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "setSupply24",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the supply to 24 V.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder supply",
+          "Elbow supply",
+          "Wrist supply"
+        ]
+      }
+    },
+    {
+      "id": "addGearbox",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Add a gearbox.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "elbowSupply22",
+      "family": "history",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "the elbow one, 22 V please",
+      "history": [
+        {
+          "request": "Change the supply voltage",
+          "outcome": "Asked: Which supply should I update?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Elbow supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow supply",
+            "symbol": "voltage",
+            "initialValue": 22,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "elbowAngle",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the elbow link's angle to 0.5 rad.",
+      "expect": {
+        "touches": [
+          "Elbow link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow link",
+            "symbol": "angle",
+            "initialValue": 0.5,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "shoulderNinety",
+      "family": "units",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Can the shoulder link start at 90 degrees?",
+      "expect": {
+        "touches": [
+          "Shoulder link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder link",
+            "symbol": "angle",
+            "initialValue": 1.5707963,
+            "unit": "rad",
+            "tolerance": 0.0001
+          }
+        ]
+      }
+    },
+    {
+      "id": "elbowSupplyVoltage",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the elbow supply voltage to 20 V.",
+      "expect": {
+        "touches": [
+          "Elbow supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow supply",
+            "symbol": "voltage",
+            "initialValue": 20,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "disableWristMotor",
+      "family": "enableDisable",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Disable the wrist motor.",
+      "expect": {
+        "touches": [
+          "Wrist motor"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Wrist motor",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "threeSupplies",
+      "family": "multiStep",
+      "domain": "robotics",
+      "style": "multiPart",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the shoulder supply to 30 V, the elbow supply to 20 V and the wrist supply to 10 V.",
+      "expect": {
+        "touches": [
+          "Shoulder supply",
+          "Elbow supply",
+          "Wrist supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder supply",
+            "symbol": "voltage",
+            "initialValue": 30,
+            "unit": "V"
+          },
+          {
+            "op": "state",
+            "node": "Elbow supply",
+            "symbol": "voltage",
+            "initialValue": 20,
+            "unit": "V"
+          },
+          {
+            "op": "state",
+            "node": "Wrist supply",
+            "symbol": "voltage",
+            "initialValue": 10,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "askSupplyFifteen",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the supply to 15 V.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder supply",
+          "Elbow supply",
+          "Wrist supply"
+        ]
+      }
+    },
+    {
+      "id": "askAngleThird",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Angle 0.3 rad.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder link",
+          "Elbow link",
+          "Wrist link"
+        ]
+      }
+    },
+    {
+      "id": "askDisableMotor",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Disable the motor.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder motor",
+          "Elbow motor",
+          "Wrist motor"
+        ]
+      }
+    },
+    {
+      "id": "askRemoveLink",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "The link is not needed any more.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder link",
+          "Elbow link",
+          "Wrist link"
+        ]
+      }
+    },
+    {
+      "id": "actElbowSupplyFifteen",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the elbow supply to 15 V.",
+      "expect": {
+        "touches": [
+          "Elbow supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow supply",
+            "symbol": "voltage",
+            "initialValue": 15,
+            "unit": "V"
+          }
+        ]
+      }
+    }
+  ]
+}

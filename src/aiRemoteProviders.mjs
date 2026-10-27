@@ -118,10 +118,24 @@ function historyText(history) {
     return `CONVERSATION SO FAR:\n${lines}\n\n`;
 }
 
+// Small models often quote an entity id ("stateRef": "2"). A temporary ref must start with a letter, so a string of digits
+// can only mean the numeric id; reading it as one cannot select a different entity.
+const referenceFields = new Set(['stateRef', 'nodeRef', 'edgeRef', 'entityRef', 'parameterRef', 'outputStateRef', 'sourceNodeRef', 'targetNodeRef']);
+function numericReferences(proposal) {
+    if (!Array.isArray(proposal?.operations)) return proposal;
+    for (const operation of proposal.operations) {
+        if (!operation || typeof operation !== 'object') continue;
+        for (const field of referenceFields) {
+            if (typeof operation[field] === 'string' && /^[1-9]\d{0,15}$/.test(operation[field])) operation[field] = Number(operation[field]);
+        }
+    }
+    return proposal;
+}
+
 function parseProposal(text) {
     if (typeof text !== 'string') throw new AssistantProviderError('The AI provider did not return proposal text.', 'emptyProviderOutput');
     const normalized = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    try { return JSON.parse(normalized); } catch { throw new AssistantProviderError('The AI provider returned malformed proposal JSON.', 'invalidProposalJson'); }
+    try { return numericReferences(JSON.parse(normalized)); } catch { throw new AssistantProviderError('The AI provider returned malformed proposal JSON.', 'invalidProposalJson'); }
 }
 
 function requireCredential(credential, providerName) {
@@ -206,7 +220,10 @@ function ollamaProvider() {
             const text = await generateText(fetchImpl, `${baseUrl({ ...configuration, provider: 'ollama' })}/api/chat`, {
                 method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: configuration.model, stream: true, format: 'json',
+                    model: configuration.model, stream: true,
+                    format: 'json',
+                    // Edits should repeat for the same request, and Ollama's default window (4096 tokens) is barely larger than this prompt.
+                    options: { temperature: 0, num_ctx: 8192 },
                     messages: [{ role: 'user', content: historyText(history) + proposalPrompt(operationSchema, context, request, repair) }]
                 })
             }, {

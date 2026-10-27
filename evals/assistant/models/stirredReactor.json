@@ -1,0 +1,348 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Feed stream",
+      "type": "Stream",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Concentration",
+          "symbol": "concentration",
+          "initialValue": 2000,
+          "unit": "mol/m3",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#d98b54"
+      },
+      "id": 1
+    },
+    {
+      "name": "Reactor",
+      "type": "Vessel",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Concentration",
+          "symbol": "concentration",
+          "initialValue": 0,
+          "unit": "mol/m3",
+          "id": 4
+        },
+        {
+          "name": "Liquid volume",
+          "symbol": "volume",
+          "initialValue": 2,
+          "unit": "m3",
+          "id": 5
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 3
+    },
+    {
+      "name": "Product stream",
+      "type": "Stream",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Concentration",
+          "symbol": "concentration",
+          "initialValue": 0,
+          "unit": "mol/m3",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#4a8f5b"
+      },
+      "id": 6
+    }
+  ],
+  "edges": [
+    {
+      "name": "Inflow mixing",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{flowRate}\\cdot(\\mathrm{sourceConcentration}-\\mathrm{targetConcentration})}{\\mathrm{targetVolume}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{flowRate}\\cdot(\\mathrm{sourceConcentration}-\\mathrm{targetConcentration})}{\\mathrm{targetVolume}}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceConcentration",
+            "label": "source.concentration"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetConcentration",
+            "label": "target.concentration"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetVolume",
+            "label": "target.volume"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 9,
+            "symbol": "flowRate",
+            "label": "flowRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          [
+            "Multiply",
+            "flowRate",
+            [
+              "Add",
+              "sourceConcentration",
+              [
+                "Negate",
+                "targetConcentration"
+              ]
+            ]
+          ],
+          "targetVolume"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Feed flow rate",
+          "symbol": "flowRate",
+          "value": 0.01,
+          "unit": "m3/s",
+          "mode": "constant",
+          "id": 9
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 8
+    },
+    {
+      "name": "Reaction",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{rateConstant}\\cdot\\mathrm{sourceConcentration}",
+      "equationModel": {
+        "latex": "\\mathrm{rateConstant}\\cdot\\mathrm{sourceConcentration}",
+        "output": {
+          "role": "target",
+          "stateId": 7
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceConcentration",
+            "label": "source.concentration"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "sourceVolume",
+            "label": "source.volume"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "targetConcentration",
+            "label": "target.concentration"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 11,
+            "symbol": "rateConstant",
+            "label": "rateConstant"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "rateConstant",
+          "sourceConcentration"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Rate constant",
+          "symbol": "rateConstant",
+          "value": 0.004,
+          "unit": "1/s",
+          "mode": "constant",
+          "id": 11
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    },
+    {
+      "name": "Reactant consumption",
+      "source": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{rateConstant}\\cdot\\mathrm{targetConcentration}",
+      "equationModel": {
+        "latex": "-\\mathrm{rateConstant}\\cdot\\mathrm{targetConcentration}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "sourceConcentration",
+            "label": "source.concentration"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetConcentration",
+            "label": "target.concentration"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetVolume",
+            "label": "target.volume"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 13,
+            "symbol": "rateConstant",
+            "label": "rateConstant"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "rateConstant",
+            "targetConcentration"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Rate constant",
+          "symbol": "rateConstant",
+          "value": 0.004,
+          "unit": "1/s",
+          "mode": "constant",
+          "id": 13
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 12
+    }
+  ]
+}

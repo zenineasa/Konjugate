@@ -1,0 +1,318 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Rainfall",
+      "type": "Source",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Inflow rate",
+          "symbol": "rate",
+          "initialValue": 0.8,
+          "unit": "m3/s",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#2e7591"
+      },
+      "id": 1
+    },
+    {
+      "name": "Lake",
+      "type": "Reservoir",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Water volume",
+          "symbol": "volume",
+          "initialValue": 2500000,
+          "unit": "m3",
+          "id": 4
+        },
+        {
+          "name": "Surface area",
+          "symbol": "surfaceArea",
+          "initialValue": 800000,
+          "unit": "m2",
+          "id": 5
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      },
+      "id": 3
+    },
+    {
+      "name": "Downstream reservoir",
+      "type": "Reservoir",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Water volume",
+          "symbol": "volume",
+          "initialValue": 400000,
+          "unit": "m3",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#5f6f7a"
+      },
+      "id": 6
+    }
+  ],
+  "edges": [
+    {
+      "name": "Rain inflow",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sourceRate}",
+      "equationModel": {
+        "latex": "\\mathrm{sourceRate}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceRate",
+            "label": "source.rate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetVolume",
+            "label": "target.volume"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetSurfaceArea",
+            "label": "target.surfaceArea"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": "sourceRate"
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 8
+    },
+    {
+      "name": "Spillway release",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{spillCoefficient}\\cdot\\mathrm{sourceVolume}",
+      "equationModel": {
+        "latex": "\\mathrm{spillCoefficient}\\cdot\\mathrm{sourceVolume}",
+        "output": {
+          "role": "target",
+          "stateId": 7
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceVolume",
+            "label": "source.volume"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "sourceSurfaceArea",
+            "label": "source.surfaceArea"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "targetVolume",
+            "label": "target.volume"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 10,
+            "symbol": "spillCoefficient",
+            "label": "spillCoefficient"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "sourceVolume",
+          "spillCoefficient"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Spill coefficient",
+          "symbol": "spillCoefficient",
+          "value": 4e-7,
+          "unit": "1/s",
+          "mode": "constant",
+          "id": 10
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 9
+    },
+    {
+      "name": "Spillway draw-down",
+      "source": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{spillCoefficient}\\cdot\\mathrm{targetVolume}",
+      "equationModel": {
+        "latex": "-\\mathrm{spillCoefficient}\\cdot\\mathrm{targetVolume}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "sourceVolume",
+            "label": "source.volume"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetVolume",
+            "label": "target.volume"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetSurfaceArea",
+            "label": "target.surfaceArea"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 12,
+            "symbol": "spillCoefficient",
+            "label": "spillCoefficient"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "spillCoefficient",
+            "targetVolume"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Spill coefficient",
+          "symbol": "spillCoefficient",
+          "value": 4e-7,
+          "unit": "1/s",
+          "mode": "constant",
+          "id": 12
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 11
+    }
+  ]
+}

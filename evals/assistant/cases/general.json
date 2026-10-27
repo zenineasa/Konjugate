@@ -1,0 +1,1410 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "blankAddNode",
+      "family": "addNode",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a node called Battery with a temperature state of 300 K.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Battery"
+          },
+          {
+            "op": "state",
+            "node": "Battery",
+            "initialValue": 300,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankAddThermalMass",
+      "family": "addNode",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Create a thermal mass named Coolant with an initial temperature of 285 K.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Coolant"
+          },
+          {
+            "op": "state",
+            "node": "Coolant",
+            "initialValue": 285,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankAddTwoNodes",
+      "family": "addNode",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add two nodes: Hot plate at 400 K and Cold plate at 280 K.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Hot plate",
+            "initialValue": 400,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Cold plate",
+            "initialValue": 280,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankConnectedPair",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "blank",
+      "request": "Add two thermal nodes, Hot block at 400 K and Cold block at 300 K, and connect them with a heat flow from Hot block to Cold block with a conductance of 5 W/K.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "edgesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Hot block",
+            "initialValue": 400,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Cold block",
+            "initialValue": 300,
+            "unit": "K"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Hot block",
+            "to": "Cold block"
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Hot block",
+            "to": "Cold block",
+            "value": 5,
+            "unit": "W/K"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Hot block",
+            "to": "Cold block",
+            "uses": [
+              "source",
+              "target"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "coolingLoop",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "blank",
+      "request": "I'm modelling a small cooling loop. To start, please create a node named Radiator with a temperature state of 310 K, and another one called Fan air with a temperature of 295 K.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Radiator",
+            "initialValue": 310,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Fan air",
+            "initialValue": 295,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "pumpTypos",
+      "family": "addNode",
+      "domain": "general",
+      "style": "typos",
+      "split": "test",
+      "model": "blank",
+      "request": "Creat a node caled Pump with a pressure of 150000 Pa",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Pump"
+          },
+          {
+            "op": "state",
+            "node": "Pump",
+            "initialValue": 150000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankKilograms",
+      "family": "addNode",
+      "domain": "general",
+      "style": "loose",
+      "split": "test",
+      "model": "blank",
+      "request": "new node: tank, 1000 kg",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "tank"
+          },
+          {
+            "op": "state",
+            "node": "tank",
+            "initialValue": 1000,
+            "unit": "kg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "addANode",
+      "family": "clarification",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a node.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "connectThem",
+      "family": "clarification",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "blank",
+      "request": "Connect them.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "reactorFeedConcentration",
+      "family": "updateValue",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Set the feed concentration to 2500 mol/m3.",
+      "expect": {
+        "touches": [
+          "Feed stream"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Feed stream",
+            "symbol": "concentration",
+            "initialValue": 2500,
+            "unit": "mol/m3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorFeedLitres",
+      "family": "units",
+      "domain": "general",
+      "style": "conversational",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Could you set the feed flow rate to 30 litres per minute?",
+      "expect": {
+        "touches": [
+          "Inflow mixing"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Feed stream",
+            "to": "Reactor",
+            "symbol": "flowRate",
+            "value": 0.0005,
+            "unit": "m3/s",
+            "tolerance": 0.0001
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorRateConstant",
+      "family": "updateParameter",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Rate constant 0.006.",
+      "expect": {
+        "touches": [
+          "Reaction",
+          "Reactant consumption"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Reactor",
+            "to": "Product stream",
+            "symbol": "rateConstant",
+            "value": 0.006,
+            "all": true,
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorTemperature",
+      "family": "addState",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "We want to track how hot the reactor runs, so please add a state called Temperature to the Reactor, starting at 350 K.",
+      "expect": {
+        "touches": [
+          "Reactor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Reactor",
+            "initialValue": 350,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorAmbiguousConcentration",
+      "family": "clarification",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Set the concentration to 500 mol/m3.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Feed stream",
+          "Reactor",
+          "Product stream"
+        ]
+      }
+    },
+    {
+      "id": "reactorScenario",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "multiPart",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Feed 1800 mol/m3, reactor volume 3 m3.",
+      "expect": {
+        "touches": [
+          "Feed stream",
+          "Reactor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Feed stream",
+            "symbol": "concentration",
+            "initialValue": 1800,
+            "unit": "mol/m3"
+          },
+          {
+            "op": "state",
+            "node": "Reactor",
+            "symbol": "volume",
+            "initialValue": 3,
+            "unit": "m3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorSecondOrder",
+      "family": "setEquation",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Make the reaction second order in the reactant concentration.",
+      "expect": {
+        "touches": [
+          "Reaction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Reactor",
+            "to": "Product stream",
+            "uses": [
+              "rateConstant"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorFeedOff",
+      "family": "enableDisable",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Switch off the feed stream.",
+      "expect": {
+        "touches": [
+          "Feed stream"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Feed stream",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorAnswer",
+      "family": "history",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "The reactor.",
+      "history": [
+        {
+          "request": "Set the concentration to 300 mol/m3.",
+          "outcome": "Asked: Which node should I update: Feed stream, Reactor or Product stream?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Reactor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Reactor",
+            "symbol": "concentration",
+            "initialValue": 300,
+            "unit": "mol/m3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reactorPurge",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "stirredReactor",
+      "request": "Add a Purge stream with a concentration of 0 mol/m3 and connect the Reactor to it with a purge rate of 0.002 per second.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Purge stream",
+            "symbol": "concentration",
+            "initialValue": 0,
+            "unit": "mol/m3"
+          },
+          {
+            "op": "edgesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasEdge",
+            "from": "Reactor",
+            "to": "Purge stream"
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Reactor",
+            "to": "Purge stream",
+            "value": 0.002
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Reactor",
+            "to": "Purge stream",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleSpeed25",
+      "family": "updateValue",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Set the vehicle speed to 25 m/s.",
+      "expect": {
+        "touches": [
+          "Vehicle"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Vehicle",
+            "symbol": "speed",
+            "initialValue": 25,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleNinetyKmh",
+      "family": "units",
+      "domain": "general",
+      "style": "conversational",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Can you start the car at 90 km/h?",
+      "expect": {
+        "touches": [
+          "Vehicle"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Vehicle",
+            "symbol": "speed",
+            "initialValue": 25,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleMassTonnes",
+      "family": "units",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Make the vehicle mass 1.6 tonnes.",
+      "expect": {
+        "touches": [
+          "Vehicle"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Vehicle",
+            "symbol": "mass",
+            "initialValue": 1600,
+            "unit": "kg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleDragCoefficient",
+      "family": "updateParameter",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Drag coefficient 0.27.",
+      "expect": {
+        "touches": [
+          "Aerodynamic drag"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Air",
+            "to": "Vehicle",
+            "symbol": "dragCoefficient",
+            "value": 0.27
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleSteeperHill",
+      "family": "updateValue",
+      "domain": "general",
+      "style": "indirect",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "We are driving up a steeper hill now, a 6% grade.",
+      "expect": {
+        "touches": [
+          "Road"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Road",
+            "symbol": "grade",
+            "initialValue": 0.06
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleEngineKilonewtons",
+      "family": "units",
+      "domain": "general",
+      "style": "loose",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "engine force like 2.4 kN",
+      "expect": {
+        "touches": [
+          "Engine"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Engine",
+            "symbol": "force",
+            "initialValue": 2400,
+            "unit": "N"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleTrailer",
+      "family": "addNode",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Add a Trailer node with a mass of 600 kg.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Trailer"
+          },
+          {
+            "op": "state",
+            "node": "Trailer",
+            "initialValue": 600,
+            "unit": "kg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleDragOff",
+      "family": "enableDisable",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Turn off the aerodynamic drag.",
+      "expect": {
+        "touches": [
+          "Aerodynamic drag"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Aerodynamic drag",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleRemoveRoad",
+      "family": "remove",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Remove the road.",
+      "expect": {
+        "touches": [
+          "Road",
+          "Gradient resistance"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Road"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vehicleHeavier",
+      "family": "clarification",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Make it heavier.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "vehicleScenarioTypos",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "typos",
+      "split": "test",
+      "model": "vehicleCruise",
+      "request": "Set the speed to 15 m/s, the car mass to 1300 kg and make the road flat.",
+      "expect": {
+        "touches": [
+          "Vehicle",
+          "Road"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Vehicle",
+            "symbol": "speed",
+            "initialValue": 15,
+            "unit": "m/s"
+          },
+          {
+            "op": "state",
+            "node": "Vehicle",
+            "symbol": "mass",
+            "initialValue": 1300,
+            "unit": "kg"
+          },
+          {
+            "op": "state",
+            "node": "Road",
+            "symbol": "grade",
+            "initialValue": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropSoilMoisture",
+      "family": "updateValue",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "cropField",
+      "request": "Set the soil moisture to 90 mm.",
+      "expect": {
+        "touches": [
+          "Soil"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Soil",
+            "symbol": "moisture",
+            "initialValue": 90,
+            "unit": "mm"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropIrrigationCentimetres",
+      "family": "units",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "cropField",
+      "request": "Put the irrigation at 0.5 cm per day.",
+      "expect": {
+        "touches": [
+          "Irrigation"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Irrigation",
+            "symbol": "rate",
+            "initialValue": 5,
+            "unit": "mm/day"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropHalfSaturation",
+      "family": "updateParameter",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "cropField",
+      "request": "Raise the half-saturation moisture to 80 mm.",
+      "expect": {
+        "touches": [
+          "Water-limited growth"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Soil",
+            "to": "Crop",
+            "symbol": "halfSaturation",
+            "value": 80,
+            "unit": "mm"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropRainRate",
+      "family": "reference",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "cropField",
+      "request": "Set the rain rate to 6 mm/day.",
+      "expect": {
+        "touches": [
+          "Rainfall"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Rainfall",
+            "symbol": "rate",
+            "initialValue": 6,
+            "unit": "mm/day"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropBiomassKilograms",
+      "family": "units",
+      "domain": "general",
+      "style": "conversational",
+      "split": "test",
+      "model": "cropField",
+      "request": "Could you start the crop at 0.25 kg per square metre?",
+      "expect": {
+        "touches": [
+          "Crop"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Crop",
+            "symbol": "biomass",
+            "initialValue": 250,
+            "unit": "g/m2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropIrrigationOff",
+      "family": "enableDisable",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "cropField",
+      "request": "Turn off irrigation.",
+      "expect": {
+        "touches": [
+          "Irrigation"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Irrigation",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropSoilTemperature",
+      "family": "addState",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "cropField",
+      "request": "Give the Soil a Temperature state of 288 K.",
+      "expect": {
+        "touches": [
+          "Soil"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Soil",
+            "initialValue": 288,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropFertiliser",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "cropField",
+      "request": "Add a Fertiliser node with a nitrogen level of 40 kg/ha and connect it to the Crop so that it boosts growth.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Fertiliser"
+          },
+          {
+            "op": "state",
+            "node": "Fertiliser",
+            "initialValue": 40,
+            "unit": "kg/ha"
+          },
+          {
+            "op": "edgesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasEdge",
+            "from": "Fertiliser",
+            "to": "Crop"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Fertiliser",
+            "to": "Crop",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropWaterMore",
+      "family": "clarification",
+      "domain": "general",
+      "style": "loose",
+      "split": "test",
+      "model": "cropField",
+      "request": "water it more",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "cropAnswer",
+      "family": "history",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "cropField",
+      "request": "Irrigation.",
+      "history": [
+        {
+          "request": "Set the rate to 3 mm/day.",
+          "outcome": "Asked: Which node should I update: Rainfall or Irrigation?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Irrigation"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Irrigation",
+            "symbol": "rate",
+            "initialValue": 3,
+            "unit": "mm/day"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cropGrowthIndependent",
+      "family": "setEquation",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "cropField",
+      "request": "For a dry-run comparison, make crop growth independent of soil moisture: just the growth rate times the biomass.",
+      "expect": {
+        "touches": [
+          "Water-limited growth"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Soil",
+            "to": "Crop",
+            "uses": [
+              "growthRate",
+              "targetBiomass"
+            ],
+            "excludes": [
+              "sourceMoisture"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankPatientWeight",
+      "family": "addNode",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "blank",
+      "request": "Patient, 70 kg.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Patient",
+            "initialValue": 70,
+            "unit": "kg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankWarehouseStock",
+      "family": "addNode",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Create a node called Warehouse Stock with 4200 pallets.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Warehouse Stock"
+          },
+          {
+            "op": "state",
+            "node": "Warehouse Stock",
+            "initialValue": 4200
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankHealthySick",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Create Healthy at 800 people and Sick at 20 people, with a relationship from Healthy to Sick.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Healthy",
+            "initialValue": 800
+          },
+          {
+            "op": "state",
+            "node": "Sick",
+            "initialValue": 20
+          },
+          {
+            "op": "edgesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasEdge",
+            "from": "Healthy",
+            "to": "Sick"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Healthy",
+            "to": "Sick",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankMugCelsius",
+      "family": "units",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a Mug node with a temperature of 85 degrees Celsius.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Mug",
+            "initialValue": 358.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankRainTank",
+      "family": "multiStep",
+      "domain": "general",
+      "style": "verbose",
+      "split": "test",
+      "model": "blank",
+      "request": "I am modelling a rainwater tank. Create a Roof catchment node with an inflow of 0.5 L/s, a Rain tank node holding 2000 L, and link the catchment to the tank.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Roof catchment",
+            "initialValue": 0.0005,
+            "unit": "m3/s",
+            "tolerance": 0.001
+          },
+          {
+            "op": "state",
+            "node": "Rain tank",
+            "initialValue": 2,
+            "unit": "m3"
+          },
+          {
+            "op": "edgesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasEdge",
+            "from": "Roof catchment",
+            "to": "Rain tank"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Roof catchment",
+            "to": "Rain tank",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankBiggerTank",
+      "family": "clarification",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Make the tank bigger.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "blankCoffeeTypos",
+      "family": "units",
+      "domain": "general",
+      "style": "typos",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a nod caled Coffee at 90 degres C",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Coffee",
+            "initialValue": 363.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "blankVisitors",
+      "family": "addNode",
+      "domain": "general",
+      "style": "indirect",
+      "split": "test",
+      "model": "blank",
+      "request": "I want to count the website visitors in a node called Visitors, starting at 12000.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Visitors"
+          },
+          {
+            "op": "state",
+            "node": "Visitors",
+            "initialValue": 12000
+          }
+        ]
+      }
+    },
+    {
+      "id": "askCountHundred",
+      "family": "clarification",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "predatorPrey",
+      "request": "Set the count to 100.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Rabbits",
+          "Foxes"
+        ]
+      }
+    },
+    {
+      "id": "askPeopleFiveThousand",
+      "family": "clarification",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "sirEpidemic",
+      "request": "People 5000.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Susceptible",
+          "Infected",
+          "Recovered"
+        ]
+      }
+    },
+    {
+      "id": "askMoreFoxes",
+      "family": "clarification",
+      "domain": "general",
+      "style": "conversational",
+      "split": "test",
+      "model": "predatorPrey",
+      "request": "Could we have more foxes?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askScaleUp",
+      "family": "clarification",
+      "domain": "general",
+      "style": "indirect",
+      "split": "test",
+      "model": "webServiceQueue",
+      "request": "We need to scale up before the launch.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askVaccinationRate",
+      "family": "clarification",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "sirEpidemic",
+      "request": "Set the vaccination rate to 0.02 per day.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "actFoxCount",
+      "family": "reference",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "predatorPrey",
+      "request": "Set the number of foxes to 100.",
+      "expect": {
+        "touches": [
+          "Foxes"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Foxes",
+            "symbol": "count",
+            "initialValue": 100
+          }
+        ]
+      }
+    },
+    {
+      "id": "actInfectedTwoFifty",
+      "family": "reference",
+      "domain": "general",
+      "style": "plain",
+      "split": "test",
+      "model": "sirEpidemic",
+      "request": "Set the infected group to 250 people.",
+      "expect": {
+        "touches": [
+          "Infected"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Infected",
+            "symbol": "people",
+            "initialValue": 250
+          }
+        ]
+      }
+    },
+    {
+      "id": "actServersTen",
+      "family": "reference",
+      "domain": "general",
+      "style": "terse",
+      "split": "test",
+      "model": "webServiceQueue",
+      "request": "Server pool: 10 servers.",
+      "expect": {
+        "touches": [
+          "Server pool"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Server pool",
+            "symbol": "servers",
+            "initialValue": 10
+          }
+        ]
+      }
+    }
+  ]
+}

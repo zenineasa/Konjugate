@@ -1,0 +1,458 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Meadow",
+      "type": "Habitat",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Grass biomass",
+          "symbol": "biomass",
+          "initialValue": 50000,
+          "unit": "kg",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#4a8f5b"
+      },
+      "id": 1
+    },
+    {
+      "name": "Rabbits",
+      "type": "Population",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Head count",
+          "symbol": "count",
+          "initialValue": 400,
+          "unit": "rabbits",
+          "id": 4
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#d98b54"
+      },
+      "id": 3
+    },
+    {
+      "name": "Foxes",
+      "type": "Population",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Head count",
+          "symbol": "count",
+          "initialValue": 30,
+          "unit": "foxes",
+          "id": 6
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 5
+    },
+    {
+      "name": "Winter severity",
+      "type": "Climate",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Severity index",
+          "symbol": "severity",
+          "initialValue": 0.2,
+          "unit": "",
+          "id": 8
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "sphere",
+        "color": "#5f6f7a"
+      },
+      "id": 7
+    }
+  ],
+  "edges": [
+    {
+      "name": "Grazing growth",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{growthRate}\\cdot\\mathrm{targetCount}\\cdot\\left(1-\\frac{\\mathrm{targetCount}\\cdot\\mathrm{foragePerRabbit}}{\\mathrm{sourceBiomass}}\\right)",
+      "equationModel": {
+        "latex": "\\mathrm{growthRate}\\cdot\\mathrm{targetCount}\\cdot\\left(1-\\frac{\\mathrm{targetCount}\\cdot\\mathrm{foragePerRabbit}}{\\mathrm{sourceBiomass}}\\right)",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceBiomass",
+            "label": "source.biomass"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 10,
+            "symbol": "growthRate",
+            "label": "growthRate"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 11,
+            "symbol": "foragePerRabbit",
+            "label": "foragePerRabbit"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "growthRate",
+          "targetCount",
+          [
+            "Add",
+            [
+              "Divide",
+              [
+                "Negate",
+                [
+                  "Multiply",
+                  "foragePerRabbit",
+                  "targetCount"
+                ]
+              ],
+              "sourceBiomass"
+            ],
+            1
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Growth rate",
+          "symbol": "growthRate",
+          "value": 0.5,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 10
+        },
+        {
+          "name": "Forage per rabbit",
+          "symbol": "foragePerRabbit",
+          "value": 40,
+          "unit": "kg/rabbit",
+          "mode": "constant",
+          "id": 11
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 9
+    },
+    {
+      "name": "Predation loss",
+      "source": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{predationRate}\\cdot\\mathrm{sourceCount}\\cdot\\mathrm{targetCount}",
+      "equationModel": {
+        "latex": "-\\mathrm{predationRate}\\cdot\\mathrm{sourceCount}\\cdot\\mathrm{targetCount}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "sourceCount",
+            "label": "source.count"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 13,
+            "symbol": "predationRate",
+            "label": "predationRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "predationRate",
+            "sourceCount",
+            "targetCount"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Predation rate",
+          "symbol": "predationRate",
+          "value": 0.002,
+          "unit": "1/(fox·month)",
+          "mode": "constant",
+          "id": 13
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 12
+    },
+    {
+      "name": "Predation gain",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{conversionEfficiency}\\cdot\\mathrm{predationRate}\\cdot\\mathrm{sourceCount}\\cdot\\mathrm{targetCount}",
+      "equationModel": {
+        "latex": "\\mathrm{conversionEfficiency}\\cdot\\mathrm{predationRate}\\cdot\\mathrm{sourceCount}\\cdot\\mathrm{targetCount}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceCount",
+            "label": "source.count"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 15,
+            "symbol": "conversionEfficiency",
+            "label": "conversionEfficiency"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 16,
+            "symbol": "predationRate",
+            "label": "predationRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "conversionEfficiency",
+          "predationRate",
+          "sourceCount",
+          "targetCount"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Conversion efficiency",
+          "symbol": "conversionEfficiency",
+          "value": 0.2,
+          "unit": "",
+          "mode": "constant",
+          "id": 15
+        },
+        {
+          "name": "Predation rate",
+          "symbol": "predationRate",
+          "value": 0.002,
+          "unit": "1/(fox·month)",
+          "mode": "constant",
+          "id": 16
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 14
+    },
+    {
+      "name": "Fox mortality",
+      "source": {
+        "nodeId": 7,
+        "stateId": 8
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{baseMortality}\\cdot(1+\\mathrm{sourceSeverity})\\cdot\\mathrm{targetCount}",
+      "equationModel": {
+        "latex": "-\\mathrm{baseMortality}\\cdot(1+\\mathrm{sourceSeverity})\\cdot\\mathrm{targetCount}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 7,
+            "stateId": 8,
+            "symbol": "sourceSeverity",
+            "label": "source.severity"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 18,
+            "symbol": "baseMortality",
+            "label": "baseMortality"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "baseMortality",
+            "targetCount",
+            [
+              "Add",
+              "sourceSeverity",
+              1
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Base mortality",
+          "symbol": "baseMortality",
+          "value": 0.05,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 18
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 17
+    }
+  ]
+}

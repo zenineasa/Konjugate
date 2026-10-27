@@ -1,0 +1,578 @@
+[
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "conversational",
+    "request": "Could you add a pressurised accumulator called Accumulator at 4 bar?",
+    "expectedOutcome": "A node named Accumulator is added with a pressure of 400000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "terse",
+    "request": "Reservoir, 1.5 bar.",
+    "expectedOutcome": "A node named Reservoir is added with a pressure of 150000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "plain",
+    "request": "Add a pipe called Return Line with a flow rate of 0.003 m3/s.",
+    "expectedOutcome": "A node named Return Line is added with a flow rate of 0.003 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "typos",
+    "request": "Ad a junctoin named Mixing Tee at 120000 Pa",
+    "expectedOutcome": "A node named Mixing Tee is added with a pressure of 120000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "loose",
+    "request": "new junction, call it J4, 1.1 bar",
+    "expectedOutcome": "A node named J4 is added with a pressure of 110000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "verbose",
+    "request": "I am sketching a transfer station. Create a pump called Transfer Pump with a suction pressure of 1 bar and a design NPSH margin of 3 metres.",
+    "expectedOutcome": "A node named Transfer Pump is added with a suction pressure of 100000 Pa and a design NPSH margin of 3 m. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "verbose",
+    "request": "I want to sketch a gravity feed. Create a tank called Header Tank at 150000 Pa and a pipe called Feed Pipe with zero flow, and connect the tank to the pipe.",
+    "expectedOutcome": "Two nodes are added, Header Tank with a pressure of 150000 Pa and Feed Pipe with a flow rate of 0 m3/s, joined by a relationship from Header Tank to Feed Pipe that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "plain",
+    "request": "Add a pump called Booster at 250000 Pa and a pipe called Discharge Line starting at 0 m3/s, with the pump driving the pipe.",
+    "expectedOutcome": "A node Booster with a pressure of 250000 Pa and a node Discharge Line with a flow rate of 0 m3/s are added, joined by a relationship from Booster to Discharge Line that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Create two tanks, North Tank at 1.2 bar and South Tank at 1.0 bar, and a pipe between them called Link Pipe at zero flow.",
+    "expectedOutcome": "Nodes North Tank (120000 Pa), South Tank (100000 Pa) and Link Pipe (0 m3/s) are added, with relationships connecting North Tank to Link Pipe and Link Pipe to South Tank, each with an equation. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "conversational",
+    "request": "Could you make me a three-part chain: a source tank at 2 bar, a pipe at zero flow, then a sink tank at 1 bar, connected in that order?",
+    "expectedOutcome": "Three nodes are added (source tank at 200000 Pa, a pipe at 0 m3/s, sink tank at 100000 Pa) with a relationship from the source tank to the pipe and one from the pipe to the sink tank, each with an equation. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "multiStep",
+    "style": "indirect",
+    "request": "I need a bypass around the pump: a pipe with no initial flow, called Bypass Line, fed from the branch and returning to the tank.",
+    "expectedOutcome": "A node Bypass Line with a flow rate of 0 m3/s is added, with a relationship from Branch Junction to Bypass Line and one from Bypass Line to Tank, each with an equation. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "addState",
+    "style": "verbose",
+    "request": "We want to check how much the pump heats the water, so give the pump a water temperature state starting at 15 degrees Celsius.",
+    "expectedOutcome": "The Pump gains a new state for water temperature with an initial value of 288.15 K. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "addState",
+    "style": "plain",
+    "request": "Add a Fill level state to the Tank starting at 2.5 m.",
+    "expectedOutcome": "The Tank gains a state called Fill level with an initial value of 2.5 m. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "addState",
+    "style": "conversational",
+    "request": "Can the manifold junction also track a vapour pressure of 2300 Pa?",
+    "expectedOutcome": "The Suction Manifold Junction gains a state for vapour pressure with an initial value of 2300 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "addParameter",
+    "style": "plain",
+    "request": "Add a loss coefficient of 0.6 to the relationship where Suction Line 3 charges Pump.",
+    "expectedOutcome": "A parameter named Loss coefficient with a value of 0.6 is added to the relationship Suction Line 3 charges Pump. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "addParameter",
+    "style": "loose",
+    "request": "give the pump to line 3 link a damping factor of 0.1",
+    "expectedOutcome": "A parameter named Damping factor with a value of 0.1 is added to the relationship Pump opposes Suction Line 3. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "addParameter",
+    "style": "indirect",
+    "request": "Valve losses at the tank outlet are missing from the model; put in a loss coefficient of 1.1 where the tank feeds the first pipe.",
+    "expectedOutcome": "A parameter named Loss coefficient with a value of 1.1 is added to the relationship Tank drives Suction Line 1. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "plain",
+    "request": "Change the inertance on the tank's feed into line 1 to 142500 kg/m4.",
+    "expectedOutcome": "The inertance of the relationship Tank drives Suction Line 1 becomes 142500 kg/m4. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "terse",
+    "request": "Line 2 manifold inertance 1e7.",
+    "expectedOutcome": "The inertance of the relationship Suction Manifold Junction drives Suction Line 2 becomes 10000000 kg/m4. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "conversational",
+    "request": "Would you reduce the capacitance of the tank connection to 8e-5 m3/Pa?",
+    "expectedOutcome": "The capacitance of the relationship Suction Line 1 discharges Tank becomes 0.00008 m3/Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "verbose",
+    "request": "Our pipe supplier revised the data sheet: the capacitance for line 2 discharging into the manifold is 3e-9 m3/Pa rather than 2e-9. Please update it.",
+    "expectedOutcome": "The capacitance of the relationship Suction Line 2 discharges Suction Manifold Junction becomes 3e-9 m3/Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "typos",
+    "request": "Chnage the capcitance where line 3 charges the pump to 1e-9",
+    "expectedOutcome": "The capacitance of the relationship Suction Line 3 charges Pump becomes 1e-9 m3/Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "loose",
+    "request": "branch to line 3 inertance up to 12 million",
+    "expectedOutcome": "The inertance of the relationship Branch Junction drives Suction Line 3 becomes 12000000 kg/m4. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateParameter",
+    "style": "indirect",
+    "request": "Line 3 should be more sluggish: double the inertance on the branch feed into it.",
+    "expectedOutcome": "The inertance of the relationship Branch Junction drives Suction Line 3 becomes about 21138057 kg/m4 (twice its current 10569028). Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "plain",
+    "request": "Start the manifold junction at 98000 Pa.",
+    "expectedOutcome": "The Suction Manifold Junction pressure becomes 98000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "conversational",
+    "request": "Let line 2 start with a flow of 0.0008 m3/s, please.",
+    "expectedOutcome": "The Suction Line 2 flow rate becomes 0.0008 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "terse",
+    "request": "NPSH design margin 3.8 m.",
+    "expectedOutcome": "The Pump design NPSH margin (the state with the safety allowance) becomes 3.8 m. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "indirect",
+    "request": "The tank is open to the atmosphere on a high-pressure day, so its surface sits at 103000 Pa.",
+    "expectedOutcome": "The Tank surface pressure becomes 103000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "units",
+    "style": "plain",
+    "request": "Make the tank pressure 14.7 psi.",
+    "expectedOutcome": "The Tank surface pressure becomes about 101353 Pa (14.7 psi). Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "units",
+    "style": "conversational",
+    "request": "Could we start the branch junction at 0.95 bar?",
+    "expectedOutcome": "The Branch Junction pressure becomes 95000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "units",
+    "style": "terse",
+    "request": "Line 1 flow 30 l/s.",
+    "expectedOutcome": "The Suction Line 1 flow rate becomes 0.03 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "units",
+    "style": "loose",
+    "request": "set tank to like 1.02 bar",
+    "expectedOutcome": "The Tank surface pressure becomes 102000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "units",
+    "style": "verbose",
+    "request": "The design office works in imperial units. For the pump they specified a design NPSH margin of 12 ft, so please enter that.",
+    "expectedOutcome": "The Pump design NPSH margin (the state with the safety allowance) becomes 3.6576 m. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "reference",
+    "style": "plain",
+    "request": "Set the second suction line's flow rate to 0.004 m3/s.",
+    "expectedOutcome": "The Suction Line 2 flow rate becomes 0.004 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "reference",
+    "style": "multiPart",
+    "request": "Make the third pipe start at 0.0007 m3/s and the first at 0.0002.",
+    "expectedOutcome": "The Suction Line 3 flow rate becomes 0.0007 m3/s and the Suction Line 1 flow rate becomes 0.0002 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "reference",
+    "style": "plain",
+    "request": "Raise the pressure at the branch, not the manifold, to 101000 Pa.",
+    "expectedOutcome": "The Branch Junction pressure becomes 101000 Pa; the Suction Manifold Junction is unchanged."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "setEquation",
+    "style": "verbose",
+    "request": "For a quick sensitivity run I want the tank to push line 1 with only half its pressure. Change how the tank drives the first suction line so the pressure term is halved.",
+    "expectedOutcome": "The equation of the relationship Tank drives Suction Line 1 becomes half of what it was: 0.5 times the tank's pressure divided by the inertance."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "setEquation",
+    "style": "plain",
+    "request": "Make the pump's link to line 3 oppose with twice the pressure.",
+    "expectedOutcome": "The equation of the relationship Pump opposes Suction Line 3 becomes minus twice the pump pressure divided by the inertance."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "setEquation",
+    "style": "conversational",
+    "request": "Could you add a friction term to the tank's feed into line 1, proportional to the flow rate, with a coefficient called friction of 500?",
+    "expectedOutcome": "The relationship Tank drives Suction Line 1 gains a parameter friction = 500 and its equation subtracts friction times line 1's flow rate, divided by the inertance, from its current form."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateNode",
+    "style": "plain",
+    "request": "Rename the Branch Junction to Tee Junction.",
+    "expectedOutcome": "The node Branch Junction is renamed Tee Junction. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateNode",
+    "style": "loose",
+    "request": "show the tank as a sphere",
+    "expectedOutcome": "The Tank is displayed as a sphere. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateNode",
+    "style": "indirect",
+    "request": "Line 3 is stiff and the solver struggles; give it 8 substeps per step.",
+    "expectedOutcome": "Suction Line 3 uses 8 substeps per global step. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateEdge",
+    "style": "plain",
+    "request": "Make the tank's feed into line 1 bidirectional.",
+    "expectedOutcome": "The relationship Tank drives Suction Line 1 becomes bidirectional. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateEdge",
+    "style": "conversational",
+    "request": "Could you rename 'Pump opposes Suction Line 3' to 'Pump back-pressure'?",
+    "expectedOutcome": "The relationship Pump opposes Suction Line 3 is renamed Pump back-pressure. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "enableDisable",
+    "style": "plain",
+    "request": "Disable Suction Line 2.",
+    "expectedOutcome": "The node Suction Line 2 is disabled. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "enableDisable",
+    "style": "loose",
+    "request": "switch off the pump's link to line 3",
+    "expectedOutcome": "The relationship Pump opposes Suction Line 3 is disabled. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "enableDisable",
+    "style": "conversational",
+    "request": "Could you take the branch junction out of the loop for now?",
+    "expectedOutcome": "The node Branch Junction is disabled. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "enableDisable",
+    "style": "typos",
+    "request": "Dissable the tank discharge conection from line 1",
+    "expectedOutcome": "The relationship Suction Line 1 discharges Tank is disabled. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "remove",
+    "style": "plain",
+    "request": "Delete Suction Line 2.",
+    "expectedOutcome": "The node Suction Line 2 and the relationships attached to it are removed. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "remove",
+    "style": "indirect",
+    "request": "We are eliminating the branch, so the branch junction has to go.",
+    "expectedOutcome": "The node Branch Junction and the relationships attached to it are removed. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "remove",
+    "style": "terse",
+    "request": "Drop the capacitance link from line 3 to the pump.",
+    "expectedOutcome": "The relationship Suction Line 3 charges Pump is removed. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "clarification",
+    "style": "terse",
+    "request": "Increase the inertance.",
+    "expectedOutcome": "The assistant should ask which relationship, because the model has several inertances, and by how much."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "clarification",
+    "style": "terse",
+    "request": "Set the flow to 0.01.",
+    "expectedOutcome": "The assistant should ask which pipe, because there are three, and confirm the unit (m3/s)."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "clarification",
+    "style": "indirect",
+    "request": "The pump is not doing enough.",
+    "expectedOutcome": "The assistant should ask what to change about the pump and to what value, because the request names no quantity."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Set the junction to 1 bar.",
+    "expectedOutcome": "The assistant should ask whether Suction Manifold Junction or Branch Junction is meant, because both are junctions with a pressure."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "clarification",
+    "style": "conversational",
+    "request": "Could you lower the capacitance of the pipe?",
+    "expectedOutcome": "The assistant should ask which pipe and which capacitance, and to what value, because there are three pipes and several capacitances."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "clarification",
+    "style": "plain",
+    "request": "Set the filter loss to 2000 Pa.",
+    "expectedOutcome": "The assistant should ask what is meant, because the model has no filter; it may offer to add one."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "history",
+    "style": "terse",
+    "request": "line 2, 0.003",
+    "history": [
+      {
+        "request": "Change the flow in a pipe",
+        "outcome": "Asked: Which pipe should I update, and to what flow rate?"
+      }
+    ],
+    "expectedOutcome": "The Suction Line 2 flow rate becomes 0.003 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "history",
+    "style": "conversational",
+    "request": "the branch one, please",
+    "history": [
+      {
+        "request": "Set the junction pressure to 1 bar.",
+        "outcome": "Asked: Which node should I update: Suction Manifold Junction or Branch Junction?"
+      }
+    ],
+    "expectedOutcome": "The Branch Junction pressure becomes 100000 Pa (1 bar). Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "history",
+    "style": "plain",
+    "request": "Now do the same for the pump's suction pressure.",
+    "history": [
+      {
+        "request": "Set the tank pressure to 98 kPa.",
+        "outcome": "Applied: Update the surface pressure of Tank."
+      }
+    ],
+    "expectedOutcome": "The Pump suction pressure becomes 98000 Pa, the value just used for the tank. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "history",
+    "style": "terse",
+    "request": "start it at zero flow",
+    "history": [
+      {
+        "request": "Add a pipe called Return Line.",
+        "outcome": "Asked: What initial flow rate should Return Line have?"
+      }
+    ],
+    "expectedOutcome": "A node named Return Line is added with a flow rate of 0 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "Set the pump suction presure to 97000 Pa",
+    "expectedOutcome": "The Pump suction pressure becomes 97000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "remove",
+    "style": "typos",
+    "request": "Remvoe Suction Line 3",
+    "expectedOutcome": "The node Suction Line 3 and the relationships attached to it are removed. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "addNode",
+    "style": "typos",
+    "request": "Add a tank caled Sump with pressure 90000 Pa",
+    "expectedOutcome": "A node named Sump is added with a pressure of 90000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "typos",
+    "request": "Change the flowrate of the 2nd pipe to 0.005",
+    "expectedOutcome": "The Suction Line 2 flow rate becomes 0.005 m3/s. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "updateValue",
+    "style": "multiPart",
+    "request": "Set the tank to 100000 Pa, the manifold junction to 99000 Pa and the branch junction to 98000 Pa.",
+    "expectedOutcome": "The Tank surface pressure becomes 100000 Pa, the Suction Manifold Junction pressure 99000 Pa and the Branch Junction pressure 98000 Pa. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "enableDisable",
+    "style": "multiPart",
+    "request": "Disable Suction Line 1 and rename the pump to Main Pump.",
+    "expectedOutcome": "The node Suction Line 1 is disabled and the node Pump is renamed Main Pump. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "blank",
+    "family": "multiStep",
+    "style": "multiPart",
+    "request": "Add a tank called Overflow at 100000 Pa, a pipe called Overflow Line at 0 m3/s, and connect them.",
+    "expectedOutcome": "Nodes Overflow (100000 Pa) and Overflow Line (0 m3/s) are added, joined by a relationship from Overflow to Overflow Line that has an equation. Nothing else changes."
+  },
+  {
+    "domain": "fluid",
+    "model": "pumpSuctionHydraulics",
+    "family": "reference",
+    "style": "multiPart",
+    "request": "Set line 1 to 0.001, line 2 to 0.002 and line 3 to 0.003 m3/s.",
+    "expectedOutcome": "The flow rates of Suction Line 1, 2 and 3 become 0.001, 0.002 and 0.003 m3/s. Nothing else changes."
+  }
+]

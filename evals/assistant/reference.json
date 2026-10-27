@@ -1,0 +1,3780 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "description": "One known-good answer per listed case. `node scripts/evalAssistant.mjs reference` replays them through the whole pipeline, which shows that those cases can be passed and that the harness itself is sound.",
+  "responses": {
+    "setBatteryTemperature": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the battery temperature.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 320
+        }
+      ]
+    },
+    "ambientCelsius": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "30 °C is 303.15 K.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 303.15
+        }
+      ]
+    },
+    "livingRoomFahrenheit": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "72 °F is about 295.37 K.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 295.37
+        }
+      ]
+    },
+    "disableHeater": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Disable the heater.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 3,
+          "enabled": false
+        }
+      ]
+    },
+    "removeHeater": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Remove the heater.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 3
+        }
+      ]
+    },
+    "massTwoKilograms": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Both relationships carry the mass.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 10,
+          "value": 2
+        },
+        {
+          "kind": "updateParameter",
+          "parameterRef": 13,
+          "value": 2
+        }
+      ]
+    },
+    "addCoolant": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a coolant body.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "coolant",
+          "name": "Coolant"
+        },
+        {
+          "kind": "addState",
+          "ref": "coolantTemperature",
+          "nodeRef": "coolant",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 280,
+          "unit": "K"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "coolantFlow",
+          "name": "Coolant heat flow",
+          "sourceNodeRef": 3,
+          "targetNodeRef": "coolant",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "coolantConductance",
+          "edgeRef": "coolantFlow",
+          "name": "Conductance",
+          "symbol": "conductance",
+          "value": 20,
+          "unit": "W/K",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "coolantFlow",
+          "outputStateRef": "coolantTemperature",
+          "latex": "\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})"
+        }
+      ]
+    },
+    "conductionEquation": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Rewrite the conduction equation.",
+      "operations": [
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 5,
+          "outputStateRef": 4,
+          "latex": "\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})"
+        }
+      ]
+    },
+    "noBackEmf": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Drop the back-EMF term.",
+      "operations": [
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 8,
+          "outputStateRef": 4,
+          "latex": "\\frac{\\mathrm{sourceVoltage}-\\mathrm{resistance}\\cdot\\mathrm{targetCurrent}}{\\mathrm{inductance}}"
+        }
+      ]
+    },
+    "reverseConduction": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Reverse the conduction.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 5,
+          "sourceNodeRef": 3,
+          "targetNodeRef": 1
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 5,
+          "outputStateRef": 2,
+          "latex": "\\frac{\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})}{\\mathrm{thermalCapacitance}}"
+        }
+      ]
+    },
+    "blankConnectedPair": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Two blocks and a heat flow.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "hot",
+          "name": "Hot block"
+        },
+        {
+          "kind": "addState",
+          "ref": "hotT",
+          "nodeRef": "hot",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 400,
+          "unit": "K"
+        },
+        {
+          "kind": "addNode",
+          "ref": "cold",
+          "name": "Cold block"
+        },
+        {
+          "kind": "addState",
+          "ref": "coldT",
+          "nodeRef": "cold",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 300,
+          "unit": "K"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "flow",
+          "name": "Heat flow",
+          "sourceNodeRef": "hot",
+          "targetNodeRef": "cold",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "g",
+          "edgeRef": "flow",
+          "name": "Conductance",
+          "symbol": "conductance",
+          "value": 5,
+          "unit": "W/K",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "flow",
+          "outputStateRef": "coldT",
+          "latex": "\\mathrm{conductance}\\cdot(\\mathrm{sourceTemperature}-\\mathrm{targetTemperature})"
+        }
+      ]
+    },
+    "taxReserveFlow": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a tax reserve fed from the operating account.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "reserve",
+          "name": "Tax reserve"
+        },
+        {
+          "kind": "addState",
+          "ref": "reserveBalance",
+          "nodeRef": "reserve",
+          "name": "Balance",
+          "symbol": "balance",
+          "initialValue": 50000,
+          "unit": "USD"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "setAside",
+          "name": "Tax set-aside",
+          "sourceNodeRef": 1,
+          "targetNodeRef": "reserve",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "fraction",
+          "edgeRef": "setAside",
+          "name": "Set-aside fraction",
+          "symbol": "setAsideFraction",
+          "value": 0.1,
+          "unit": "1/month",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "setAside",
+          "outputStateRef": "reserveBalance",
+          "latex": "\\mathrm{setAsideFraction}\\cdot\\mathrm{sourceBalance}"
+        }
+      ]
+    },
+    "couplerLonger": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Lengthen both couplings.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 58,
+          "value": 3.2
+        },
+        {
+          "kind": "updateParameter",
+          "parameterRef": 63,
+          "value": 3.2
+        }
+      ]
+    },
+    "sixtyPercentToA": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Re-split the gate.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 84,
+          "value": 0.6
+        },
+        {
+          "kind": "updateParameter",
+          "parameterRef": 95,
+          "value": 0.4
+        }
+      ]
+    },
+    "answerClarification": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the battery temperature.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 310
+        }
+      ]
+    },
+    "ambiguousTemperature": {
+      "responseKind": "clarification",
+      "question": "Which node should I update?",
+      "suggestions": [
+        "Battery module",
+        "Enclosed air"
+      ]
+    },
+    "zone4": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add Zone 4.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "zone4",
+          "name": "Zone 4",
+          "type": "Demand zone"
+        },
+        {
+          "kind": "addState",
+          "ref": "zone4Backlog",
+          "nodeRef": "zone4",
+          "name": "Backlog",
+          "symbol": "backlog",
+          "initialValue": 10,
+          "unit": "TEU"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "deliverB4",
+          "name": "Deliver B to Zone 4",
+          "sourceNodeRef": 52,
+          "targetNodeRef": "zone4",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "rate4",
+          "edgeRef": "deliverB4",
+          "name": "Delivery rate",
+          "symbol": "deliveryRate",
+          "value": 0.5,
+          "unit": "1/day",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "deliverB4",
+          "outputStateRef": "zone4Backlog",
+          "latex": "-\\mathrm{deliveryRate}\\cdot\\mathrm{targetBacklog}"
+        }
+      ]
+    },
+    "removeWristAssembly": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Remove the wrist.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 33
+        },
+        {
+          "kind": "removeEntity",
+          "entityRef": 35
+        },
+        {
+          "kind": "removeEntity",
+          "entityRef": 38
+        }
+      ]
+    },
+    "loanPaymentTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Raise both loan payments.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 19,
+          "value": 15000
+        },
+        {
+          "kind": "updateParameter",
+          "parameterRef": 21,
+          "value": 15000
+        }
+      ]
+    },
+    "salesPerYear": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "2 million a year is 166,667 a month.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 8,
+          "initialValue": 166666.67
+        }
+      ]
+    },
+    "smallLogistics": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "A warehouse and a zone.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "warehouse",
+          "name": "Warehouse"
+        },
+        {
+          "kind": "addState",
+          "ref": "onHand",
+          "nodeRef": "warehouse",
+          "name": "On hand",
+          "symbol": "onHand",
+          "initialValue": 500,
+          "unit": "TEU"
+        },
+        {
+          "kind": "addNode",
+          "ref": "zone",
+          "name": "Customer zone"
+        },
+        {
+          "kind": "addState",
+          "ref": "backlog",
+          "nodeRef": "zone",
+          "name": "Backlog",
+          "symbol": "backlog",
+          "initialValue": 40,
+          "unit": "TEU"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "deliveries",
+          "name": "Deliveries",
+          "sourceNodeRef": "warehouse",
+          "targetNodeRef": "zone",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "rate",
+          "edgeRef": "deliveries",
+          "name": "Delivery rate",
+          "symbol": "deliveryRate",
+          "value": 0.1,
+          "unit": "1/day",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "deliveries",
+          "outputStateRef": "backlog",
+          "latex": "-\\mathrm{deliveryRate}\\cdot\\mathrm{sourceOnHand}"
+        }
+      ]
+    },
+    "renamePort": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Rename the port.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 15,
+          "name": "Port of Rotterdam"
+        }
+      ]
+    },
+    "vesselDelay": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Low stocks after a vessel delay.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 16,
+          "initialValue": 20
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 21,
+          "initialValue": 100
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 53,
+          "initialValue": 40
+        }
+      ]
+    },
+    "addPackVoltage": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a voltage state.",
+      "operations": [
+        {
+          "kind": "addState",
+          "ref": "v",
+          "nodeRef": 1,
+          "name": "Pack voltage",
+          "symbol": "packVoltage",
+          "initialValue": 400,
+          "unit": "V"
+        }
+      ]
+    },
+    "cartAndWall": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "A cart on a spring.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "cart",
+          "name": "Cart"
+        },
+        {
+          "kind": "addState",
+          "ref": "cartX",
+          "nodeRef": "cart",
+          "name": "Displacement",
+          "symbol": "displacement",
+          "initialValue": 0,
+          "unit": "m"
+        },
+        {
+          "kind": "addState",
+          "ref": "cartV",
+          "nodeRef": "cart",
+          "name": "Velocity",
+          "symbol": "velocity",
+          "initialValue": 0,
+          "unit": "m/s"
+        },
+        {
+          "kind": "addNode",
+          "ref": "wall",
+          "name": "Wall"
+        },
+        {
+          "kind": "addState",
+          "ref": "wallX",
+          "nodeRef": "wall",
+          "name": "Displacement",
+          "symbol": "displacement",
+          "initialValue": 2,
+          "unit": "m"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "spring",
+          "name": "Spring",
+          "sourceNodeRef": "wall",
+          "targetNodeRef": "cart",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "k",
+          "edgeRef": "spring",
+          "name": "Stiffness",
+          "symbol": "stiffness",
+          "value": 100,
+          "unit": "N/m",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "spring",
+          "outputStateRef": "cartV",
+          "latex": "\\mathrm{stiffness}\\cdot(\\mathrm{sourceDisplacement}-\\mathrm{targetDisplacement})"
+        }
+      ]
+    },
+    "proportionalOnly": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Proportional control only.",
+      "operations": [
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 18,
+          "outputStateRef": 2,
+          "latex": "\\mathrm{gain}\\cdot\\left(\\mathrm{setpointAngle}-\\mathrm{sourceAngle}\\right)"
+        }
+      ]
+    },
+    "blankAddNode": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a battery.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "battery",
+          "name": "Battery"
+        },
+        {
+          "kind": "addState",
+          "ref": "batteryTemperature",
+          "nodeRef": "battery",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 300,
+          "unit": "K"
+        }
+      ]
+    },
+    "blankAddThermalMass": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a coolant.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "coolant",
+          "name": "Coolant"
+        },
+        {
+          "kind": "addState",
+          "ref": "coolantTemperature",
+          "nodeRef": "coolant",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 285,
+          "unit": "K"
+        }
+      ]
+    },
+    "blankAddTwoNodes": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add two plates.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "hot",
+          "name": "Hot plate"
+        },
+        {
+          "kind": "addState",
+          "ref": "hotTemperature",
+          "nodeRef": "hot",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 400,
+          "unit": "K"
+        },
+        {
+          "kind": "addNode",
+          "ref": "cold",
+          "name": "Cold plate"
+        },
+        {
+          "kind": "addState",
+          "ref": "coldTemperature",
+          "nodeRef": "cold",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 280,
+          "unit": "K"
+        }
+      ]
+    },
+    "coolingLoop": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Start a cooling loop.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "radiator",
+          "name": "Radiator"
+        },
+        {
+          "kind": "addState",
+          "ref": "radiatorTemperature",
+          "nodeRef": "radiator",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 310,
+          "unit": "K"
+        },
+        {
+          "kind": "addNode",
+          "ref": "fan",
+          "name": "Fan air"
+        },
+        {
+          "kind": "addState",
+          "ref": "fanTemperature",
+          "nodeRef": "fan",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 295,
+          "unit": "K"
+        }
+      ]
+    },
+    "oilBath": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add an oil bath.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "oil",
+          "name": "Oil bath"
+        },
+        {
+          "kind": "addState",
+          "ref": "oilTemperature",
+          "nodeRef": "oil",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 340,
+          "unit": "K"
+        }
+      ]
+    },
+    "logicRail": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a logic rail.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "rail",
+          "name": "Logic rail"
+        },
+        {
+          "kind": "addState",
+          "ref": "railVoltage",
+          "nodeRef": "rail",
+          "name": "Voltage",
+          "symbol": "voltage",
+          "initialValue": 5,
+          "unit": "V"
+        }
+      ]
+    },
+    "taxReserve": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a tax reserve.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "reserve",
+          "name": "Tax reserve"
+        },
+        {
+          "kind": "addState",
+          "ref": "reserveBalance",
+          "nodeRef": "reserve",
+          "name": "Balance",
+          "symbol": "balance",
+          "initialValue": 50000,
+          "unit": "USD"
+        }
+      ]
+    },
+    "reservoir": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a reservoir.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "reservoir",
+          "name": "Reservoir"
+        },
+        {
+          "kind": "addState",
+          "ref": "reservoirPressure",
+          "nodeRef": "reservoir",
+          "name": "Pressure",
+          "symbol": "pressure",
+          "initialValue": 200000,
+          "unit": "Pa"
+        }
+      ]
+    },
+    "pumpTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a pump.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "pump",
+          "name": "Pump"
+        },
+        {
+          "kind": "addState",
+          "ref": "pumpPressure",
+          "nodeRef": "pump",
+          "name": "Pressure",
+          "symbol": "pressure",
+          "initialValue": 150000,
+          "unit": "Pa"
+        }
+      ]
+    },
+    "tankKilograms": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a tank.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "tank",
+          "name": "tank"
+        },
+        {
+          "kind": "addState",
+          "ref": "tankMass",
+          "nodeRef": "tank",
+          "name": "Mass",
+          "symbol": "mass",
+          "initialValue": 1000,
+          "unit": "kg"
+        }
+      ]
+    },
+    "warehouseC": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a warehouse.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "wc",
+          "name": "Warehouse C"
+        },
+        {
+          "kind": "addState",
+          "ref": "wcOnHand",
+          "nodeRef": "wc",
+          "name": "On hand",
+          "symbol": "onHand",
+          "initialValue": 50,
+          "unit": "TEU"
+        }
+      ]
+    },
+    "ceiling": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a ceiling.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "ceiling",
+          "name": "Ceiling"
+        },
+        {
+          "kind": "addState",
+          "ref": "ceilingDisplacement",
+          "nodeRef": "ceiling",
+          "name": "Displacement",
+          "symbol": "displacement",
+          "initialValue": 0,
+          "unit": "m"
+        },
+        {
+          "kind": "addState",
+          "ref": "ceilingVelocity",
+          "nodeRef": "ceiling",
+          "name": "Velocity",
+          "symbol": "velocity",
+          "initialValue": 0,
+          "unit": "m/s"
+        }
+      ]
+    },
+    "gripper": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a gripper.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "gripper",
+          "name": "Gripper"
+        },
+        {
+          "kind": "addState",
+          "ref": "gripperAngle",
+          "nodeRef": "gripper",
+          "name": "Angle",
+          "symbol": "angle",
+          "initialValue": 0,
+          "unit": "rad"
+        },
+        {
+          "kind": "addState",
+          "ref": "gripperAngularVelocity",
+          "nodeRef": "gripper",
+          "name": "Angular velocity",
+          "symbol": "angularVelocity",
+          "initialValue": 0,
+          "unit": "rad/s"
+        }
+      ]
+    },
+    "supplyMotorPair": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "A supply and a motor.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "supply",
+          "name": "Supply"
+        },
+        {
+          "kind": "addState",
+          "ref": "supplyVoltage",
+          "nodeRef": "supply",
+          "name": "Voltage",
+          "symbol": "voltage",
+          "initialValue": 12,
+          "unit": "V"
+        },
+        {
+          "kind": "addNode",
+          "ref": "motor",
+          "name": "Motor"
+        },
+        {
+          "kind": "addState",
+          "ref": "motorCurrent",
+          "nodeRef": "motor",
+          "name": "Current",
+          "symbol": "current",
+          "initialValue": 0,
+          "unit": "A"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "drive",
+          "name": "Armature dynamics",
+          "sourceNodeRef": "supply",
+          "targetNodeRef": "motor",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "driveP0",
+          "edgeRef": "drive",
+          "name": "Resistance",
+          "symbol": "resistance",
+          "value": 2,
+          "unit": "Ω",
+          "mode": "constant"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "driveP1",
+          "edgeRef": "drive",
+          "name": "Inductance",
+          "symbol": "inductance",
+          "value": 0.5,
+          "unit": "H",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "drive",
+          "outputStateRef": "motorCurrent",
+          "latex": "\\frac{\\mathrm{sourceVoltage}-\\mathrm{resistance}\\cdot\\mathrm{targetCurrent}}{\\mathrm{inductance}}"
+        }
+      ]
+    },
+    "leftMotor": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add the left motor.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "left",
+          "name": "Left motor"
+        },
+        {
+          "kind": "addState",
+          "ref": "leftCurrent",
+          "nodeRef": "left",
+          "name": "Current",
+          "symbol": "current",
+          "initialValue": 0,
+          "unit": "A"
+        },
+        {
+          "kind": "addState",
+          "ref": "leftAngularVelocity",
+          "nodeRef": "left",
+          "name": "Angular velocity",
+          "symbol": "angularVelocity",
+          "initialValue": 0,
+          "unit": "rad/s"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "leftDrive",
+          "name": "Left armature dynamics",
+          "sourceNodeRef": 1,
+          "targetNodeRef": "left",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "leftDriveP0",
+          "edgeRef": "leftDrive",
+          "name": "Resistance",
+          "symbol": "resistance",
+          "value": 2,
+          "unit": "Ω",
+          "mode": "constant"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "leftDriveP1",
+          "edgeRef": "leftDrive",
+          "name": "Inductance",
+          "symbol": "inductance",
+          "value": 0.5,
+          "unit": "H",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "leftDrive",
+          "outputStateRef": "leftCurrent",
+          "latex": "\\frac{\\mathrm{sourceVoltage}-\\mathrm{resistance}\\cdot\\mathrm{targetCurrent}}{\\mathrm{inductance}}"
+        }
+      ]
+    },
+    "savingsChecking": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Savings feed checking.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "savings",
+          "name": "Savings"
+        },
+        {
+          "kind": "addState",
+          "ref": "savingsBalance",
+          "nodeRef": "savings",
+          "name": "Balance",
+          "symbol": "balance",
+          "initialValue": 1000,
+          "unit": "USD"
+        },
+        {
+          "kind": "addNode",
+          "ref": "checking",
+          "name": "Checking"
+        },
+        {
+          "kind": "addState",
+          "ref": "checkingBalance",
+          "nodeRef": "checking",
+          "name": "Balance",
+          "symbol": "balance",
+          "initialValue": 200,
+          "unit": "USD"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "interest",
+          "name": "Savings interest",
+          "sourceNodeRef": "savings",
+          "targetNodeRef": "checking",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "interestP0",
+          "edgeRef": "interest",
+          "name": "Monthly rate",
+          "symbol": "monthlyRate",
+          "value": 0.01,
+          "unit": "1/month",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "interest",
+          "outputStateRef": "checkingBalance",
+          "latex": "\\mathrm{monthlyRate}\\cdot\\mathrm{sourceBalance}"
+        }
+      ]
+    },
+    "reliefJunction": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a relief junction.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "relief",
+          "name": "Relief valve junction"
+        },
+        {
+          "kind": "addState",
+          "ref": "reliefPressure",
+          "nodeRef": "relief",
+          "name": "Pressure",
+          "symbol": "pressure",
+          "initialValue": 150000,
+          "unit": "Pa"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "reliefFlow",
+          "name": "Pump to relief",
+          "sourceNodeRef": 13,
+          "targetNodeRef": "relief",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "reliefFlowP0",
+          "edgeRef": "reliefFlow",
+          "name": "Conductance",
+          "symbol": "conductance",
+          "value": 1,
+          "unit": "1/s",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "reliefFlow",
+          "outputStateRef": "reliefPressure",
+          "latex": "\\mathrm{conductance}\\cdot(\\mathrm{sourcePressure}-\\mathrm{targetPressure})"
+        }
+      ]
+    },
+    "addPayload": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Hang a payload.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "payload",
+          "name": "Payload"
+        },
+        {
+          "kind": "addState",
+          "ref": "payloadDisplacement",
+          "nodeRef": "payload",
+          "name": "Displacement",
+          "symbol": "displacement",
+          "initialValue": 0,
+          "unit": "m"
+        },
+        {
+          "kind": "addState",
+          "ref": "payloadVelocity",
+          "nodeRef": "payload",
+          "name": "Velocity",
+          "symbol": "velocity",
+          "initialValue": 0,
+          "unit": "m/s"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "hang",
+          "name": "Payload spring",
+          "sourceNodeRef": 1,
+          "targetNodeRef": "payload",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "hangP0",
+          "edgeRef": "hang",
+          "name": "Stiffness",
+          "symbol": "stiffness",
+          "value": 50,
+          "unit": "N/m",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "hang",
+          "outputStateRef": "payloadVelocity",
+          "latex": "\\mathrm{stiffness}\\cdot(\\mathrm{sourceDisplacement}-\\mathrm{targetDisplacement})"
+        }
+      ]
+    },
+    "wristCameraMount": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a camera mount.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "mount",
+          "name": "Wrist camera mount"
+        },
+        {
+          "kind": "addState",
+          "ref": "mountMass",
+          "nodeRef": "mount",
+          "name": "Mass",
+          "symbol": "mass",
+          "initialValue": 0.3,
+          "unit": "kg"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "mountLink",
+          "name": "Camera mount coupling",
+          "sourceNodeRef": 38,
+          "targetNodeRef": "mount",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "mountLinkP0",
+          "edgeRef": "mountLink",
+          "name": "Coupling",
+          "symbol": "coupling",
+          "value": 1,
+          "unit": "kg/rad",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "mountLink",
+          "outputStateRef": "mountMass",
+          "latex": "\\mathrm{coupling}\\cdot\\mathrm{sourceAngle}"
+        }
+      ]
+    },
+    "collectionRate": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Collect 90% of revenue.",
+      "operations": [
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 13,
+          "outputStateRef": 2,
+          "latex": "0.9\\cdot\\mathrm{sourceRevenueRate}"
+        }
+      ]
+    },
+    "addContactArea": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a contact area.",
+      "operations": [
+        {
+          "kind": "addParameter",
+          "ref": "area",
+          "edgeRef": 9,
+          "name": "Contact area",
+          "symbol": "contactArea",
+          "value": 0.5,
+          "unit": "m²",
+          "mode": "constant"
+        }
+      ]
+    },
+    "airHumidity": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add humidity.",
+      "operations": [
+        {
+          "kind": "addState",
+          "ref": "humidity",
+          "nodeRef": 4,
+          "name": "Humidity",
+          "symbol": "humidity",
+          "initialValue": 45,
+          "unit": "%"
+        }
+      ]
+    },
+    "insulationFactor": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add an insulation factor.",
+      "operations": [
+        {
+          "kind": "addParameter",
+          "ref": "insulation",
+          "edgeRef": 7,
+          "name": "Insulation factor",
+          "symbol": "insulationFactor",
+          "value": 0.8,
+          "unit": "",
+          "mode": "constant"
+        }
+      ]
+    },
+    "dcSupply12": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: dcSupply12.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 12
+        }
+      ]
+    },
+    "loadTorqueHalf": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: loadTorqueHalf.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 7,
+          "initialValue": 0.5
+        }
+      ]
+    },
+    "armatureResistance": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: armatureResistance.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 9,
+          "value": 3
+        }
+      ]
+    },
+    "halfRotorInertia": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: halfRotorInertia.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 15,
+          "value": 0.005
+        }
+      ]
+    },
+    "bumpSupply": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: bumpSupply.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 36
+        }
+      ]
+    },
+    "viscousFrictionTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: viscousFrictionTypos.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 14,
+          "value": 0.05
+        }
+      ]
+    },
+    "bearingFrictionOff": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: bearingFrictionOff.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 6,
+          "enabled": false
+        }
+      ]
+    },
+    "removeDischarge": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeDischarge.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 25
+        }
+      ]
+    },
+    "stateOfCharge80": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: stateOfCharge80.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 3,
+          "initialValue": 80
+        }
+      ]
+    },
+    "wheelRadiusCentimetres": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: wheelRadiusCentimetres.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 22,
+          "value": 0.075
+        }
+      ]
+    },
+    "increaseSpeed": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "changeResistance": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "aboutPointThree": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: aboutPointThree.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 7,
+          "initialValue": 0.3
+        }
+      ]
+    },
+    "coldStartScenario": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: coldStartScenario.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 3,
+          "initialValue": 60
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 13,
+          "initialValue": 278.15
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 11,
+          "initialValue": 278.15
+        }
+      ]
+    },
+    "housingTemperature": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: housingTemperature.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 11,
+          "initialValue": 310
+        }
+      ]
+    },
+    "housingConductionDirected": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: housingConductionDirected.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 27,
+          "directionality": "directed"
+        }
+      ]
+    },
+    "supplyAndLoad": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: supplyAndLoad.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 12
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 7,
+          "initialValue": 0.2
+        }
+      ]
+    },
+    "accountBalance300k": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: accountBalance300k.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 300000
+        }
+      ]
+    },
+    "loanPrincipal650k": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: loanPrincipal650k.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 650000
+        }
+      ]
+    },
+    "salesTwoHundredK": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: salesTwoHundredK.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 8,
+          "initialValue": 200000
+        }
+      ]
+    },
+    "costsUp": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: costsUp.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 10,
+          "initialValue": 165000
+        }
+      ]
+    },
+    "marketEightTenths": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: marketEightTenths.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 12,
+          "initialValue": 0.008
+        }
+      ]
+    },
+    "creditSpread": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: creditSpread.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 17,
+          "value": 0.003
+        }
+      ]
+    },
+    "sweepFivePercent": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: sweepFivePercent.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 23,
+          "value": 0.05
+        }
+      ]
+    },
+    "stopSweep": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: stopSweep.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 22,
+          "enabled": false
+        }
+      ]
+    },
+    "removeLoan": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeLoan.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 5
+        }
+      ]
+    },
+    "updateTheRate": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "removeMortgage": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "revenue150k": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: revenue150k.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 8,
+          "initialValue": 150000
+        }
+      ]
+    },
+    "recession": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: recession.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 8,
+          "initialValue": 120000
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 12,
+          "initialValue": -0.01
+        }
+      ]
+    },
+    "portfolio1500k": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: portfolio1500k.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 1500000
+        }
+      ]
+    },
+    "renameAccount": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: renameAccount.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 1,
+          "name": "Main current account"
+        }
+      ]
+    },
+    "balanceSheet": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: balanceSheet.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 100000
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 2000000
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 500000
+        }
+      ]
+    },
+    "tankAtmospheric": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankAtmospheric.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 101325
+        }
+      ]
+    },
+    "tankOneBar": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankOneBar.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 100000
+        }
+      ]
+    },
+    "npshDesign35": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: npshDesign35.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 17,
+          "initialValue": 3.5
+        }
+      ]
+    },
+    "line2Flow": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: line2Flow.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 8,
+          "initialValue": 0.002
+        }
+      ]
+    },
+    "biggerTank": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: biggerTank.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 22,
+          "value": 0.0005
+        }
+      ]
+    },
+    "branchJunctionOff": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: branchJunctionOff.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 9,
+          "enabled": false
+        }
+      ]
+    },
+    "pumpPressureTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: pumpPressureTypos.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 14,
+          "initialValue": 90000
+        }
+      ]
+    },
+    "removeLine3": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeLine3.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 11
+        }
+      ]
+    },
+    "removeLine2Charges": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeLine2Charges.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 33
+        }
+      ]
+    },
+    "changeInertance": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "pressure95k": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?",
+      "suggestions": [
+        "Tank",
+        "Pump"
+      ]
+    },
+    "thePump": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: thePump.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 14,
+          "initialValue": 95000
+        }
+      ]
+    },
+    "tankLineInertance": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankLineInertance.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 18,
+          "value": 150000
+        }
+      ]
+    },
+    "hotPumpScenario": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: hotPumpScenario.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 17,
+          "initialValue": 3
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 14,
+          "initialValue": 95000
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 101325
+        }
+      ]
+    },
+    "addANode": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "connectThem": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "portYard400": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: portYard400.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 16,
+          "initialValue": 400
+        }
+      ]
+    },
+    "warehouseBOnHand": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: warehouseBOnHand.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 53,
+          "initialValue": 120
+        }
+      ]
+    },
+    "zone2Backlog35": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: zone2Backlog35.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 139,
+          "initialValue": 35
+        }
+      ]
+    },
+    "warehouseADemand": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: warehouseADemand.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 25,
+          "initialValue": 90
+        }
+      ]
+    },
+    "leadTimeB5": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: leadTimeB5.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 96,
+          "value": 5
+        }
+      ]
+    },
+    "disableZone3": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: disableZone3.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 171,
+          "enabled": false
+        }
+      ]
+    },
+    "zone1SignalOff": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: zone1SignalOff.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 137,
+          "enabled": false
+        }
+      ]
+    },
+    "closeWarehouseB": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: closeWarehouseB.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 52
+        }
+      ]
+    },
+    "removeZone3Signal": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeZone3Signal.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 201
+        }
+      ]
+    },
+    "changeLeadTime": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "backlog25": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?",
+      "suggestions": [
+        "Zone 1",
+        "Zone 2",
+        "Zone 3"
+      ]
+    },
+    "zoneThree": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: zoneThree.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 172,
+          "initialValue": 25
+        }
+      ]
+    },
+    "zone3Backlog30": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: zone3Backlog30.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 172,
+          "initialValue": 30
+        }
+      ]
+    },
+    "twoBacklogs": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: twoBacklogs.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 108,
+          "initialValue": 80
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 139,
+          "initialValue": 60
+        }
+      ]
+    },
+    "springStiffness10": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: springStiffness10.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 9,
+          "value": 10
+        }
+      ]
+    },
+    "damping12": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: damping12.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 12,
+          "value": 1.2
+        }
+      ]
+    },
+    "startFiveCentimetres": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: startFiveCentimetres.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 0.05
+        }
+      ]
+    },
+    "pushedToThirty": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: pushedToThirty.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 0.3
+        }
+      ]
+    },
+    "stifferSpring": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: stifferSpring.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 9,
+          "value": 8
+        }
+      ]
+    },
+    "removeDamperTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeDamperTypos.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 11
+        }
+      ]
+    },
+    "pivotDOutward": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: pivotDOutward.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 15,
+          "initialValue": 4
+        }
+      ]
+    },
+    "rockerRodXOut": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: rockerRodXOut.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 67,
+          "enabled": false
+        }
+      ]
+    },
+    "stifferRod": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "springTwenty": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: springTwenty.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 9,
+          "value": 20
+        }
+      ]
+    },
+    "ditchSupport": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: ditchSupport.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 5
+        }
+      ]
+    },
+    "renameCarBody": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: renameCarBody.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 1,
+          "name": "Car body"
+        }
+      ]
+    },
+    "tuneSuspension": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tuneSuspension.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 9,
+          "value": 6
+        },
+        {
+          "kind": "updateParameter",
+          "parameterRef": 12,
+          "value": 0.8
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 0.2
+        }
+      ]
+    },
+    "setpoint2": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: setpoint2.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 21,
+          "value": 2
+        }
+      ]
+    },
+    "positionGain8": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: positionGain8.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 19,
+          "value": 8
+        }
+      ]
+    },
+    "elbowWristSupplies": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: elbowWristSupplies.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 18,
+          "initialValue": 20
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 34,
+          "initialValue": 15
+        }
+      ]
+    },
+    "shoulderInertia": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: shoulderInertia.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 15,
+          "value": 0.04
+        }
+      ]
+    },
+    "killElbowMotor": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: killElbowMotor.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 19,
+          "enabled": false
+        }
+      ]
+    },
+    "wristSupplyTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: wristSupplyTypos.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 34,
+          "initialValue": 9
+        }
+      ]
+    },
+    "wristOffShoulder28": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: wristOffShoulder28.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 35,
+          "enabled": false
+        },
+        {
+          "kind": "updateNode",
+          "nodeRef": 38,
+          "enabled": false
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 28
+        }
+      ]
+    },
+    "setSupply24": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?",
+      "suggestions": [
+        "Shoulder supply",
+        "Elbow supply",
+        "Wrist supply"
+      ]
+    },
+    "addGearbox": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "elbowSupply22": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: elbowSupply22.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 18,
+          "initialValue": 22
+        }
+      ]
+    },
+    "elbowAngle": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: elbowAngle.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 23,
+          "initialValue": 0.5
+        }
+      ]
+    },
+    "shoulderNinety": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: shoulderNinety.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 7,
+          "initialValue": 1.5707963
+        }
+      ]
+    },
+    "elbowSupplyVoltage": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: elbowSupplyVoltage.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 18,
+          "initialValue": 20
+        }
+      ]
+    },
+    "disableWristMotor": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: disableWristMotor.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 35,
+          "enabled": false
+        }
+      ]
+    },
+    "threeSupplies": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: threeSupplies.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 30
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 18,
+          "initialValue": 20
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 34,
+          "initialValue": 10
+        }
+      ]
+    },
+    "heaterPowerKilowatts": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: heaterPowerKilowatts.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 3000
+        }
+      ]
+    },
+    "bedroomCelsius": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: bedroomCelsius.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 291.15
+        }
+      ]
+    },
+    "disableConvectionLoss": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: disableConvectionLoss.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 12,
+          "enabled": false
+        }
+      ]
+    },
+    "renameOutdoorAir": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: renameOutdoorAir.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 5,
+          "name": "Outside air"
+        }
+      ]
+    },
+    "tankSubsteps": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankSubsteps.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 1,
+          "substepsPerGlobalStep": 4
+        }
+      ]
+    },
+    "tankSphere": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankSphere.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 1,
+          "shape": "sphere"
+        }
+      ]
+    },
+    "removeBedroomLoss": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: removeBedroomLoss.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 10
+        }
+      ]
+    },
+    "vagueWarmer": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "missingPump": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "reviseValue": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: reviseValue.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 305
+        }
+      ]
+    },
+    "heaterTwoAndAHalf": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: heaterTwoAndAHalf.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 2500
+        }
+      ]
+    },
+    "tankStartsCold": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankStartsCold.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 320
+        }
+      ]
+    },
+    "tankFiftyCelsius": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankFiftyCelsius.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 323.15
+        }
+      ]
+    },
+    "ambientFifteenTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: ambientFifteenTypos.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 288.15
+        }
+      ]
+    },
+    "heatLossCoefficient": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: heatLossCoefficient.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 10,
+          "value": 25
+        }
+      ]
+    },
+    "livingRoomEnvelope": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: livingRoomEnvelope.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 8,
+          "value": 200
+        }
+      ]
+    },
+    "batteryConvectionArea": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: batteryConvectionArea.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 14,
+          "value": 2
+        }
+      ]
+    },
+    "tankScenario": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: tankScenario.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 300
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 280
+        },
+        {
+          "kind": "updateNode",
+          "nodeRef": 3,
+          "enabled": false
+        }
+      ]
+    },
+    "lossBidirectional": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: lossBidirectional.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 9,
+          "directionality": "bidirectional"
+        }
+      ]
+    },
+    "dropBedroom": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: dropBedroom.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 3
+        }
+      ]
+    },
+    "changeTemperatureForMe": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "tooHotInThere": {
+      "responseKind": "clarification",
+      "question": "Which one do you mean?"
+    },
+    "bareNumberReply": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: bareNumberReply.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 330
+        }
+      ]
+    },
+    "batteryTestStart": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: batteryTestStart.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 298.15
+        }
+      ]
+    },
+    "renameTank": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: renameTank.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 1,
+          "name": "Hot water cylinder"
+        }
+      ]
+    },
+    "ambientCylinder": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: ambientCylinder.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 5,
+          "shape": "cylinder"
+        }
+      ]
+    },
+    "managementTrio": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Derived from the case: managementTrio.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 310
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 5,
+          "initialValue": 290
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 7,
+          "initialValue": 500
+        }
+      ]
+    },
+    "reactorFeedConcentration": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the feed concentration.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 2500
+        }
+      ]
+    },
+    "reactorFeedLitres": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "30 L/min is 0.0005 m3/s.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 9,
+          "value": 0.0005
+        }
+      ]
+    },
+    "reactorRateConstant": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Both relationships carry the rate constant.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 11,
+          "value": 0.006
+        },
+        {
+          "kind": "updateParameter",
+          "parameterRef": 13,
+          "value": 0.006
+        }
+      ]
+    },
+    "reactorTemperature": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a temperature state.",
+      "operations": [
+        {
+          "kind": "addState",
+          "ref": "t",
+          "nodeRef": 3,
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 350,
+          "unit": "K"
+        }
+      ]
+    },
+    "reactorAmbiguousConcentration": {
+      "responseKind": "clarification",
+      "question": "Which node should I update?",
+      "suggestions": [
+        "Feed stream",
+        "Reactor",
+        "Product stream"
+      ]
+    },
+    "reactorScenario": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Update both.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 1800
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 5,
+          "initialValue": 3
+        }
+      ]
+    },
+    "reactorSecondOrder": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Second-order reaction.",
+      "operations": [
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 10,
+          "outputStateRef": 7,
+          "latex": "\\mathrm{rateConstant}\\cdot\\mathrm{sourceConcentration}^{2}"
+        }
+      ]
+    },
+    "reactorFeedOff": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Disable the feed.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 1,
+          "enabled": false
+        }
+      ]
+    },
+    "reactorAnswer": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the reactor concentration.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 300
+        }
+      ]
+    },
+    "reactorPurge": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a purge stream.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "purge",
+          "name": "Purge stream"
+        },
+        {
+          "kind": "addState",
+          "ref": "purgeC",
+          "nodeRef": "purge",
+          "name": "Concentration",
+          "symbol": "concentration",
+          "initialValue": 0,
+          "unit": "mol/m3"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "purgeFlow",
+          "name": "Purge",
+          "sourceNodeRef": 3,
+          "targetNodeRef": "purge",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "purgeFlowP0",
+          "edgeRef": "purgeFlow",
+          "name": "Purge rate",
+          "symbol": "purgeRate",
+          "value": 0.002,
+          "unit": "1/s",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "purgeFlow",
+          "outputStateRef": "purgeC",
+          "latex": "\\mathrm{purgeRate}\\cdot\\mathrm{sourceConcentration}"
+        }
+      ]
+    },
+    "vehicleSpeed25": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set speed.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 25
+        }
+      ]
+    },
+    "vehicleNinetyKmh": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "90 km/h is 25 m/s.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 25
+        }
+      ]
+    },
+    "vehicleMassTonnes": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "1.6 tonnes is 1600 kg.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 5,
+          "initialValue": 1600
+        }
+      ]
+    },
+    "vehicleDragCoefficient": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set drag coefficient.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 12,
+          "value": 0.27
+        }
+      ]
+    },
+    "vehicleSteeperHill": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "6% grade is 0.06.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 9,
+          "initialValue": 0.06
+        }
+      ]
+    },
+    "vehicleEngineKilonewtons": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "2.4 kN is 2400 N.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 2400
+        }
+      ]
+    },
+    "vehicleTrailer": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a trailer.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "trailer",
+          "name": "Trailer"
+        },
+        {
+          "kind": "addState",
+          "ref": "trailerMass",
+          "nodeRef": "trailer",
+          "name": "Mass",
+          "symbol": "mass",
+          "initialValue": 600,
+          "unit": "kg"
+        }
+      ]
+    },
+    "vehicleDragOff": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Disable drag.",
+      "operations": [
+        {
+          "kind": "updateEdge",
+          "edgeRef": 11,
+          "enabled": false
+        }
+      ]
+    },
+    "vehicleRemoveRoad": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Remove the road.",
+      "operations": [
+        {
+          "kind": "removeEntity",
+          "entityRef": 8
+        }
+      ]
+    },
+    "vehicleHeavier": {
+      "responseKind": "clarification",
+      "question": "How heavy should the vehicle be (in kg)?"
+    },
+    "vehicleScenarioTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Update speed, mass and road.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 15
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 5,
+          "initialValue": 1300
+        },
+        {
+          "kind": "updateState",
+          "stateRef": 9,
+          "initialValue": 0
+        }
+      ]
+    },
+    "cropSoilMoisture": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set soil moisture.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 90
+        }
+      ]
+    },
+    "cropIrrigationCentimetres": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "0.5 cm/day is 5 mm/day.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 5
+        }
+      ]
+    },
+    "cropHalfSaturation": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set half-saturation.",
+      "operations": [
+        {
+          "kind": "updateParameter",
+          "parameterRef": 15,
+          "value": 80
+        }
+      ]
+    },
+    "cropRainRate": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the rain rate.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 6
+        }
+      ]
+    },
+    "cropBiomassKilograms": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "0.25 kg/m2 is 250 g/m2.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 8,
+          "initialValue": 250
+        }
+      ]
+    },
+    "cropIrrigationOff": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Disable irrigation.",
+      "operations": [
+        {
+          "kind": "updateNode",
+          "nodeRef": 3,
+          "enabled": false
+        }
+      ]
+    },
+    "cropSoilTemperature": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add soil temperature.",
+      "operations": [
+        {
+          "kind": "addState",
+          "ref": "tt",
+          "nodeRef": 5,
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 288,
+          "unit": "K"
+        }
+      ]
+    },
+    "cropFertiliser": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add fertiliser feeding growth.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "fert",
+          "name": "Fertiliser"
+        },
+        {
+          "kind": "addState",
+          "ref": "fertN",
+          "nodeRef": "fert",
+          "name": "Nitrogen level",
+          "symbol": "nitrogen",
+          "initialValue": 40,
+          "unit": "kg/ha"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "boost",
+          "name": "Fertiliser boost",
+          "sourceNodeRef": "fert",
+          "targetNodeRef": 7,
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "boostP0",
+          "edgeRef": "boost",
+          "name": "Boost rate",
+          "symbol": "boostRate",
+          "value": 0.001,
+          "unit": "g/m2/(kg/ha)/day",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "boost",
+          "outputStateRef": 8,
+          "latex": "\\mathrm{boostRate}\\cdot\\mathrm{sourceNitrogen}"
+        }
+      ]
+    },
+    "cropWaterMore": {
+      "responseKind": "clarification",
+      "question": "How much more water should I give it: what irrigation rate should I use?"
+    },
+    "cropAnswer": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set irrigation.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 3
+        }
+      ]
+    },
+    "cropGrowthIndependent": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Drop the moisture factor.",
+      "operations": [
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": 13,
+          "outputStateRef": 8,
+          "latex": "\\mathrm{growthRate}\\cdot\\mathrm{targetBiomass}"
+        }
+      ]
+    },
+    "blankPatientWeight": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add a patient.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "patient",
+          "name": "Patient"
+        },
+        {
+          "kind": "addState",
+          "ref": "patientMass",
+          "nodeRef": "patient",
+          "name": "Body mass",
+          "symbol": "mass",
+          "initialValue": 70,
+          "unit": "kg"
+        }
+      ]
+    },
+    "blankWarehouseStock": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add stock.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "stock",
+          "name": "Warehouse Stock"
+        },
+        {
+          "kind": "addState",
+          "ref": "stockCount",
+          "nodeRef": "stock",
+          "name": "Pallets",
+          "symbol": "pallets",
+          "initialValue": 4200,
+          "unit": "pallets"
+        }
+      ]
+    },
+    "blankHealthySick": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Healthy and sick groups.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "healthy",
+          "name": "Healthy"
+        },
+        {
+          "kind": "addState",
+          "ref": "hP",
+          "nodeRef": "healthy",
+          "name": "People",
+          "symbol": "people",
+          "initialValue": 800,
+          "unit": "people"
+        },
+        {
+          "kind": "addNode",
+          "ref": "sick",
+          "name": "Sick"
+        },
+        {
+          "kind": "addState",
+          "ref": "sP",
+          "nodeRef": "sick",
+          "name": "People",
+          "symbol": "people",
+          "initialValue": 20,
+          "unit": "people"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "contagion",
+          "name": "Infection",
+          "sourceNodeRef": "healthy",
+          "targetNodeRef": "sick",
+          "directionality": "directed"
+        },
+        {
+          "kind": "addParameter",
+          "ref": "contagionP0",
+          "edgeRef": "contagion",
+          "name": "Contact rate",
+          "symbol": "contactRate",
+          "value": 0.0001,
+          "unit": "1/(person·day)",
+          "mode": "constant"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "contagion",
+          "outputStateRef": "sP",
+          "latex": "\\mathrm{contactRate}\\cdot\\mathrm{sourcePeople}\\cdot\\mathrm{targetPeople}"
+        }
+      ]
+    },
+    "blankMugCelsius": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "85 °C is 358.15 K.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "mug",
+          "name": "Mug"
+        },
+        {
+          "kind": "addState",
+          "ref": "mugT",
+          "nodeRef": "mug",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 358.15,
+          "unit": "K"
+        }
+      ]
+    },
+    "blankRainTank": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Rain tank.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "roof",
+          "name": "Roof catchment"
+        },
+        {
+          "kind": "addState",
+          "ref": "roofQ",
+          "nodeRef": "roof",
+          "name": "Inflow",
+          "symbol": "inflow",
+          "initialValue": 0.0005,
+          "unit": "m3/s"
+        },
+        {
+          "kind": "addNode",
+          "ref": "tank",
+          "name": "Rain tank"
+        },
+        {
+          "kind": "addState",
+          "ref": "tankV",
+          "nodeRef": "tank",
+          "name": "Volume",
+          "symbol": "volume",
+          "initialValue": 2,
+          "unit": "m3"
+        },
+        {
+          "kind": "addEdge",
+          "ref": "collect",
+          "name": "Collection",
+          "sourceNodeRef": "roof",
+          "targetNodeRef": "tank",
+          "directionality": "directed"
+        },
+        {
+          "kind": "setEdgeEquation",
+          "edgeRef": "collect",
+          "outputStateRef": "tankV",
+          "latex": "\\mathrm{sourceInflow}"
+        }
+      ]
+    },
+    "blankBiggerTank": {
+      "responseKind": "clarification",
+      "question": "The model is empty, so there is no tank. What should I create?"
+    },
+    "blankCoffeeTypos": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "90 °C is 363.15 K.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "coffee",
+          "name": "Coffee"
+        },
+        {
+          "kind": "addState",
+          "ref": "coffeeT",
+          "nodeRef": "coffee",
+          "name": "Temperature",
+          "symbol": "temperature",
+          "initialValue": 363.15,
+          "unit": "K"
+        }
+      ]
+    },
+    "blankVisitors": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Add visitors.",
+      "operations": [
+        {
+          "kind": "addNode",
+          "ref": "visitors",
+          "name": "Visitors"
+        },
+        {
+          "kind": "addState",
+          "ref": "vCount",
+          "nodeRef": "visitors",
+          "name": "Visitor count",
+          "symbol": "visitors",
+          "initialValue": 12000,
+          "unit": "visitors"
+        }
+      ]
+    },
+    "askRaiseTemperatureTen": {
+      "responseKind": "clarification",
+      "question": "Which temperature should I raise?",
+      "suggestions": [
+        "Battery module",
+        "Enclosed air"
+      ]
+    },
+    "askRoomTwentyOneCelsius": {
+      "responseKind": "clarification",
+      "question": "Which room should be 21 °C?",
+      "suggestions": [
+        "Living room",
+        "Bedroom"
+      ]
+    },
+    "askWarmRoomUp": {
+      "responseKind": "clarification",
+      "question": "Which room do you mean?",
+      "suggestions": [
+        "Living room",
+        "Bedroom"
+      ]
+    },
+    "askSupplyFifteen": {
+      "responseKind": "clarification",
+      "question": "Which supply should I change?",
+      "suggestions": [
+        "Shoulder supply",
+        "Elbow supply",
+        "Wrist supply"
+      ]
+    },
+    "askAngleThird": {
+      "responseKind": "clarification",
+      "question": "Which link should have that angle?",
+      "suggestions": [
+        "Shoulder link",
+        "Elbow link",
+        "Wrist link"
+      ]
+    },
+    "askDisableMotor": {
+      "responseKind": "clarification",
+      "question": "Which motor should I disable?",
+      "suggestions": [
+        "Shoulder motor",
+        "Elbow motor",
+        "Wrist motor"
+      ]
+    },
+    "askRemoveLink": {
+      "responseKind": "clarification",
+      "question": "Which link should I remove?",
+      "suggestions": [
+        "Shoulder link",
+        "Elbow link",
+        "Wrist link"
+      ]
+    },
+    "askPressureOneOhFive": {
+      "responseKind": "clarification",
+      "question": "Which pressure should I set?",
+      "suggestions": [
+        "Tank",
+        "Suction Manifold Junction",
+        "Branch Junction",
+        "Pump"
+      ]
+    },
+    "askZeroLineFlow": {
+      "responseKind": "clarification",
+      "question": "Which line do you mean?",
+      "suggestions": [
+        "Suction Line 1",
+        "Suction Line 2",
+        "Suction Line 3"
+      ]
+    },
+    "askBacklogForty": {
+      "responseKind": "clarification",
+      "question": "Which zone's backlog should I set?",
+      "suggestions": [
+        "Zone 1",
+        "Zone 2",
+        "Zone 3"
+      ]
+    },
+    "askForecastEighty": {
+      "responseKind": "clarification",
+      "question": "Which warehouse's forecast should I set?",
+      "suggestions": [
+        "Warehouse A",
+        "Warehouse B"
+      ]
+    },
+    "askRateSixThousandths": {
+      "responseKind": "clarification",
+      "question": "Which rate should I change?",
+      "suggestions": [
+        "Sales",
+        "Operating costs",
+        "Capital market"
+      ]
+    },
+    "askCountHundred": {
+      "responseKind": "clarification",
+      "question": "Which population should I set?",
+      "suggestions": [
+        "Rabbits",
+        "Foxes"
+      ]
+    },
+    "askPeopleFiveThousand": {
+      "responseKind": "clarification",
+      "question": "Which group should have 5000 people?",
+      "suggestions": [
+        "Susceptible",
+        "Infected",
+        "Recovered"
+      ]
+    },
+    "askDisplacementTwenty": {
+      "responseKind": "clarification",
+      "question": "Which displacement should I set?",
+      "suggestions": [
+        "Suspended mass",
+        "Fixed support"
+      ]
+    },
+    "askTemperatureThreeTen": {
+      "responseKind": "clarification",
+      "question": "Which temperature should I set?",
+      "suggestions": [
+        "Water tank",
+        "Ambient air"
+      ]
+    },
+    "askCoolDown": {
+      "responseKind": "clarification",
+      "question": "Which body should be cooled?",
+      "suggestions": [
+        "Hot body",
+        "Cold body"
+      ]
+    },
+    "askHeaterMorePowerful": {
+      "responseKind": "clarification",
+      "question": "What heat flow should the heater have?"
+    },
+    "askChangeWaterTemperature": {
+      "responseKind": "clarification",
+      "question": "What temperature should the water have?"
+    },
+    "askIncreaseSales": {
+      "responseKind": "clarification",
+      "question": "What revenue rate should Sales have?"
+    },
+    "askChangeLoan": {
+      "responseKind": "clarification",
+      "question": "What should change about the loan, and to what value?"
+    },
+    "askIncreaseTankPressure": {
+      "responseKind": "clarification",
+      "question": "To what pressure should the tank be set?"
+    },
+    "askRaiseForecastA": {
+      "responseKind": "clarification",
+      "question": "What demand forecast should Warehouse A have?"
+    },
+    "askSetSupplyVoltage": {
+      "responseKind": "clarification",
+      "question": "What voltage should the supply have?"
+    },
+    "askMoreFoxes": {
+      "responseKind": "clarification",
+      "question": "How many foxes should there be?"
+    },
+    "askScaleUp": {
+      "responseKind": "clarification",
+      "question": "What should change: the number of servers or the capacity per server, and to what?"
+    },
+    "askHeaterTemperature": {
+      "responseKind": "clarification",
+      "question": "The Electric heater has a heat flow, not a temperature. Do you want to change its heat flow?"
+    },
+    "askRemoveThermostat": {
+      "responseKind": "clarification",
+      "question": "There is no thermostat in this model. Which node or relationship did you mean?"
+    },
+    "askCoolantFlow": {
+      "responseKind": "clarification",
+      "question": "There is no coolant flow in this model. Should I add one, and how should it connect?"
+    },
+    "askTaxRate": {
+      "responseKind": "clarification",
+      "question": "There is no tax rate in this model. Should I add one, and what should it act on?"
+    },
+    "askGearboxRatio": {
+      "responseKind": "clarification",
+      "question": "There is no gearbox in this model. Should I add one?"
+    },
+    "askValveOpening": {
+      "responseKind": "clarification",
+      "question": "There is no valve in this model. Should I add one?"
+    },
+    "askDisableWarehouseC": {
+      "responseKind": "clarification",
+      "question": "There is no Warehouse C. Did you mean Warehouse A or Warehouse B?",
+      "suggestions": [
+        "Warehouse A",
+        "Warehouse B"
+      ]
+    },
+    "askTurnOffKitchen": {
+      "responseKind": "clarification",
+      "question": "There is no kitchen. Did you mean the Living room or the Bedroom?",
+      "suggestions": [
+        "Living room",
+        "Bedroom"
+      ]
+    },
+    "askVaccinationRate": {
+      "responseKind": "clarification",
+      "question": "There is no vaccination in this model. Should I add a Vaccinated group?"
+    },
+    "askTwoTemperatures": {
+      "responseKind": "clarification",
+      "question": "These two values conflict. Which temperature should the water have?"
+    },
+    "askPayOffAndKeep": {
+      "responseKind": "clarification",
+      "question": "These conflict: paying off the loan means a principal of 0. Which do you want?"
+    },
+    "askRemoveEverything": {
+      "responseKind": "clarification",
+      "question": "This would delete the whole model. Which parts do you want removed?"
+    },
+    "askDeleteIt": {
+      "responseKind": "clarification",
+      "question": "What should I delete?"
+    },
+    "askSwapRooms": {
+      "responseKind": "clarification",
+      "question": "What should be swapped: their temperatures, their names, or their connections?"
+    },
+    "actLivingRoomTwentyThree": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 296.15
+        }
+      ]
+    },
+    "actElbowSupplyFifteen": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 18,
+          "initialValue": 15
+        }
+      ]
+    },
+    "actTankPressureOneOhFive": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 105000
+        }
+      ]
+    },
+    "actZoneThreeBacklog": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 172,
+          "initialValue": 40
+        }
+      ]
+    },
+    "actCostRate": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 10,
+          "initialValue": 150000
+        }
+      ]
+    },
+    "actFoxCount": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 6,
+          "initialValue": 100
+        }
+      ]
+    },
+    "actWaterThreeTen": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 310
+        }
+      ]
+    },
+    "actInfectedTwoFifty": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 250
+        }
+      ]
+    },
+    "actCoolHotBody": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 330
+        }
+      ]
+    },
+    "actServersTen": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 4,
+          "initialValue": 10
+        }
+      ]
+    },
+    "actSupplyNine": {
+      "responseKind": "proposal",
+      "proposalVersion": 1,
+      "summary": "Set the value.",
+      "operations": [
+        {
+          "kind": "updateState",
+          "stateRef": 2,
+          "initialValue": 9
+        }
+      ]
+    }
+  }
+}

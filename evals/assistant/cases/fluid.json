@@ -1,0 +1,469 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "tankAtmospheric",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Set the tank pressure to 101325 Pa.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 101325,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankOneBar",
+      "family": "units",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Make the tank pressure 1 bar.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 100000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "npshDesign35",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Pump NPSH design 3.5 m.",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "npshDesign",
+            "initialValue": 3.5,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "line2Flow",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Could we start Suction Line 2 with a flow of 0.002 cubic metres per second?",
+      "expect": {
+        "touches": [
+          "Suction Line 2"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 2",
+            "symbol": "flowRate",
+            "initialValue": 0.002,
+            "unit": "m3/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "biggerTank",
+      "family": "updateParameter",
+      "domain": "fluid",
+      "style": "indirect",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "We upgraded to a bigger tank, and its capacitance is now 0.0005 m³/Pa.",
+      "expect": {
+        "touches": [
+          "Suction Line 1 discharges Tank"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Suction Line 1",
+            "to": "Tank",
+            "symbol": "capacitance",
+            "value": 0.0005
+          }
+        ]
+      }
+    },
+    {
+      "id": "branchJunctionOff",
+      "family": "enableDisable",
+      "domain": "fluid",
+      "style": "loose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "disable the branch junction",
+      "expect": {
+        "touches": [
+          "Branch Junction"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Branch Junction",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "pumpPressureTypos",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "typos",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Chnage the pump presure to 90000 Pa",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "pressure",
+            "initialValue": 90000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reservoir",
+      "family": "addNode",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a tank called Reservoir with a pressure of 200000 Pa.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Reservoir"
+          },
+          {
+            "op": "state",
+            "node": "Reservoir",
+            "initialValue": 200000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reliefJunction",
+      "family": "multiStep",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Add a Relief valve junction at 150000 Pa and connect the pump to it.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Relief valve junction",
+            "initialValue": 150000,
+            "unit": "Pa"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Pump",
+            "to": "Relief valve junction",
+            "either": true
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Pump",
+            "to": "Relief valve junction",
+            "uses": [],
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeLine3",
+      "family": "remove",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Remove Suction Line 3.",
+      "expect": {
+        "touches": [
+          "Suction Line 3"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Suction Line 3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeLine2Charges",
+      "family": "remove",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Delete the relationship where Suction Line 2 charges the Branch Junction; I will model that path differently.",
+      "expect": {
+        "touches": [
+          "Suction Line 2 charges Branch Junction"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Suction Line 2 charges Branch Junction"
+          }
+        ]
+      }
+    },
+    {
+      "id": "changeInertance",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Change the inertance.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "pressure95k",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Set the pressure to 95000 Pa.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Tank",
+          "Pump"
+        ]
+      }
+    },
+    {
+      "id": "thePump",
+      "family": "history",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "The pump",
+      "history": [
+        {
+          "request": "Set the pressure to 95000 Pa.",
+          "outcome": "Asked: Which node should I update?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "pressure",
+            "initialValue": 95000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tankLineInertance",
+      "family": "updateParameter",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Set the inertance of the Tank drives Suction Line 1 relationship to 150000 kg/m4.",
+      "expect": {
+        "touches": [
+          "Tank drives Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Tank",
+            "to": "Suction Line 1",
+            "symbol": "inertance",
+            "value": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": "hotPumpScenario",
+      "family": "multiStep",
+      "domain": "fluid",
+      "style": "multiPart",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Running the pump hot: reduce NPSH design to 3 m, set the pump pressure to 95 kPa, and make sure the tank is at 1 atm.",
+      "expect": {
+        "touches": [
+          "Pump",
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "npshDesign",
+            "initialValue": 3,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "pressure",
+            "initialValue": 95000,
+            "unit": "Pa"
+          },
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 101325,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "askPressureOneOhFive",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Set the pressure to 105000 Pa.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Tank",
+          "Suction Manifold Junction",
+          "Branch Junction",
+          "Pump"
+        ]
+      }
+    },
+    {
+      "id": "askZeroLineFlow",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Could you zero the flow in the line, please?",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Suction Line 1",
+          "Suction Line 2",
+          "Suction Line 3"
+        ]
+      }
+    },
+    {
+      "id": "askIncreaseTankPressure",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Increase the tank pressure.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askValveOpening",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "loose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "valve opening 60%",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "actTankPressureOneOhFive",
+      "family": "reference",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Set the tank pressure to 105000 Pa.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 105000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    }
+  ]
+}

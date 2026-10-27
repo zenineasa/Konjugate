@@ -68,7 +68,7 @@ import {
     stripEdgeGroups,
     unresolvedGroupSymbols
 } from '../edgeGroups.mjs';
-import { applyAssistantProposal as buildAssistantProposal } from '../assistantOperations.mjs';
+import { applyAssistantProposal as buildAssistantProposal, summarizeDocumentForAssistant } from '../assistantOperations.mjs';
 import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from '../instabilityFingerprint.mjs';
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import {
@@ -8807,20 +8807,7 @@ $('#cancelParameterTuning').addEventListener('click', () => {
 $('#commitParameterTuning').addEventListener('click', () => { commitParameterTuning(); });
 
 function assistantModelSummary() {
-    const document = serializeProjectDocument();
-    return {
-        format: document.format,
-        version: document.version,
-        units: document.metadata.units,
-        nodes: document.nodes.map((node) => ({
-            id: node.id, name: node.name, type: node.type, enabled: node.enabled !== false,
-            states: node.states.map((state) => ({ id: state.id, name: state.name, symbol: state.symbol, initialValue: state.initialValue, unit: state.unit }))
-        })),
-        edges: document.edges.map((edge) => ({
-            id: edge.id, name: edge.name, sourceNodeId: edge.source.nodeId,
-            targetNodeId: edge.target.nodeId, directionality: edge.directionality, enabled: edge.enabled !== false
-        }))
-    };
+    return summarizeDocumentForAssistant(serializeProjectDocument());
 }
 
 async function refreshAssistantConfigurations() {

@@ -1,0 +1,378 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Engine",
+      "type": "Actuator",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Traction force",
+          "symbol": "force",
+          "initialValue": 1800,
+          "unit": "N",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 1
+    },
+    {
+      "name": "Vehicle",
+      "type": "Body",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Speed",
+          "symbol": "speed",
+          "initialValue": 20,
+          "unit": "m/s",
+          "id": 4
+        },
+        {
+          "name": "Mass",
+          "symbol": "mass",
+          "initialValue": 1400,
+          "unit": "kg",
+          "id": 5
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      },
+      "id": 3
+    },
+    {
+      "name": "Air",
+      "type": "Environment",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Air density",
+          "symbol": "density",
+          "initialValue": 1.2,
+          "unit": "kg/m3",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "sphere",
+        "color": "#5f6f7a"
+      },
+      "id": 6
+    },
+    {
+      "name": "Road",
+      "type": "Environment",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Road grade",
+          "symbol": "grade",
+          "initialValue": 0.02,
+          "unit": "",
+          "id": 9
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#8a6fa8"
+      },
+      "id": 8
+    }
+  ],
+  "edges": [
+    {
+      "name": "Traction",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{sourceForce}}{\\mathrm{targetMass}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{sourceForce}}{\\mathrm{targetMass}}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceForce",
+            "label": "source.force"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetSpeed",
+            "label": "target.speed"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetMass",
+            "label": "target.mass"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          "sourceForce",
+          "targetMass"
+        ]
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    },
+    {
+      "name": "Aerodynamic drag",
+      "source": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\frac{0.5\\cdot\\mathrm{sourceDensity}\\cdot\\mathrm{dragCoefficient}\\cdot\\mathrm{frontalArea}\\cdot\\mathrm{targetSpeed}^{2}}{\\mathrm{targetMass}}",
+      "equationModel": {
+        "latex": "-\\frac{0.5\\cdot\\mathrm{sourceDensity}\\cdot\\mathrm{dragCoefficient}\\cdot\\mathrm{frontalArea}\\cdot\\mathrm{targetSpeed}^{2}}{\\mathrm{targetMass}}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "sourceDensity",
+            "label": "source.density"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetSpeed",
+            "label": "target.speed"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetMass",
+            "label": "target.mass"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 12,
+            "symbol": "dragCoefficient",
+            "label": "dragCoefficient"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 13,
+            "symbol": "frontalArea",
+            "label": "frontalArea"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Divide",
+            [
+              "Multiply",
+              0.5,
+              "dragCoefficient",
+              "frontalArea",
+              "sourceDensity",
+              [
+                "Power",
+                "targetSpeed",
+                2
+              ]
+            ],
+            "targetMass"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Drag coefficient",
+          "symbol": "dragCoefficient",
+          "value": 0.3,
+          "unit": "",
+          "mode": "constant",
+          "id": 12
+        },
+        {
+          "name": "Frontal area",
+          "symbol": "frontalArea",
+          "value": 2.2,
+          "unit": "m2",
+          "mode": "constant",
+          "id": 13
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 11
+    },
+    {
+      "name": "Gradient resistance",
+      "source": {
+        "nodeId": 8,
+        "stateId": 9
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{gravity}\\cdot\\mathrm{sourceGrade}",
+      "equationModel": {
+        "latex": "-\\mathrm{gravity}\\cdot\\mathrm{sourceGrade}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 8,
+            "stateId": 9,
+            "symbol": "sourceGrade",
+            "label": "source.grade"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetSpeed",
+            "label": "target.speed"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetMass",
+            "label": "target.mass"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 15,
+            "symbol": "gravity",
+            "label": "gravity"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "gravity",
+            "sourceGrade"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Gravity",
+          "symbol": "gravity",
+          "value": 9.81,
+          "unit": "m/s2",
+          "mode": "constant",
+          "id": 15
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 14
+    }
+  ]
+}

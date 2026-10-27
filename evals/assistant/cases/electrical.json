@@ -1,0 +1,586 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "dcSupply12",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the DC supply voltage to 12 V.",
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 12,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "loadTorqueHalf",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Load torque 0.5 N·m.",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.5,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "armatureResistance",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Could you raise the armature resistance to 3 ohms?",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "DC supply",
+            "to": "Motor",
+            "symbol": "resistance",
+            "value": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "halfRotorInertia",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "The motor is too sluggish. It has 0.01 kg·m² of rotor inertia at the moment and I want half of that.",
+      "expect": {
+        "touches": [
+          "Shaft dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Load torque",
+            "to": "Motor",
+            "symbol": "rotorInertia",
+            "value": 0.005
+          }
+        ]
+      }
+    },
+    {
+      "id": "bumpSupply",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "bump the supply up to 36V",
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 36,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "viscousFrictionTypos",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Increse the viscus friction on the shaft to 0.05",
+      "expect": {
+        "touches": [
+          "Shaft dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Load torque",
+            "to": "Motor",
+            "symbol": "viscousFriction",
+            "value": 0.05
+          }
+        ]
+      }
+    },
+    {
+      "id": "noBackEmf",
+      "family": "setEquation",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "For a stalled-rotor test I want the armature dynamics without the back-EMF term: just the supply voltage minus the resistance times the current, divided by the inductance.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "DC supply",
+            "to": "Motor",
+            "uses": [
+              "sourceVoltage",
+              "resistance",
+              "inductance"
+            ],
+            "excludes": [
+              "backEmfConstant"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "logicRail",
+      "family": "addNode",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a voltage source called Logic rail with a voltage of 5 V.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Logic rail"
+          },
+          {
+            "op": "state",
+            "node": "Logic rail",
+            "initialValue": 5,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "leftMotor",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Add a second motor called Left motor with a current of 0 A and an angular velocity of 0 rad/s, and connect the drive supply to it.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Left motor",
+            "initialValue": 0,
+            "unit": "A"
+          },
+          {
+            "op": "state",
+            "node": "Left motor",
+            "initialValue": 0,
+            "unit": "rad/s"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Drive supply",
+            "to": "Left motor"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Drive supply",
+            "to": "Left motor",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "bearingFrictionOff",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Switch off the bearing friction.",
+      "expect": {
+        "touches": [
+          "Bearing friction"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Bearing friction",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeDischarge",
+      "family": "remove",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Delete the discharge relationship.",
+      "expect": {
+        "touches": [
+          "Discharge"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Discharge"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stateOfCharge80",
+      "family": "reference",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Set the battery state of charge to 80%.",
+      "expect": {
+        "touches": [
+          "Battery"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery",
+            "symbol": "stateOfCharge",
+            "initialValue": 80,
+            "unit": "%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "wheelRadiusCentimetres",
+      "family": "units",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Could the wheels be 7.5 cm in radius?",
+      "expect": {
+        "touches": [
+          "Traction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive motor",
+            "to": "Chassis",
+            "symbol": "wheelRadius",
+            "value": 0.075,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "increaseSpeed",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Increase the speed.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "changeResistance",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Change the resistance to 1 ohm.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "aboutPointThree",
+      "family": "history",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "about 0.3",
+      "history": [
+        {
+          "request": "Change the load",
+          "outcome": "Asked: What load torque (in N·m) should Load torque be set to?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.3,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "coldStartScenario",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "For the next test the pack is only charged to 60%, the ambient is a cold 5 °C, and the motor housing starts at the same temperature as the ambient.",
+      "expect": {
+        "touches": [
+          "Battery",
+          "Ambient air",
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery",
+            "symbol": "stateOfCharge",
+            "initialValue": 60,
+            "unit": "%"
+          },
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 278.15,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Motor housing",
+            "symbol": "temperature",
+            "initialValue": 278.15,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "supplyMotorPair",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a voltage source called Supply at 12 V and a motor called Motor with a current of 0 A, and connect the supply to the motor.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Supply",
+            "initialValue": 12,
+            "unit": "V"
+          },
+          {
+            "op": "state",
+            "node": "Motor",
+            "initialValue": 0,
+            "unit": "A"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Supply",
+            "to": "Motor"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Supply",
+            "to": "Motor",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "housingTemperature",
+      "family": "reference",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Raise the motor housing temperature to 310 K.",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor housing",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "housingConductionDirected",
+      "family": "updateEdge",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Make the Housing conduction relationship directed.",
+      "expect": {
+        "touches": [
+          "Housing conduction"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Motor housing",
+            "to": "Ambient air",
+            "directionality": "directed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "supplyAndLoad",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the DC supply to 12 V and the load torque to 0.2 N·m.",
+      "expect": {
+        "touches": [
+          "DC supply",
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 12,
+            "unit": "V"
+          },
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.2,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "askSetSupplyVoltage",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the supply voltage.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askGearboxRatio",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the gearbox ratio to 50.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "actSupplyNine",
+      "family": "reference",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Drop the DC supply to 9 V.",
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 9,
+            "unit": "V"
+          }
+        ]
+      }
+    }
+  ]
+}

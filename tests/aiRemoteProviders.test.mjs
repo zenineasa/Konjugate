@@ -30,6 +30,32 @@ test('Ollama adapter discovers models and requests portable JSON output', async 
     assert.equal(calls[1].url, 'http://127.0.0.1:11434/api/chat');
 });
 
+test('Ollama adapter fixes sampling and widens the context', async () => {
+    let body;
+    const adapter = provider('ollama', async (url, options) => {
+        body = JSON.parse(options.body);
+        return jsonResponse({ message: { content: '{}' } });
+    });
+    await adapter.generateProposal(input('ollama'));
+    assert.deepEqual(body.options, { temperature: 0, num_ctx: 8192 });
+}); 
+
+test('A quoted numeric entity id is read as the id, and a temporary ref is left alone', async () => {
+    const quoted = { proposalVersion: 1, operations: [
+        { kind: 'updateState', stateRef: '2', initialValue: 12 },
+        { kind: 'addState', ref: 'voltage', nodeRef: '15', name: 'Voltage' },
+        { kind: 'updateParameter', parameterRef: 'bias', value: 1 },
+        { kind: 'removeEntity', entityRef: '0012' }
+    ] };
+    const adapter = provider('ollama', async () => jsonResponse({ message: { content: JSON.stringify(quoted) } }));
+    const { operations } = await adapter.generateProposal(input('ollama'));
+    assert.equal(operations[0].stateRef, 2);
+    assert.equal(operations[1].nodeRef, 15);
+    assert.equal(operations[1].ref, 'voltage');
+    assert.equal(operations[2].parameterRef, 'bias');
+    assert.equal(operations[3].entityRef, '0012');
+});
+
 test('OpenAI-compatible adapters use bearer authentication and provider endpoints', async () => {
     for (const [id, expectedHost] of [['openAi', 'api.openai.com'], ['nvidia', 'integrate.api.nvidia.com'], ['huggingFace', 'router.huggingface.co']]) {
         let call;

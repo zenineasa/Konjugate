@@ -1,0 +1,272 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Solar array",
+      "type": "Generator",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Output power",
+          "symbol": "power",
+          "initialValue": 3500,
+          "unit": "W",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#d98b54"
+      },
+      "id": 1
+    },
+    {
+      "name": "House load",
+      "type": "Consumer",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Demand power",
+          "symbol": "power",
+          "initialValue": 1200,
+          "unit": "W",
+          "id": 4
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#8a6fa8"
+      },
+      "id": 3
+    },
+    {
+      "name": "Home battery",
+      "type": "Storage",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Stored energy",
+          "symbol": "energy",
+          "initialValue": 36000000,
+          "unit": "J",
+          "id": 6
+        },
+        {
+          "name": "Capacity",
+          "symbol": "capacity",
+          "initialValue": 54000000,
+          "unit": "J",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#4a8f5b"
+      },
+      "id": 5
+    }
+  ],
+  "edges": [
+    {
+      "name": "Solar charging",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{chargeEfficiency}\\cdot\\mathrm{sourcePower}\\cdot\\left(1-\\frac{\\mathrm{targetEnergy}}{\\mathrm{targetCapacity}}\\right)",
+      "equationModel": {
+        "latex": "\\mathrm{chargeEfficiency}\\cdot\\mathrm{sourcePower}\\cdot\\left(1-\\frac{\\mathrm{targetEnergy}}{\\mathrm{targetCapacity}}\\right)",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourcePower",
+            "label": "source.power"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetEnergy",
+            "label": "target.energy"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 7,
+            "symbol": "targetCapacity",
+            "label": "target.capacity"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 9,
+            "symbol": "chargeEfficiency",
+            "label": "chargeEfficiency"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "chargeEfficiency",
+          "sourcePower",
+          [
+            "Add",
+            [
+              "Divide",
+              [
+                "Negate",
+                "targetEnergy"
+              ],
+              "targetCapacity"
+            ],
+            1
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Charge efficiency",
+          "symbol": "chargeEfficiency",
+          "value": 0.95,
+          "unit": "",
+          "mode": "constant",
+          "id": 9
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 8
+    },
+    {
+      "name": "House consumption",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "-\\frac{\\mathrm{sourcePower}}{\\mathrm{inverterEfficiency}}",
+      "equationModel": {
+        "latex": "-\\frac{\\mathrm{sourcePower}}{\\mathrm{inverterEfficiency}}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourcePower",
+            "label": "source.power"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetEnergy",
+            "label": "target.energy"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 7,
+            "symbol": "targetCapacity",
+            "label": "target.capacity"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 11,
+            "symbol": "inverterEfficiency",
+            "label": "inverterEfficiency"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Divide",
+            "sourcePower",
+            "inverterEfficiency"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Inverter efficiency",
+          "symbol": "inverterEfficiency",
+          "value": 0.96,
+          "unit": "",
+          "mode": "constant",
+          "id": 11
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    }
+  ]
+}

@@ -1,0 +1,514 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Marketing",
+      "type": "Spend",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Monthly spend",
+          "symbol": "spend",
+          "initialValue": 20000,
+          "unit": "USD/month",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#d98b54"
+      },
+      "id": 1
+    },
+    {
+      "name": "Prospects",
+      "type": "Funnel stage",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Lead count",
+          "symbol": "count",
+          "initialValue": 5000,
+          "unit": "leads",
+          "id": 4
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#8a6fa8"
+      },
+      "id": 3
+    },
+    {
+      "name": "Subscribers",
+      "type": "Funnel stage",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Account count",
+          "symbol": "count",
+          "initialValue": 1200,
+          "unit": "accounts",
+          "id": 6
+        },
+        {
+          "name": "Monthly price",
+          "symbol": "price",
+          "initialValue": 29,
+          "unit": "USD/month",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#4a8f5b"
+      },
+      "id": 5
+    },
+    {
+      "name": "Churned accounts",
+      "type": "Funnel stage",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Account count",
+          "symbol": "count",
+          "initialValue": 0,
+          "unit": "accounts",
+          "id": 9
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 8
+    }
+  ],
+  "edges": [
+    {
+      "name": "Lead generation",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{sourceSpend}}{\\mathrm{costPerLead}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{sourceSpend}}{\\mathrm{costPerLead}}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceSpend",
+            "label": "source.spend"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 11,
+            "symbol": "costPerLead",
+            "label": "costPerLead"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          "sourceSpend",
+          "costPerLead"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Cost per lead",
+          "symbol": "costPerLead",
+          "value": 40,
+          "unit": "USD/lead",
+          "mode": "constant",
+          "id": 11
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    },
+    {
+      "name": "Conversion",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{conversionRate}\\cdot\\mathrm{sourceCount}",
+      "equationModel": {
+        "latex": "\\mathrm{conversionRate}\\cdot\\mathrm{sourceCount}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceCount",
+            "label": "source.count"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 7,
+            "symbol": "targetPrice",
+            "label": "target.price"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 13,
+            "symbol": "conversionRate",
+            "label": "conversionRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "conversionRate",
+          "sourceCount"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Conversion rate",
+          "symbol": "conversionRate",
+          "value": 0.08,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 13
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 12
+    },
+    {
+      "name": "Prospect depletion",
+      "source": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{conversionRate}\\cdot\\mathrm{targetCount}",
+      "equationModel": {
+        "latex": "-\\mathrm{conversionRate}\\cdot\\mathrm{targetCount}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "sourceCount",
+            "label": "source.count"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 7,
+            "symbol": "sourcePrice",
+            "label": "source.price"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 15,
+            "symbol": "conversionRate",
+            "label": "conversionRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "conversionRate",
+            "targetCount"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Conversion rate",
+          "symbol": "conversionRate",
+          "value": 0.08,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 15
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 14
+    },
+    {
+      "name": "Churn",
+      "source": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "target": {
+        "nodeId": 8,
+        "stateId": 9
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{churnRate}\\cdot\\mathrm{sourceCount}",
+      "equationModel": {
+        "latex": "\\mathrm{churnRate}\\cdot\\mathrm{sourceCount}",
+        "output": {
+          "role": "target",
+          "stateId": 9
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "sourceCount",
+            "label": "source.count"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 7,
+            "symbol": "sourcePrice",
+            "label": "source.price"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 8,
+            "stateId": 9,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 17,
+            "symbol": "churnRate",
+            "label": "churnRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "churnRate",
+          "sourceCount"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Churn rate",
+          "symbol": "churnRate",
+          "value": 0.03,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 17
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 16
+    },
+    {
+      "name": "Subscriber loss",
+      "source": {
+        "nodeId": 8,
+        "stateId": 9
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{churnRate}\\cdot\\mathrm{targetCount}",
+      "equationModel": {
+        "latex": "-\\mathrm{churnRate}\\cdot\\mathrm{targetCount}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 8,
+            "stateId": 9,
+            "symbol": "sourceCount",
+            "label": "source.count"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetCount",
+            "label": "target.count"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 7,
+            "symbol": "targetPrice",
+            "label": "target.price"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 19,
+            "symbol": "churnRate",
+            "label": "churnRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "churnRate",
+            "targetCount"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Churn rate",
+          "symbol": "churnRate",
+          "value": 0.03,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 19
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 18
+    }
+  ]
+}

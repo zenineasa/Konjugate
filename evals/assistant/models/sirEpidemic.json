@@ -1,0 +1,416 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Susceptible",
+      "type": "Population group",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "People",
+          "symbol": "people",
+          "initialValue": 9900,
+          "unit": "people",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#4a8f5b"
+      },
+      "id": 1
+    },
+    {
+      "name": "Infected",
+      "type": "Population group",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "People",
+          "symbol": "people",
+          "initialValue": 100,
+          "unit": "people",
+          "id": 4
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 3
+    },
+    {
+      "name": "Recovered",
+      "type": "Population group",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "People",
+          "symbol": "people",
+          "initialValue": 0,
+          "unit": "people",
+          "id": 6
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      },
+      "id": 5
+    }
+  ],
+  "edges": [
+    {
+      "name": "Infection spread",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{transmissionRate}\\cdot\\mathrm{sourcePeople}\\cdot\\mathrm{targetPeople}}{\\mathrm{totalPopulation}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{transmissionRate}\\cdot\\mathrm{sourcePeople}\\cdot\\mathrm{targetPeople}}{\\mathrm{totalPopulation}}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourcePeople",
+            "label": "source.people"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetPeople",
+            "label": "target.people"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 8,
+            "symbol": "transmissionRate",
+            "label": "transmissionRate"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 9,
+            "symbol": "totalPopulation",
+            "label": "totalPopulation"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          [
+            "Multiply",
+            "sourcePeople",
+            "targetPeople",
+            "transmissionRate"
+          ],
+          "totalPopulation"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Transmission rate",
+          "symbol": "transmissionRate",
+          "value": 0.3,
+          "unit": "1/day",
+          "mode": "constant",
+          "id": 8
+        },
+        {
+          "name": "Total population",
+          "symbol": "totalPopulation",
+          "value": 10000,
+          "unit": "people",
+          "mode": "constant",
+          "id": 9
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 7
+    },
+    {
+      "name": "Susceptible depletion",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "directionality": "directed",
+      "equation": "-\\frac{\\mathrm{transmissionRate}\\cdot\\mathrm{sourcePeople}\\cdot\\mathrm{targetPeople}}{\\mathrm{totalPopulation}}",
+      "equationModel": {
+        "latex": "-\\frac{\\mathrm{transmissionRate}\\cdot\\mathrm{sourcePeople}\\cdot\\mathrm{targetPeople}}{\\mathrm{totalPopulation}}",
+        "output": {
+          "role": "target",
+          "stateId": 2
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourcePeople",
+            "label": "source.people"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "targetPeople",
+            "label": "target.people"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 11,
+            "symbol": "transmissionRate",
+            "label": "transmissionRate"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 12,
+            "symbol": "totalPopulation",
+            "label": "totalPopulation"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Divide",
+            [
+              "Multiply",
+              "sourcePeople",
+              "targetPeople",
+              "transmissionRate"
+            ],
+            "totalPopulation"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Transmission rate",
+          "symbol": "transmissionRate",
+          "value": 0.3,
+          "unit": "1/day",
+          "mode": "constant",
+          "id": 11
+        },
+        {
+          "name": "Total population",
+          "symbol": "totalPopulation",
+          "value": 10000,
+          "unit": "people",
+          "mode": "constant",
+          "id": 12
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    },
+    {
+      "name": "Recovery",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{recoveryRate}\\cdot\\mathrm{sourcePeople}",
+      "equationModel": {
+        "latex": "\\mathrm{recoveryRate}\\cdot\\mathrm{sourcePeople}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourcePeople",
+            "label": "source.people"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetPeople",
+            "label": "target.people"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 14,
+            "symbol": "recoveryRate",
+            "label": "recoveryRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "recoveryRate",
+          "sourcePeople"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Recovery rate",
+          "symbol": "recoveryRate",
+          "value": 0.1,
+          "unit": "1/day",
+          "mode": "constant",
+          "id": 14
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 13
+    },
+    {
+      "name": "Recovery outflow",
+      "source": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{recoveryRate}\\cdot\\mathrm{targetPeople}",
+      "equationModel": {
+        "latex": "-\\mathrm{recoveryRate}\\cdot\\mathrm{targetPeople}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "sourcePeople",
+            "label": "source.people"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetPeople",
+            "label": "target.people"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 16,
+            "symbol": "recoveryRate",
+            "label": "recoveryRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "recoveryRate",
+            "targetPeople"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Recovery rate",
+          "symbol": "recoveryRate",
+          "value": 0.1,
+          "unit": "1/day",
+          "mode": "constant",
+          "id": 16
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 15
+    }
+  ]
+}

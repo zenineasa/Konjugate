@@ -1,0 +1,425 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Stomach",
+      "type": "Compartment",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Drug amount",
+          "symbol": "amount",
+          "initialValue": 500,
+          "unit": "mg",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#d98b54"
+      },
+      "id": 1
+    },
+    {
+      "name": "Bloodstream",
+      "type": "Compartment",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Drug amount",
+          "symbol": "amount",
+          "initialValue": 0,
+          "unit": "mg",
+          "id": 4
+        },
+        {
+          "name": "Distribution volume",
+          "symbol": "distributionVolume",
+          "initialValue": 42,
+          "unit": "L",
+          "id": 5
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 3
+    },
+    {
+      "name": "Kidneys",
+      "type": "Compartment",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Excreted amount",
+          "symbol": "amount",
+          "initialValue": 0,
+          "unit": "mg",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      },
+      "id": 6
+    }
+  ],
+  "edges": [
+    {
+      "name": "Absorption",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{absorptionRate}\\cdot\\mathrm{sourceAmount}",
+      "equationModel": {
+        "latex": "\\mathrm{absorptionRate}\\cdot\\mathrm{sourceAmount}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceAmount",
+            "label": "source.amount"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetAmount",
+            "label": "target.amount"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetDistributionVolume",
+            "label": "target.distributionVolume"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 9,
+            "symbol": "absorptionRate",
+            "label": "absorptionRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "absorptionRate",
+          "sourceAmount"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Absorption rate",
+          "symbol": "absorptionRate",
+          "value": 1.2,
+          "unit": "1/h",
+          "mode": "constant",
+          "id": 9
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 8
+    },
+    {
+      "name": "Stomach depletion",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{absorptionRate}\\cdot\\mathrm{targetAmount}",
+      "equationModel": {
+        "latex": "-\\mathrm{absorptionRate}\\cdot\\mathrm{targetAmount}",
+        "output": {
+          "role": "target",
+          "stateId": 2
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceAmount",
+            "label": "source.amount"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "sourceDistributionVolume",
+            "label": "source.distributionVolume"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "targetAmount",
+            "label": "target.amount"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 11,
+            "symbol": "absorptionRate",
+            "label": "absorptionRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "absorptionRate",
+            "targetAmount"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Absorption rate",
+          "symbol": "absorptionRate",
+          "value": 1.2,
+          "unit": "1/h",
+          "mode": "constant",
+          "id": 11
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    },
+    {
+      "name": "Elimination",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "directionality": "directed",
+      "equation": "\\frac{\\mathrm{clearance}\\cdot\\mathrm{sourceAmount}}{\\mathrm{sourceDistributionVolume}}",
+      "equationModel": {
+        "latex": "\\frac{\\mathrm{clearance}\\cdot\\mathrm{sourceAmount}}{\\mathrm{sourceDistributionVolume}}",
+        "output": {
+          "role": "target",
+          "stateId": 7
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceAmount",
+            "label": "source.amount"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "sourceDistributionVolume",
+            "label": "source.distributionVolume"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "targetAmount",
+            "label": "target.amount"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 13,
+            "symbol": "clearance",
+            "label": "clearance"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Divide",
+          [
+            "Multiply",
+            "clearance",
+            "sourceAmount"
+          ],
+          "sourceDistributionVolume"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Clearance",
+          "symbol": "clearance",
+          "value": 4,
+          "unit": "L/h",
+          "mode": "constant",
+          "id": 13
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 12
+    },
+    {
+      "name": "Plasma clearance",
+      "source": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "-\\frac{\\mathrm{clearance}\\cdot\\mathrm{targetAmount}}{\\mathrm{targetDistributionVolume}}",
+      "equationModel": {
+        "latex": "-\\frac{\\mathrm{clearance}\\cdot\\mathrm{targetAmount}}{\\mathrm{targetDistributionVolume}}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "sourceAmount",
+            "label": "source.amount"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetAmount",
+            "label": "target.amount"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "targetDistributionVolume",
+            "label": "target.distributionVolume"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 15,
+            "symbol": "clearance",
+            "label": "clearance"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Divide",
+            [
+              "Multiply",
+              "clearance",
+              "targetAmount"
+            ],
+            "targetDistributionVolume"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Clearance",
+          "symbol": "clearance",
+          "value": 4,
+          "unit": "L/h",
+          "mode": "constant",
+          "id": 15
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 14
+    }
+  ]
+}

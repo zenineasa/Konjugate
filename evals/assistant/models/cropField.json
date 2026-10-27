@@ -1,0 +1,388 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Rainfall",
+      "type": "Weather",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Rain rate",
+          "symbol": "rate",
+          "initialValue": 2,
+          "unit": "mm/day",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#2e7591"
+      },
+      "id": 1
+    },
+    {
+      "name": "Irrigation",
+      "type": "Supply",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Irrigation rate",
+          "symbol": "rate",
+          "initialValue": 4,
+          "unit": "mm/day",
+          "id": 4
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#4a8f5b"
+      },
+      "id": 3
+    },
+    {
+      "name": "Soil",
+      "type": "Medium",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Soil moisture",
+          "symbol": "moisture",
+          "initialValue": 120,
+          "unit": "mm",
+          "id": 6
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#8a6fa8"
+      },
+      "id": 5
+    },
+    {
+      "name": "Crop",
+      "type": "Plant",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Biomass",
+          "symbol": "biomass",
+          "initialValue": 150,
+          "unit": "g/m2",
+          "id": 8
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#d98b54"
+      },
+      "id": 7
+    }
+  ],
+  "edges": [
+    {
+      "name": "Rain supply",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sourceRate}",
+      "equationModel": {
+        "latex": "\\mathrm{sourceRate}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceRate",
+            "label": "source.rate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetMoisture",
+            "label": "target.moisture"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": "sourceRate"
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 9
+    },
+    {
+      "name": "Irrigation supply",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sourceRate}",
+      "equationModel": {
+        "latex": "\\mathrm{sourceRate}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceRate",
+            "label": "source.rate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetMoisture",
+            "label": "target.moisture"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": "sourceRate"
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 10
+    },
+    {
+      "name": "Crop transpiration",
+      "source": {
+        "nodeId": 7,
+        "stateId": 8
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{transpirationRate}\\cdot\\mathrm{sourceBiomass}",
+      "equationModel": {
+        "latex": "-\\mathrm{transpirationRate}\\cdot\\mathrm{sourceBiomass}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 7,
+            "stateId": 8,
+            "symbol": "sourceBiomass",
+            "label": "source.biomass"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetMoisture",
+            "label": "target.moisture"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 12,
+            "symbol": "transpirationRate",
+            "label": "transpirationRate"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "sourceBiomass",
+            "transpirationRate"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Transpiration rate",
+          "symbol": "transpirationRate",
+          "value": 0.01,
+          "unit": "mm·m2/(g·day)",
+          "mode": "constant",
+          "id": 12
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 11
+    },
+    {
+      "name": "Water-limited growth",
+      "source": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "target": {
+        "nodeId": 7,
+        "stateId": 8
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{growthRate}\\cdot\\mathrm{targetBiomass}\\cdot\\frac{\\mathrm{sourceMoisture}}{\\mathrm{sourceMoisture}+\\mathrm{halfSaturation}}",
+      "equationModel": {
+        "latex": "\\mathrm{growthRate}\\cdot\\mathrm{targetBiomass}\\cdot\\frac{\\mathrm{sourceMoisture}}{\\mathrm{sourceMoisture}+\\mathrm{halfSaturation}}",
+        "output": {
+          "role": "target",
+          "stateId": 8
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "sourceMoisture",
+            "label": "source.moisture"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 7,
+            "stateId": 8,
+            "symbol": "targetBiomass",
+            "label": "target.biomass"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 14,
+            "symbol": "growthRate",
+            "label": "growthRate"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 15,
+            "symbol": "halfSaturation",
+            "label": "halfSaturation"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "growthRate",
+          "targetBiomass",
+          [
+            "Divide",
+            "sourceMoisture",
+            [
+              "Add",
+              "halfSaturation",
+              "sourceMoisture"
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Growth rate",
+          "symbol": "growthRate",
+          "value": 0.05,
+          "unit": "1/day",
+          "mode": "constant",
+          "id": 14
+        },
+        {
+          "name": "Half-saturation moisture",
+          "symbol": "halfSaturation",
+          "value": 60,
+          "unit": "mm",
+          "mode": "constant",
+          "id": 15
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 13
+    }
+  ]
+}

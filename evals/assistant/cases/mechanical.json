@@ -1,0 +1,504 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "springStiffness10",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Set the spring stiffness to 10 N/m.",
+      "expect": {
+        "touches": [
+          "Spring force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "stiffness",
+            "value": 10,
+            "unit": "N/m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "damping12",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Damping 1.2 N·s/m.",
+      "expect": {
+        "touches": [
+          "Damper force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "dampingCoefficient",
+            "value": 1.2
+          }
+        ]
+      }
+    },
+    {
+      "id": "startFiveCentimetres",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Can the mass start 5 cm above its rest position, please?",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 0.05,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "pushedToThirty",
+      "family": "updateValue",
+      "domain": "mechanical",
+      "style": "indirect",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "I want it to start from rest but pushed out to 0.3 m.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 0.3,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "massTwoKilograms",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Make the mass weigh 2 kg.",
+      "expect": {
+        "touches": [
+          "Spring force",
+          "Damper force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "mass",
+            "value": 2,
+            "unit": "kg",
+            "all": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "stifferSpring",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "stiffer spring pls, like 8",
+      "expect": {
+        "touches": [
+          "Spring force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "stiffness",
+            "value": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeDamperTypos",
+      "family": "remove",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Remvoe the damper",
+      "expect": {
+        "touches": [
+          "Damper force"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Damper force"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ceiling",
+      "family": "addNode",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a mechanical boundary called Ceiling with a displacement of 0 m and a velocity of 0 m/s.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Ceiling"
+          },
+          {
+            "op": "state",
+            "node": "Ceiling",
+            "initialValue": 0,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Ceiling",
+            "initialValue": 0,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "addPayload",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "I want to hang a second mass called Payload below the suspended mass (displacement 0 m, velocity 0 m/s), connected to it with a spring of stiffness 50 N/m.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Payload",
+            "initialValue": 0,
+            "unit": "m"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Suspended mass",
+            "to": "Payload",
+            "either": true
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Suspended mass",
+            "to": "Payload",
+            "symbol": "stiffness",
+            "value": 50,
+            "unit": "N/m",
+            "either": true
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Suspended mass",
+            "to": "Payload",
+            "uses": [],
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "pivotDOutward",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Move ground pivot D out to x = 4 m.",
+      "expect": {
+        "touches": [
+          "Ground pivot D"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot D",
+            "symbol": "x",
+            "initialValue": 4,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rockerRodXOut",
+      "family": "enableDisable",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Could you take the rocker rod X out of the simulation?",
+      "expect": {
+        "touches": [
+          "Rocker rod X"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Rocker rod X",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "couplerLonger",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "The coupler rod is longer in reality than I modelled: 3.2 m at rest instead of 3. Please update both the X and Y couplings.",
+      "expect": {
+        "touches": [
+          "Coupler rod X",
+          "Coupler rod Y"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Crank pin B",
+            "to": "Coupler-rocker pin C",
+            "symbol": "restLength",
+            "value": 3.2,
+            "unit": "m",
+            "all": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "stifferRod",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Make the rod stiffer.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "springTwenty",
+      "family": "history",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "20",
+      "history": [
+        {
+          "request": "Make the spring stiffer",
+          "outcome": "Asked: What stiffness (in N/m) should Spring force use?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Spring force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "stiffness",
+            "value": 20
+          }
+        ]
+      }
+    },
+    {
+      "id": "ditchSupport",
+      "family": "remove",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "ditch the fixed support",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Fixed support"
+          }
+        ]
+      }
+    },
+    {
+      "id": "renameCarBody",
+      "family": "updateNode",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Call the suspended mass 'Car body'.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Car body"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cartAndWall",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "blank",
+      "request": "Create a mass called Cart at 0 m with a velocity of 0 m/s, and a fixed wall called Wall at 2 m with no velocity, connected by a spring with a stiffness of 100 N/m.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "Cart",
+            "initialValue": 0,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Wall",
+            "initialValue": 2,
+            "unit": "m"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Cart",
+            "to": "Wall",
+            "either": true
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Cart",
+            "to": "Wall",
+            "value": 100,
+            "unit": "N/m",
+            "either": true
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Cart",
+            "to": "Wall",
+            "uses": [],
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "tuneSuspension",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Set the spring stiffness to 6 N/m, the damping to 0.8 N·s/m and start the mass at 0.2 m.",
+      "expect": {
+        "touches": [
+          "Spring force",
+          "Damper force",
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "stiffness",
+            "value": 6
+          },
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "dampingCoefficient",
+            "value": 0.8
+          },
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 0.2,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "askDisplacementTwenty",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Set the displacement to 0.2 m.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Suspended mass",
+          "Fixed support"
+        ]
+      }
+    }
+  ]
+}

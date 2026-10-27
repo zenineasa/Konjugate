@@ -69,6 +69,25 @@ function projectEntities(document) {
     return entities;
 }
 
+// The compact description of the active model that goes to a provider with every request. It lives here, not in
+// the renderer, so the assistant evaluation harness (scripts/evalAssistant.mjs) sends providers exactly what the
+// panel does.
+export function summarizeDocumentForAssistant(document) {
+    return {
+        format: document.format,
+        version: document.version,
+        units: document.metadata.units,
+        nodes: document.nodes.map((node) => ({
+            id: node.id, name: node.name, type: node.type, enabled: node.enabled !== false,
+            states: node.states.map((state) => ({ id: state.id, name: state.name, symbol: state.symbol, initialValue: state.initialValue, unit: state.unit }))
+        })),
+        edges: document.edges.map((edge) => ({
+            id: edge.id, name: edge.name, sourceNodeId: edge.source.nodeId,
+            targetNodeId: edge.target.nodeId, directionality: edge.directionality, enabled: edge.enabled !== false
+        }))
+    };
+}
+
 export function validateAssistantProposal(proposal) {
     if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) {
         throw new AssistantProposalError('A proposal must be an object.');

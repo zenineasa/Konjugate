@@ -1,0 +1,242 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Incoming traffic",
+      "type": "Load",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Arrival rate",
+          "symbol": "arrivalRate",
+          "initialValue": 120,
+          "unit": "requests/s",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#d98b54"
+      },
+      "id": 1
+    },
+    {
+      "name": "Server pool",
+      "type": "Compute",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Server count",
+          "symbol": "servers",
+          "initialValue": 6,
+          "unit": "servers",
+          "id": 4
+        },
+        {
+          "name": "Capacity per server",
+          "symbol": "perServer",
+          "initialValue": 25,
+          "unit": "requests/s",
+          "id": 5
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      },
+      "id": 3
+    },
+    {
+      "name": "Request queue",
+      "type": "Queue",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Queue length",
+          "symbol": "length",
+          "initialValue": 40,
+          "unit": "requests",
+          "id": 7
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#8a6fa8"
+      },
+      "id": 6
+    }
+  ],
+  "edges": [
+    {
+      "name": "Request arrivals",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sourceArrivalRate}",
+      "equationModel": {
+        "latex": "\\mathrm{sourceArrivalRate}",
+        "output": {
+          "role": "target",
+          "stateId": 7
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceArrivalRate",
+            "label": "source.arrivalRate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "targetLength",
+            "label": "target.length"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": "sourceArrivalRate"
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 8
+    },
+    {
+      "name": "Request service",
+      "source": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "target": {
+        "nodeId": 6,
+        "stateId": 7
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{sourceServers}\\cdot\\mathrm{sourcePerServer}\\cdot\\frac{\\mathrm{targetLength}}{\\mathrm{targetLength}+\\mathrm{saturationLength}}",
+      "equationModel": {
+        "latex": "-\\mathrm{sourceServers}\\cdot\\mathrm{sourcePerServer}\\cdot\\frac{\\mathrm{targetLength}}{\\mathrm{targetLength}+\\mathrm{saturationLength}}",
+        "output": {
+          "role": "target",
+          "stateId": 7
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "sourceServers",
+            "label": "source.servers"
+          },
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 3,
+            "stateId": 5,
+            "symbol": "sourcePerServer",
+            "label": "source.perServer"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 6,
+            "stateId": 7,
+            "symbol": "targetLength",
+            "label": "target.length"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 10,
+            "symbol": "saturationLength",
+            "label": "saturationLength"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          [
+            "Multiply",
+            "sourcePerServer",
+            "sourceServers",
+            [
+              "Divide",
+              "targetLength",
+              [
+                "Add",
+                "saturationLength",
+                "targetLength"
+              ]
+            ]
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Saturation length",
+          "symbol": "saturationLength",
+          "value": 10,
+          "unit": "requests",
+          "mode": "constant",
+          "id": 10
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 9
+    }
+  ]
+}

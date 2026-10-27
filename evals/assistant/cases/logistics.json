@@ -1,0 +1,585 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "portYard400",
+      "family": "updateValue",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Set the Port yard to 400 TEU.",
+      "expect": {
+        "touches": [
+          "Port"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Port",
+            "symbol": "yard",
+            "initialValue": 400,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "warehouseBOnHand",
+      "family": "updateValue",
+      "domain": "logistics",
+      "style": "terse",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Warehouse B on-hand 120.",
+      "expect": {
+        "touches": [
+          "Warehouse B"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Warehouse B",
+            "symbol": "onHand",
+            "initialValue": 120
+          }
+        ]
+      }
+    },
+    {
+      "id": "zone2Backlog35",
+      "family": "updateValue",
+      "domain": "logistics",
+      "style": "conversational",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Could you set Zone 2's backlog to 35 TEU?",
+      "expect": {
+        "touches": [
+          "Zone 2"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Zone 2",
+            "symbol": "backlog",
+            "initialValue": 35,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "warehouseADemand",
+      "family": "updateValue",
+      "domain": "logistics",
+      "style": "indirect",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "We expect much more demand at Warehouse A, around 90 TEU per day.",
+      "expect": {
+        "touches": [
+          "Warehouse A"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Warehouse A",
+            "symbol": "forecast",
+            "initialValue": 90,
+            "unit": "TEU/day"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sixtyPercentToA",
+      "family": "updateParameter",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Send 60% of the port's volume to Warehouse A.",
+      "expect": {
+        "touches": [
+          "Dispatch to Warehouse A",
+          "Dispatch to Warehouse B"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Port",
+            "to": "Warehouse A",
+            "symbol": "gateShare",
+            "value": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "id": "leadTimeB5",
+      "family": "updateParameter",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Increase the lead time for Warehouse B dispatches to 5 days.",
+      "expect": {
+        "touches": [
+          "Dispatch to Warehouse B"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Port",
+            "to": "Warehouse B",
+            "symbol": "leadTime",
+            "value": 5,
+            "unit": "day"
+          }
+        ]
+      }
+    },
+    {
+      "id": "disableZone3",
+      "family": "enableDisable",
+      "domain": "logistics",
+      "style": "typos",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Dissable Zone 3",
+      "expect": {
+        "touches": [
+          "Zone 3"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Zone 3",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "zone1SignalOff",
+      "family": "enableDisable",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Turn off the Zone 1 demand signal.",
+      "expect": {
+        "touches": [
+          "Zone 1 demand signal"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Zone 1 demand signal",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "warehouseC",
+      "family": "addNode",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "blank",
+      "request": "Add a warehouse called Warehouse C holding 50 TEU on hand.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "hasNode",
+            "name": "Warehouse C"
+          },
+          {
+            "op": "state",
+            "node": "Warehouse C",
+            "initialValue": 50,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "zone4",
+      "family": "multiStep",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Add Zone 4 with a backlog of 10 TEU and connect Warehouse B to it.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 1
+          },
+          {
+            "op": "state",
+            "node": "Zone 4",
+            "initialValue": 10,
+            "unit": "TEU"
+          },
+          {
+            "op": "hasEdge",
+            "from": "Warehouse B",
+            "to": "Zone 4"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "Warehouse B",
+            "to": "Zone 4",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "closeWarehouseB",
+      "family": "remove",
+      "domain": "logistics",
+      "style": "terse",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Close Warehouse B.",
+      "expect": {
+        "touches": [
+          "Warehouse B"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Warehouse B"
+          }
+        ]
+      }
+    },
+    {
+      "id": "removeZone3Signal",
+      "family": "remove",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Remove the Zone 3 demand signal relationship.",
+      "expect": {
+        "touches": [
+          "Zone 3 demand signal"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Zone 3 demand signal"
+          }
+        ]
+      }
+    },
+    {
+      "id": "changeLeadTime",
+      "family": "clarification",
+      "domain": "logistics",
+      "style": "terse",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Change the lead time.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "backlog25",
+      "family": "clarification",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Set the backlog to 25 TEU.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Zone 1",
+          "Zone 2",
+          "Zone 3"
+        ]
+      }
+    },
+    {
+      "id": "zoneThree",
+      "family": "history",
+      "domain": "logistics",
+      "style": "terse",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Zone 3",
+      "history": [
+        {
+          "request": "Set the backlog to 25 TEU.",
+          "outcome": "Asked: Which demand zone should I update?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Zone 3"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Zone 3",
+            "symbol": "backlog",
+            "initialValue": 25,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vesselDelay",
+      "family": "multiStep",
+      "domain": "logistics",
+      "style": "verbose",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "A vessel delay means the yard is nearly empty, so set the Port yard to 20 TEU. The two warehouses are also running low, so put Warehouse A at 100 TEU on hand and Warehouse B at 40.",
+      "expect": {
+        "touches": [
+          "Port",
+          "Warehouse A",
+          "Warehouse B"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Port",
+            "symbol": "yard",
+            "initialValue": 20,
+            "unit": "TEU"
+          },
+          {
+            "op": "state",
+            "node": "Warehouse A",
+            "symbol": "onHand",
+            "initialValue": 100,
+            "unit": "TEU"
+          },
+          {
+            "op": "state",
+            "node": "Warehouse B",
+            "symbol": "onHand",
+            "initialValue": 40,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "zone3Backlog30",
+      "family": "reference",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Set Zone 3's backlog to 30 TEU.",
+      "expect": {
+        "touches": [
+          "Zone 3"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Zone 3",
+            "symbol": "backlog",
+            "initialValue": 30,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "renamePort",
+      "family": "updateNode",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Rename Port to Port of Rotterdam.",
+      "expect": {
+        "touches": [
+          "Port"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Port of Rotterdam"
+          }
+        ]
+      }
+    },
+    {
+      "id": "smallLogistics",
+      "family": "multiStep",
+      "domain": "logistics",
+      "style": "conversational",
+      "split": "test",
+      "model": "blank",
+      "request": "I'd like to start a logistics model: one warehouse with 500 TEU on hand and one customer zone with a backlog of 40 TEU, with deliveries flowing from the warehouse to the zone.",
+      "expect": {
+        "touches": [],
+        "assertions": [
+          {
+            "op": "nodesAdded",
+            "count": 2
+          },
+          {
+            "op": "state",
+            "node": "warehouse",
+            "initialValue": 500,
+            "unit": "TEU"
+          },
+          {
+            "op": "state",
+            "node": "zone",
+            "initialValue": 40,
+            "unit": "TEU"
+          },
+          {
+            "op": "hasEdge",
+            "from": "warehouse",
+            "to": "zone"
+          },
+          {
+            "op": "edgeEquation",
+            "from": "warehouse",
+            "to": "zone",
+            "uses": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "twoBacklogs",
+      "family": "multiStep",
+      "domain": "logistics",
+      "style": "multiPart",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Put 80 TEU of backlog in Zone 1 and 60 in Zone 2.",
+      "expect": {
+        "touches": [
+          "Zone 1",
+          "Zone 2"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Zone 1",
+            "symbol": "backlog",
+            "initialValue": 80,
+            "unit": "TEU"
+          },
+          {
+            "op": "state",
+            "node": "Zone 2",
+            "symbol": "backlog",
+            "initialValue": 60,
+            "unit": "TEU"
+          }
+        ]
+      }
+    },
+    {
+      "id": "askBacklogForty",
+      "family": "clarification",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Set the backlog to 40 TEU.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Zone 1",
+          "Zone 2",
+          "Zone 3"
+        ]
+      }
+    },
+    {
+      "id": "askForecastEighty",
+      "family": "clarification",
+      "domain": "logistics",
+      "style": "loose",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "forecast 80 TEU/day",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Warehouse A",
+          "Warehouse B"
+        ]
+      }
+    },
+    {
+      "id": "askRaiseForecastA",
+      "family": "clarification",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Raise the forecast for Warehouse A.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "askDisableWarehouseC",
+      "family": "clarification",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Disable Warehouse C.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Warehouse A",
+          "Warehouse B"
+        ]
+      }
+    },
+    {
+      "id": "actZoneThreeBacklog",
+      "family": "reference",
+      "domain": "logistics",
+      "style": "plain",
+      "split": "test",
+      "model": "logisticsPortNetwork",
+      "request": "Set the backlog of Zone 3 to 40 TEU.",
+      "expect": {
+        "touches": [
+          "Zone 3"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Zone 3",
+            "symbol": "backlog",
+            "initialValue": 40,
+            "unit": "TEU"
+          }
+        ]
+      }
+    }
+  ]
+}

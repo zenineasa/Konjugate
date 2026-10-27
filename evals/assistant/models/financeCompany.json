@@ -1,0 +1,615 @@
+{
+  "format": "konjugate",
+  "version": 1,
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "metadata": {
+    "units": "SI"
+  },
+  "nodes": [
+    {
+      "name": "Operating account",
+      "type": "Cash account",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Balance",
+          "symbol": "balance",
+          "initialValue": 250000,
+          "unit": "USD",
+          "id": 2
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#2e7591"
+      },
+      "id": 1
+    },
+    {
+      "name": "Investment portfolio",
+      "type": "Portfolio",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Market value",
+          "symbol": "value",
+          "initialValue": 1200000,
+          "unit": "USD",
+          "id": 4
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#4a8f5b"
+      },
+      "id": 3
+    },
+    {
+      "name": "Business loan",
+      "type": "Loan",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        1.8,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Principal outstanding",
+          "symbol": "principal",
+          "initialValue": 800000,
+          "unit": "USD",
+          "id": 6
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "box",
+        "color": "#a55a4e"
+      },
+      "id": 5
+    },
+    {
+      "name": "Sales",
+      "type": "Revenue stream",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        5.4,
+        0,
+        0
+      ],
+      "states": [
+        {
+          "name": "Revenue rate",
+          "symbol": "revenueRate",
+          "initialValue": 180000,
+          "unit": "USD/month",
+          "id": 8
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#d98b54"
+      },
+      "id": 7
+    },
+    {
+      "name": "Operating costs",
+      "type": "Expense stream",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -5.4,
+        -3.2,
+        0
+      ],
+      "states": [
+        {
+          "name": "Cost rate",
+          "symbol": "costRate",
+          "initialValue": 140000,
+          "unit": "USD/month",
+          "id": 10
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "cylinder",
+        "color": "#8a6fa8"
+      },
+      "id": 9
+    },
+    {
+      "name": "Capital market",
+      "type": "Market",
+      "numerics": {
+        "substepsPerGlobalStep": 1
+      },
+      "position": [
+        -1.8,
+        -3.2,
+        0
+      ],
+      "states": [
+        {
+          "name": "Monthly return rate",
+          "symbol": "returnRate",
+          "initialValue": 0.005,
+          "unit": "1/month",
+          "id": 12
+        }
+      ],
+      "sourceTerms": [],
+      "appearance": {
+        "type": "primitive",
+        "shape": "sphere",
+        "color": "#5f6f7a"
+      },
+      "id": 11
+    }
+  ],
+  "edges": [
+    {
+      "name": "Sales income",
+      "source": {
+        "nodeId": 7,
+        "stateId": 8
+      },
+      "target": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sourceRevenueRate}",
+      "equationModel": {
+        "latex": "\\mathrm{sourceRevenueRate}",
+        "output": {
+          "role": "target",
+          "stateId": 2
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 7,
+            "stateId": 8,
+            "symbol": "sourceRevenueRate",
+            "label": "source.revenueRate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "targetBalance",
+            "label": "target.balance"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": "sourceRevenueRate"
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 13
+    },
+    {
+      "name": "Cost payments",
+      "source": {
+        "nodeId": 9,
+        "stateId": 10
+      },
+      "target": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{sourceCostRate}",
+      "equationModel": {
+        "latex": "-\\mathrm{sourceCostRate}",
+        "output": {
+          "role": "target",
+          "stateId": 2
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 9,
+            "stateId": 10,
+            "symbol": "sourceCostRate",
+            "label": "source.costRate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "targetBalance",
+            "label": "target.balance"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          "sourceCostRate"
+        ]
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 14
+    },
+    {
+      "name": "Portfolio growth",
+      "source": {
+        "nodeId": 11,
+        "stateId": 12
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sourceReturnRate} \\cdot \\mathrm{targetValue}",
+      "equationModel": {
+        "latex": "\\mathrm{sourceReturnRate} \\cdot \\mathrm{targetValue}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 11,
+            "stateId": 12,
+            "symbol": "sourceReturnRate",
+            "label": "source.returnRate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetValue",
+            "label": "target.value"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "sourceReturnRate",
+          "targetValue"
+        ]
+      },
+      "parameters": [],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 15
+    },
+    {
+      "name": "Loan interest",
+      "source": {
+        "nodeId": 11,
+        "stateId": 12
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "(\\mathrm{sourceReturnRate} + \\mathrm{creditSpread}) \\cdot \\mathrm{targetPrincipal}",
+      "equationModel": {
+        "latex": "(\\mathrm{sourceReturnRate} + \\mathrm{creditSpread}) \\cdot \\mathrm{targetPrincipal}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 11,
+            "stateId": 12,
+            "symbol": "sourceReturnRate",
+            "label": "source.returnRate"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetPrincipal",
+            "label": "target.principal"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 17,
+            "symbol": "creditSpread",
+            "label": "creditSpread"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "targetPrincipal",
+          [
+            "Add",
+            "creditSpread",
+            "sourceReturnRate"
+          ]
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Credit spread",
+          "symbol": "creditSpread",
+          "value": 0.002,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 17
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 16
+    },
+    {
+      "name": "Loan repayment",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{monthlyPayment}",
+      "equationModel": {
+        "latex": "-\\mathrm{monthlyPayment}",
+        "output": {
+          "role": "target",
+          "stateId": 6
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceBalance",
+            "label": "source.balance"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "targetPrincipal",
+            "label": "target.principal"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 19,
+            "symbol": "monthlyPayment",
+            "label": "monthlyPayment"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          "monthlyPayment"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Monthly payment",
+          "symbol": "monthlyPayment",
+          "value": 12000,
+          "unit": "USD/month",
+          "mode": "constant",
+          "id": 19
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 18
+    },
+    {
+      "name": "Debt service",
+      "source": {
+        "nodeId": 5,
+        "stateId": 6
+      },
+      "target": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "directionality": "directed",
+      "equation": "-\\mathrm{monthlyPayment}",
+      "equationModel": {
+        "latex": "-\\mathrm{monthlyPayment}",
+        "output": {
+          "role": "target",
+          "stateId": 2
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 5,
+            "stateId": 6,
+            "symbol": "sourcePrincipal",
+            "label": "source.principal"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "targetBalance",
+            "label": "target.balance"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 21,
+            "symbol": "monthlyPayment",
+            "label": "monthlyPayment"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Negate",
+          "monthlyPayment"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Monthly payment",
+          "symbol": "monthlyPayment",
+          "value": 12000,
+          "unit": "USD/month",
+          "mode": "constant",
+          "id": 21
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 20
+    },
+    {
+      "name": "Treasury sweep",
+      "source": {
+        "nodeId": 1,
+        "stateId": 2
+      },
+      "target": {
+        "nodeId": 3,
+        "stateId": 4
+      },
+      "directionality": "directed",
+      "equation": "\\mathrm{sweepFraction} \\cdot \\mathrm{sourceBalance}",
+      "equationModel": {
+        "latex": "\\mathrm{sweepFraction} \\cdot \\mathrm{sourceBalance}",
+        "output": {
+          "role": "target",
+          "stateId": 4
+        },
+        "bindings": [
+          {
+            "kind": "state",
+            "role": "source",
+            "nodeId": 1,
+            "stateId": 2,
+            "symbol": "sourceBalance",
+            "label": "source.balance"
+          },
+          {
+            "kind": "state",
+            "role": "target",
+            "nodeId": 3,
+            "stateId": 4,
+            "symbol": "targetValue",
+            "label": "target.value"
+          },
+          {
+            "kind": "parameter",
+            "parameterId": 23,
+            "symbol": "sweepFraction",
+            "label": "sweepFraction"
+          },
+          {
+            "kind": "time",
+            "symbol": "t",
+            "label": "t (time)"
+          }
+        ],
+        "mathJson": [
+          "Multiply",
+          "sourceBalance",
+          "sweepFraction"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Sweep fraction",
+          "symbol": "sweepFraction",
+          "value": 0.02,
+          "unit": "1/month",
+          "mode": "constant",
+          "id": 23
+        }
+      ],
+      "appearance": {
+        "color": "#9c83c4",
+        "offset": 0
+      },
+      "id": 22
+    }
+  ]
+}

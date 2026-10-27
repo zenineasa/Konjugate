@@ -1,0 +1,803 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "g0260ReferencePumpSuctionHydraulics",
+      "family": "reference",
+      "domain": "fluid",
+      "style": "indirect",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "The spec says the Suction Line 2 flow rate is 2 m3/s.",
+      "expect": {
+        "touches": [
+          "Suction Line 2"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 2",
+            "symbol": "flowRate",
+            "initialValue": 2,
+            "unit": "m3/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0262UnitsPumpSuctionHydraulics",
+      "family": "units",
+      "domain": "fluid",
+      "style": "typos",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I'd like the flow rate of the Sucion Line 2 to be 23 L/s, if that's possible.",
+      "expect": {
+        "touches": [
+          "Suction Line 2"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 2",
+            "symbol": "flowRate",
+            "initialValue": 0.023,
+            "unit": "m3/s",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0265UnitsPumpSuctionHydraulics",
+      "family": "units",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Can we make the Suction Line 1 flow rate 490 L/min?",
+      "expect": {
+        "touches": [
+          "Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 1",
+            "symbol": "flowRate",
+            "initialValue": 0.00816666667,
+            "unit": "m3/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0268UpdateValuePumpSuctionHydraulics",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I'm updating the model with the latest measurements. Tank's surface pressure is now 150000 Pa, so please change it to match; everything else stays as it is.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 150000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0269UpdateValuePumpSuctionHydraulics",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Update the surface pressure to 150000 Pa.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 150000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0270UnitsPumpSuctionHydraulics",
+      "family": "units",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Tank surface pressure 2.8 bar.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "symbol": "pressure",
+            "initialValue": 280000,
+            "unit": "Pa",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0271UpdateValuePumpSuctionHydraulics",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Could you update the nPSH margin to 2.61 m for me?",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "npshHead",
+            "initialValue": 2.61,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0272UpdateValuePumpSuctionHydraulics",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "loose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "set pump npsh margin 2.61 m",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "npshHead",
+            "initialValue": 2.61,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0274ReferencePumpSuctionHydraulics",
+      "family": "reference",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "We re-ran the calibration this morning and the result was clear: the flow rate of the Suction Line 3 should be 5 m3/s. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Suction Line 3"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 3",
+            "symbol": "flowRate",
+            "initialValue": 5,
+            "unit": "m3/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0276UnitsPumpSuctionHydraulics",
+      "family": "units",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Update the Suction Line 3 flow rate to 370 L/min.",
+      "expect": {
+        "touches": [
+          "Suction Line 3"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 3",
+            "symbol": "flowRate",
+            "initialValue": 0.00616666667,
+            "unit": "m3/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0277UpdateValuePumpSuctionHydraulics",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Pump suction pressure = 400000 Pa",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "pressure",
+            "initialValue": 400000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0278UpdateValuePumpSuctionHydraulics",
+      "family": "updateValue",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Can we make the suction pressure 50000 Pa?",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "pressure",
+            "initialValue": 50000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0281ReferencePumpSuctionHydraulics",
+      "family": "reference",
+      "domain": "fluid",
+      "style": "typos",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Would you change the pressure of the Suciton Manifold Junction to 75000 Pa? Thanks.",
+      "expect": {
+        "touches": [
+          "Suction Manifold Junction"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Manifold Junction",
+            "symbol": "pressure",
+            "initialValue": 75000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0282UnitsPumpSuctionHydraulics",
+      "family": "units",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I'm updating the model with the latest measurements. Suction Manifold Junction's pressure is now 4.5 bar, so please change it to match; everything else stays as it is.",
+      "expect": {
+        "touches": [
+          "Suction Manifold Junction"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Manifold Junction",
+            "symbol": "pressure",
+            "initialValue": 450000,
+            "unit": "Pa",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0490UpdateParameterPumpSuctionHydraulics",
+      "family": "updateParameter",
+      "domain": "fluid",
+      "style": "typos",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Would you change the inertacne for Tank drives Suction Line 1 to 1110000 kg/m4? Thanks.",
+      "expect": {
+        "touches": [
+          "Tank drives Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Tank",
+            "to": "Suction Line 1",
+            "symbol": "inertance",
+            "value": 1110000
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0491UpdateParameterPumpSuctionHydraulics",
+      "family": "updateParameter",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Please set the inertance of the Suction Manifold Junction opposes Suction Line 1 relationship to 416000 kg/m4.",
+      "expect": {
+        "touches": [
+          "Suction Manifold Junction opposes Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Suction Manifold Junction",
+            "to": "Suction Line 1",
+            "symbol": "inertance",
+            "value": 416000
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0492UpdateParameterPumpSuctionHydraulics",
+      "family": "updateParameter",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I'd like the capacitance for Suction Line 1 discharges Tank to be 0.0003 m3/Pa, if that's possible.",
+      "expect": {
+        "touches": [
+          "Suction Line 1 discharges Tank"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Suction Line 1",
+            "to": "Tank",
+            "symbol": "capacitance",
+            "value": 0.0003
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0707EnableDisablePumpSuctionHydraulics",
+      "family": "enableDisable",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Disable Suction Manifold Junction.",
+      "expect": {
+        "touches": [
+          "Suction Manifold Junction"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Suction Manifold Junction",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0709EnableDisablePumpSuctionHydraulics",
+      "family": "enableDisable",
+      "domain": "fluid",
+      "style": "indirect",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I don't want the Suction Line 1 charges Suction Manifold Junction relationship active in this run.",
+      "expect": {
+        "touches": [
+          "Suction Line 1 charges Suction Manifold Junction"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Suction Line 1 charges Suction Manifold Junction",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0712RemovePumpSuctionHydraulics",
+      "family": "remove",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "After the redesign the Suction Line 2 is gone from the system. Please delete it from the model so it doesn't confuse anyone.",
+      "expect": {
+        "touches": [
+          "Suction Line 2"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Suction Line 2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0720RemovePumpSuctionHydraulics",
+      "family": "remove",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Remove the Suction Line 2 charges Branch Junction relationship.",
+      "expect": {
+        "touches": [
+          "Suction Line 2 charges Branch Junction"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Suction Line 2 charges Branch Junction"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0958UpdateNodePumpSuctionHydraulics",
+      "family": "updateNode",
+      "domain": "fluid",
+      "style": "conversational",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Could you rename the Pump to Prototype, please?",
+      "expect": {
+        "touches": [
+          "Pump"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Prototype"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0959UpdateNodePumpSuctionHydraulics",
+      "family": "updateNode",
+      "domain": "fluid",
+      "style": "indirect",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "The Suction Line 3 looks wrong as it is; a box would suit it better.",
+      "expect": {
+        "touches": [
+          "Suction Line 3"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Suction Line 3",
+            "path": "appearance.shape",
+            "value": "box"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1070ClarificationPumpSuctionHydraulics",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Change the flow rate to 0.5 m3/s.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Suction Line 1",
+          "Suction Line 2",
+          "Suction Line 3"
+        ]
+      }
+    },
+    {
+      "id": "g1071ClarificationPumpSuctionHydraulics",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Pressure: 400000 Pa",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Suction Manifold Junction",
+          "Branch Junction"
+        ]
+      }
+    },
+    {
+      "id": "g1073ClarificationPumpSuctionHydraulics",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "indirect",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I think the pressure of the Suction Manifold Junction is off.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1075ClarificationPumpSuctionHydraulics",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "typos",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Disble the gearbox.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1076ClarificationPumpSuctionHydraulics",
+      "family": "clarification",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Two people on my team gave me different numbers for the Suction Line 2 flow rate: 2 m3/s and 5 m3/s. Please put in the correct one.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1179MultiStepPumpSuctionHydraulics",
+      "family": "multiStep",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Set the Pump suction pressure to 400000 Pa and the Suction Line 1 flow rate to 0.5 m3/s.",
+      "expect": {
+        "touches": [
+          "Pump",
+          "Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Pump",
+            "symbol": "pressure",
+            "initialValue": 400000,
+            "unit": "Pa"
+          },
+          {
+            "op": "state",
+            "node": "Suction Line 1",
+            "symbol": "flowRate",
+            "initialValue": 0.5,
+            "unit": "m3/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1303AddStatePumpSuctionHydraulics",
+      "family": "addState",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "For the next analysis I need an extra quantity on the Tank. Please add a state called Pressure with an initial value of 101325 Pa.",
+      "expect": {
+        "touches": [
+          "Tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Tank",
+            "initialValue": 101325,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1367AddParameterPumpSuctionHydraulics",
+      "family": "addParameter",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "I want to experiment with Suction Line 1 discharges Tank. Please add a parameter called Efficiency with the value 0.9 to that relationship so I can change it later.",
+      "expect": {
+        "touches": [
+          "Suction Line 1 discharges Tank"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Suction Line 1",
+            "to": "Tank",
+            "value": 0.9
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1437SetEquationPumpSuctionHydraulics",
+      "family": "setEquation",
+      "domain": "fluid",
+      "style": "verbose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "When I compare with measurements, Suction Line 1 discharges Tank comes out wrong by a constant factor. Please change its equation so the whole expression is multiplied by 3.",
+      "expect": {
+        "touches": [
+          "Suction Line 1 discharges Tank"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Suction Line 1",
+            "to": "Tank",
+            "uses": [
+              "sourceFlowRate"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1494UpdateEdgePumpSuctionHydraulics",
+      "family": "updateEdge",
+      "domain": "fluid",
+      "style": "plain",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Change Branch Junction drives Suction Line 3 to bidirectional.",
+      "expect": {
+        "touches": [
+          "Branch Junction drives Suction Line 3"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Branch Junction",
+            "to": "Suction Line 3",
+            "directionality": "bidirectional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1567HistoryPumpSuctionHydraulics",
+      "family": "history",
+      "domain": "fluid",
+      "style": "loose",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "suction line 1",
+      "history": [
+        {
+          "request": "Set the flow rate to 100 m3/s.",
+          "outcome": "Asked: Which node's flow rate should I set?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 1",
+            "symbol": "flowRate",
+            "initialValue": 100,
+            "unit": "m3/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1568HistoryPumpSuctionHydraulics",
+      "family": "history",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Make it 5 m3/s.",
+      "history": [
+        {
+          "request": "Set the Suction Line 1 flow rate to 2 m3/s.",
+          "outcome": "Proposed: Set the Suction Line 1 flow rate to 2 m3/s."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Suction Line 1"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suction Line 1",
+            "symbol": "flowRate",
+            "initialValue": 5,
+            "unit": "m3/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1570HistoryPumpSuctionHydraulics",
+      "family": "history",
+      "domain": "fluid",
+      "style": "terse",
+      "split": "test",
+      "model": "pumpSuctionHydraulics",
+      "request": "Same for Branch Junction.",
+      "history": [
+        {
+          "request": "Set the Suction Manifold Junction pressure to 800000 Pa.",
+          "outcome": "Applied: Set the Suction Manifold Junction pressure to 800000 Pa."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Branch Junction"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Branch Junction",
+            "symbol": "pressure",
+            "initialValue": 800000,
+            "unit": "Pa"
+          }
+        ]
+      }
+    }
+  ]
+}

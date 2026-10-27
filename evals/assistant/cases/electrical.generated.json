@@ -1,0 +1,2172 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "g0035UpdateValueSingleJointActuator",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Motor angular velocity 100 rad/s.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 100,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0037UnitsSingleJointActuator",
+      "family": "units",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Motor's angular velocity should be 2610 rpm.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 273.318561,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0038UpdateValueSingleJointActuator",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "motor armature current 5 A ok?",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 5,
+            "unit": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0039UpdateValueSingleJointActuator",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the armature current of the Mottor to 5 A.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 5,
+            "unit": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0040UnitsSingleJointActuator",
+      "family": "units",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "We re-ran the calibration this morning and the result was clear: the armature current of the Motor should be 7400 mA. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 7.4,
+            "unit": "A",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0041UpdateValueSingleJointActuator",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the DC supply voltage to 6 V.",
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 6,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0042UpdateValueSingleJointActuator",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "DC supply voltage: 12 V.",
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 12,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0043UpdateValueSingleJointActuator",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "load torque → 0.4 N·m",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.4,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0046UpdateValueWheeledRobotDrivetrain",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Set the Drive motor armature current to 5 A.",
+      "expect": {
+        "touches": [
+          "Drive motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Drive motor",
+            "symbol": "current",
+            "initialValue": 5,
+            "unit": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0048UpdateValueWheeledRobotDrivetrain",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Could you update the position to 10 m for me?",
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "position",
+            "initialValue": 10,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0050UnitsWheeledRobotDrivetrain",
+      "family": "units",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "chassis position → 65 cm",
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "position",
+            "initialValue": 0.65,
+            "unit": "m",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0053UnitsWheeledRobotDrivetrain",
+      "family": "units",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Update the Bearing friction load torque to 26 N·cm.",
+      "expect": {
+        "touches": [
+          "Bearing friction"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bearing friction",
+            "symbol": "torque",
+            "initialValue": 0.26,
+            "unit": "N·m",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0054UpdateValueWheeledRobotDrivetrain",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Drive motor angular velocity: 0.5 rad/s.",
+      "expect": {
+        "touches": [
+          "Drive motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Drive motor",
+            "symbol": "angularVelocity",
+            "initialValue": 0.5,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0056UnitsWheeledRobotDrivetrain",
+      "family": "units",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "drive motor angular velocity to 390 rpm pls",
+      "expect": {
+        "touches": [
+          "Drive motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Drive motor",
+            "symbol": "angularVelocity",
+            "initialValue": 40.8407045,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0057UpdateValueWheeledRobotDrivetrain",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "We're assuming the Drive supply voltage is 192 V.",
+      "expect": {
+        "touches": [
+          "Drive supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Drive supply",
+            "symbol": "voltage",
+            "initialValue": 192,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0058UpdateValueWheeledRobotDrivetrain",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "We re-ran the calibration this morning and the result was clear: the voltage should be 18 V. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Drive supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Drive supply",
+            "symbol": "voltage",
+            "initialValue": 18,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0060UpdateValueWheeledRobotDrivetrain",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Chassis velocity = 5 m/s",
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "velocity",
+            "initialValue": 5,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0061UnitsWheeledRobotDrivetrain",
+      "family": "units",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Would you change the Chassis velocity to 110 km/h? Thanks.",
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "velocity",
+            "initialValue": 30.5555556,
+            "unit": "m/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0062UpdateValueBatteryPoweredJoint",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "For this run, the angular velocity of the Motor needs to be 20 rad/s.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 20,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0063UpdateValueBatteryPoweredJoint",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "set motor angular velocity 5 rad/s",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 5,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0064UnitsBatteryPoweredJoint",
+      "family": "units",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Channge the angular velcity to 2610 rpm.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 273.318561,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0065UpdateValueBatteryPoweredJoint",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Before I run the comparison I need the inputs to match the test report, in which the state of charge is 10 %. Please make that change.",
+      "expect": {
+        "touches": [
+          "Battery"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery",
+            "symbol": "stateOfCharge",
+            "initialValue": 10,
+            "unit": "%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0066UpdateValueBatteryPoweredJoint",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Please set Battery's state of charge to 25 %.",
+      "expect": {
+        "touches": [
+          "Battery"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery",
+            "symbol": "stateOfCharge",
+            "initialValue": 25,
+            "unit": "%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0067UpdateValueBatteryPoweredJoint",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Could you update the Load torque to 0.15 N·m for me?",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.15,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0069UnitsBatteryPoweredJoint",
+      "family": "units",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "We're assuming the Load torque value is 23 N·cm.",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.23,
+            "unit": "N·m",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0072UnitsBatteryPoweredJoint",
+      "family": "units",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Please set the temperature of the Battery to 34 °C.",
+      "expect": {
+        "touches": [
+          "Battery"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery",
+            "symbol": "temperature",
+            "initialValue": 307.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0075ReferenceBatteryPoweredJoint",
+      "family": "reference",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "ambient air temperature → 288 K",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 288,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0076ReferenceBatteryPoweredJoint",
+      "family": "reference",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Can we make the temperature of the Ammbient air 295 K?",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 295,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0077UnitsBatteryPoweredJoint",
+      "family": "units",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "We re-ran the calibration this morning and the result was clear: the temperature of the Ambient air should be 24 °C. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 297.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0079ReferenceBatteryPoweredJoint",
+      "family": "reference",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Motor housing temperature to 310 K.",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor housing",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0080UnitsBatteryPoweredJoint",
+      "family": "units",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Can we make Motor housing's temperature 51 °F?",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor housing",
+            "symbol": "temperature",
+            "initialValue": 283.705556,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0082UpdateValueBatteryPoweredJoint",
+      "family": "updateValue",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "The armature current of the Motor should be 2 A.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 2,
+            "unit": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0083UnitsBatteryPoweredJoint",
+      "family": "units",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "I'm updating the model with the latest measurements. The armature current is now 5600 mA, so please change it to match; everything else stays as it is.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 5.6,
+            "unit": "A",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0441UpdateParameterSingleJointActuator",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Couuld you update the back EMF constant to 0.2 V·s/rad for me?",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "DC supply",
+            "to": "Motor",
+            "symbol": "backEmfConstant",
+            "value": 0.2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0442UpdateParameterSingleJointActuator",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Shaft dynamics torque constant: 0.15 N·m/A.",
+      "expect": {
+        "touches": [
+          "Shaft dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Load torque",
+            "to": "Motor",
+            "symbol": "torqueConstant",
+            "value": 0.15
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0444UpdateParameterSingleJointActuator",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Plese set the armature resistance of the Armature dynamics relationship to 3 Ω.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "DC supply",
+            "to": "Motor",
+            "symbol": "resistance",
+            "value": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0445UpdateParameterWheeledRobotDrivetrain",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Change the armature resistance for Armature dynamics to 16 Ω.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive supply",
+            "to": "Drive motor",
+            "symbol": "resistance",
+            "value": 16
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0447UnitsWheeledRobotDrivetrain",
+      "family": "units",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "traction chassis mass → 2.1 tonnes",
+      "expect": {
+        "touches": [
+          "Traction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive motor",
+            "to": "Chassis",
+            "symbol": "chassisMass",
+            "value": 2100,
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0451UnitsWheeledRobotDrivetrain",
+      "family": "units",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "I'd like the wheel radius to be 45 cm, if that's possible.",
+      "expect": {
+        "touches": [
+          "Traction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive motor",
+            "to": "Chassis",
+            "symbol": "wheelRadius",
+            "value": 0.45,
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0453UpdateParameterWheeledRobotDrivetrain",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Wolud you change the torque constant for Traction to 0.4 N·m/A? Thanks.",
+      "expect": {
+        "touches": [
+          "Traction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive motor",
+            "to": "Chassis",
+            "symbol": "torqueConstant",
+            "value": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0455UpdateParameterWheeledRobotDrivetrain",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Can we make the armature inductance for Armature dynamics 2 H?",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive supply",
+            "to": "Drive motor",
+            "symbol": "inductance",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0457UpdateParameterBatteryPoweredJoint",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Change the wiinding resistance of the Resistive heaating relationship to 8 Ω.",
+      "expect": {
+        "touches": [
+          "Resistive heating"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Motor",
+            "to": "Motor housing",
+            "symbol": "resistance",
+            "value": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0459UpdateParameterBatteryPoweredJoint",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "The thermal capacitance of the Resistive heating relationship should be 400 J/K.",
+      "expect": {
+        "touches": [
+          "Resistive heating"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Motor",
+            "to": "Motor housing",
+            "symbol": "thermalCapacitance",
+            "value": 400
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0462UpdateParameterBatteryPoweredJoint",
+      "family": "updateParameter",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Could you set the armature inductance on Armature dynamics to 4 H, please?",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Battery",
+            "to": "Motor",
+            "symbol": "inductance",
+            "value": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0592EnableDisableSingleJointActuator",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Can we switch off the Motor, please?",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Motor",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0594EnableDisableSingleJointActuator",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Let's see what happens without the Load torque.",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Load torque",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0597RemoveSingleJointActuator",
+      "family": "remove",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Remove the Shaft dynamics relationship.",
+      "expect": {
+        "touches": [
+          "Shaft dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Shaft dynamics"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0602EnableDisableWheeledRobotDrivetrain",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Plaese disable the Armaure dynamics relationship.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Armature dynamics",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0604EnableDisableWheeledRobotDrivetrain",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Turn off the Drive supply.",
+      "expect": {
+        "touches": [
+          "Drive supply"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Drive supply",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0610RemoveWheeledRobotDrivetrain",
+      "family": "remove",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Remove the Chassis.",
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Chassis"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0616RemoveBatteryPoweredJoint",
+      "family": "remove",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "The Battery was decommissioned last month, so please take it out of the model completely.",
+      "expect": {
+        "touches": [
+          "Battery"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Battery"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0621EnableDisableBatteryPoweredJoint",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "The Motor housing shouldn't take part in the simulation for now.",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Motor housing",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0622RemoveBatteryPoweredJoint",
+      "family": "remove",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "The Motor housing was decommissioned last month, so please take it out of the model completely.",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Motor housing"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0631EnableDisableBatteryPoweredJoint",
+      "family": "enableDisable",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Please disable the Internal resistance heating relationship.",
+      "expect": {
+        "touches": [
+          "Internal resistance heating"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Internal resistance heating",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0933UpdateNodeSingleJointActuator",
+      "family": "updateNode",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Set the Load torque to 2 subssteps per gobal step.",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Load torque",
+            "path": "numerics.substepsPerGlobalStep",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0934UpdateNodeSingleJointActuator",
+      "family": "updateNode",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "We are standardising names ahead of the review. The DC supply should be named Primary everywhere in the model; please rename it.",
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Primary"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0936UpdateNodeWheeledRobotDrivetrain",
+      "family": "updateNode",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Bearing friction: 4 substeps.",
+      "expect": {
+        "touches": [
+          "Bearing friction"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Bearing friction",
+            "path": "numerics.substepsPerGlobalStep",
+            "value": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0937UpdateNodeWheeledRobotDrivetrain",
+      "family": "updateNode",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Could you rename the Drive supply to North side, please?",
+      "expect": {
+        "touches": [
+          "Drive supply"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "North side"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0940UpdateNodeBatteryPoweredJoint",
+      "family": "updateNode",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "We are standardising names ahead of the review. The Motor housing should be named Main unit everywhere in the model; please rename it.",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Main unit"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1022ClarificationSingleJointActuator",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Load torque: more load torque.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1023ClarificationSingleJointActuator",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Could we have a bit more voltage on the DC supply?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1024ClarificationSingleJointActuator",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "filter 100",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1025ClarificationSingleJointActuator",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "The vaccination rate is causing trouble in the results.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1026ClarificationSingleJointActuator",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Two people on my team gave me different numbers for the Load torque load torque: 0.05 N·m and 1.1 N·m. Please put in the correct one.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1027ClarificationWheeledRobotDrivetrain",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Cange the Chsasis position.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1028ClarificationWheeledRobotDrivetrain",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Adjust the load torque of the Bearing friction.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1029ClarificationWheeledRobotDrivetrain",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Drop buffer tank.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1030ClarificationWheeledRobotDrivetrain",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Could you turn off the bypass line, please?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1031ClarificationWheeledRobotDrivetrain",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "The Bearing friction load torque is 0.16 N·m in one report and 1.32 N·m in another; use the right one.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1032ClarificationBatteryPoweredJoint",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "make temperature 335 K",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Battery",
+          "Motor housing",
+          "Ambient air"
+        ]
+      }
+    },
+    {
+      "id": "g1033ClarificationBatteryPoweredJoint",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Adjjust the voltage of the Battery.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1034ClarificationBatteryPoweredJoint",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "After looking at last week's results I think the Ambient air temperature needs to change, but I haven't decided on the number yet. Please update it.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1035ClarificationBatteryPoweredJoint",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Remove the buffer tank.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1037ClarificationBatteryPoweredJoint",
+      "family": "clarification",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Could you set the Motor housing temperature to 335 K? No wait, 671 K. Or whichever is better.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1157MultiStepSingleJointActuator",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Load torque load torque 0.025 N·m, DC supply voltage 96 V and Motor armature current 1 A.",
+      "expect": {
+        "touches": [
+          "Load torque",
+          "DC supply",
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.025,
+            "unit": "N·m"
+          },
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 96,
+            "unit": "V"
+          },
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 1,
+            "unit": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1160MultiStepWheeledRobotDrivetrain",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "chassis position 3 m and drive supply voltage 36 v pls",
+      "expect": {
+        "touches": [
+          "Chassis",
+          "Drive supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "position",
+            "initialValue": 3,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Drive supply",
+            "symbol": "voltage",
+            "initialValue": 36,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1162MultiStepBatteryPoweredJoint",
+      "family": "multiStep",
+      "domain": "electrical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Ambient air temperature 288 K, Motor armature current 100 A and Load torque load torque 0.8 N·m.",
+      "expect": {
+        "touches": [
+          "Ambient air",
+          "Motor",
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 288,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 100,
+            "unit": "A"
+          },
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 0.8,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1285AddStateSingleJointActuator",
+      "family": "addState",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Load torque: add Power rating 500 W.",
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "initialValue": 500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1286AddStateWheeledRobotDrivetrain",
+      "family": "addState",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Could you give the Bearing friction a capacity state of 100, please?",
+      "expect": {
+        "touches": [
+          "Bearing friction"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bearing friction",
+            "initialValue": 100
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1291AddStateBatteryPoweredJoint",
+      "family": "addState",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Give the Motor housing a new state called Efficiency, starting at 0.92.",
+      "expect": {
+        "touches": [
+          "Motor housing"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor housing",
+            "initialValue": 0.92
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1351AddParameterSingleJointActuator",
+      "family": "addParameter",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "add gain 1.5 to armature dynamics",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "DC supply",
+            "to": "Motor",
+            "value": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1354AddParameterWheeledRobotDrivetrain",
+      "family": "addParameter",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Add a scale of 0.5 to the Traction relationship.",
+      "expect": {
+        "touches": [
+          "Traction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Drive motor",
+            "to": "Chassis",
+            "value": 0.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1356AddParameterBatteryPoweredJoint",
+      "family": "addParameter",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Could you add a gain of 1.5 to Housing conduction, please?",
+      "expect": {
+        "touches": [
+          "Housing conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Motor housing",
+            "to": "Ambient air",
+            "value": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1412SetEquationSingleJointActuator",
+      "family": "setEquation",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Can Armature dynamics be zero until 120 seconds have passed?",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "DC supply",
+            "to": "Motor",
+            "uses": [
+              "sourceVoltage",
+              "begin{cases}",
+              "120"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1415SetEquationWheeledRobotDrivetrain",
+      "family": "setEquation",
+      "domain": "electrical",
+      "style": "verbose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "I want to simulate a start-up phase. Until 5 minutes have passed, Armature dynamics should contribute nothing, and afterwards it should behave exactly as now. Please change its equation accordingly.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Drive supply",
+            "to": "Drive motor",
+            "uses": [
+              "sourceVoltage",
+              "begin{cases}",
+              "300"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1420SetEquationBatteryPoweredJoint",
+      "family": "setEquation",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "A negative Shaft dynamics would be unphysical, so prevent it.",
+      "expect": {
+        "touches": [
+          "Shaft dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Load torque",
+            "to": "Motor",
+            "uses": [
+              "torqueConstant",
+              "max"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1484UpdateEdgeSingleJointActuator",
+      "family": "updateEdge",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "The effect of Armature dynamics goes both ways in reality.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "DC supply",
+            "to": "Motor",
+            "directionality": "bidirectional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1486UpdateEdgeWheeledRobotDrivetrain",
+      "family": "updateEdge",
+      "domain": "electrical",
+      "style": "typos",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Make the Shaaft dyynamics relationship bidirectional.",
+      "expect": {
+        "touches": [
+          "Shaft dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Bearing friction",
+            "to": "Drive motor",
+            "directionality": "bidirectional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1488UpdateEdgeBatteryPoweredJoint",
+      "family": "updateEdge",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Battery conduction: one-way.",
+      "expect": {
+        "touches": [
+          "Battery conduction"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Battery",
+            "to": "Ambient air",
+            "directionality": "directed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1538HistorySingleJointActuator",
+      "family": "history",
+      "domain": "electrical",
+      "style": "indirect",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "0.075 N·m was wrong; the right number is 1.11 N·m.",
+      "history": [
+        {
+          "request": "Set the Load torque load torque to 0.075 N·m.",
+          "outcome": "Proposed: Set the Load torque load torque to 0.075 N·m."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Load torque"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Load torque",
+            "symbol": "torque",
+            "initialValue": 1.11,
+            "unit": "N·m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1539HistorySingleJointActuator",
+      "family": "history",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "Same request, but only touch that value.",
+      "history": [
+        {
+          "request": "Set the Motor angular velocity to 100 rad/s.",
+          "outcome": "Rejected: The proposal changed more than was asked."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 100,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1540HistorySingleJointActuator",
+      "family": "history",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "singleJointActuator",
+      "request": "72 V, please.",
+      "history": [
+        {
+          "request": "Increase the DC supply voltage.",
+          "outcome": "Asked: What value should the DC supply voltage have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "DC supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "DC supply",
+            "symbol": "voltage",
+            "initialValue": 72,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1541HistoryWheeledRobotDrivetrain",
+      "family": "history",
+      "domain": "electrical",
+      "style": "plain",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Change that to 192 V.",
+      "history": [
+        {
+          "request": "Set the Drive supply voltage to 36 V.",
+          "outcome": "Applied: Set the Drive supply voltage to 36 V."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Drive supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Drive supply",
+            "symbol": "voltage",
+            "initialValue": 192,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1542HistoryWheeledRobotDrivetrain",
+      "family": "history",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "Not that value. Try 151 m/s instead.",
+      "history": [
+        {
+          "request": "Set the Chassis velocity to 100 m/s.",
+          "outcome": "Discarded: Set the Chassis velocity to 100 m/s."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "velocity",
+            "initialValue": 151,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1543HistoryWheeledRobotDrivetrain",
+      "family": "history",
+      "domain": "electrical",
+      "style": "loose",
+      "split": "test",
+      "model": "wheeledRobotDrivetrain",
+      "request": "say 20 m/s",
+      "history": [
+        {
+          "request": "Increase the Chassis velocity.",
+          "outcome": "Asked: What value should the Chassis velocity have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Chassis"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Chassis",
+            "symbol": "velocity",
+            "initialValue": 20,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1546HistoryBatteryPoweredJoint",
+      "family": "history",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Not that value. Try 444 K instead.",
+      "history": [
+        {
+          "request": "Set the Battery temperature to 295 K.",
+          "outcome": "Discarded: Set the Battery temperature to 295 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Battery"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery",
+            "symbol": "temperature",
+            "initialValue": 444,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1547HistoryBatteryPoweredJoint",
+      "family": "history",
+      "domain": "electrical",
+      "style": "conversational",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "280 K, please.",
+      "history": [
+        {
+          "request": "Increase the Ambient air temperature.",
+          "outcome": "Asked: What value should the Ambient air temperature have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1548HistoryBatteryPoweredJoint",
+      "family": "history",
+      "domain": "electrical",
+      "style": "terse",
+      "split": "test",
+      "model": "batteryPoweredJoint",
+      "request": "Same for Ambient air.",
+      "history": [
+        {
+          "request": "Set the Battery temperature to 280 K.",
+          "outcome": "Applied: Set the Battery temperature to 280 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          }
+        ]
+      }
+    }
+  ]
+}

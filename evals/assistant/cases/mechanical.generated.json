@@ -1,0 +1,1179 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "g0085ReferenceSpringMassDamper",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Make the displacement of the Suspended mass 0.05 m.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 0.05,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0086UnitsSpringMassDamper",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Suspended mass displacement: 7 ft.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 2.1336,
+            "unit": "m",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0088ReferenceSpringMassDamper",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "indirect",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "The spec says the Fixed support displacement is 10 m.",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "displacement",
+            "initialValue": 10,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0089UnitsSpringMassDamper",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "fixed support displacement 6 ft ok?",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "displacement",
+            "initialValue": 1.8288,
+            "unit": "m",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0092UnitsSpringMassDamper",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Please set the velocity of the Suspended mass to 65 km/h.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "velocity",
+            "initialValue": 18.0555556,
+            "unit": "m/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0093ReferenceSpringMassDamper",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Fixed support velocity: 20 m/s.",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "velocity",
+            "initialValue": 20,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0095UnitsSpringMassDamper",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "set fixed support velocity 85 km/h",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "velocity",
+            "initialValue": 23.6111111,
+            "unit": "m/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0101UnitsFourBarLinkage",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Would you change the Ground pivot D z position to 770 mm? Thanks.",
+      "expect": {
+        "touches": [
+          "Ground pivot D"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot D",
+            "symbol": "z",
+            "initialValue": 0.77,
+            "unit": "m",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0106ReferenceFourBarLinkage",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Set Coupler-rocker pin C's y velocity to 20 m/s.",
+      "expect": {
+        "touches": [
+          "Coupler-rocker pin C"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Coupler-rocker pin C",
+            "symbol": "vy",
+            "initialValue": 20,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0128UnitsFourBarLinkage",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Crank pin B y velocity = 65 km/h",
+      "expect": {
+        "touches": [
+          "Crank pin B"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Crank pin B",
+            "symbol": "vy",
+            "initialValue": 18.0555556,
+            "unit": "m/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0133ReferenceFourBarLinkage",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "We re-ran the calibration this morning and the result was clear: Ground pivot D's yaw should be 10 rad. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Ground pivot D"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot D",
+            "symbol": "yaw",
+            "initialValue": 10,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0173UnitsFourBarLinkage",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "coupler-rocker pin c yaw to 130 degrees pls",
+      "expect": {
+        "touches": [
+          "Coupler-rocker pin C"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Coupler-rocker pin C",
+            "symbol": "yaw",
+            "initialValue": 2.26892803,
+            "unit": "rad",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0185UnitsFourBarLinkage",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Could you update the Ground pivot D pitch to 45 degrees for me?",
+      "expect": {
+        "touches": [
+          "Ground pivot D"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot D",
+            "symbol": "pitch",
+            "initialValue": 0.785398163,
+            "unit": "rad",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0186ReferenceFourBarLinkage",
+      "family": "reference",
+      "domain": "mechanical",
+      "style": "indirect",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "We're assuming the Coupler-rocker pin C x position is 8.06 m.",
+      "expect": {
+        "touches": [
+          "Coupler-rocker pin C"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Coupler-rocker pin C",
+            "symbol": "x",
+            "initialValue": 8.06,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0197UnitsFourBarLinkage",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Please set the roll of the Ground pivot A to 60 degrees.",
+      "expect": {
+        "touches": [
+          "Ground pivot A"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot A",
+            "symbol": "roll",
+            "initialValue": 1.04719755,
+            "unit": "rad",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0468UpdateParameterSpringMassDamper",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Set the spring stiffness of the Spring force relationship to 32 N/m.",
+      "expect": {
+        "touches": [
+          "Spring force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "stiffness",
+            "value": 32
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0469UnitsSpringMassDamper",
+      "family": "units",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Spring force spring stiffness = 0.5 N/mm",
+      "expect": {
+        "touches": [
+          "Spring force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "stiffness",
+            "value": 500,
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0470UpdateParameterSpringMassDamper",
+      "family": "updateParameter",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Can we make the damping coefficient for Damper force 0.2 N·s/m?",
+      "expect": {
+        "touches": [
+          "Damper force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "symbol": "dampingCoefficient",
+            "value": 0.2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0641RemoveSpringMassDamper",
+      "family": "remove",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "get rid of damper force relationship",
+      "expect": {
+        "touches": [
+          "Damper force"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Damper force"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0642EnableDisableSpringMassDamper",
+      "family": "enableDisable",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Disable the Fxied support.",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Fixed support",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0653RemoveFourBarLinkage",
+      "family": "remove",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Could you delete the Ground pivot A?",
+      "expect": {
+        "touches": [
+          "Ground pivot A"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Ground pivot A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0656EnableDisableFourBarLinkage",
+      "family": "enableDisable",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Turn off the Gorund piot D.",
+      "expect": {
+        "touches": [
+          "Ground pivot D"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Ground pivot D",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0661RemoveFourBarLinkage",
+      "family": "remove",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "delete crank pin b pls",
+      "expect": {
+        "touches": [
+          "Crank pin B"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Crank pin B"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0662EnableDisableFourBarLinkage",
+      "family": "enableDisable",
+      "domain": "mechanical",
+      "style": "indirect",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "I don't want the Crank drive Y relationship active in this run.",
+      "expect": {
+        "touches": [
+          "Crank drive Y"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Crank drive Y",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0943UpdateNodeSpringMassDamper",
+      "family": "updateNode",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Suspended mass → Stage one.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Stage one"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0944UpdateNodeSpringMassDamper",
+      "family": "updateNode",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Could you display the Fixed support as a sphere?",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Fixed support",
+            "path": "appearance.shape",
+            "value": "sphere"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0947UpdateNodeFourBarLinkage",
+      "family": "updateNode",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Show the Gorund pivot A as a cylinder.",
+      "expect": {
+        "touches": [
+          "Ground pivot A"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Ground pivot A",
+            "path": "appearance.shape",
+            "value": "cylinder"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1038ClarificationSpringMassDamper",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "velocity to 2 m/s pls",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Suspended mass",
+          "Fixed support"
+        ]
+      }
+    },
+    {
+      "id": "g1040ClarificationSpringMassDamper",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "After looking at last week's results I think the Fixed support displacement needs to change, but I haven't decided on the number yet. Please update it.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1042ClarificationSpringMassDamper",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Remove the sensor.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1043ClarificationSpringMassDamper",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Drop brake.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1044ClarificationSpringMassDamper",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Could you set the Suspended mass displacement to 0.3 m? No wait, 1.6 m. Or whichever is better.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1046ClarificationFourBarLinkage",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "make x velocity 100 m/s",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Ground pivot A",
+          "Ground pivot D",
+          "Crank pin B",
+          "Coupler-rocker pin C"
+        ]
+      }
+    },
+    {
+      "id": "g1047ClarificationFourBarLinkage",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Change the pittch to 0.5 rad.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Ground pivot A",
+          "Ground pivot D",
+          "Crank pin B",
+          "Coupler-rocker pin C"
+        ]
+      }
+    },
+    {
+      "id": "g1048ClarificationFourBarLinkage",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "After the latest test I realised the x position in the model is wrong. It should be 0.5 m; could you fix that?",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Ground pivot A",
+          "Ground pivot D",
+          "Crank pin B",
+          "Coupler-rocker pin C"
+        ]
+      }
+    },
+    {
+      "id": "g1049ClarificationFourBarLinkage",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Change the y position to 3 m.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Ground pivot A",
+          "Ground pivot D",
+          "Crank pin B",
+          "Coupler-rocker pin C"
+        ]
+      }
+    },
+    {
+      "id": "g1051ClarificationFourBarLinkage",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Can you tweak the Crank pin B x position for me?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1052ClarificationFourBarLinkage",
+      "family": "clarification",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "thermostat off pls",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1165MultiStepSpringMassDamper",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Fixed support displacement 100 m and Suspended mass displacement 0.025 m.",
+      "expect": {
+        "touches": [
+          "Fixed support",
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "displacement",
+            "initialValue": 100,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 0.025,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1166MultiStepSpringMassDamper",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "multiPart",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Change the Fixed support displacement to 20 m, then the Suspended mass displacement to 0.4 m.",
+      "expect": {
+        "touches": [
+          "Fixed support",
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "displacement",
+            "initialValue": 20,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "displacement",
+            "initialValue": 0.4,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1168MultiStepFourBarLinkage",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Ground pivot D x position 2.25 m, Ground pivot A x position 5 m and Coupler-rocker pin C x position 8.06 m.",
+      "expect": {
+        "touches": [
+          "Ground pivot D",
+          "Ground pivot A",
+          "Coupler-rocker pin C"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot D",
+            "symbol": "x",
+            "initialValue": 2.25,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Ground pivot A",
+            "symbol": "x",
+            "initialValue": 5,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Coupler-rocker pin C",
+            "symbol": "x",
+            "initialValue": 8.06,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1170MultiStepFourBarLinkage",
+      "family": "multiStep",
+      "domain": "mechanical",
+      "style": "indirect",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "For the next run we want Ground pivot A x position 10 m, Ground pivot D x position 4.5 m and Coupler-rocker pin C x position 8.06 m.",
+      "expect": {
+        "touches": [
+          "Ground pivot A",
+          "Ground pivot D",
+          "Coupler-rocker pin C"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot A",
+            "symbol": "x",
+            "initialValue": 10,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Ground pivot D",
+            "symbol": "x",
+            "initialValue": 4.5,
+            "unit": "m"
+          },
+          {
+            "op": "state",
+            "node": "Coupler-rocker pin C",
+            "symbol": "x",
+            "initialValue": 8.06,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1292AddStateSpringMassDamper",
+      "family": "addState",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Suspended mass: add Temperature 57 °F.",
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "initialValue": 287.038889,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1293AddStateSpringMassDamper",
+      "family": "addState",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Could you give the Fixed support a pressure state of 101325 Pa, please?",
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "initialValue": 101325,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1296AddStateFourBarLinkage",
+      "family": "addState",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Give the Ground pviot A a new state called Power rating, startng at 500 W.",
+      "expect": {
+        "touches": [
+          "Ground pivot A"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot A",
+            "initialValue": 500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1422SetEquationSpringMassDamper",
+      "family": "setEquation",
+      "domain": "mechanical",
+      "style": "typos",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Scale the Spring foce euation by 0.25.",
+      "expect": {
+        "touches": [
+          "Spring force"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Fixed support",
+            "to": "Suspended mass",
+            "uses": [
+              "stiffness"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1423SetEquationFourBarLinkage",
+      "family": "setEquation",
+      "domain": "mechanical",
+      "style": "verbose",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "In my runs the Rocker rod Y relationship occasionally produces a negative rate, which should be impossible. Please change its equation so that the result is never below zero.",
+      "expect": {
+        "touches": [
+          "Rocker rod Y"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Ground pivot D",
+            "to": "Coupler-rocker pin C",
+            "uses": [
+              "stiffness",
+              "max"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1550HistorySpringMassDamper",
+      "family": "history",
+      "domain": "mechanical",
+      "style": "loose",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "nah make it 5 m",
+      "history": [
+        {
+          "request": "Set the Fixed support displacement to 2 m.",
+          "outcome": "Applied: Set the Fixed support displacement to 2 m."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "displacement",
+            "initialValue": 5,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1551HistorySpringMassDamper",
+      "family": "history",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "100 m/s.",
+      "history": [
+        {
+          "request": "Increase the Fixed support velocity.",
+          "outcome": "Asked: What value should the Fixed support velocity have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Fixed support"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Fixed support",
+            "symbol": "velocity",
+            "initialValue": 100,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1552HistorySpringMassDamper",
+      "family": "history",
+      "domain": "mechanical",
+      "style": "conversational",
+      "split": "test",
+      "model": "springMassDamper",
+      "request": "Could you do the same for the Suspended mass?",
+      "history": [
+        {
+          "request": "Set the Fixed support velocity to 2 m/s.",
+          "outcome": "Applied: Set the Fixed support velocity to 2 m/s."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Suspended mass"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Suspended mass",
+            "symbol": "velocity",
+            "initialValue": 2,
+            "unit": "m/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1555HistoryFourBarLinkage",
+      "family": "history",
+      "domain": "mechanical",
+      "style": "terse",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "5 m",
+      "history": [
+        {
+          "request": "Increase the Coupler-rocker pin C z position.",
+          "outcome": "Asked: What value should the Coupler-rocker pin C z position have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Coupler-rocker pin C"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Coupler-rocker pin C",
+            "symbol": "z",
+            "initialValue": 5,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1556HistoryFourBarLinkage",
+      "family": "history",
+      "domain": "mechanical",
+      "style": "plain",
+      "split": "test",
+      "model": "fourBarLinkage",
+      "request": "Do the same for the Ground pivot A.",
+      "history": [
+        {
+          "request": "Set the Crank pin B yaw to 0.5 rad.",
+          "outcome": "Applied: Set the Crank pin B yaw to 0.5 rad."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Ground pivot A"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ground pivot A",
+            "symbol": "yaw",
+            "initialValue": 0.5,
+            "unit": "rad"
+          }
+        ]
+      }
+    }
+  ]
+}

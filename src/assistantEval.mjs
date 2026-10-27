@@ -69,6 +69,9 @@ const checks = {
         return directionality && !edges.some((edge) => edge.directionality === directionality)
             ? `the relationship from “${from}” to “${to}” is not ${directionality}` : null;
     },
+    // A relationship between the two nodes that carries the name, for a request to rename one.
+    edgeName: ({ result }, { from, to, name, either }) =>
+        edgesBetween(result, from, to, either).some((edge) => nameMatches(edge.name, name)) ? null : `no relationship from “${from}” to “${to}” named like “${name}”`,
     // `uses` and `excludes` are substrings of the equation's LaTeX; `changed` requires it to differ from what the
     // relationship had before, for a request to rewrite an equation whose new text cannot be spelled out in advance.
     edgeEquation: ({ base, result }, { from, to, uses = [], excludes = [], changed = false, either }) => {

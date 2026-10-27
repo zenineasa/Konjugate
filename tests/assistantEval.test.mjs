@@ -105,6 +105,9 @@ test('assertions cover edges, enabled flags, removal and fields', () => {
         { op: 'enabled', node: 'Enclosed air', value: false },
         { op: 'field', node: 'Enclosed air', path: 'appearance.shape', value: 'sphere' }
     ] }), []);
+    result.edges[0].name = 'Radiated heat';
+    assert.deepEqual(checkOutcome(base, result, { touches: ['Battery module', 'Enclosed air', 'Heat'], assertions: [{ op: 'edgeName', from: 'Battery', to: 'Enclosed', name: 'radiated' }] }), []);
+    assert.equal(checkOutcome(base, result, { touches: ['Battery module', 'Enclosed air', 'Heat'], assertions: [{ op: 'edgeName', from: 'Battery', to: 'Enclosed', name: 'conduction' }] }).length, 1);
     const withoutBattery = { ...result, nodes: result.nodes.slice(1), edges: [] };
     assert.deepEqual(checkOutcome(base, withoutBattery, { touches: ['Battery module'], assertions: [{ op: 'removed', node: 'Battery module' }] }).filter((failure) => /Enclosed air/.test(failure)), [
         'node “Enclosed air” was changed'

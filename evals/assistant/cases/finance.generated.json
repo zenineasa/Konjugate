@@ -1,0 +1,736 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "g0301UnitsFinanceCompany",
+      "family": "units",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Wouuld you change the revenue rate to 150k per month? Thanks.",
+      "expect": {
+        "touches": [
+          "Sales"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Sales",
+            "symbol": "revenueRate",
+            "initialValue": 150000,
+            "unit": "USD/month",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0304UnitsFinanceCompany",
+      "family": "units",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Investment portfolio market value 0.7 million USD.",
+      "expect": {
+        "touches": [
+          "Investment portfolio"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Investment portfolio",
+            "symbol": "value",
+            "initialValue": 700000,
+            "unit": "USD",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0305UpdateValueFinanceCompany",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "I'd like Capital market's monthly return rate to be 0.00375 1/month, if that's possible.",
+      "expect": {
+        "touches": [
+          "Capital market"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Capital market",
+            "symbol": "returnRate",
+            "initialValue": 0.00375,
+            "unit": "1/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0306UpdateValueFinanceCompany",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "capital market monthly return rate 0.00375 1/month ok?",
+      "expect": {
+        "touches": [
+          "Capital market"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Capital market",
+            "symbol": "returnRate",
+            "initialValue": 0.00375,
+            "unit": "1/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0308UpdateValueFinanceCompany",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "I'd like the balance of the Operting acocunt to be 188000 USD, if that's possible.",
+      "expect": {
+        "touches": [
+          "Operating account"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating account",
+            "symbol": "balance",
+            "initialValue": 188000,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0309UnitsFinanceCompany",
+      "family": "units",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Change the Operating account balance to 3.3 million USD.",
+      "expect": {
+        "touches": [
+          "Operating account"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating account",
+            "symbol": "balance",
+            "initialValue": 3300000,
+            "unit": "USD",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0312UnitsFinanceCompany",
+      "family": "units",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "I need the principal outstanding at 3.1 million USD for the next test.",
+      "expect": {
+        "touches": [
+          "Business loan"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Business loan",
+            "symbol": "principal",
+            "initialValue": 3100000,
+            "unit": "USD",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0313UpdateValueFinanceCompany",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "make operating costs cost rate like 210000 USD/month",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "symbol": "costRate",
+            "initialValue": 210000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0314UpdateValueFinanceCompany",
+      "family": "updateValue",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Could you update Opertaing costs's cost rate to 105000 USD/month for me?",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "symbol": "costRate",
+            "initialValue": 105000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0315UnitsFinanceCompany",
+      "family": "units",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Before I run the comparison I need the inputs to match the test report, in which Operating costs's cost rate is 50k per month. Please make that change.",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "symbol": "costRate",
+            "initialValue": 50000,
+            "unit": "USD/month",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0520UpdateParameterFinanceCompany",
+      "family": "updateParameter",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Would you change the monthly payment on both Loan repayment and Debt service to 18000 USD/month? Thanks.",
+      "expect": {
+        "touches": [
+          "Loan repayment",
+          "Debt service"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Business loan",
+            "symbol": "monthlyPayment",
+            "value": 18000,
+            "all": true,
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0521UnitsFinanceCompany",
+      "family": "units",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "the monthly payment on both loan repayment and debt service → 1080000 per year",
+      "expect": {
+        "touches": [
+          "Loan repayment",
+          "Debt service"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Business loan",
+            "symbol": "monthlyPayment",
+            "value": 90000,
+            "all": true,
+            "either": true,
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0522UpdateParameterFinanceCompany",
+      "family": "updateParameter",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "The credit spread for Loan interest should be 0.006 1/month.",
+      "expect": {
+        "touches": [
+          "Loan interest"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Capital market",
+            "to": "Business loan",
+            "symbol": "creditSpread",
+            "value": 0.006
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0523UpdateParameterFinanceCompany",
+      "family": "updateParameter",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Please set the sewep fraction for Trreasury sweep to 0.015 1/month.",
+      "expect": {
+        "touches": [
+          "Treasury sweep"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Investment portfolio",
+            "symbol": "sweepFraction",
+            "value": 0.015
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0766RemoveFinanceCompany",
+      "family": "remove",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "get rid of capital market",
+      "expect": {
+        "touches": [
+          "Capital market"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Capital market"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0769EnableDisableFinanceCompany",
+      "family": "enableDisable",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Disable the Business loan.",
+      "expect": {
+        "touches": [
+          "Business loan"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Business loan",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0772RemoveFinanceCompany",
+      "family": "remove",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "get rid of operating costs",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Operating costs"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0775EnableDisableFinanceCompany",
+      "family": "enableDisable",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Turn off the Loan innterest relationship.",
+      "expect": {
+        "touches": [
+          "Loan interest"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Loan interest",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0964UpdateNodeFinanceCompany",
+      "family": "updateNode",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Capital market → Core.",
+      "expect": {
+        "touches": [
+          "Capital market"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Core"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0965UpdateNodeFinanceCompany",
+      "family": "updateNode",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Could you display the Investment portfolio as a cylinder?",
+      "expect": {
+        "touches": [
+          "Investment portfolio"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Investment portfolio",
+            "path": "appearance.shape",
+            "value": "cylinder"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1084ClarificationFinanceCompany",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "terse",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Investment portfolio market value up.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1085ClarificationFinanceCompany",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "conversational",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Could we have a bit more balance on the Operating account?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1086ClarificationFinanceCompany",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "The tax rate is causing trouble in the results.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1087ClarificationFinanceCompany",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "generator off pls",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1088ClarificationFinanceCompany",
+      "family": "clarification",
+      "domain": "finance",
+      "style": "typos",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Make the Business loan princcipal outstannding both 1200000 USD and 2400000 USD.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1184MultiStepFinanceCompany",
+      "family": "multiStep",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "I'm preparing a new scenario for the review. The inputs are: Operating costs cost rate 210000 USD/month, Capital market monthly return rate 0.015 1/month and Operating account balance 500000 USD. Please apply all of them and leave the rest of the model alone.",
+      "expect": {
+        "touches": [
+          "Operating costs",
+          "Capital market",
+          "Operating account"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "symbol": "costRate",
+            "initialValue": 210000,
+            "unit": "USD/month"
+          },
+          {
+            "op": "state",
+            "node": "Capital market",
+            "symbol": "returnRate",
+            "initialValue": 0.015,
+            "unit": "1/month"
+          },
+          {
+            "op": "state",
+            "node": "Operating account",
+            "symbol": "balance",
+            "initialValue": 500000,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1311AddStateFinanceCompany",
+      "family": "addState",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "For the next analysis I need an extra quantity on the Operating costs. Please add a state called Pressure with an initial value of 101325 Pa.",
+      "expect": {
+        "touches": [
+          "Operating costs"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating costs",
+            "initialValue": 101325,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1371AddParameterFinanceCompany",
+      "family": "addParameter",
+      "domain": "finance",
+      "style": "loose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "debt service needs a delay of 30 s",
+      "expect": {
+        "touches": [
+          "Debt service"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Business loan",
+            "to": "Operating account",
+            "value": 30,
+            "unit": "s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1372AddParameterFinanceCompany",
+      "family": "addParameter",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "We should be able to tune the damping ratio of Treasury sweep, which is 0.7 for now.",
+      "expect": {
+        "touches": [
+          "Treasury sweep"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Operating account",
+            "to": "Investment portfolio",
+            "value": 0.7
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1442SetEquationFinanceCompany",
+      "family": "setEquation",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Cost payments should only act once the first 1 hour are over.",
+      "expect": {
+        "touches": [
+          "Cost payments"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Operating costs",
+            "to": "Operating account",
+            "uses": [
+              "sourceCostRate",
+              "begin{cases}",
+              "3600"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1499UpdateEdgeFinanceCompany",
+      "family": "updateEdge",
+      "domain": "finance",
+      "style": "verbose",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "To match our documentation, the relationship currently named Loan repayment should be called Main flow. Please rename it.",
+      "expect": {
+        "touches": [
+          "Loan repayment"
+        ],
+        "assertions": [
+          {
+            "op": "edgeName",
+            "from": "Operating account",
+            "to": "Business loan",
+            "name": "Main flow"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1575HistoryFinanceCompany",
+      "family": "history",
+      "domain": "finance",
+      "style": "indirect",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "125000 USD was wrong; the right number is 500000 USD.",
+      "history": [
+        {
+          "request": "Set the Operating account balance to 125000 USD.",
+          "outcome": "Proposed: Set the Operating account balance to 125000 USD."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Operating account"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Operating account",
+            "symbol": "balance",
+            "initialValue": 500000,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1576HistoryFinanceCompany",
+      "family": "history",
+      "domain": "finance",
+      "style": "plain",
+      "split": "test",
+      "model": "financeCompany",
+      "request": "Use 45000 USD/month.",
+      "history": [
+        {
+          "request": "Increase the Sales revenue rate.",
+          "outcome": "Asked: What value should the Sales revenue rate have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Sales"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Sales",
+            "symbol": "revenueRate",
+            "initialValue": 45000,
+            "unit": "USD/month"
+          }
+        ]
+      }
+    }
+  ]
+}

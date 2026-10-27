@@ -1,0 +1,1437 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "g0206UnitsArticulatedRoboticArm",
+      "family": "units",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Would you change Wrist motor's armature current to 3200 mA? Thanks.",
+      "expect": {
+        "touches": [
+          "Wrist motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Wrist motor",
+            "symbol": "current",
+            "initialValue": 3.2,
+            "unit": "A",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0209UnitsArticulatedRoboticArm",
+      "family": "units",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "We re-ran the calibration this morning and the result was clear: Shoulder motor's armature current should be 8700 mA. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Shoulder motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder motor",
+            "symbol": "current",
+            "initialValue": 8.7,
+            "unit": "A",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0217UnitsArticulatedRoboticArm",
+      "family": "units",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Change the Elbow link angular velocity to 1020 rpm.",
+      "expect": {
+        "touches": [
+          "Elbow link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow link",
+            "symbol": "angularVelocity",
+            "initialValue": 106.81415,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0218ReferenceArticulatedRoboticArm",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Shoulder link angle 2 rad.",
+      "expect": {
+        "touches": [
+          "Shoulder link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder link",
+            "symbol": "angle",
+            "initialValue": 2,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0223UnitsArticulatedRoboticArm",
+      "family": "units",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the anguar veelocity of the Wrist link to 2460 rpm.",
+      "expect": {
+        "touches": [
+          "Wrist link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Wrist link",
+            "symbol": "angularVelocity",
+            "initialValue": 257.610598,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0237UnitsArticulatedRoboticArm",
+      "family": "units",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the angular velocity of the Shoulder link to 900 rpm.",
+      "expect": {
+        "touches": [
+          "Shoulder link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder link",
+            "symbol": "angularVelocity",
+            "initialValue": 94.2477796,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0241ReferenceArticulatedRoboticArm",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "wrist supply voltage → 3 V",
+      "expect": {
+        "touches": [
+          "Wrist supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Wrist supply",
+            "symbol": "voltage",
+            "initialValue": 3,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0244ReferenceArticulatedRoboticArm",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Elbow motor angular velocity = 2 rad/s",
+      "expect": {
+        "touches": [
+          "Elbow motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow motor",
+            "symbol": "angularVelocity",
+            "initialValue": 2,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0245UnitsArticulatedRoboticArm",
+      "family": "units",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Could you set the Elbow motor angular velocity to 600 rpm, please?",
+      "expect": {
+        "touches": [
+          "Elbow motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow motor",
+            "symbol": "angularVelocity",
+            "initialValue": 62.8318531,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0246ReferencePositionControlledJoint",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "set motor angular velocity 2 rad/s",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 2,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0247ReferencePositionControlledJoint",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "We're assuming Motor's angular velocity is 100 rad/s.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 100,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0248UnitsPositionControlledJoint",
+      "family": "units",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Before I run the comparison I need the inputs to match the test report, in which Motor's angular velocity is 1920 rpm. Please make that change.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 201.06193,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0249UpdateValuePositionControlledJoint",
+      "family": "updateValue",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Could you update the Joint link anggle to 2 rad for me?",
+      "expect": {
+        "touches": [
+          "Joint link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angle",
+            "initialValue": 2,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0250UpdateValuePositionControlledJoint",
+      "family": "updateValue",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Make the angle 3 rad.",
+      "expect": {
+        "touches": [
+          "Joint link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angle",
+            "initialValue": 3,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0251UnitsPositionControlledJoint",
+      "family": "units",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Joint link angle 45 degrees.",
+      "expect": {
+        "touches": [
+          "Joint link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angle",
+            "initialValue": 0.785398163,
+            "unit": "rad",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0252UpdateValuePositionControlledJoint",
+      "family": "updateValue",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Can we make the Voltage source value 2 V?",
+      "expect": {
+        "touches": [
+          "Voltage source"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Voltage source",
+            "symbol": "voltage",
+            "initialValue": 2,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0253UpdateValuePositionControlledJoint",
+      "family": "updateValue",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "I need the Voltage source value at 0.5 V for the next test.",
+      "expect": {
+        "touches": [
+          "Voltage source"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Voltage source",
+            "symbol": "voltage",
+            "initialValue": 0.5,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0254UpdateValuePositionControlledJoint",
+      "family": "updateValue",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Set Motor's armtaure currnet to 1 A.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 1,
+            "unit": "A"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0256UnitsPositionControlledJoint",
+      "family": "units",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Update the armature current to 2500 mA.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 2.5,
+            "unit": "A",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0257ReferencePositionControlledJoint",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Joint link angular velocity to 1 rad/s.",
+      "expect": {
+        "touches": [
+          "Joint link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angularVelocity",
+            "initialValue": 1,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0258ReferencePositionControlledJoint",
+      "family": "reference",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "I'd like the angular velocity of the Joint link to be 5 rad/s, if that's possible.",
+      "expect": {
+        "touches": [
+          "Joint link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angularVelocity",
+            "initialValue": 5,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0259UnitsPositionControlledJoint",
+      "family": "units",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "joint link angular velocity 1170 rpm ok?",
+      "expect": {
+        "touches": [
+          "Joint link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angularVelocity",
+            "initialValue": 122.522113,
+            "unit": "rad/s",
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0477UpdateParameterArticulatedRoboticArm",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Could you update the armature resistance for Shoulder armature dynamics to 4 Ω for me?",
+      "expect": {
+        "touches": [
+          "Shoulder armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Shoulder supply",
+            "to": "Shoulder motor",
+            "symbol": "resistance",
+            "value": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0478UpdateParameterArticulatedRoboticArm",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "For this run, the armature resistance on Elbow armature dynamics needs to be 1.5 Ω.",
+      "expect": {
+        "touches": [
+          "Elbow armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Elbow supply",
+            "to": "Elbow motor",
+            "symbol": "resistance",
+            "value": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0480UpdateParameterArticulatedRoboticArm",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Elbow armature dynamics back EMF constant = 0.4 V·s/rad",
+      "expect": {
+        "touches": [
+          "Elbow armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Elbow supply",
+            "to": "Elbow motor",
+            "symbol": "backEmfConstant",
+            "value": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0481UpdateParameterPositionControlledJoint",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Our latest data puts the back EMF constant of the Armature dynamics relationship at 0.4 V·s/rad.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Voltage source",
+            "to": "Motor",
+            "symbol": "backEmfConstant",
+            "value": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0484UpdateParameterPositionControlledJoint",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Would you change the armature inductance of the Armature dynamics relationship to 1.5 H? Thanks.",
+      "expect": {
+        "touches": [
+          "Armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Voltage source",
+            "to": "Motor",
+            "symbol": "inductance",
+            "value": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0485UpdateParameterPositionControlledJoint",
+      "family": "updateParameter",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "For this run, the setpoint angle needs to be 0.3 rad.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Joint link",
+            "to": "Voltage source",
+            "symbol": "setpointAngle",
+            "value": 0.3
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0486UnitsPositionControlledJoint",
+      "family": "units",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Following the review meeting we agreed on new inputs. Please set the setpoint angle for Position control to 170 degrees and leave everything else alone.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Joint link",
+            "to": "Voltage source",
+            "symbol": "setpointAngle",
+            "value": 2.96705973,
+            "tolerance": 0.001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0676EnableDisableArticulatedRoboticArm",
+      "family": "enableDisable",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "The Elbow supply shouldn't take part in the simulation for now.",
+      "expect": {
+        "touches": [
+          "Elbow supply"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Elbow supply",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0681RemoveArticulatedRoboticArm",
+      "family": "remove",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Would you remove the Elbow armature dynamics relationship? Thanks.",
+      "expect": {
+        "touches": [
+          "Elbow armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Elbow armature dynamics"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0688EnableDisableArticulatedRoboticArm",
+      "family": "enableDisable",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Can we switch off the Wrist motor, please?",
+      "expect": {
+        "touches": [
+          "Wrist motor"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Wrist motor",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0697EnableDisablePositionControlledJoint",
+      "family": "enableDisable",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Turn off the Position coontrol relationship.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Position control",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0698RemovePositionControlledJoint",
+      "family": "remove",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "After the redesign the Position control relationship is gone from the system. Please delete it from the model so it doesn't confuse anyone.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Position control"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0699EnableDisablePositionControlledJoint",
+      "family": "enableDisable",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Switch the Motor off.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Motor",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0700RemovePositionControlledJoint",
+      "family": "remove",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Remove Motor.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Motor"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0949UpdateNodeArticulatedRoboticArm",
+      "family": "updateNode",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Rename the Shoulder link to Core.",
+      "expect": {
+        "touches": [
+          "Shoulder link"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Core"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0953UpdateNodePositionControlledJoint",
+      "family": "updateNode",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "The Voltage source looks wrong as it is; a sphere would suit it better.",
+      "expect": {
+        "touches": [
+          "Voltage source"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Voltage source",
+            "path": "appearance.shape",
+            "value": "sphere"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0955UpdateNodePositionControlledJoint",
+      "family": "updateNode",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Reanme the Moor to Core.",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Core"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1055ClarificationArticulatedRoboticArm",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Chaange the voltgae to 72 V.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder supply",
+          "Elbow supply",
+          "Wrist supply"
+        ]
+      }
+    },
+    {
+      "id": "g1056ClarificationArticulatedRoboticArm",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the angle to 3 rad.",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Shoulder link",
+          "Elbow link",
+          "Wrist link"
+        ]
+      }
+    },
+    {
+      "id": "g1059ClarificationArticulatedRoboticArm",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "The Wrist supply voltage is too low.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1061ClarificationArticulatedRoboticArm",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Reemove the flywheel.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1063ClarificationArticulatedRoboticArm",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Set the Elbow supply voltage to 54 V and also to 109 V.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1064ClarificationPositionControlledJoint",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Angular velocity: 5 rad/s",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Motor",
+          "Joint link"
+        ]
+      }
+    },
+    {
+      "id": "g1066ClarificationPositionControlledJoint",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "joint link angle is wrong, fix",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1067ClarificationPositionControlledJoint",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "The compressor is causing trouble in the results.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1068ClarificationPositionControlledJoint",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "I was reviewing the design and noticed that the heat exchanger needs adjusting, so please change it to 0.5 and tell me when it's done.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1069ClarificationPositionControlledJoint",
+      "family": "clarification",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Set the Jonit link angle to 2 rad and also to 5 rad.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1172MultiStepArticulatedRoboticArm",
+      "family": "multiStep",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Could you set the Elbow motor armature current to 20 A and the Shoulder link angle to 0.5 rad, please?",
+      "expect": {
+        "touches": [
+          "Elbow motor",
+          "Shoulder link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow motor",
+            "symbol": "current",
+            "initialValue": 20,
+            "unit": "A"
+          },
+          {
+            "op": "state",
+            "node": "Shoulder link",
+            "symbol": "angle",
+            "initialValue": 0.5,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1175MultiStepPositionControlledJoint",
+      "family": "multiStep",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Could you set the Motor armature current to 100 A and the Joint link angle to 3 rad and the Voltage source voltage to 1 V, please?",
+      "expect": {
+        "touches": [
+          "Motor",
+          "Joint link",
+          "Voltage source"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "current",
+            "initialValue": 100,
+            "unit": "A"
+          },
+          {
+            "op": "state",
+            "node": "Joint link",
+            "symbol": "angle",
+            "initialValue": 3,
+            "unit": "rad"
+          },
+          {
+            "op": "state",
+            "node": "Voltage source",
+            "symbol": "voltage",
+            "initialValue": 1,
+            "unit": "V"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1297AddStateArticulatedRoboticArm",
+      "family": "addState",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "For the next analysis I need an extra quantity on the Shoulder motor. Please add a state called Pressure with an initial value of 101325 Pa.",
+      "expect": {
+        "touches": [
+          "Shoulder motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder motor",
+            "initialValue": 101325,
+            "unit": "Pa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1299AddStateArticulatedRoboticArm",
+      "family": "addState",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Shoulder supply: add Length 2.5 m.",
+      "expect": {
+        "touches": [
+          "Shoulder supply"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Shoulder supply",
+            "initialValue": 2.5,
+            "unit": "m"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1300AddStatePositionControlledJoint",
+      "family": "addState",
+      "domain": "robotics",
+      "style": "conversational",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Can the Motor also track a power rating, starting at 500 W?",
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "initialValue": 500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1360AddParameterArticulatedRoboticArm",
+      "family": "addParameter",
+      "domain": "robotics",
+      "style": "typos",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Add a gain of 1.5 to the Soulder armature dynamcis relationship.",
+      "expect": {
+        "touches": [
+          "Shoulder armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Shoulder supply",
+            "to": "Shoulder motor",
+            "value": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1361AddParameterArticulatedRoboticArm",
+      "family": "addParameter",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Give Wrist armature dynamics a new parameter, loss coefficient, set to 0.05.",
+      "expect": {
+        "touches": [
+          "Wrist armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Wrist supply",
+            "to": "Wrist motor",
+            "value": 0.05
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1364AddParameterPositionControlledJoint",
+      "family": "addParameter",
+      "domain": "robotics",
+      "style": "indirect",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Rotational drive needs a damping ratio; use 0.7.",
+      "expect": {
+        "touches": [
+          "Rotational drive"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Motor",
+            "to": "Joint link",
+            "value": 0.7
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1427SetEquationArticulatedRoboticArm",
+      "family": "setEquation",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "delay wrist armature dynamics by 1 minute",
+      "expect": {
+        "touches": [
+          "Wrist armature dynamics"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Wrist supply",
+            "to": "Wrist motor",
+            "uses": [
+              "sourceVoltage",
+              "begin{cases}",
+              "60"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1431SetEquationPositionControlledJoint",
+      "family": "setEquation",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "Double the effect of Position control.",
+      "expect": {
+        "touches": [
+          "Position control"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Joint link",
+            "to": "Voltage source",
+            "uses": [
+              "gain"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1491UpdateEdgeArticulatedRoboticArm",
+      "family": "updateEdge",
+      "domain": "robotics",
+      "style": "loose",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "rename elbow rotational drive to transfer",
+      "expect": {
+        "touches": [
+          "Elbow rotational drive"
+        ],
+        "assertions": [
+          {
+            "op": "edgeName",
+            "from": "Elbow motor",
+            "to": "Elbow link",
+            "name": "Transfer"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1493UpdateEdgePositionControlledJoint",
+      "family": "updateEdge",
+      "domain": "robotics",
+      "style": "verbose",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "To match our documentation, the relationship currently named Rotational drive should be called Main flow. Please rename it.",
+      "expect": {
+        "touches": [
+          "Rotational drive"
+        ],
+        "assertions": [
+          {
+            "op": "edgeName",
+            "from": "Motor",
+            "to": "Joint link",
+            "name": "Main flow"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1557HistoryArticulatedRoboticArm",
+      "family": "history",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "It is the Elbow link.",
+      "history": [
+        {
+          "request": "Set the angle to 2 rad.",
+          "outcome": "Asked: Which node's angle should I set?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Elbow link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Elbow link",
+            "symbol": "angle",
+            "initialValue": 2,
+            "unit": "rad"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1560HistoryArticulatedRoboticArm",
+      "family": "history",
+      "domain": "robotics",
+      "style": "plain",
+      "split": "test",
+      "model": "articulatedRoboticArm",
+      "request": "Make it 5 rad/s.",
+      "history": [
+        {
+          "request": "Increase the Wrist link angular velocity.",
+          "outcome": "Asked: What value should the Wrist link angular velocity have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Wrist link"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Wrist link",
+            "symbol": "angularVelocity",
+            "initialValue": 5,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1562HistoryPositionControlledJoint",
+      "family": "history",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "The Motor.",
+      "history": [
+        {
+          "request": "Set the angular velocity to 1 rad/s.",
+          "outcome": "Asked: Which node's angular velocity should I set?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Motor"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Motor",
+            "symbol": "angularVelocity",
+            "initialValue": 1,
+            "unit": "rad/s"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1563HistoryPositionControlledJoint",
+      "family": "history",
+      "domain": "robotics",
+      "style": "terse",
+      "split": "test",
+      "model": "positionControlledJoint",
+      "request": "No, 20 V.",
+      "history": [
+        {
+          "request": "Set the Voltage source voltage to 2 V.",
+          "outcome": "Applied: Set the Voltage source voltage to 2 V."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Voltage source"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Voltage source",
+            "symbol": "voltage",
+            "initialValue": 20,
+            "unit": "V"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,2555 @@
+{
+  "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+  "cases": [
+    {
+      "id": "g0001UpdateValueHeatedWaterTank",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Change the water temperature of the Water tank to 310 K.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0002UpdateValueHeatedWaterTank",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Water temperature 335 K.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 335,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0003UnitsHeatedWaterTank",
+      "family": "units",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Can we make the water temperature of the Water tank 57 degrees Celsius?",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 330.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0004UpdateValueHeatedWaterTank",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "ambient air temperature → 365 K",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 365,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0005UpdateValueHeatedWaterTank",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "The spec says the temperature is 335 K.",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 335,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0006UnitsHeatedWaterTank",
+      "family": "units",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "I'm updating the model with the latest measurements. The temperature of the Ambient air is now 36 °C, so please change it to match; everything else stays as it is.",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 309.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0007UpdateValueHeatedWaterTank",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Chage the heat flow to 1500 W.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 1500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0008UpdateValueHeatedWaterTank",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make the heat flow of the Electric heater 500 W.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 500,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0009UnitsHeatedWaterTank",
+      "family": "units",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Electric heater heat flow to 5.7 kW.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 5700,
+            "unit": "W",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0010ReferenceThermalManagement",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "I'd like Battery module's temperature to be 310 K, if that's possible.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0011ReferenceThermalManagement",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "The spec says Battery module's temperature is 310 K.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0012UnitsThermalManagement",
+      "family": "units",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "battery module temperature to 64 °C pls",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 337.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0013UpdateValueThermalManagement",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Before I run the comparison I need the inputs to match the test report, in which the Electrical losses heat flow is 315 W. Please make that change.",
+      "expect": {
+        "touches": [
+          "Electrical losses"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electrical losses",
+            "symbol": "qDot",
+            "initialValue": 315,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0014UnitsThermalManagement",
+      "family": "units",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Please set the Electrical losses heat flow to 1.8 kW.",
+      "expect": {
+        "touches": [
+          "Electrical losses"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electrical losses",
+            "symbol": "qDot",
+            "initialValue": 1800,
+            "unit": "W",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0016ReferenceThermalManagement",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Would you change the Enclosed air temperature to 303 K? Thanks.",
+      "expect": {
+        "touches": [
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "symbol": "temperature",
+            "initialValue": 303,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0017UnitsThermalManagement",
+      "family": "units",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "enclosed air temperature to 169 °F pls",
+      "expect": {
+        "touches": [
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "symbol": "temperature",
+            "initialValue": 349.261111,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0018UpdateValueThermalManagement",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Our latest data puts the state of charge at 90 %.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "stateOfCharge",
+            "initialValue": 90,
+            "unit": "%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0019UpdateValueThermalManagement",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Following the review meeting we agreed on new inputs. Please set the state of charge to 10 % and leave everything else alone.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "stateOfCharge",
+            "initialValue": 10,
+            "unit": "%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0021ReferenceTwoRoomBuilding",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Bedroom air temperature to 275 K.",
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bedroom",
+            "symbol": "temperature",
+            "initialValue": 275,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0022UnitsTwoRoomBuilding",
+      "family": "units",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Would you change the Bedroom air temperature to 70 °C? Thanks.",
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bedroom",
+            "symbol": "temperature",
+            "initialValue": 343.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0023UpdateValueTwoRoomBuilding",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Our latest data puts the Outdoor air temperature at 280 K.",
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Outdoor air",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0024UpdateValueTwoRoomBuilding",
+      "family": "updateValue",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "make outdoor air temperature like 275 K",
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Outdoor air",
+            "symbol": "temperature",
+            "initialValue": 275,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0025UnitsTwoRoomBuilding",
+      "family": "units",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Chnge the temperature to 173 °F.",
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Outdoor air",
+            "symbol": "temperature",
+            "initialValue": 351.483333,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0026ReferenceTwoRoomBuilding",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "We re-ran the calibration this morning and the result was clear: the air temperature of the Living room should be 320 K. Could you put that into the model?",
+      "expect": {
+        "touches": [
+          "Living room"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "symbol": "temperature",
+            "initialValue": 320,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0027ReferenceTwoRoomBuilding",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Set the Living room air temperature to 303 K.",
+      "expect": {
+        "touches": [
+          "Living room"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "symbol": "temperature",
+            "initialValue": 303,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0028UnitsTwoRoomBuilding",
+      "family": "units",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Living room air temperature to 128 °F.",
+      "expect": {
+        "touches": [
+          "Living room"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "symbol": "temperature",
+            "initialValue": 326.483333,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0030ReferenceThermalEquilibrium",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "set hot body temperature 701 K",
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Hot body",
+            "symbol": "temperature",
+            "initialValue": 701,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0031UnitsThermalEquilibrium",
+      "family": "units",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "The temperature of the Hot body should be 163 °F.",
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Hot body",
+            "symbol": "temperature",
+            "initialValue": 345.927778,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0032ReferenceThermalEquilibrium",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "I'm updating the model with the latest measurements. The temperature of the Cold body is now 320 K, so please change it to match; everything else stays as it is.",
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "symbol": "temperature",
+            "initialValue": 320,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0033ReferenceThermalEquilibrium",
+      "family": "reference",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Cange the temperature of the Cold body to 295 K.",
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "symbol": "temperature",
+            "initialValue": 295,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0034UnitsThermalEquilibrium",
+      "family": "units",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Set the Cold body temperature to 25 °C.",
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "symbol": "temperature",
+            "initialValue": 298.15,
+            "unit": "K",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0424UpdateParameterHeatedWaterTank",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make the water thermal capacitance of the Heater input relationship 105000 J/K.",
+      "expect": {
+        "touches": [
+          "Heater input"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Electric heater",
+            "to": "Water tank",
+            "symbol": "waterThermalCapacitance",
+            "value": 105000
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0425UpdateParameterHeatedWaterTank",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Can we make the water thermal capacitance of the Ambient heat loss relationship 105000 J/K?",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "symbol": "waterThermalCapacitance",
+            "value": 105000
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0426UpdateParameterHeatedWaterTank",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "I need the heat loss coefficient for Ambient heat loss at 30 W/K for the next test.",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "symbol": "heatLossCoefficient",
+            "value": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0428UpdateParameterThermalManagement",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Air convection gain air thermal capacitance 20100 J/K.",
+      "expect": {
+        "touches": [
+          "Air convection gain"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Battery module",
+            "to": "Enclosed air",
+            "symbol": "airThermalCapacitance",
+            "value": 20100
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0430UpdateParameterThermalManagement",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Make the convective heat transfer coefficient on both Air convection gain and Batttery convection loss 12 W/(m²·K).",
+      "expect": {
+        "touches": [
+          "Air convection gain",
+          "Battery convection loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Battery module",
+            "to": "Enclosed air",
+            "symbol": "heatTransferCoefficient",
+            "value": 12,
+            "all": true,
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0431UpdateParameterThermalManagement",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Update the heat capacity to 500 J/K.",
+      "expect": {
+        "touches": [
+          "Heat source"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Electrical losses",
+            "to": "Battery module",
+            "symbol": "heatCapacity",
+            "value": 500
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0432UpdateParameterTwoRoomBuilding",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Could you set the partition conductance on both Heat transfer to living room and Heat transfer to bedroom to 60 W/K, please?",
+      "expect": {
+        "touches": [
+          "Heat transfer to living room",
+          "Heat transfer to bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Bedroom",
+            "to": "Living room",
+            "symbol": "partitionConductance",
+            "value": 60,
+            "all": true,
+            "either": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0433UpdateParameterTwoRoomBuilding",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "The spec says the envelope conductance on Living room envelope loss is 600 W/K.",
+      "expect": {
+        "touches": [
+          "Living room envelope loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Outdoor air",
+            "to": "Living room",
+            "symbol": "envelopeConductance",
+            "value": 600
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0436UpdateParameterTwoRoomBuilding",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "I need the zone thermal capacitance for Bedroom envelope loss at 6400000 J/K for the next test.",
+      "expect": {
+        "touches": [
+          "Bedroom envelope loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Outdoor air",
+            "to": "Bedroom",
+            "symbol": "zoneThermalCapacitance",
+            "value": 6400000
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0437UpdateParameterThermalEquilibrium",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Make the theral capacitance of the Condction relationship 250 J/K.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Hot body",
+            "to": "Cold body",
+            "symbol": "thermalCapacitance",
+            "value": 250
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0438UpdateParameterThermalEquilibrium",
+      "family": "updateParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Change the conductance of the Conduction relationship to 100 W/K.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Hot body",
+            "to": "Cold body",
+            "symbol": "conductance",
+            "value": 100
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0551EnableDisableHeatedWaterTank",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Would you disable the Heater input relationship? Thanks.",
+      "expect": {
+        "touches": [
+          "Heater input"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Heater input",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0557EnableDisableHeatedWaterTank",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Disable Water tank.",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Water tank",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0558RemoveHeatedWaterTank",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Could you delete the Water tank?",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Water tank"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0565EnableDisableThermalManagement",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Could you turn off the Battery module for me?",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Battery module",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0567EnableDisableThermalManagement",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Let's see what happens without the Heat source relationship.",
+      "expect": {
+        "touches": [
+          "Heat source"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Heat source",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0568RemoveThermalManagement",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "The Heat source relationship was decommissioned last month, so please take it out of the model completely.",
+      "expect": {
+        "touches": [
+          "Heat source"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Heat source"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0572RemoveThermalManagement",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Can we get rid of the Battery convection loss relationship, please?",
+      "expect": {
+        "touches": [
+          "Battery convection loss"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Battery convection loss"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0576RemoveTwoRoomBuilding",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "The Bedroom was decommissioned last month, so please take it out of the model completely.",
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Bedroom"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0583EnableDisableTwoRoomBuilding",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Pelase diasble the Living room envelope loss relationship.",
+      "expect": {
+        "touches": [
+          "Living room envelope loss"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Living room envelope loss",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0586RemoveTwoRoomBuilding",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Would you remove the Heat transfer to living room relationship? Thanks.",
+      "expect": {
+        "touches": [
+          "Heat transfer to living room"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "edge": "Heat transfer to living room"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0587EnableDisableThermalEquilibrium",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "The Conduction relationship shouldn't take part in the simulation for now.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "edge": "Conduction",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0590EnableDisableThermalEquilibrium",
+      "family": "enableDisable",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Disable the Hot body.",
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "enabled",
+            "node": "Hot body",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0591RemoveThermalEquilibrium",
+      "family": "remove",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Drop Hot body.",
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "removed",
+            "node": "Hot body"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0922UpdateNodeHeatedWaterTank",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Ambient air → Test rig.",
+      "expect": {
+        "touches": [
+          "Ambient air"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Test rig"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0923UpdateNodeHeatedWaterTank",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Can the Water tank be a sphere in the diagram, please?",
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Water tank",
+            "path": "appearance.shape",
+            "value": "sphere"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0925UpdateNodeThermalManagement",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Everyone calls the Enclosed air \"Stage one\", so the model should too.",
+      "expect": {
+        "touches": [
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Stage one"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0926UpdateNodeThermalManagement",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "The diagram is hard to read because everything looks the same. Please change the Battery module so that it is drawn as a cylinder.",
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Battery module",
+            "path": "appearance.shape",
+            "value": "cylinder"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0928UpdateNodeTwoRoomBuilding",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Call the Outdoor air \"Test rig\" instead.",
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Test rig"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0930UpdateNodeThermalEquilibrium",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Could you give the Hot body 2 substeps per step, please?",
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "field",
+            "node": "Hot body",
+            "path": "numerics.substepsPerGlobalStep",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g0931UpdateNodeThermalEquilibrium",
+      "family": "updateNode",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Everyone calls the Cold body \"Primary\", so the model should too.",
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "hasNode",
+            "name": "Primary"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1001ClarificationHeatedWaterTank",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Inncrease the Ambint air temperature.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1002ClarificationHeatedWaterTank",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Change the Electric heater heat flow.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1003ClarificationHeatedWaterTank",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Drop valve.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1004ClarificationHeatedWaterTank",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Can we set the bypass line to 5?",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1005ClarificationHeatedWaterTank",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "The Electric heater heat flow is 3000 W in one report and 6000 W in another; use the right one.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1006ClarificationThermalManagement",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "make temperature 365 K",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Battery module",
+          "Enclosed air"
+        ]
+      }
+    },
+    {
+      "id": "g1007ClarificationThermalManagement",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Adjust the tempreature of the Baattery module.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1008ClarificationThermalManagement",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "After looking at last week's results I think the Electrical losses heat flow needs to change, but I haven't decided on the number yet. Please update it.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1010ClarificationThermalManagement",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Drop compressor.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1011ClarificationThermalManagement",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Could you set the Electrical losses heat flow to 210 W? No wait, 421 W. Or whichever is better.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1012ClarificationTwoRoomBuilding",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "make air temperature 335 K",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Living room",
+          "Bedroom"
+        ]
+      }
+    },
+    {
+      "id": "g1013ClarificationTwoRoomBuilding",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "I think the air temperature of the Living room is off.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1014ClarificationTwoRoomBuilding",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "After looking at last week's results I think the Outdoor air temperature needs to change, but I haven't decided on the number yet. Please update it.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1015ClarificationTwoRoomBuilding",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Reomve the warheouse C.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1016ClarificationTwoRoomBuilding",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Disable the vaccination rate.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1017ClarificationThermalEquilibrium",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Could you make the temperature 288 K, please?",
+      "expect": {
+        "kind": "clarification",
+        "suggestionsInclude": [
+          "Hot body",
+          "Cold body"
+        ]
+      }
+    },
+    {
+      "id": "g1018ClarificationThermalEquilibrium",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "I think the temperature of the Hot body is off.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1019ClarificationThermalEquilibrium",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "bump up cold body temperature",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1020ClarificationThermalEquilibrium",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "verbose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "I was reviewing the design and noticed that the insurance reserve needs adjusting, so please change it to 20 and tell me when it's done.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1021ClarificationThermalEquilibrium",
+      "family": "clarification",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Make the Hot body temperature both 303 K and 607 K.",
+      "expect": {
+        "kind": "clarification"
+      }
+    },
+    {
+      "id": "g1145MultiStepHeatedWaterTank",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Set the Electric heater heat flow to 8000 W and the Ambient air temperature to 350 K and the Water tank water temperature to 350 K.",
+      "expect": {
+        "touches": [
+          "Electric heater",
+          "Ambient air",
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 8000,
+            "unit": "W"
+          },
+          {
+            "op": "state",
+            "node": "Ambient air",
+            "symbol": "temperature",
+            "initialValue": 350,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 350,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1147MultiStepThermalManagement",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "For the next run we want Electrical losses heat flow 840 W, Battery module temperature 320 K and Enclosed air temperature 275 K.",
+      "expect": {
+        "touches": [
+          "Electrical losses",
+          "Battery module",
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electrical losses",
+            "symbol": "qDot",
+            "initialValue": 840,
+            "unit": "W"
+          },
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 320,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "symbol": "temperature",
+            "initialValue": 275,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1151MultiStepTwoRoomBuilding",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "living room air temperature 280 k, bedroom air temperature 280 k and outdoor air temperature 288 k pls",
+      "expect": {
+        "touches": [
+          "Living room",
+          "Bedroom",
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Bedroom",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Outdoor air",
+            "symbol": "temperature",
+            "initialValue": 288,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1155MultiStepThermalEquilibrium",
+      "family": "multiStep",
+      "domain": "thermal",
+      "style": "multiPart",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Change the Cold body temperature to 310 K, then the Hot body temperature to 365 K.",
+      "expect": {
+        "touches": [
+          "Cold body",
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          },
+          {
+            "op": "state",
+            "node": "Hot body",
+            "symbol": "temperature",
+            "initialValue": 365,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1274AddStateHeatedWaterTank",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "The Electric heater needs to carry its age too, which is 120 day right now.",
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "initialValue": 120,
+            "unit": "day"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1277AddStateThermalManagement",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Give the Enclosed air a new state called Cost, starting at 2500 USD.",
+      "expect": {
+        "touches": [
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "initialValue": 2500,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1278AddStateTwoRoomBuilding",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "+ Length 630 mm on Living room",
+      "expect": {
+        "touches": [
+          "Living room"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Living room",
+            "initialValue": 0.63,
+            "unit": "m",
+            "tolerance": 0.000001
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1280AddStateTwoRoomBuilding",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "The Bedroom needs to carry its cost too, which is 2500 USD right now.",
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bedroom",
+            "initialValue": 2500,
+            "unit": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1281AddStateThermalEquilibrium",
+      "family": "addState",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "cold body also needs efficiency, 0.92",
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "initialValue": 0.92
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1342AddParameterHeatedWaterTank",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Can Ambient heat loss also have a safety factor, 1.2?",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "value": 1.2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1343AddParameterHeatedWaterTank",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "heater input needs a damping ratio of 0.7",
+      "expect": {
+        "touches": [
+          "Heater input"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Electric heater",
+            "to": "Water tank",
+            "value": 0.7
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1344AddParameterThermalManagement",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "We should be able to tune the safety factor of Heat source, which is 1.2 for now.",
+      "expect": {
+        "touches": [
+          "Heat source"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Electrical losses",
+            "to": "Battery module",
+            "value": 1.2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1347AddParameterTwoRoomBuilding",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Add a offset of 2 to the Living room envelope loss relationship.",
+      "expect": {
+        "touches": [
+          "Living room envelope loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Outdoor air",
+            "to": "Living room",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1348AddParameterTwoRoomBuilding",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Heat transfer to bedroom: add offset 2.",
+      "expect": {
+        "touches": [
+          "Heat transfer to bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Living room",
+            "to": "Bedroom",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1350AddParameterThermalEquilibrium",
+      "family": "addParameter",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Conduction needs a loss coefficient; use 0.05.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeParameter",
+            "from": "Hot body",
+            "to": "Cold body",
+            "value": 0.05
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1403SetEquationHeatedWaterTank",
+      "family": "setEquation",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Make Heater input start only after 60 seconds.",
+      "expect": {
+        "touches": [
+          "Heater input"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Electric heater",
+            "to": "Water tank",
+            "uses": [
+              "sourceQDot",
+              "begin{cases}",
+              "60"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1405SetEquationThermalManagement",
+      "family": "setEquation",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Could you make sure Battery convection loss can't go below zero?",
+      "expect": {
+        "touches": [
+          "Battery convection loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Enclosed air",
+            "to": "Battery module",
+            "uses": [
+              "heatTransferCoefficient",
+              "max"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1408SetEquationTwoRoomBuilding",
+      "family": "setEquation",
+      "domain": "thermal",
+      "style": "typos",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Never let Heat transfer to liiving room go negative.",
+      "expect": {
+        "touches": [
+          "Heat transfer to living room"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Bedroom",
+            "to": "Living room",
+            "uses": [
+              "partitionConductance",
+              "max"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1411SetEquationThermalEquilibrium",
+      "family": "setEquation",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Conduction >= 0 only.",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeEquation",
+            "from": "Hot body",
+            "to": "Cold body",
+            "uses": [
+              "conductance",
+              "max"
+            ],
+            "changed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1477UpdateEdgeHeatedWaterTank",
+      "family": "updateEdge",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "rename ambient heat loss to transfer",
+      "expect": {
+        "touches": [
+          "Ambient heat loss"
+        ],
+        "assertions": [
+          {
+            "op": "edgeName",
+            "from": "Ambient air",
+            "to": "Water tank",
+            "name": "Transfer"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1480UpdateEdgeThermalManagement",
+      "family": "updateEdge",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Change Air convection gain to bidirectional.",
+      "expect": {
+        "touches": [
+          "Air convection gain"
+        ],
+        "assertions": [
+          {
+            "op": "hasEdge",
+            "from": "Battery module",
+            "to": "Enclosed air",
+            "directionality": "bidirectional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1481UpdateEdgeTwoRoomBuilding",
+      "family": "updateEdge",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "Heat transfer to living room → Main flow.",
+      "expect": {
+        "touches": [
+          "Heat transfer to living room"
+        ],
+        "assertions": [
+          {
+            "op": "edgeName",
+            "from": "Bedroom",
+            "to": "Living room",
+            "name": "Main flow"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1483UpdateEdgeThermalEquilibrium",
+      "family": "updateEdge",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "rename conduction to primary link",
+      "expect": {
+        "touches": [
+          "Conduction"
+        ],
+        "assertions": [
+          {
+            "op": "edgeName",
+            "from": "Hot body",
+            "to": "Cold body",
+            "name": "Primary link"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1520HistoryHeatedWaterTank",
+      "family": "history",
+      "domain": "thermal",
+      "style": "indirect",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "280 K was wrong; the right number is 310 K.",
+      "history": [
+        {
+          "request": "Set the Water tank water temperature to 280 K.",
+          "outcome": "Applied: Set the Water tank water temperature to 280 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Water tank"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Water tank",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1521HistoryHeatedWaterTank",
+      "family": "history",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Try that once more.",
+      "history": [
+        {
+          "request": "Set the Electric heater heat flow to 3000 W.",
+          "outcome": "Error: The AI provider did not respond in time."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 3000,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1522HistoryHeatedWaterTank",
+      "family": "history",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "heatedWaterTank",
+      "request": "Let's say 4000 W, thanks.",
+      "history": [
+        {
+          "request": "Increase the Electric heater heat flow.",
+          "outcome": "Asked: What value should the Electric heater heat flow have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Electric heater"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Electric heater",
+            "symbol": "qDot",
+            "initialValue": 4000,
+            "unit": "W"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1524HistoryThermalManagement",
+      "family": "history",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Sorry, I meant 504 K.",
+      "history": [
+        {
+          "request": "Set the Enclosed air temperature to 335 K.",
+          "outcome": "Proposed: Set the Enclosed air temperature to 335 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Enclosed air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Enclosed air",
+            "symbol": "temperature",
+            "initialValue": 504,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1527HistoryThermalManagement",
+      "family": "history",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "thermalManagement",
+      "request": "Do the same for the Battery module.",
+      "history": [
+        {
+          "request": "Set the Enclosed air temperature to 365 K.",
+          "outcome": "Applied: Set the Enclosed air temperature to 365 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Battery module"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Battery module",
+            "symbol": "temperature",
+            "initialValue": 365,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1528HistoryTwoRoomBuilding",
+      "family": "history",
+      "domain": "thermal",
+      "style": "conversational",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "The Bedroom, please.",
+      "history": [
+        {
+          "request": "Set the air temperature to 280 K.",
+          "outcome": "Asked: Which node's air temperature should I set?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Bedroom"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Bedroom",
+            "symbol": "temperature",
+            "initialValue": 280,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1529HistoryTwoRoomBuilding",
+      "family": "history",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "No, 335 K.",
+      "history": [
+        {
+          "request": "Set the Outdoor air temperature to 288 K.",
+          "outcome": "Applied: Set the Outdoor air temperature to 288 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Outdoor air",
+            "symbol": "temperature",
+            "initialValue": 335,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1530HistoryTwoRoomBuilding",
+      "family": "history",
+      "domain": "thermal",
+      "style": "plain",
+      "split": "test",
+      "model": "twoRoomBuilding",
+      "request": "retry",
+      "history": [
+        {
+          "request": "Set the Outdoor air temperature to 303 K.",
+          "outcome": "Error: The AI provider did not respond in time."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Outdoor air"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Outdoor air",
+            "symbol": "temperature",
+            "initialValue": 303,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1534HistoryThermalEquilibrium",
+      "family": "history",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "nah make it 444 K",
+      "history": [
+        {
+          "request": "Set the Cold body temperature to 295 K.",
+          "outcome": "Proposed: Set the Cold body temperature to 295 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "symbol": "temperature",
+            "initialValue": 444,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1536HistoryThermalEquilibrium",
+      "family": "history",
+      "domain": "thermal",
+      "style": "loose",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "275 K i guess",
+      "history": [
+        {
+          "request": "Increase the Hot body temperature.",
+          "outcome": "Asked: What value should the Hot body temperature have?"
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Hot body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Hot body",
+            "symbol": "temperature",
+            "initialValue": 275,
+            "unit": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "g1537HistoryThermalEquilibrium",
+      "family": "history",
+      "domain": "thermal",
+      "style": "terse",
+      "split": "test",
+      "model": "thermalEquilibrium",
+      "request": "Same for Cold body.",
+      "history": [
+        {
+          "request": "Set the Hot body temperature to 310 K.",
+          "outcome": "Applied: Set the Hot body temperature to 310 K."
+        }
+      ],
+      "expect": {
+        "touches": [
+          "Cold body"
+        ],
+        "assertions": [
+          {
+            "op": "state",
+            "node": "Cold body",
+            "symbol": "temperature",
+            "initialValue": 310,
+            "unit": "K"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -136,7 +136,7 @@ Konjugate is in active development and public beta, not early-stage anymore — 
 
 ## Try It in Your Browser
 
-Want a quick look before installing anything? A free, in-browser trial of Konjugate needs no install: **[try it at zenineasa.github.io/Konjugate](https://zenineasa.github.io/Konjugate/)** <!-- Goes live after GitHub Pages is enabled (Settings > Pages, source: GitHub Actions) and the first version-tag push after that, per .github/workflows/webEdition.yml -->. It's a lightweight preview, not the full app — Run is batch-only there (no live progress or mid-run control), and programmable C++ providers, FMU import/export, add-ons, and AI-assisted authoring aren't available yet. For the full experience, **[download the desktop app](https://github.com/zenineasa/Konjugate/releases/latest)** above.
+Want a quick look before installing anything? A free, in-browser trial of Konjugate needs no install: **[try it at web.konjugate.com](https://web.konjugate.com/)**. It's a lightweight preview, not the full app — Run is batch-only there (no live progress or mid-run control), and programmable C++ providers, FMU import/export, add-ons, and AI-assisted authoring aren't available yet. For the full experience, **[download the desktop app](https://github.com/zenineasa/Konjugate/releases/latest)** above.
 
 ## Installing a Release Build
 

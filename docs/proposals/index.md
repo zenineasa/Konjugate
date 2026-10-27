@@ -14,3 +14,4 @@
 * [Guided Tour](guidedTour.md) - An optional, skippable first-model tour for the desktop and web editions, offered on first launch and from the Welcome window
 * [Package Compatibility](packageCompatibility.md) - Minimum Konjugate version for packages, and installing the newest release the running app can use
 * [Toolbox Mechanisms and Design Optimisation](toolboxMechanismsAndDesignOptimisation.md) - Toolbox-owned regions of a model rebuilt by merging, providers that solve a group of nodes and edges together, and optimisation towards a design objective with constraints
+* [Embedded Assistant Model](embeddedAssistantModel.md) - A small open model fine-tuned for the assistant and shipped inside the app through llama.cpp, with the decisions so far, the evidence from the evaluation harness, and the gates it must pass

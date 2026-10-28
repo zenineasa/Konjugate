@@ -296,6 +296,8 @@ struct AlgebraicOutput {
     CompiledExpression expression;
     // The definitions it needs, directly or through other definitions, in ascending order.
     std::vector<std::size_t> definitions;
+    // The bindings it reads, itself or through those definitions, in ascending order.
+    std::vector<std::size_t> bindingReads;
 };
 
 struct ExecutionPlan {

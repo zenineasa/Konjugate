@@ -44,11 +44,14 @@ std::vector<double> evaluateNodeDerivative(
 }
 
 std::optional<NodeStabilityAssessment> assessNodeStability(
-    const NodeExecutionPlan& node, const StateValues& synchronizationSnapshot, double globalTimeStep) {
+    const NodeExecutionPlan& node, const StateValues& synchronizationSnapshot, double globalTimeStep,
+    const std::vector<std::size_t>& relationshipSet) {
     if (!isEquationOnly(node)) return std::nullopt;
 
+    const std::set<std::size_t> setByRelationships(relationshipSet.begin(), relationshipSet.end());
     std::set<std::size_t> algebraicLocalIndices;
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
+        if (setByRelationships.contains(node.stateIndexes[index])) algebraicLocalIndices.insert(index);
         for (const auto& task : node.algebraicTasks) {
             if (task.outputStateIndex == node.stateIndexes[index]) algebraicLocalIndices.insert(index);
         }

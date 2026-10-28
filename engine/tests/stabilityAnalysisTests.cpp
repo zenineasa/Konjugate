@@ -330,6 +330,25 @@ void assessNodeStabilitySkipsANodeWithNoDifferentialStates() {
     require(!assessment.has_value(), "A node with only an algebraic state should not be assessed.");
 }
 
+void assessNodeStabilityLeavesOutStatesAnAlgebraicRelationshipSets() {
+    // B's only state is set by the relationship from A, so it has nothing Explicit Euler steps; told which states
+    // relationships set, the check leaves it out (a toolbox's node may hold hundreds of them).
+    const auto project = parseProject(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [
+            {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 1}], "sourceTerms": []},
+            {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0}], "sourceTerms": []}
+        ],
+        "edges": [{"id": 5, "name": "Set", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+            "equationModel": {"bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+                              "outputs": [{"role": "target", "stateId": 21, "mathJson": ["Multiply", 2, "x"], "setsValue": true}]}}]
+    })json");
+    const auto plan = konjugate::compileExecutionPlan(project);
+    const auto& node = plan.nodes.at(0).nodeId == 2 ? plan.nodes.at(0) : plan.nodes.at(1);
+    require(!konjugate::assessNodeStability(node, plan.initialStates, 0.1, plan.algebraicStateIndexes).has_value(),
+        "A node whose only state a relationship sets should not be assessed.");
+}
+
 void assessNodeStabilitySkipsAProgrammableNode() {
     const auto plan = konjugate::compileExecutionPlan(programmableSourceTermProject());
     const auto assessment = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.1);
@@ -453,6 +472,7 @@ int main() {
         assessNodeStabilityStillReportsStiffnessBesideAConservedQuantity();
         assessNodeStabilityFollowsCouplingThroughAnAlgebraicState();
         assessNodeStabilitySkipsANodeWithNoDifferentialStates();
+        assessNodeStabilityLeavesOutStatesAnAlgebraicRelationshipSets();
         assessNodeStabilitySkipsAProgrammableNode();
         assessNodeStabilityAttributesTheDrivingParameter();
         assessNodeStabilityAttributesTheFasterOfTwoRates();

@@ -105,9 +105,15 @@ struct NodeStabilityAssessment {
 // once; dividing that into globalTimeStep and rounding up gives a concrete substep count to
 // recommend. When any eigenvalue instead has Re(λ) ≥ 0, that bound doesn't exist at all -- see
 // unconditionallyUnstable.
+//
+// `relationshipSet`: the states algebraic relationships set (the plan's algebraicStateIndexes, indices into the whole
+// state vector). Like those a node's own algebraic tasks set, they are not stepped, so they are left out of the
+// Jacobian: a node a toolbox fills with hundreds of them would otherwise make an eigenproblem hundreds wide of
+// nothing but zero rows.
 std::optional<NodeStabilityAssessment> assessNodeStability(
     const NodeExecutionPlan& node,
     const StateValues& synchronizationSnapshot,
-    double globalTimeStep);
+    double globalTimeStep,
+    const std::vector<std::size_t>& relationshipSet = {});
 
 }

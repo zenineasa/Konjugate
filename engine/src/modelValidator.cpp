@@ -1093,7 +1093,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         try {
             const auto plan = compileExecutionPlan(document);
             for (const auto& node : plan.nodes) {
-                const auto assessment = assessNodeStability(node, plan.initialStates, *activeGlobalTimeStep);
+                const auto assessment = assessNodeStability(node, plan.initialStates, *activeGlobalTimeStep, plan.algebraicStateIndexes);
                 if (!assessment) continue;
                 const auto nodeId = std::to_string(assessment->nodeId);
                 if (!assessment->stable) {

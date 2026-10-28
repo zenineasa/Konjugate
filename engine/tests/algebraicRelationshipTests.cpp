@@ -157,6 +157,41 @@ void aSemiImplicitNodeUpdatesEachStateFromTheOnesUpdatedBeforeIt() {
     require(energy(semiStates) < 0.6, "Semi-implicit Euler's energy should stay near 0.5.");
 }
 
+// A relationship whose equations come before and after another's: P sets B.y = e (e = 2 x) and A.v = q + e, Q sets
+// A.q = 10 y between them. P's definition e is worked out once for the instant and kept; its second equation reads
+// A.q as Q settled it, not as it stood when P's first equation was reached.
+void aRelationshipsLaterEquationReadsWhatAnotherSettledSinceItsFirst() {
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 3},
+                                          {"id": 12, "name": "Q", "symbol": "q", "initialValue": 0},
+                                          {"id": 13, "name": "V", "symbol": "v", "initialValue": 0}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0}], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "P", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11},
+                         {"symbol": "q", "kind": "state", "role": "source", "nodeId": 1, "stateId": 12}],
+            "definitions": [{"symbol": "e", "mathJson": ["Multiply", 2, "x"]}],
+            "outputs": [{"role": "source", "stateId": 13, "mathJson": ["Add", "q", "e"], "setsValue": true},
+                        {"role": "target", "stateId": 21, "mathJson": "e", "setsValue": true}]}},
+        {"id": 6, "name": "Q", "directionality": "directed", "source": {"nodeId": 2}, "target": {"nodeId": 1}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "y", "kind": "state", "role": "source", "nodeId": 2, "stateId": 21}],
+            "outputs": [{"role": "target", "stateId": 12, "mathJson": ["Multiply", 10, "y"], "setsValue": true}]}}
+    ]})json");
+    require(konjugate::validateModel(document).valid, "Two relationships, one's equations either side of the other's, should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto states = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    require(at(21) == 6 && at(12) == 60, "B.y should be 2 x = 6 and A.q 10 y = 60.");
+    require(at(13) == 66, "A.v should be q + e = 60 + 6, reading q as Q settled it.");
+    // Again, from the states as they now stand: nothing is carried over from the instant before.
+    states.at(plan.stateIndexes.at(11)) = 4;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    require(at(21) == 8 && at(12) == 80 && at(13) == 88, "With x = 4, y, q and v should be 8, 80 and 88.");
+}
+
 void inverseTrigonometricAndHyperbolicFunctionsEvaluate() {
     const auto value = [](const std::string& mathJson) {
         const auto document = parse(std::string(R"json({"format": "konjugate", "version": 1, "nodes": [)json") + chainNodes + R"json(], "edges": [
@@ -184,6 +219,7 @@ int main() {
         theValidatorCatchesMalformedRelationshipsWithSeveralEquations();
         aSemiImplicitNodeUpdatesEachStateFromTheOnesUpdatedBeforeIt();
         inverseTrigonometricAndHyperbolicFunctionsEvaluate();
+        aRelationshipsLaterEquationReadsWhatAnotherSettledSinceItsFirst();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

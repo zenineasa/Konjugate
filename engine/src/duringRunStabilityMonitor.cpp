@@ -80,7 +80,7 @@ std::vector<DuringRunStabilityFinding> DuringRunStabilityMonitor::observeGlobalS
         spent += 1;
         const auto* node = findNode(plan_, nodeId);
         if (!node) continue;
-        const auto assessment = assessNodeStability(*node, synchronizedStates, globalTimeStep_);
+        const auto assessment = assessNodeStability(*node, synchronizedStates, globalTimeStep_, plan_.algebraicStateIndexes);
         if (assessment && !assessment->stable) {
             std::ostringstream message;
             message << "This node's growth trend was confirmed by a re-check of its current dynamics: amplification factor "

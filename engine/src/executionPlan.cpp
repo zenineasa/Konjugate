@@ -2,6 +2,8 @@
 
 #include "executionPlan.hpp"
 #include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <set>
 #include <chrono>
 #include <cmath>
@@ -30,11 +32,17 @@ EntityId idValue(const boost::property_tree::ptree& tree, const std::string& key
     return result;
 }
 
-double finiteNumber(const std::string& input) {
-    std::size_t consumed = 0;
-    const auto result = std::stod(input, &consumed);
-    if (consumed != input.size() || !std::isfinite(result)) throw std::runtime_error("Expression contains a non-finite number.");
-    return result;
+// Whether a leaf of an expression is a finite number, read whole and in range, without
+// throwing: a model has many symbols for every number, and an exception for each is slow to compile.
+bool readsAsFiniteNumber(const std::string& input, double& result) {
+    if (input.empty()) return false;
+    const char* begin = input.c_str();
+    char* end = nullptr;
+    errno = 0;
+    const auto value = std::strtod(begin, &end);
+    if (end == begin || end != begin + input.size() || errno == ERANGE || !std::isfinite(value)) return false;
+    result = value;
+    return true;
 }
 
 ExpressionOperation operationFromName(const std::string& name) {
@@ -80,10 +88,11 @@ CompiledExpression compileExpression(const boost::property_tree::ptree& tree) {
             expression.literal = tree.data() == "True" ? 1.0 : 0.0;
             return expression;
         }
-        try {
+        double number = 0;
+        if (readsAsFiniteNumber(tree.data(), number)) {
             expression.operation = ExpressionOperation::literal;
-            expression.literal = finiteNumber(tree.data());
-        } catch (...) {
+            expression.literal = number;
+        } else {
             expression.operation = ExpressionOperation::symbol;
             expression.symbol = tree.data();
         }
@@ -199,15 +208,16 @@ void bindExpressionSymbols(CompiledExpression& expression, const std::vector<Com
     for (auto& argument : expression.arguments) bindExpressionSymbols(argument, bindings);
 }
 
-// Binds an expression's symbols against a table of names (an algebraic relationship's bindings, then
-// its definitions), allowing only the first `visible` of them.
-void bindExpressionNames(CompiledExpression& expression, const std::vector<std::string>& names, std::size_t visible) {
+// Binds an expression's symbols against the names seen so far (an algebraic relationship's bindings, then the
+// definitions before it), each at its first place, by a hash, so a relationship with many definitions binds in linear
+// time.
+void bindExpressionNames(CompiledExpression& expression, const std::unordered_map<std::string, std::size_t>& names) {
     if (expression.operation == ExpressionOperation::symbol) {
-        const auto found = std::find(names.begin(), names.begin() + static_cast<std::ptrdiff_t>(visible), expression.symbol);
-        if (found == names.begin() + static_cast<std::ptrdiff_t>(visible)) throw std::runtime_error("Unknown executable symbol: " + expression.symbol + ".");
-        expression.symbolIndex = static_cast<std::size_t>(std::distance(names.begin(), found));
+        const auto found = names.find(expression.symbol);
+        if (found == names.end()) throw std::runtime_error("Unknown executable symbol: " + expression.symbol + ".");
+        expression.symbolIndex = found->second;
     }
-    for (auto& argument : expression.arguments) bindExpressionNames(argument, names, visible);
+    for (auto& argument : expression.arguments) bindExpressionNames(argument, names);
 }
 
 void collectSymbolIndexes(const CompiledExpression& expression, std::set<std::size_t>& indexes) {
@@ -367,25 +377,28 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
         if (found == relationship.parameters.end()) throw std::runtime_error("An executable parameter binding is unresolved.");
         binding.parameterIndex = static_cast<std::size_t>(std::distance(relationship.parameters.begin(), found));
     }
-    std::vector<std::string> names;
-    for (const auto& binding : relationship.bindings) names.push_back(binding.symbol);
+    std::unordered_map<std::string, std::size_t> names;
+    std::size_t nameCount = 0;
+    for (const auto& binding : relationship.bindings) names.emplace(binding.symbol, nameCount++);
     if (const auto definitions = edge.get_child_optional("equationModel.definitions")) {
         for (const auto& definitionItem : *definitions) {
             auto expression = compileExpression(definitionItem.second.get_child("mathJson"));
             // A definition reads the bindings and the definitions before it.
-            bindExpressionNames(expression, names, names.size());
-            names.push_back(value(definitionItem.second, "symbol"));
+            bindExpressionNames(expression, names);
+            names.emplace(value(definitionItem.second, "symbol"), nameCount++);
             relationship.definitions.push_back(std::move(expression));
         }
     }
     const auto bindingCount = relationship.bindings.size();
     // The definitions each definition needs, directly or through others.
     std::vector<std::set<std::size_t>> needs(relationship.definitions.size());
+    // And the bindings each reads itself.
+    std::vector<std::vector<std::size_t>> definitionReads(relationship.definitions.size());
     for (std::size_t index = 0; index < relationship.definitions.size(); ++index) {
         std::set<std::size_t> symbols;
         collectSymbolIndexes(relationship.definitions[index], symbols);
         for (const auto symbol : symbols) {
-            if (symbol < bindingCount) continue;
+            if (symbol < bindingCount) { definitionReads[index].push_back(symbol); continue; }
             const auto definition = symbol - bindingCount;
             needs[index].insert(definition);
             needs[index].insert(needs[definition].begin(), needs[definition].end());
@@ -407,7 +420,7 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
         }
         compiled.outputStateIndex = found->second;
         compiled.expression = compileExpression(output.get_child("mathJson"));
-        bindExpressionNames(compiled.expression, names, names.size());
+        bindExpressionNames(compiled.expression, names);
         std::set<std::size_t> symbols;
         collectSymbolIndexes(compiled.expression, symbols);
         std::set<std::size_t> definitions;
@@ -417,6 +430,11 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
             definitions.insert(needs[symbol - bindingCount].begin(), needs[symbol - bindingCount].end());
         }
         compiled.definitions.assign(definitions.begin(), definitions.end());
+        // The bindings it reads, itself or through those definitions: the only ones refreshed for it.
+        std::set<std::size_t> reads;
+        for (const auto symbol : symbols) if (symbol < bindingCount) reads.insert(symbol);
+        for (const auto definition : definitions) reads.insert(definitionReads[definition].begin(), definitionReads[definition].end());
+        compiled.bindingReads.assign(reads.begin(), reads.end());
         plan.algebraicOutputs.push_back(std::move(compiled));
     }
     plan.algebraicRelationships.push_back(std::move(relationship));
@@ -1198,27 +1216,40 @@ void evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& stat
                                     const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
     if (plan.algebraicOutputs.empty()) return;
     for (const auto index : plan.algebraicStateIndexes) states.at(index) = 0;
-    // Each relationship's parameters, resolved once for this instant.
+    // Each relationship's parameters, resolved once for this instant; and its symbols, kept for the instant, so each
+    // definition is worked out once however many of its equations need it. That is sound because the outputs are in
+    // dependency order: when an equation needing a definition is reached, every state the definition reads is already
+    // settled, so it has the same value whichever of the relationship's equations first needs it. The state bindings
+    // an equation reads (itself or through its definitions) are read again for it, as one an earlier equation did not
+    // need may have been settled since.
     std::vector<std::vector<double>> parameterValues(plan.algebraicRelationships.size());
+    std::vector<std::vector<double>> symbolValues(plan.algebraicRelationships.size());
+    std::vector<std::vector<char>> worked(plan.algebraicRelationships.size());
     std::vector<bool> resolved(plan.algebraicRelationships.size(), false);
-    std::vector<double> symbols;
     for (const auto& output : plan.algebraicOutputs) {
         const auto& relationship = plan.algebraicRelationships[output.relationship];
+        auto& symbols = symbolValues[output.relationship];
+        auto& done = worked[output.relationship];
         if (!resolved[output.relationship]) {
             auto& values = parameterValues[output.relationship];
             for (const auto& parameter : relationship.parameters) values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, simulationTime));
+            symbols.assign(relationship.bindings.size() + relationship.definitions.size(), 0.0);
+            done.assign(relationship.definitions.size(), 0);
+            for (std::size_t index = 0; index < relationship.bindings.size(); ++index) {
+                const auto& binding = relationship.bindings[index];
+                if (binding.source == BindingSource::parameter) symbols[index] = values.at(binding.parameterIndex);
+                else if (binding.source == BindingSource::simulationTime) symbols[index] = simulationTime;
+            }
             resolved[output.relationship] = true;
         }
-        const auto& values = parameterValues[output.relationship];
-        symbols.assign(relationship.bindings.size() + relationship.definitions.size(), 0.0);
-        for (std::size_t index = 0; index < relationship.bindings.size(); ++index) {
+        for (const auto index : output.bindingReads) {
             const auto& binding = relationship.bindings[index];
-            if (binding.source == BindingSource::parameter) symbols[index] = values.at(binding.parameterIndex);
-            else if (binding.source == BindingSource::simulationTime) symbols[index] = simulationTime;
-            else symbols[index] = states.at(binding.valueIndex);
+            if (binding.source != BindingSource::parameter && binding.source != BindingSource::simulationTime) symbols[index] = states[binding.valueIndex];
         }
         for (const auto definition : output.definitions) {
+            if (done[definition]) continue;
             symbols[relationship.bindings.size() + definition] = relationship.definitions[definition].evaluate(symbols);
+            done[definition] = 1;
         }
         const auto result = output.expression.evaluate(symbols);
         if (!std::isfinite(result)) {

@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from '../src/shapeLibraryCatalog.mjs';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const shapesDir = join(currentDir, '..', 'assets', 'shapes');
@@ -100,4 +101,27 @@ test('bundled robotics shapes include all core manipulator, actuation, and mobil
         servoDomains.includes('robotics') && servoDomains.includes('electrical') && servoDomains.includes('mechanical'),
         'Servo actuator should belong to robotics, electrical, and mechanical domains'
     );
+});
+
+test('only STL, STEP and STP files are shapes, whatever the case of the extension', () => {
+    assert.equal(uploadedShapeFormat('Gear.STL'), 'stl');
+    assert.equal(uploadedShapeFormat('bracket.step'), 'step');
+    assert.equal(uploadedShapeFormat('bracket.stp'), 'stp');
+    assert.equal(uploadedShapeFormat('notes.txt'), null);
+    assert.equal(uploadedShapeFormat('stl'), null);
+});
+
+test('an upload is kept under a cleaned name, numbered when that name is taken', () => {
+    assert.equal(uploadedShapeFileName('Gear v2!.stl'), 'Gear v2.stl');
+    assert.equal(uploadedShapeFileName('C:\\parts\\bracket.STEP'), 'bracket.step');
+    assert.equal(uploadedShapeFileName('!!!.stl'), 'shape.stl');
+    const taken = new Set(['gear.stl', 'gear (1).stl']);
+    assert.equal(uploadedShapeFileName('gear.stl', (name) => taken.has(name)), 'gear (2).stl');
+    assert.throws(() => uploadedShapeFileName('notes.txt'), /Only STL, STEP, or STP/);
+});
+
+test('a kept upload is listed under the user-uploaded domain, named without its extension', () => {
+    assert.deepEqual(uploadedShapeEntry('gear (1).stl'), {
+        id: 'userUploaded/gear (1).stl', name: 'gear (1)', domains: ['userUploaded'], domain: 'userUploaded', format: 'stl', file: 'gear (1).stl', tags: [], source: 'user'
+    });
 });

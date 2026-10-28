@@ -1481,25 +1481,40 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 }
 [data-web-edition] .webEditionBanner {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
-    padding: 8px 14px;
-    background: var(--orange);
-    color: var(--surface);
+    padding: 10px 12px 10px 16px;
+    background: rgb(12 24 33 / 96%);
+    color: #b7c6cc;
+    border: 1px solid #253a46;
+    border-left: 3px solid var(--orange);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 40%);
+    backdrop-filter: blur(10px);
     font-size: 12px;
+    line-height: 1.55;
+    /* A floating notice over the empty canvas, centred below the toolstrip: a bar across the top covered the title bar, and with it
+       New, Open, Save, Examples and every other title-bar control, until it was dismissed. */
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 60;
+    top: calc(var(--title-height) + var(--tools-height) + 12px);
+    left: calc(var(--rail-width) + (100vw - var(--rail-width)) / 2);
+    transform: translateX(-50%);
+    width: min(680px, calc(100vw - var(--rail-width) - 32px));
+    z-index: 38;
+    /* It floats over canvas that people work on, so only its link and its dismiss button take clicks; everything else goes through to the canvas. */
+    pointer-events: none;
+}
+.webEditionBanner :is(a, button) {
+    pointer-events: auto;
 }
 .webEditionBanner span {
     flex: 1;
 }
 .webEditionBanner a {
-    color: inherit;
+    color: #74ddd3;
     font-weight: 600;
     text-decoration: underline;
+    text-underline-offset: 3px;
 }
 .webEditionBanner button {
     background: none;

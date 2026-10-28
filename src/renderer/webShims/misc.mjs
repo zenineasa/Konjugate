@@ -14,7 +14,7 @@
 // providerEditor.mjs.
 
 import { threads, version } from './buildInfo.mjs';
-import { normalizeShapeLibraryEntry } from '../../shapeLibraryCatalog.mjs';
+import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName } from '../../shapeLibraryCatalog.mjs';
 import { validateComponentTemplate } from '../../componentTemplate.mjs';
 import { createUserLibraryStore } from '../../userLibraryStore.mjs';
 import { bugReportUrl, formatBugReportEmail } from '../../bugReport.mjs';
@@ -86,22 +86,64 @@ export const modelClipboard = {
     read: () => clipboardFragment
 };
 
+// The shapes a person uploads are kept in the browser (IndexedDB), the counterpart of the desktop app's shapes folder in its user data;
+// what they are called and listed as is decided in src/shapeLibraryCatalog.mjs, the same code the desktop uses.
+const userShapeDatabaseName = 'konjugate-user-shape-library';
+
+function openUserShapeDatabase() {
+    return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') {
+            reject(new Error('This browser cannot keep shapes here (private browsing, or storage turned off).'));
+            return;
+        }
+        const request = indexedDB.open(userShapeDatabaseName, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('shapes', { keyPath: 'file' });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error ?? new Error('The browser could not open its shape storage.'));
+    });
+}
+
+async function userShapeRequest(mode, action) {
+    const database = await openUserShapeDatabase();
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction('shapes', mode);
+        const request = action(transaction.objectStore('shapes'));
+        transaction.oncomplete = () => { database.close(); resolve(request?.result); };
+        transaction.onerror = transaction.onabort = () => {
+            database.close();
+            reject(transaction.error ?? new Error('The browser could not store the shape.'));
+        };
+    });
+}
+
+// Kept shapes, or none when the browser will not keep any: the bundled ones must still list.
+const uploadedShapes = async () => (await userShapeRequest('readonly', (store) => store.getAll()).catch(() => [])) ?? [];
+
 async function shapeLibraryManifest() {
     const response = await fetch(new URL('../../assets/shapes/manifest.json', import.meta.url));
-    if (!response.ok) return [];
-    const parsed = await response.json();
-    return parsed.shapes.map(normalizeShapeLibraryEntry);
+    const bundled = response.ok ? (await response.json()).shapes.map(normalizeShapeLibraryEntry) : [];
+    return [...bundled, ...(await uploadedShapes()).map(({ file }) => uploadedShapeEntry(file))];
 }
 export const shapeLibrary = {
     list: () => shapeLibraryManifest(),
     load: async (id) => {
         const shape = (await shapeLibraryManifest()).find((candidate) => candidate.id === id);
         if (!shape) throw new Error('That shape is not available.');
+        if (shape.source === 'user') {
+            const kept = await userShapeRequest('readonly', (store) => store.get(shape.file));
+            if (!kept) throw new Error('That shape is not available.');
+            return { ...shape, data: new Uint8Array(kept.data) };
+        }
         const response = await fetch(new URL(`../../assets/shapes/${shape.file}`, import.meta.url));
         if (!response.ok) throw new Error('That shape is not available.');
         return { ...shape, data: new Uint8Array(await response.arrayBuffer()) };
     },
-    saveUpload: async () => ({ available: false })
+    saveUpload: async (fileName, data) => {
+        const taken = new Set((await uploadedShapes()).map(({ file }) => file));
+        const file = uploadedShapeFileName(fileName, (name) => taken.has(name));
+        await userShapeRequest('readwrite', (store) => store.put({ file, data: new Uint8Array(data) }));
+        return { id: `userUploaded/${file}` };
+    }
 };
 
 // The user's own templates live in the browser (IndexedDB), the counterpart of the desktop app's user data folder. What is

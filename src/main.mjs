@@ -58,7 +58,7 @@ import { registerLauncherHandlers } from './launcherHost.mjs';
 import { addonCacheDirectory } from './addonCache.mjs';
 import { createAddonSettingsStore } from './addonSettingsStore.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
-import { normalizeShapeLibraryEntry } from './shapeLibraryCatalog.mjs';
+import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from './shapeLibraryCatalog.mjs';
 
 if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
@@ -1385,7 +1385,6 @@ ipcMain.handle('projectOpenCausalInferenceInteractionHelp', (event) => {
 
 const shapesDir = join(currentDir, '..', 'assets', 'shapes');
 const userShapesDir = join(app.getPath('userData'), 'shapes');
-const shapeFormatPattern = /\.(stl|step|stp)$/i;
 
 // Mirrors discoverComponentLibrary's bundled-plus-writable-userData split: the bundled manifest
 // is hand-curated (name/domain/tags), while every user upload gets a self-describing entry
@@ -1396,36 +1395,16 @@ async function shapeLibraryManifest() {
         .map(normalizeShapeLibraryEntry);
     const uploadedEntries = await readdir(userShapesDir, { withFileTypes: true }).catch(() => []);
     const uploaded = uploadedEntries
-        .filter((entry) => entry.isFile() && shapeFormatPattern.test(entry.name))
-        .map((entry) => {
-            const format = entry.name.split('.').pop().toLowerCase();
-            return {
-                id: `userUploaded/${entry.name}`,
-                name: entry.name.slice(0, -(format.length + 1)),
-                domains: ['userUploaded'],
-                domain: 'userUploaded',
-                format,
-                file: entry.name,
-                tags: [],
-                source: 'user'
-            };
-        });
+        .filter((entry) => entry.isFile() && uploadedShapeFormat(entry.name))
+        .map((entry) => uploadedShapeEntry(entry.name));
     return [...bundled, ...uploaded];
 }
 
 ipcMain.handle('shapeLibraryList', async () => shapeLibraryManifest());
 
 ipcMain.handle('shapeLibrarySaveUpload', async (_event, { fileName, data }) => {
-    const format = fileName.split('.').pop()?.toLowerCase();
-    if (!['stl', 'step', 'stp'].includes(format)) {
-        throw new Error('Only STL, STEP, or STP files can be saved to the shape library.');
-    }
     await mkdir(userShapesDir, { recursive: true });
-    const stem = basename(fileName, `.${format}`).replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'shape';
-    let candidateName = `${stem}.${format}`;
-    for (let counter = 1; existsSync(join(userShapesDir, candidateName)); counter += 1) {
-        candidateName = `${stem} (${counter}).${format}`;
-    }
+    const candidateName = uploadedShapeFileName(fileName, (name) => existsSync(join(userShapesDir, name)));
     await writeFile(join(userShapesDir, candidateName), Buffer.from(data));
     return { id: `userUploaded/${candidateName}` };
 });

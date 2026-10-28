@@ -12,8 +12,8 @@
 // The file is a JSON array of { domain, model, family, style, request, expectedOutcome, history? }.
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { checkGeneratedRequests, reviewGeneratedRequests } from '../src/assistantEvalRequests.mjs';
-import { loadEvalBase, loadEvalCases } from '../src/assistantEvalFiles.mjs';
+import { checkGeneratedRequests, reviewGeneratedRequests } from '../evals/assistant/assistantEvalRequests.mjs';
+import { loadEvalBase, loadEvalCases } from '../evals/assistant/assistantEvalFiles.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => {

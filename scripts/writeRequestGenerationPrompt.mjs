@@ -8,8 +8,8 @@
 //
 // --domain and --count fill in the assignment at the end; without them the agent is told to ask for one.
 
-import { evalDomainModels, evalFamilies, evalStyles, heldOutModels } from '../src/assistantEvalRequests.mjs';
-import { loadEvalBase } from '../src/assistantEvalFiles.mjs';
+import { evalDomainModels, evalFamilies, evalStyles, heldOutModels } from '../evals/assistant/assistantEvalRequests.mjs';
+import { loadEvalBase } from '../evals/assistant/assistantEvalFiles.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => {

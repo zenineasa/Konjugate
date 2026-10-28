@@ -1,13 +1,13 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// Where the assistant evaluation finds its cases and the models they start from (see src/assistantEval.mjs).
+// Where the assistant evaluation finds its cases and the models they start from (see assistantEval.mjs).
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { blankEvalDocument } from './assistantEval.mjs';
-import { decodeProjectFile } from './projectFile.mjs';
+import { decodeProjectFile } from '../../src/projectFile.mjs';
 
-const root = join(import.meta.dirname, '..');
+const root = join(import.meta.dirname, '..', '..');
 export const evalCasesPath = join(root, 'evals', 'assistant', 'cases');
 
 // A path is one file or a directory of files, each `{ "cases": [...] }`; cases keep the order of their files.

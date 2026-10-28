@@ -3,7 +3,7 @@
 // Scores a model provider on the assistant's job: turn a request into a proposal that, applied to a model,
 // passes the host and native validators AND leaves the model the way the request asked. It goes through the same
 // registry and adapters as the app, so what it measures is what a user gets. Cases are in evals/assistant/cases/ (one file per domain);
-// the scoring is in src/assistantEval.mjs.
+// the scoring is in evals/assistant/assistantEval.mjs.
 //
 //   node scripts/evalAssistant.mjs <provider> <model> [--endpoint <url>] [--cases <id|family|domain|style>,...] [--cases-file <path>]
 //                                  [--repeat <n>] [--think true|false] [--timeout <seconds>] [--out <results.json>] [--no-native] [--verbose]
@@ -17,8 +17,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createAIProviderRegistry } from '../src/aiProviderRegistry.mjs';
 import { createRemoteAIProviders } from '../src/aiRemoteProviders.mjs';
-import { blankEvalDocument, runEvalCase, summarizeEvalResults } from '../src/assistantEval.mjs';
-import { loadEvalBase, loadEvalCases, loadReferenceProvider } from '../src/assistantEvalFiles.mjs';
+import { blankEvalDocument, runEvalCase, summarizeEvalResults } from '../evals/assistant/assistantEval.mjs';
+import { loadEvalBase, loadEvalCases, loadReferenceProvider } from '../evals/assistant/assistantEvalFiles.mjs';
 import { validateWithEngine } from '../src/engineAdapter.mjs';
 
 const root = join(import.meta.dirname, '..');

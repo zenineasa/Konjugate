@@ -16,7 +16,7 @@ const ignoredTopLevelDirectories = new Set([
     'tests',
     'docs',
     'packaging',
-    // The Featured feed and its images are fetched from the repository at run time, never bundled.
+    'evals',
     'welcome',
 ]);
 

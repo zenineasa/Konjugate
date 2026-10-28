@@ -6,7 +6,7 @@
 // Passing validation is necessary but not sufficient (a flipped edge or a wrong value validates), so a case
 // states what the model must look like afterwards, and that nothing it did not name changed.
 
-import { applyAssistantProposal, summarizeDocumentForAssistant } from './assistantOperations.mjs';
+import { applyAssistantProposal, summarizeDocumentForAssistant } from '../../src/assistantOperations.mjs';
 
 export const evalStages = Object.freeze(['generate', 'kind', 'apply', 'native', 'outcome']);
 

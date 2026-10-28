@@ -16,6 +16,7 @@ test('Electron Packager excludes build-only top-level directories', async () => 
         '.claude',
         'docs',
         'packaging',
+        'evals',
     ];
 
     for (const directory of excluded) {
@@ -62,6 +63,11 @@ test('Electron Packager excludes tests/ except the --interaction-test driver src
     ]) {
         assert.equal(shouldIgnorePackagePath(excludedPath), true);
     }
+});
+
+test('Electron Packager leaves the assistant evaluation harness out of the app', () => {
+    for (const evalPath of ['/evals/assistant/assistantEval.mjs', '/evals/assistant/cases/thermal.json', '/evals/assistant/reference.json']) assert.equal(shouldIgnorePackagePath(evalPath), true, evalPath);
+    for (const appPath of ['/src/assistantOperations.mjs', '/src/aiProviderRegistry.mjs', '/src/aiRemoteProviders.mjs']) assert.equal(shouldIgnorePackagePath(appPath), false, appPath);
 });
 
 test('Electron Packager leaves the Welcome feed out of the app, but keeps the bundled Welcome assets', () => {

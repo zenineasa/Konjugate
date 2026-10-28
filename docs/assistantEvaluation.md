@@ -44,7 +44,7 @@ Cases live in `evals/assistant/cases/`, one `<domain>.json` file of hand-written
 
 ### Tags
 
-The vocabulary is in `src/assistantEvalRequests.mjs`, and a test keeps every case inside it.
+The vocabulary is in `evals/assistant/assistantEvalRequests.mjs`, and a test keeps every case inside it.
 
 * **Family** (what is asked): `addNode`, `addState`, `addParameter`, `multiStep`, `setEquation`, `updateValue`, `updateParameter`, `updateNode`, `updateEdge`, `enableDisable`, `remove`, `units`, `reference` (picking among similar things by name), `clarification` and `history`.
 * **Domain** (the field): the eight above. `evalDomainModels` says which models belong to each.
@@ -129,6 +129,10 @@ A pool entry is only half of a training example. The answers still have to be pr
 ## Tests
 
 `tests/assistantEval.test.mjs` covers the scoring (every assertion, untouched-entity comparison, the conduct counts), that every case is inside the vocabulary and starts from a model of its domain, the uniqueness checks above, the reference replay, and the intake checks. `tests/aiRemoteProviders.test.mjs` covers the Ollama settings and the numeric reference handling.
+
+## Where it lives and what ships
+
+The harness code (`assistantEval.mjs`, `assistantEvalFiles.mjs`, `assistantEvalRequests.mjs`) sits in `evals/assistant/` beside its data, and imports from `src/` but is never imported by it. The packaged app leaves the whole `evals/` directory out (see `scripts/packageElectron.mjs`, with a test in `tests/packagingIgnore.test.mjs`), as it does `docs/` and `tests/`. The command-line scripts in `scripts/` are not excluded from the package, as is the case for every script there.
 
 ## Known limits
 

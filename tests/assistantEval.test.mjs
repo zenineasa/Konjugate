@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAIProviderRegistry } from '../src/aiProviderRegistry.mjs';
-import { checkOutcome, runEvalCase, summarizeEvalResults, untouchedChanges } from '../src/assistantEval.mjs';
-import { loadEvalBase, loadEvalCases, loadReferenceProvider } from '../src/assistantEvalFiles.mjs';
-import { checkGeneratedRequests, evalDomainModels, evalFamilies, evalStyles, heldOutModels, reviewGeneratedRequests } from '../src/assistantEvalRequests.mjs';
+import { checkOutcome, runEvalCase, summarizeEvalResults, untouchedChanges } from '../evals/assistant/assistantEval.mjs';
+import { loadEvalBase, loadEvalCases, loadReferenceProvider } from '../evals/assistant/assistantEvalFiles.mjs';
+import { checkGeneratedRequests, evalDomainModels, evalFamilies, evalStyles, heldOutModels, reviewGeneratedRequests } from '../evals/assistant/assistantEvalRequests.mjs';
 
 const model = () => ({
     format: 'konjugate', version: 1, metadata: { units: 'SI' },

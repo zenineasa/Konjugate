@@ -51,4 +51,4 @@ If Konjugate's behavior changes in a way that affects this policy, this file wil
 
 ## Contact
 
-Questions or concerns can be raised by opening an issue at https://github.com/zenineasa/Konjugate/issues.
+Questions or concerns can be raised by opening an issue at https://github.com/zenineasa/Konjugate/issues, or by email to info@konjugate.com. Konjugate's Help & feedback dialog shows that address and a message with your Konjugate version and system details already written in, for you to copy into an email yourself: Konjugate sends nothing, and does not open your email program.

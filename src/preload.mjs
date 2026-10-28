@@ -56,6 +56,14 @@ contextBridge.exposeInMainWorld('tour', {
     recordCompleted: () => ipcRenderer.invoke('tourRecordCompleted')
 });
 
+// "Help & feedback": the text of the email a person can send us (see bugReport.mjs), GitHub's pre-filled report, and main telling this
+// window to show the dialog (the Welcome window's button).
+contextBridge.exposeInMainWorld('helpFeedback', {
+    details: () => ipcRenderer.invoke('helpFeedbackDetails'),
+    openGitHub: () => ipcRenderer.invoke('appOpenBugReport'),
+    onOpen: (callback) => ipcRenderer.on('helpFeedbackOpen', () => callback())
+});
+
 contextBridge.exposeInMainWorld('diagnostics', {
     list: () => ipcRenderer.invoke('diagnosticsList'),
     onIssue: (callback) => {

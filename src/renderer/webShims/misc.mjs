@@ -17,6 +17,8 @@ import { threads, version } from './buildInfo.mjs';
 import { normalizeShapeLibraryEntry } from '../../shapeLibraryCatalog.mjs';
 import { validateComponentTemplate } from '../../componentTemplate.mjs';
 import { createUserLibraryStore } from '../../userLibraryStore.mjs';
+import { bugReportUrl, formatBugReportEmail } from '../../bugReport.mjs';
+import { welcomeLinks } from '../../welcomeModel.mjs';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -63,6 +65,14 @@ export const tour = {
 export const applicationInfo = {
     get: async () => ({ version }),
     openWelcome: async () => { tourStarters.forEach((start) => start()); }
+};
+
+// Help & feedback (src/bugReport.mjs). The web edition reports its browser, not an installer or Electron, and opens GitHub in a new tab.
+const webBugReportDetails = () => ({ version, browser: navigator.userAgent });
+export const helpFeedback = {
+    details: async () => formatBugReportEmail(webBugReportDetails()),
+    openGitHub: async () => { window.open(bugReportUrl(welcomeLinks.reportProblem, webBugReportDetails()), '_blank', 'noopener'); },
+    onOpen: () => {}
 };
 
 export const diagnostics = {

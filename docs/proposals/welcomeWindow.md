@@ -32,7 +32,7 @@ From top to bottom, with conditional parts only when they apply:
 5. **Learn Konjugate: the On-Ramp** — the six tutorial episodes (below). Permanent.
 6. **More to watch** — other videos, newest first (below).
 7. **Recent from the blog.**
-8. **Community & help:** Discord, Documentation, and **Report a problem**, which opens GitHub's new-issue page with the report's sections and the system details (Konjugate version, operating system, install source, Electron and Chromium versions) already filled in through the page's URL parameters, so a report does not start with "which version?".
+8. **Community & help:** Discord, Documentation, and **Help & feedback**, which closes the Welcome window and opens the Help & feedback dialog in the project window (the same one the button at the bottom of the left rail opens). The dialog offers two ways to report a problem, both with the report's sections and the system details (Konjugate version, operating system, install source, Electron and Chromium versions) already filled in so a report does not start with "which version?": by email, where it shows info@konjugate.com and the message in a text box with buttons to copy the address and to copy everything (no mailto: link, since most people have no mail program set up for one), and on GitHub, which opens the new-issue page with the details in its URL parameters.
 9. **A footer:** one line about Konjugate, then "Mozilla Public License 2.0 · © 2026 Zenin Easa Panthakkalakath". The three "About" paragraphs shrink to that one line; the full text stays in the ReadMe.
 
 ## The On-Ramp series is permanent

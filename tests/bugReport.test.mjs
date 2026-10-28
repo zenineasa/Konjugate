@@ -3,7 +3,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { bugReportSections, bugReportUrl, formatBugReportBody, formatBugReportDetails } from '../src/bugReport.mjs';
+import {
+    bugReportEmailAddress, bugReportEmailPlaceholder, bugReportSections, bugReportUrl, formatBugReportBody, formatBugReportDetails, formatBugReportEmail, formatBugReportEmailBlock
+} from '../src/bugReport.mjs';
 
 test('the details name the version, install source, operating system and Electron', () => {
     assert.equal(formatBugReportDetails({ version: '1.1.8', source: 'store', platform: 'win32', arch: 'x64', osRelease: '10.0.26100', electron: '43.2.0', chromium: '140.0.1' }),
@@ -44,4 +46,38 @@ test('the URL opens the new-issue page with the whole body encoded in it', () =>
 test('the GitHub issue template has the same headings as the body the app writes', async () => {
     const template = await readFile(new URL('../.github/ISSUE_TEMPLATE/bug_report.md', import.meta.url), 'utf8');
     assert.deepEqual([...template.matchAll(/^## (.+)$/gm)].map((match) => match[1]), bugReportSections);
+});
+
+test('the web edition reports its browser, not an installer or Electron', () => {
+    assert.equal(formatBugReportDetails({ version: 'dev', browser: 'Mozilla/5.0 (X11; Linux x86_64)' }), 'Konjugate: dev (web edition)\nBrowser: Mozilla/5.0 (X11; Linux x86_64)');
+    assert.equal(formatBugReportDetails({ browser: '' }), 'Konjugate: unknown (web edition)\nBrowser: unknown');
+});
+
+const details = { version: '1.2.1', source: 'homebrew', platform: 'darwin', arch: 'arm64', osRelease: '25.0.0', electron: '43.2.0', chromium: '140.0.1' };
+
+test('the email is plain text with every section, in the GitHub report\'s order, and the details in it', () => {
+    const { address, subject, body } = formatBugReportEmail(details);
+    assert.equal(address, 'info@konjugate.com');
+    assert.equal(address, bugReportEmailAddress);
+    assert.equal(subject, 'Konjugate problem report (1.2.1)');
+    assert.ok(!/#|<!--/.test(body), 'no Markdown headings or HTML comments in an email');
+    const positions = bugReportSections.map((heading) => body.indexOf(`${heading}\n`));
+    assert.ok(positions.every((position) => position >= 0), body);
+    assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+    assert.ok(body.endsWith(`System details\n${formatBugReportDetails(details)}\n`));
+});
+
+test('an email with no details is still written, and says "unknown" rather than "undefined"', () => {
+    const { subject, body } = formatBugReportEmail();
+    assert.equal(subject, 'Konjugate problem report (unknown)');
+    assert.ok(!/undefined|null/.test(body), body);
+});
+
+test('the email starts with a placeholder the dialog can find, under "What happened"', () => {
+    assert.ok(formatBugReportEmail(details).body.startsWith(`What happened\n${bugReportEmailPlaceholder}\n`));
+});
+
+test('everything is one block: who it goes to, the subject, then the message', () => {
+    const email = formatBugReportEmail(details);
+    assert.equal(formatBugReportEmailBlock(email), `To: info@konjugate.com\nSubject: Konjugate problem report (1.2.1)\n\n${email.body}`);
 });

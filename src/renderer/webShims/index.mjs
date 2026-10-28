@@ -12,7 +12,7 @@ import projectFiles, { setPendingDroppedFile } from './projectFiles.mjs';
 import providerEditor from './providerEditor.mjs';
 import {
     addons, aiProviders, applicationInfo, componentLibrary, diagnostics, extensions,
-    modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
+    helpFeedback, modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
 } from './misc.mjs';
 
 window.engine = engine;
@@ -21,6 +21,7 @@ window.uiZoom = uiZoom;
 window.windowControls = windowControls;
 window.applicationInfo = applicationInfo;
 window.diagnostics = diagnostics;
+window.helpFeedback = helpFeedback;
 window.extensions = extensions;
 window.shapeLibrary = shapeLibrary;
 window.componentLibrary = componentLibrary;

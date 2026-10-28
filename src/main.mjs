@@ -33,7 +33,7 @@ import { createProviderToolchainStore, providerExecutionModes } from './provider
 import { installSource } from './updateCheck.mjs';
 import { createUpdateCoordinator } from './updateCoordinator.mjs';
 import { createUpdateSkipStore } from './updateSkipStore.mjs';
-import { bugReportUrl } from './bugReport.mjs';
+import { bugReportUrl, formatBugReportEmail } from './bugReport.mjs';
 import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } from './aiRequestTiming.mjs';
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
@@ -689,11 +689,28 @@ ipcMain.handle('welcomeOpenFeatured', (_event, id) => {
     shell.openExternal(item.url);
     return true;
 });
+const bugReportDetails = () => ({
+    version: app.getVersion(), source: installSource(), platform: process.platform, arch: process.arch,
+    osRelease: osRelease(), electron: process.versions.electron, chromium: process.versions.chrome
+});
+// "Help & feedback": the rail button's dialog asks for the email's text and for GitHub's page to be opened; the Welcome window's button
+// closes it and asks the project window it was opened from to show that same dialog (like the tour's card, above), so there is one
+// place that explains the two ways to report a problem. Without a project window to show it, it opens the GitHub report as it always did.
 ipcMain.handle('appOpenBugReport', () => {
-    shell.openExternal(bugReportUrl(welcomeLinks.reportProblem, {
-        version: app.getVersion(), source: installSource(), platform: process.platform, arch: process.arch,
-        osRelease: osRelease(), electron: process.versions.electron, chromium: process.versions.chrome
-    }));
+    shell.openExternal(bugReportUrl(welcomeLinks.reportProblem, bugReportDetails()));
+    return true;
+});
+ipcMain.handle('helpFeedbackDetails', () => formatBugReportEmail(bugReportDetails()));
+ipcMain.handle('appOpenHelpFeedback', (event) => {
+    const guideWindow = BrowserWindow.fromWebContents(event.sender);
+    const projectWindow = [...projectWindows].find((window) => projectWindowState.get(window)?.exampleGuideWindow === guideWindow);
+    if (!projectWindow || projectWindow.isDestroyed()) {
+        shell.openExternal(bugReportUrl(welcomeLinks.reportProblem, bugReportDetails()));
+        return true;
+    }
+    guideWindow.close();
+    projectWindow.focus();
+    projectWindow.webContents.send('helpFeedbackOpen');
     return true;
 });
 

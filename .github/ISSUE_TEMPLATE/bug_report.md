@@ -16,4 +16,4 @@ labels: bug
 
 ## System details
 
-<!-- In Konjugate, Welcome window > Report a problem opens this form with the details below filled in. Otherwise: Konjugate version, how you installed it, and your operating system. -->
+<!-- In Konjugate, Help & feedback (the bottom button of the left rail, or the Welcome window) > Report on GitHub opens this form with the details below filled in. Otherwise: Konjugate version, how you installed it, and your operating system. -->

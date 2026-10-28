@@ -10,6 +10,7 @@ import 'mathlive';
 import { DocumentController } from './documentController.mjs';
 import { createTour } from './tour.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
+import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
@@ -11536,6 +11537,80 @@ $('#extensionsClose').addEventListener('click', () => $('#extensionsDialog').clo
 
 $('#newWindowButton').addEventListener('click', () => window.windowControls.newWindow());
 $('#loadButton').addEventListener('click', openProject);
+// ---- Help & feedback: report a problem by email or on GitHub (src/bugReport.mjs) ----------------------------------------------------
+// The email is shown for the person to copy, not opened with a mailto: link: most people have no mail program set up for one. The message
+// is the same text GitHub's report starts from, with the system details already in it, and the person fills in the rest before copying.
+const helpFeedbackCopyTimers = new Map();
+
+// The button itself says it worked ("Copied ✓", for a couple of seconds), and a screen reader is told through the live region.
+function markHelpFeedbackCopied(button, text) {
+    button.textContent = text;
+    button.classList.add('copied');
+    $('#helpFeedbackCopied').textContent = text;
+    clearTimeout(helpFeedbackCopyTimers.get(button));
+    helpFeedbackCopyTimers.set(button, setTimeout(() => {
+        button.textContent = button.dataset.copyLabel;
+        button.classList.remove('copied');
+        $('#helpFeedbackCopied').textContent = '';
+    }, 2200));
+}
+
+// Copies to the clipboard. Where the browser refuses (no permission, or an insecure page), the text is selected instead, so Ctrl/Cmd+C finishes the job.
+async function copyHelpFeedbackText(button, text, field) {
+    try {
+        await navigator.clipboard.writeText(text);
+        markHelpFeedbackCopied(button, 'Copied ✓');
+    } catch {
+        field.focus();
+        field.select();
+        markHelpFeedbackCopied(button, `Press ${isMac ? '⌘' : 'Ctrl'}+C`);
+    }
+}
+
+// A message still carrying the placeholder has not been written yet. That is said, once copied, and never stops the copy.
+function updateHelpFeedbackNudge(copying) {
+    const unwritten = $('#helpFeedbackMessage').value.includes(bugReportEmailPlaceholder);
+    $('#helpFeedbackNudge').hidden = !(unwritten && copying);
+}
+
+async function openHelpFeedbackDialog() {
+    let details;
+    try {
+        details = await window.helpFeedback.details();
+    } catch (error) {
+        console.error('Help & feedback details could not be loaded.', error);
+        return;
+    }
+    $('#helpFeedbackAddress').value = details.address;
+    $('#helpFeedbackSubject').value = details.subject;
+    const message = $('#helpFeedbackMessage');
+    message.value = details.body;
+    $('#helpFeedbackNudge').hidden = true;
+    $('#helpFeedbackDialog').showModal();
+    // The placeholder is selected, so the first thing typed replaces it.
+    message.focus();
+    const start = details.body.indexOf(bugReportEmailPlaceholder);
+    if (start >= 0) message.setSelectionRange(start, start + bugReportEmailPlaceholder.length);
+}
+
+$('#helpFeedbackButton').addEventListener('click', openHelpFeedbackDialog);
+window.helpFeedback.onOpen(openHelpFeedbackDialog);
+$('#helpFeedbackMessage').addEventListener('input', () => updateHelpFeedbackNudge(false));
+$('#helpFeedbackCopyAddress').addEventListener('click', (event) => copyHelpFeedbackText(event.currentTarget, $('#helpFeedbackAddress').value, $('#helpFeedbackAddress')));
+$('#helpFeedbackCopySubject').addEventListener('click', (event) => copyHelpFeedbackText(event.currentTarget, $('#helpFeedbackSubject').value, $('#helpFeedbackSubject')));
+$('#helpFeedbackCopyMessage').addEventListener('click', (event) => {
+    updateHelpFeedbackNudge(true);
+    copyHelpFeedbackText(event.currentTarget, $('#helpFeedbackMessage').value, $('#helpFeedbackMessage'));
+});
+$('#helpFeedbackCopyEverything').addEventListener('click', (event) => {
+    updateHelpFeedbackNudge(true);
+    copyHelpFeedbackText(event.currentTarget, formatBugReportEmailBlock({
+        address: $('#helpFeedbackAddress').value, subject: $('#helpFeedbackSubject').value, body: $('#helpFeedbackMessage').value
+    }), $('#helpFeedbackMessage'));
+});
+$('#helpFeedbackOpenGitHub').addEventListener('click', () => window.helpFeedback.openGitHub());
+$('#helpFeedbackClose').addEventListener('click', () => $('#helpFeedbackDialog').close());
+
 $('#extensionsButton').addEventListener('click', openExtensionsDialog);
 $('#saveButton').addEventListener('click', () => saveProject());
 $('#saveEncryptedButton').addEventListener('click', async (event) => {

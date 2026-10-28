@@ -409,6 +409,50 @@
         </form>
     </dialog>
 
+    <!-- Help & feedback: the two ways to report a problem, GitHub first as the preferred one (the report lands where it can be tracked and
+         others can add to it). Email is shown, not opened with a mailto: link, because most people have no mail program set up for one;
+         the message is the same text GitHub's report starts from (src/bugReport.mjs). Styled after the Konjugate website's install window. -->
+    <dialog id="helpFeedbackDialog" class="passwordDialog helpFeedbackDialog" aria-labelledby="helpFeedbackTitle">
+        <form method="dialog">
+            <button id="helpFeedbackClose" class="helpFeedbackCloseButton" type="button" aria-label="Close">×</button>
+            <span class="contextKicker">Help &amp; feedback</span>
+            <h1 id="helpFeedbackTitle">Report a problem</h1>
+            <p class="helpFeedbackIntro">Tell us what went wrong. Nothing is sent from here: you send the report yourself, in whichever way suits you.</p>
+            <section class="helpFeedbackOption helpFeedbackPreferred">
+                <h2>On GitHub <span class="helpFeedbackBadge">Preferred</span></h2>
+                <p>The best way: your report is kept where we can track it and others can add to it. It is public and needs a free GitHub account. It opens with your system details already filled in.</p>
+                <button id="helpFeedbackOpenGitHub" class="helpFeedbackPrimary" type="button">Report on GitHub <span aria-hidden="true">↗</span></button>
+            </section>
+            <section class="helpFeedbackOption">
+                <h2>By email</h2>
+                <p>No GitHub account? Write to us from your own email: copy each part into a new message.</p>
+                <div class="helpFeedbackField">
+                    <span class="helpFeedbackFieldLabel">To</span>
+                    <div class="helpFeedbackLine">
+                        <input id="helpFeedbackAddress" type="text" readonly aria-label="Email address">
+                        <button id="helpFeedbackCopyAddress" class="helpFeedbackCopy" type="button" data-copy-label="Copy">Copy</button>
+                    </div>
+                </div>
+                <div class="helpFeedbackField">
+                    <span class="helpFeedbackFieldLabel">Subject</span>
+                    <div class="helpFeedbackLine">
+                        <input id="helpFeedbackSubject" type="text" readonly aria-label="Suggested subject">
+                        <button id="helpFeedbackCopySubject" class="helpFeedbackCopy" type="button" data-copy-label="Copy">Copy</button>
+                    </div>
+                </div>
+                <div class="helpFeedbackField">
+                    <span class="helpFeedbackFieldLabel">Message <small>Say what happened first, then copy</small></span>
+                    <div class="helpFeedbackLine helpFeedbackMessageLine">
+                        <textarea id="helpFeedbackMessage" rows="10" spellcheck="true" aria-label="Message"></textarea>
+                        <button id="helpFeedbackCopyMessage" class="helpFeedbackCopy" type="button" data-copy-label="Copy">Copy</button>
+                    </div>
+                    <p id="helpFeedbackNudge" class="helpFeedbackNudge" role="status" hidden>You haven't said what happened yet. It is copied anyway, but a line or two helps us a lot.</p>
+                </div>
+                <p class="helpFeedbackAll"><button id="helpFeedbackCopyEverything" class="helpFeedbackLink" type="button" data-copy-label="Copy all as one block">Copy all as one block</button> <span id="helpFeedbackCopied" class="helpFeedbackAnnounce" role="status" aria-live="polite"></span></p>
+            </section>
+        </form>
+    </dialog>
+
     <dialog id="runLaunchDialog" class="passwordDialog runConfigurationDialog">
         <form method="dialog">
             <span class="contextKicker">Simulation</span>
@@ -537,6 +581,10 @@
         </button>
         <span class="railSeparator" aria-hidden="true"></span>
         <div id="addonRailButtons" class="addonRailButtons"></div>
+        <button id="helpFeedbackButton" class="toolButton railTool" type="button" aria-label="Help and feedback" aria-haspopup="dialog">
+            <span class="railToolSymbol"><svg class="toolSvg" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 3.5h11v7h-5l-3 2.5v-2.5h-3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M6 6.2h4M6 8.2h2.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span>
+            <span class="railToolLabel">Help &amp; feedback</span>
+        </button>
     </nav>
 
     <main id="canvas" class="canvas" data-tool="select">

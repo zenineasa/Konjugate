@@ -15,6 +15,7 @@ okf_version: "0.2"
 * [Protobuf Architecture](protobufArchitecture.md) - IPC protocol and streaming transport between the desktop application and native simulation engine
 * [Engine Job Protocol](jobProtocol.md) - Live control and event streaming contract for engine runs
 * [AI Provider Architecture](aiProviderArchitecture.md) - Architecture for local (Ollama) and hosted (OpenAI, Gemini, NIM, HuggingFace) model providers
+* [Assistant Model Findings](assistantModelFindings.md) - What the harness showed about small untuned local models, above all how they keep asking for more information on clear requests, with the runs, numbers, examples and caveats
 * [Assistant Evaluation](assistantEvaluation.md) - Harness that scores a model on the assistant's job: cases, assertions, reference answers, the error-direction report, request pools and commands
 * [Parallel Execution](parallelExecution.md) - Native execution backends: serial loop, shared thread pool, and communication-aware partitions
 * [Provider Execution Transports](providerExecution.md) - Runtime execution and IPC options for user-defined C++ and Python providers

@@ -37,7 +37,10 @@ test('Ollama adapter fixes sampling and widens the context', async () => {
         return jsonResponse({ message: { content: '{}' } });
     });
     await adapter.generateProposal(input('ollama'));
-    assert.deepEqual(body.options, { temperature: 0, num_ctx: 8192 });
+    assert.deepEqual(body.options, { temperature: 0, num_ctx: 8192, num_predict: 4096 });
+    assert.equal('think' in body, false);
+    await adapter.generateProposal(input('ollama', { configuration: { provider: 'ollama', endpoint: '', model: 'test-model', think: false } }));
+    assert.equal(body.think, false);
 }); 
 
 test('A quoted numeric entity id is read as the id, and a temporary ref is left alone', async () => {

@@ -47,13 +47,13 @@ What this says:
 
 ### Smaller models
 
-Qwen3.5 0.8B, 2B and 4B (released this year under Apache 2.0, available through Ollama) are being measured the same way. Results are added to the table below as they come in; none has been fine-tuned.
+Qwen3.5 0.8B, 2B and 4B (released this year under Apache 2.0, available through Ollama) were measured the same way, untuned and with thinking off. Smaller means less capable, and none acts on a clear request any more readily than the 4B baseline: all of them ask about three in four clear requests or more, and the 0.8B never proposed at all. A newer 4B is no better than the older one here. None has been fine-tuned, which is the point of the exercise. Thinking on was not measured. The full results, examples of the needless questions and how they differ between models are in [Assistant model findings](../assistantModelFindings.md).
 
 | Model | Size on disk | Notes |
 |---|---|---|
 | Qwen3.5 0.8B | 1.2 GB | untuned, thinking off: 24 of 70 (34%). It answered all 70 cases with a question and never produced a proposal, so it asked when it should have acted on 28 of 28 and, trivially, never acted when it should have asked. About 2 seconds per case, against 9 for the 4B |
-| Qwen3.5 2B | 3.1 GB | being measured |
-| Qwen3.5 4B | about 3.5 GB | not yet downloaded |
+| Qwen3.5 2B | 3.1 GB | untuned, thinking off: 33 of 70 (47%). Asked when it should have acted on 24 of 28 (86%), acted when it should have asked on 1 of 42, one valid but wrong edit. Four cases failed at generation (three temporary references that were not lower camel case, which repair did not fix, and one that timed out). About 8 seconds per case |
+| Qwen3.5 4B | about 3.5 GB | untuned, thinking off: 43 of 70 (61%), the same as Qwen3-4B-Instruct-2507. Asked when it should have acted on 21 of 28 (75%), acted when it should have asked on 2 of 42 (5%), no valid but wrong edits. About 20 seconds per case, twice the older 4B |
 
 Other candidates noted but not yet tried: Qwen3 1.7B and 0.6B (Apache 2.0, text-only), Gemma 4 E2B (2.3B effective parameters, Apache 2.0), Granite 3.3 2B and SmolLM3 3B. Check each model's licence on its model card before relying on it.
 

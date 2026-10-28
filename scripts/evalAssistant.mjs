@@ -6,7 +6,7 @@
 // the scoring is in src/assistantEval.mjs.
 //
 //   node scripts/evalAssistant.mjs <provider> <model> [--endpoint <url>] [--cases <id|family|domain|style>,...] [--cases-file <path>]
-//                                  [--repeat <n>] [--out <results.json>] [--no-native] [--verbose]
+//                                  [--repeat <n>] [--think true|false] [--timeout <seconds>] [--out <results.json>] [--no-native] [--verbose]
 //   node scripts/evalAssistant.mjs --compare <before.json> <after.json>
 //
 // <provider> is one of: reference (replays the recorded known-good answers, to check the harness and the cases), localDemonstration, ollama, openAi, nvidia, huggingFace, gemini (the key, if one is needed, is
@@ -100,6 +100,8 @@ const repeat = Number.parseInt(flag('--repeat') ?? '1', 10);
 const outPath = flag('--out');
 const skipNative = flag('--no-native', false);
 const verbose = flag('--verbose', false);
+const timeoutSeconds = Number.parseFloat(flag('--timeout') ?? '240');   // per case, so one runaway generation cannot stall a run
+const think = flag('--think');   // true | false: Ollama's `think` for models that can reason; unset leaves the model's default
 const [provider, model = ''] = args;
 const knownProviders = ['reference', 'localDemonstration', 'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'];
 if (!knownProviders.includes(provider) || (!['reference', 'localDemonstration'].includes(provider) && !model) || !(repeat >= 1)) {
@@ -143,7 +145,7 @@ async function baseFor(modelId) {
     return bases.get(modelId);
 }
 
-const configuration = { provider, model, endpoint };
+const configuration = { provider, model, endpoint, ...(think === 'true' || think === 'false' ? { think: think === 'true' } : {}) };
 console.log(`Provider ${provider}${model ? `, model ${model}` : ''}; ${cases.length} case(s)${repeat > 1 ? ` x ${repeat}` : ''}.\n`);
 const results = [];
 for (let round = 1; round <= repeat; round += 1) {
@@ -151,7 +153,8 @@ for (let round = 1; round <= repeat; round += 1) {
         const { document, baselineErrors } = await baseFor(evalCase.model);
         const result = await runEvalCase(evalCase, {
             base: document, registry, configuration, credential, baselineErrors,
-            validateNative: nativeAvailable ? nativeValidator : null
+            validateNative: nativeAvailable ? nativeValidator : null,
+            signal: AbortSignal.timeout(timeoutSeconds * 1000)
         });
         results.push({ ...result, round });
         console.log(`${result.passed ? 'pass' : 'FAIL'}  ${evalCase.id.padEnd(26)} ${String(result.attempts)} attempt(s)  ${result.seconds.toFixed(1).padStart(6)} s${result.passed ? '' : `  [${result.stage}]`}`);

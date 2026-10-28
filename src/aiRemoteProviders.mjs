@@ -222,8 +222,10 @@ function ollamaProvider() {
                 body: JSON.stringify({
                     model: configuration.model, stream: true,
                     format: 'json',
-                    // Edits should repeat for the same request, and Ollama's default window (4096 tokens) is barely larger than this prompt.
-                    options: { temperature: 0, num_ctx: 8192 },
+                    // Only when set: models that cannot think reject `think`, and the default is the model's own.
+                    ...(typeof configuration.think === 'boolean' ? { think: configuration.think } : {}),
+                    // Edits should repeat for the same request, and Ollama's default window (4096 tokens) is barely larger than this prompt. A proposal is a few hundred tokens, so the cap only ever stops a model that has started to loop.
+                    options: { temperature: 0, num_ctx: 8192, num_predict: 4096 },
                     messages: [{ role: 'user', content: historyText(history) + proposalPrompt(operationSchema, context, request, repair) }]
                 })
             }, {

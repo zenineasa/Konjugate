@@ -225,6 +225,17 @@ void collectSymbolIndexes(const CompiledExpression& expression, std::set<std::si
     for (const auto& argument : expression.arguments) collectSymbolIndexes(argument, indexes);
 }
 
+// The symbols an expression reads whatever its choices take: a choice's (Which's) first condition is always worked
+// out, its values and later conditions only when reached.
+void collectUnconditionalSymbolIndexes(const CompiledExpression& expression, std::set<std::size_t>& indexes) {
+    if (expression.operation == ExpressionOperation::symbol) indexes.insert(expression.symbolIndex);
+    if (expression.operation == ExpressionOperation::conditional) {
+        if (!expression.arguments.empty()) collectUnconditionalSymbolIndexes(expression.arguments.front(), indexes);
+        return;
+    }
+    for (const auto& argument : expression.arguments) collectUnconditionalSymbolIndexes(argument, indexes);
+}
+
 bool expressionReadsSymbol(const CompiledExpression& expression, std::size_t symbolIndex) {
     if (expression.operation == ExpressionOperation::symbol && expression.symbolIndex == symbolIndex) return true;
     return std::any_of(expression.arguments.begin(), expression.arguments.end(), [&](const auto& argument) {
@@ -258,29 +269,26 @@ void bindTask(ContributionTask& task) {
     else task.providerProcessKeyCache = (task.implementation == ContributionImplementation::pythonProvider ? "py:" : "cpp:") + task.providerSource;
 }
 
-double requireArgument(const CompiledExpression& expression, std::size_t index, const std::vector<double>& symbols) {
-    if (index >= expression.arguments.size()) throw std::runtime_error("Executable expression has too few arguments.");
-    return expression.arguments[index].evaluate(symbols);
-}
-
-}
-
-double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
-    const auto argument = [&](std::size_t index) { return requireArgument(*this, index, symbols); };
-    switch (operation) {
-        case ExpressionOperation::literal: return literal;
-        case ExpressionOperation::symbol: {
-            if (symbolIndex >= symbols.size()) throw std::runtime_error("Executable symbol binding is invalid.");
-            return symbols[symbolIndex];
-        }
+// An expression's value, each symbol's from `read`: the symbols' values as they stand, or an algebraic relationship's
+// with each definition worked out when first read.
+template <typename Read>
+double evaluateWith(const CompiledExpression& expression, Read& read) {
+    const auto& arguments = expression.arguments;
+    const auto argument = [&](std::size_t index) {
+        if (index >= arguments.size()) throw std::runtime_error("Executable expression has too few arguments.");
+        return evaluateWith(arguments[index], read);
+    };
+    switch (expression.operation) {
+        case ExpressionOperation::literal: return expression.literal;
+        case ExpressionOperation::symbol: return read(expression.symbolIndex);
         case ExpressionOperation::add: {
             double result = 0;
-            for (const auto& item : arguments) result += item.evaluate(symbols);
+            for (const auto& item : arguments) result += evaluateWith(item, read);
             return result;
         }
         case ExpressionOperation::multiply: {
             double result = 1;
-            for (const auto& item : arguments) result *= item.evaluate(symbols);
+            for (const auto& item : arguments) result *= evaluateWith(item, read);
             return result;
         }
         case ExpressionOperation::negate: return -argument(0);
@@ -304,7 +312,7 @@ double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
             // (condition, value) pairs, first true condition wins; only the chosen value is
             // evaluated. The validator requires a final "True" (otherwise) branch.
             for (std::size_t index = 0; index + 1 < arguments.size(); index += 2) {
-                if (arguments[index].evaluate(symbols) != 0.0) return arguments[index + 1].evaluate(symbols);
+                if (evaluateWith(arguments[index], read) != 0.0) return evaluateWith(arguments[index + 1], read);
             }
             throw std::runtime_error("No branch of a cases expression matched.");
         }
@@ -316,11 +324,11 @@ double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
         case ExpressionOperation::notEqual: {
             // Chained, as MathJSON writes 0 < x < 1: every adjacent pair must hold.
             if (arguments.size() < 2) throw std::runtime_error("Executable expression has too few arguments.");
-            double left = arguments[0].evaluate(symbols);
+            double left = evaluateWith(arguments[0], read);
             for (std::size_t index = 1; index < arguments.size(); ++index) {
-                const double right = arguments[index].evaluate(symbols);
+                const double right = evaluateWith(arguments[index], read);
                 bool holds = false;
-                switch (operation) {
+                switch (expression.operation) {
                     case ExpressionOperation::less: holds = left < right; break;
                     case ExpressionOperation::lessEqual: holds = left <= right; break;
                     case ExpressionOperation::greater: holds = left > right; break;
@@ -334,16 +342,26 @@ double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
             return 1.0;
         }
         case ExpressionOperation::logicalAnd: {
-            for (const auto& item : arguments) if (item.evaluate(symbols) == 0.0) return 0.0;
+            for (const auto& item : arguments) if (evaluateWith(item, read) == 0.0) return 0.0;
             return 1.0;
         }
         case ExpressionOperation::logicalOr: {
-            for (const auto& item : arguments) if (item.evaluate(symbols) != 0.0) return 1.0;
+            for (const auto& item : arguments) if (evaluateWith(item, read) != 0.0) return 1.0;
             return 0.0;
         }
         case ExpressionOperation::logicalNot: return argument(0) == 0.0 ? 1.0 : 0.0;
     }
     throw std::runtime_error("Executable expression operation is invalid.");
+}
+
+}
+
+double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
+    const auto read = [&](std::size_t index) {
+        if (index >= symbols.size()) throw std::runtime_error("Executable symbol binding is invalid.");
+        return symbols[index];
+    };
+    return evaluateWith(*this, read);
 }
 
 std::size_t CompiledExpression::operationCount() const noexcept {
@@ -390,20 +408,49 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
         }
     }
     const auto bindingCount = relationship.bindings.size();
-    // The definitions each definition needs, directly or through others.
-    std::vector<std::set<std::size_t>> needs(relationship.definitions.size());
-    // And the bindings each reads itself.
-    std::vector<std::vector<std::size_t>> definitionReads(relationship.definitions.size());
+    // Where each binding is read from: a state's place in the plan's states, or its symbol's value for the instant.
+    for (const auto& binding : relationship.bindings) {
+        const bool constant = binding.source == BindingSource::parameter || binding.source == BindingSource::simulationTime;
+        relationship.stateReads.push_back(constant ? std::numeric_limits<std::size_t>::max() : binding.valueIndex);
+    }
+    // The definitions each definition reads directly. Each output's closure over them is found by a
+    // walk, so a long chain of definitions costs in proportion to what each output needs rather than to its square.
+    std::vector<std::vector<std::size_t>> directDefinitions(relationship.definitions.size());
+    relationship.unconditionalDefinitions.resize(relationship.definitions.size());
     for (std::size_t index = 0; index < relationship.definitions.size(); ++index) {
         std::set<std::size_t> symbols;
         collectSymbolIndexes(relationship.definitions[index], symbols);
-        for (const auto symbol : symbols) {
-            if (symbol < bindingCount) { definitionReads[index].push_back(symbol); continue; }
-            const auto definition = symbol - bindingCount;
-            needs[index].insert(definition);
-            needs[index].insert(needs[definition].begin(), needs[definition].end());
-        }
+        for (const auto symbol : symbols) if (symbol >= bindingCount) directDefinitions[index].push_back(symbol - bindingCount);
+        // Those it reads whatever its choices (Which) take; the others only if the branch reading them is taken.
+        std::set<std::size_t> always;
+        collectUnconditionalSymbolIndexes(relationship.definitions[index], always);
+        for (const auto symbol : always) if (symbol >= bindingCount) relationship.unconditionalDefinitions[index].push_back(symbol - bindingCount);
     }
+    // The definitions `roots` reach through `edges`, in ascending order; `seen` marks each with `stamp` once.
+    std::vector<std::size_t> seen(relationship.definitions.size(), 0);
+    std::size_t stamp = 0;
+    const auto closure = [&](const std::set<std::size_t>& symbols, const std::vector<std::vector<std::size_t>>& edges) {
+        ++stamp;
+        std::vector<std::size_t> found;
+        std::vector<std::size_t> pending;
+        for (const auto symbol : symbols) {
+            if (symbol < bindingCount || seen[symbol - bindingCount] == stamp) continue;
+            seen[symbol - bindingCount] = stamp;
+            pending.push_back(symbol - bindingCount);
+        }
+        while (!pending.empty()) {
+            const auto at = pending.back();
+            pending.pop_back();
+            found.push_back(at);
+            for (const auto next : edges[at]) {
+                if (seen[next] == stamp) continue;
+                seen[next] = stamp;
+                pending.push_back(next);
+            }
+        }
+        std::sort(found.begin(), found.end());
+        return found;
+    };
     const auto relationshipIndex = plan.algebraicRelationships.size();
     const auto sourceNodeId = idValue(edge, "source.nodeId");
     const auto targetNodeId = idValue(edge, "target.nodeId");
@@ -423,18 +470,10 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
         bindExpressionNames(compiled.expression, names);
         std::set<std::size_t> symbols;
         collectSymbolIndexes(compiled.expression, symbols);
-        std::set<std::size_t> definitions;
-        for (const auto symbol : symbols) {
-            if (symbol < bindingCount) continue;
-            definitions.insert(symbol - bindingCount);
-            definitions.insert(needs[symbol - bindingCount].begin(), needs[symbol - bindingCount].end());
-        }
-        compiled.definitions.assign(definitions.begin(), definitions.end());
-        // The bindings it reads, itself or through those definitions: the only ones refreshed for it.
-        std::set<std::size_t> reads;
-        for (const auto symbol : symbols) if (symbol < bindingCount) reads.insert(symbol);
-        for (const auto definition : definitions) reads.insert(definitionReads[definition].begin(), definitionReads[definition].end());
-        compiled.bindingReads.assign(reads.begin(), reads.end());
+        compiled.definitions = closure(symbols, directDefinitions);
+        std::set<std::size_t> alwaysSymbols;
+        collectUnconditionalSymbolIndexes(compiled.expression, alwaysSymbols);
+        compiled.eagerDefinitions = closure(alwaysSymbols, relationship.unconditionalDefinitions);
         plan.algebraicOutputs.push_back(std::move(compiled));
     }
     plan.algebraicRelationships.push_back(std::move(relationship));
@@ -1212,52 +1251,109 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
 }
 
-void evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
-                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
-    if (plan.algebraicOutputs.empty()) return;
+namespace {
+
+// Reads an algebraic relationship's symbols for the instant: a state binding from the states as they stand (an equation
+// reached later may read one settled since an earlier one), a parameter or the time as resolved for the instant, and a
+// definition as worked out when first read: with the definitions it reads whatever its choices take, in ascending
+// order, so working one out recurses only as deep as its choices are nested, never down a long chain of definitions.
+struct DefinitionReader {
+    const AlgebraicRelationship& relationship;
+    const StateValues& states;
+    std::vector<double>& symbols;
+    // Per definition: 0 not worked out, 1 worked out, 2 waiting its turn.
+    std::vector<char>& done;
+    std::size_t& worked;
+    // Lists kept for the instant: those found waiting (each read's at its end), and those still to look through.
+    std::vector<std::size_t>& found;
+    std::vector<std::size_t>& pending;
+
+    double operator()(std::size_t index) {
+        if (index >= symbols.size()) throw std::runtime_error("Executable symbol binding is invalid.");
+        const auto bindingCount = relationship.bindings.size();
+        if (index < bindingCount) {
+            const auto state = relationship.stateReads[index];
+            return state == noState ? symbols[index] : states[state];
+        }
+        if (done[index - bindingCount] != 1) workOut(index - bindingCount);
+        return symbols[index];
+    }
+
+    void workOutOne(std::size_t definition) {
+        symbols[relationship.bindings.size() + definition] = evaluateWith(relationship.definitions[definition], *this);
+        done[definition] = 1;
+        ++worked;
+    }
+
+    void workOut(std::size_t definition) {
+        // Every definition read here is below this one, and every one waiting from a read further out is above it:
+        // this read's list (at the end of `found`) never meets that one's. `pending` is empty between reads.
+        const auto start = found.size();
+        pending.push_back(definition);
+        done[definition] = 2;
+        while (!pending.empty()) {
+            const auto at = pending.back();
+            pending.pop_back();
+            found.push_back(at);
+            for (const auto next : relationship.unconditionalDefinitions[at]) {
+                if (done[next] != 0) continue;
+                done[next] = 2;
+                pending.push_back(next);
+            }
+        }
+        std::sort(found.begin() + static_cast<std::ptrdiff_t>(start), found.end());
+        const auto end = found.size();
+        for (auto at = start; at < end; ++at) workOutOne(found[at]);
+        found.resize(start);
+    }
+
+    static constexpr std::size_t noState = std::numeric_limits<std::size_t>::max();
+};
+
+}
+
+std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+    std::size_t definitionsWorked = 0;
+    if (plan.algebraicOutputs.empty()) return definitionsWorked;
     for (const auto index : plan.algebraicStateIndexes) states.at(index) = 0;
-    // Each relationship's parameters, resolved once for this instant; and its symbols, kept for the instant, so each
-    // definition is worked out once however many of its equations need it. That is sound because the outputs are in
+    // Each relationship's parameters, resolved once for this instant; and its definitions, kept for the instant, so
+    // each is worked out once however many of its equations need it. That is sound because the outputs are in
     // dependency order: when an equation needing a definition is reached, every state the definition reads is already
-    // settled, so it has the same value whichever of the relationship's equations first needs it. The state bindings
-    // an equation reads (itself or through its definitions) are read again for it, as one an earlier equation did not
-    // need may have been settled since.
-    std::vector<std::vector<double>> parameterValues(plan.algebraicRelationships.size());
+    // settled, so it has the same value whichever of the relationship's equations first needs it.
     std::vector<std::vector<double>> symbolValues(plan.algebraicRelationships.size());
     std::vector<std::vector<char>> worked(plan.algebraicRelationships.size());
     std::vector<bool> resolved(plan.algebraicRelationships.size(), false);
+    std::vector<std::size_t> found;
+    std::vector<std::size_t> pending;
     for (const auto& output : plan.algebraicOutputs) {
         const auto& relationship = plan.algebraicRelationships[output.relationship];
         auto& symbols = symbolValues[output.relationship];
         auto& done = worked[output.relationship];
         if (!resolved[output.relationship]) {
-            auto& values = parameterValues[output.relationship];
-            for (const auto& parameter : relationship.parameters) values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, simulationTime));
             symbols.assign(relationship.bindings.size() + relationship.definitions.size(), 0.0);
             done.assign(relationship.definitions.size(), 0);
             for (std::size_t index = 0; index < relationship.bindings.size(); ++index) {
                 const auto& binding = relationship.bindings[index];
-                if (binding.source == BindingSource::parameter) symbols[index] = values.at(binding.parameterIndex);
-                else if (binding.source == BindingSource::simulationTime) symbols[index] = simulationTime;
+                if (binding.source == BindingSource::parameter) {
+                    symbols[index] = resolveParameterValue(relationship.parameters.at(binding.parameterIndex), liveParameterValues, activeSchedules, simulationTime);
+                } else if (binding.source == BindingSource::simulationTime) {
+                    symbols[index] = simulationTime;
+                }
             }
             resolved[output.relationship] = true;
         }
-        for (const auto index : output.bindingReads) {
-            const auto& binding = relationship.bindings[index];
-            if (binding.source != BindingSource::parameter && binding.source != BindingSource::simulationTime) symbols[index] = states[binding.valueIndex];
-        }
-        for (const auto definition : output.definitions) {
-            if (done[definition]) continue;
-            symbols[relationship.bindings.size() + definition] = relationship.definitions[definition].evaluate(symbols);
-            done[definition] = 1;
-        }
-        const auto result = output.expression.evaluate(symbols);
+        // The definitions it reads whatever its choices take, in ascending order; any other when a branch taken reads it.
+        DefinitionReader read{relationship, states, symbols, done, definitionsWorked, found, pending};
+        for (const auto definition : output.eagerDefinitions) if (done[definition] != 1) read.workOutOne(definition);
+        const auto result = evaluateWith(output.expression, read);
         if (!std::isfinite(result)) {
             throw std::runtime_error("The relationship " + std::to_string(relationship.edgeId) + " produced a non-finite value for state " +
                 std::to_string(output.outputStateId) + " at " + std::to_string(simulationTime) + " s.");
         }
         states.at(output.outputStateIndex) += result;
     }
+    return definitionsWorked;
 }
 
 }

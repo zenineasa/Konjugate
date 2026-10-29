@@ -210,6 +210,53 @@ void inverseTrigonometricAndHyperbolicFunctionsEvaluate() {
     require(std::abs(value(R"json(["Tanh", 0.3])json") - std::tanh(0.3)) < 1e-15, "Tanh.");
 }
 
+// A definition is worked out only when an equation needs it: one read only in a branch not taken is not. B.y = c, c a
+// choice between a = 2 x (x above 0) and the end of a long chain b1 = a + 1, b2 = b1 + 1, ... (otherwise); B.z = n, a
+// choice inside a choice, and B.w = a again (kept from the instant, not worked out twice). With x above 0 the chain is
+// skipped; with x below it the chain is worked out in turn, without recursing down it.
+void aDefinitionReadOnlyInABranchNotTakenIsNotWorkedOut() {
+    const std::size_t chain = 3000;
+    std::string definitions = R"json({"symbol": "a", "mathJson": ["Multiply", 2, "x"]}, {"symbol": "b1", "mathJson": ["Add", "a", 1]})json";
+    for (std::size_t index = 2; index <= chain; ++index) {
+        definitions += R"json(, {"symbol": "b)json" + std::to_string(index) + R"json(", "mathJson": ["Add", "b)json" + std::to_string(index - 1) + R"json(", 1]})json";
+    }
+    definitions += R"json(, {"symbol": "c", "mathJson": ["Which", ["Greater", "x", 0], "a", "True", "b)json" + std::to_string(chain) + R"json("]})json";
+    definitions += R"json(, {"symbol": "f", "mathJson": ["Multiply", "a", "a"]}, {"symbol": "g", "mathJson": ["Negate", "a"]})json";
+    definitions += R"json(, {"symbol": "n", "mathJson": ["Which", ["Greater", "x", 0], ["Which", ["Greater", "x", 5], "f", "True", "g"], "True", 0]})json";
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 3}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0},
+                                          {"id": 22, "name": "Z", "symbol": "z", "initialValue": 0},
+                                          {"id": 23, "name": "W", "symbol": "w", "initialValue": 0}], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "P", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "definitions": [)json" + definitions + R"json(],
+            "outputs": [{"role": "target", "stateId": 21, "mathJson": "c", "setsValue": true},
+                        {"role": "target", "stateId": 22, "mathJson": "n", "setsValue": true},
+                        {"role": "target", "stateId": 23, "mathJson": "a", "setsValue": true}]}}
+    ]})json");
+    require(konjugate::validateModel(document).valid, "A relationship with choices between definitions should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    const auto at = [&](const konjugate::StateValues& states, konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    auto states = plan.initialStates;
+    // x = 3: c reads a; n reads g (and so a, already worked out). Worked out: c, a, n, g.
+    auto worked = konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    require(at(states, 21) == 6 && at(states, 22) == -6 && at(states, 23) == 6, "With x = 3, y, z and w should be 6, -6 and 6.");
+    require(worked == 4, "With x = 3 only c, a, n and g should be worked out, not " + std::to_string(worked) + " definitions.");
+    // x = 6: n reads f instead.
+    states.at(plan.stateIndexes.at(11)) = 6;
+    worked = konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    require(at(states, 22) == 144 && worked == 4, "With x = 6, z should be a a = 144, from c, a, n and f.");
+    // x = -1: c reads the chain's end, and so the whole chain; n takes neither f nor g.
+    states.at(plan.stateIndexes.at(11)) = -1;
+    worked = konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    require(at(states, 21) == -2.0 + static_cast<double>(chain) && at(states, 22) == 0 && at(states, 23) == -2,
+            "With x = -1, y should be -2 plus the chain's length, z 0 and w -2.");
+    require(worked == chain + 3, "With x = -1 the chain, a, c and n should be worked out, not " + std::to_string(worked) + " definitions.");
+}
+
 }
 
 int main() {
@@ -220,6 +267,7 @@ int main() {
         aSemiImplicitNodeUpdatesEachStateFromTheOnesUpdatedBeforeIt();
         inverseTrigonometricAndHyperbolicFunctionsEvaluate();
         aRelationshipsLaterEquationReadsWhatAnotherSettledSinceItsFirst();
+        aDefinitionReadOnlyInABranchNotTakenIsNotWorkedOut();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

@@ -281,10 +281,16 @@ struct AlgebraicRelationship {
     EntityId edgeId = 0;
     // States (source synchronizationSnapshot, valueIndex the plan's index), parameters and time.
     std::vector<CompiledBinding> bindings;
+    // Per binding: the state's index in the plan's states, read as it stands when an equation reads it; or none (the
+    // largest size_t) for a parameter or the time, resolved once for the instant.
+    std::vector<std::size_t> stateReads;
     std::vector<CompiledParameter> parameters;
     // Each reads the bindings (symbols 0 .. bindings.size() - 1) and earlier definitions (symbol
     // bindings.size() + k for definition k).
     std::vector<CompiledExpression> definitions;
+    // The definitions each definition reads whatever its choices (Which) take: all but those read only in a choice's
+    // values or later conditions. The others are worked out only if the branch reading them is taken.
+    std::vector<std::vector<std::size_t>> unconditionalDefinitions;
 };
 
 // One equation of an algebraic relationship: its value is added to its state, which every
@@ -294,10 +300,11 @@ struct AlgebraicOutput {
     EntityId outputStateId = 0;
     std::size_t outputStateIndex = std::numeric_limits<std::size_t>::max();
     CompiledExpression expression;
-    // The definitions it needs, directly or through other definitions, in ascending order.
+    // The definitions it may need, directly or through other definitions, in ascending order.
     std::vector<std::size_t> definitions;
-    // The bindings it reads, itself or through those definitions, in ascending order.
-    std::vector<std::size_t> bindingReads;
+    // Of those, the ones it needs whatever its choices take, in ascending order: worked out before it. The rest are
+    // worked out when a branch taken reads them, and not at all otherwise.
+    std::vector<std::size_t> eagerDefinitions;
 };
 
 struct ExecutionPlan {
@@ -409,8 +416,10 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
 // its expression, and other nodes read it through the synchronization snapshot before its own node
 // recomputes it. `stepSize` is only passed on to programmable terms' providers.
 // Sets every state algebraic relationships set: each to zero, then each output's value added, in
-// dependency order, from `states` (which it updates), at simulationTime.
-void evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+// dependency order, from `states` (which it updates), at simulationTime. A definition is worked out at
+// most once in the instant, and only if an equation needs it: one read only in a branch not taken is
+// not. Returns how many definitions were worked out.
+std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                                     const std::vector<ParameterSchedule>& activeSchedules, double simulationTime);
 
 void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,

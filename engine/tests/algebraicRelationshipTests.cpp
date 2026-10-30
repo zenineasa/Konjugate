@@ -7,6 +7,7 @@
 #include "executionPlan.hpp"
 #include "modelValidator.hpp"
 #include <boost/property_tree/json_parser.hpp>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <sstream>
@@ -257,6 +258,76 @@ void aDefinitionReadOnlyInABranchNotTakenIsNotWorkedOut() {
     require(worked == chain + 3, "With x = -1 the chain, a, c and n should be worked out, not " + std::to_string(worked) + " definitions.");
 }
 
+
+// An output depends on a state written by another relationship's output when any definition it may need reads that
+// state, however deep in a chain of definitions; and finding that looks through each definition once, not once per
+// output that may need it: a relationship of thousands of outputs sharing thousands of definitions is ordered at once.
+void outputsAreOrderedByStatesTheirDefinitionsReadOnceEach() {
+    const std::size_t chain = 10000;
+    const std::size_t outputs = 10000;
+    const auto end = "d" + std::to_string(chain);
+    std::string definitions = R"json({"symbol": "d1", "mathJson": ["Add", "y", 1]})json";
+    for (std::size_t index = 2; index <= chain; ++index) {
+        definitions += R"json(, {"symbol": "d)json" + std::to_string(index) + R"json(", "mathJson": ["Add", "d)json" + std::to_string(index - 1) + R"json(", 1]})json";
+    }
+    // The first output reads the chain's end; the others read it only in a branch not taken.
+    std::string states;
+    std::string sets;
+    for (std::size_t index = 0; index < outputs; ++index) {
+        const auto id = std::to_string(1000 + index);
+        const auto read = index ? R"json(["Which", ["Greater", "d1", 1000000], ")json" + end + R"json(", "True", )json" + std::to_string(index) + "]" : "\"" + end + "\"";
+        states += std::string(index ? ", " : "") + R"json({"id": )json" + id + R"json(, "name": "S)json" + id + R"json(", "symbol": "s)json" + id + R"json(", "initialValue": 0})json";
+        sets += std::string(index ? ", " : "") + R"json({"role": "target", "stateId": )json" + id + R"json(, "mathJson": )json" + read + R"json(, "setsValue": true})json";
+    }
+    // The long relationship comes first in the document, so only what its definitions read puts it after the short one.
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 3}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0}], "sourceTerms": []},
+        {"id": 3, "name": "C", "states": [)json" + states + R"json(], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "Long", "directionality": "directed", "source": {"nodeId": 2}, "target": {"nodeId": 3}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "y", "kind": "state", "role": "source", "nodeId": 2, "stateId": 21}],
+            "definitions": [)json" + definitions + R"json(],
+            "outputs": [)json" + sets + R"json(]}},
+        {"id": 6, "name": "Short", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "outputs": [{"role": "target", "stateId": 21, "mathJson": ["Multiply", 2, "x"], "setsValue": true}]}}
+    ]})json");
+    const auto started = std::chrono::steady_clock::now();
+    const auto plan = konjugate::compileExecutionPlan(document);
+    const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    require(plan.algebraicOutputs.front().outputStateId == 21, "The output setting y should come before every output whose definitions read y.");
+    auto values = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, values, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return values.at(plan.stateIndexes.at(id)); };
+    require(at(21) == 6 && at(1000) == 6.0 + static_cast<double>(chain) && at(1000 + outputs - 1) == static_cast<double>(outputs - 1),
+            "The first output should read y as set this instant, through the whole chain, and the others their own numbers.");
+    // Looking through the chain once per output took 17 s here; once in all, a third of a second.
+    require(seconds < 3, "Compiling should not look through the definitions once per output: it took " + std::to_string(seconds) + " s.");
+}
+
+// A valid model's validation hands back the plan it compiled, so a run need not compile it again; an invalid one's none.
+void validationHandsBackTheCompiledPlan() {
+    const auto document = parse(chainProject());
+    const auto result = konjugate::validateModel(document);
+    require(result.valid && result.plan, "Validating a valid model with relationships should hand back its compiled plan.");
+    const auto compiled = konjugate::compileExecutionPlan(document);
+    auto fromValidation = result.plan->initialStates;
+    auto fromCompile = compiled.initialStates;
+    konjugate::evaluateAlgebraicRelationships(*result.plan, fromValidation, {}, {}, 0);
+    konjugate::evaluateAlgebraicRelationships(compiled, fromCompile, {}, {}, 0);
+    require(fromValidation == fromCompile, "The plan validation hands back should be the one compiling gives.");
+    const auto loop = R"json(,
+        {"id": 8, "name": "C to B", "directionality": "directed", "source": {"nodeId": 3}, "target": {"nodeId": 2},
+         "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "z", "kind": "state", "role": "source", "nodeId": 3, "stateId": 31}],
+            "outputs": [{"role": "target", "stateId": 21, "mathJson": "z", "setsValue": true}]}})json";
+    require(!konjugate::validateModel(parse(chainProject(loop))).plan, "An invalid model's validation should hand back no plan.");
+}
+
 }
 
 int main() {
@@ -268,6 +339,8 @@ int main() {
         inverseTrigonometricAndHyperbolicFunctionsEvaluate();
         aRelationshipsLaterEquationReadsWhatAnotherSettledSinceItsFirst();
         aDefinitionReadOnlyInABranchNotTakenIsNotWorkedOut();
+        outputsAreOrderedByStatesTheirDefinitionsReadOnceEach();
+        validationHandsBackTheCompiledPlan();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

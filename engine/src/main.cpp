@@ -349,10 +349,10 @@ int main(int argc, char** argv) {
 #ifdef __EMSCRIPTEN__
         EmJsEventStream emJsEventStream;
         konjugate::runSimulation(document, configuration, outputPath, protobufControls ? &std::cin : nullptr,
-            protobufEvents ? &emJsEventStream : nullptr);
+            protobufEvents ? &emJsEventStream : nullptr, result.plan);
 #else
         konjugate::runSimulation(document, configuration, outputPath, protobufControls ? &std::cin : nullptr,
-            protobufEvents ? &std::cout : nullptr);
+            protobufEvents ? &std::cout : nullptr, result.plan);
 #endif
         std::_Exit(0);
     } catch (const konjugate::ContainerError& error) {

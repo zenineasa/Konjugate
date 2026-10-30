@@ -1063,9 +1063,11 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             "A state set by relationships' equations is the sum of what they set, and takes no other contribution.",
             "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
     }
+    // The plan compiled here, if any, serves the stability pass below too: compiling a large model takes seconds.
+    std::shared_ptr<const ExecutionPlan> compiledPlan;
     if (!relationshipStateIds.empty() && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
         try {
-            static_cast<void>(compileExecutionPlan(document));
+            compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
         } catch (const std::exception& error) {
             add(result, std::string(error.what()).find("form a loop") != std::string::npos ? "algebraicLoop" : "modelCompileFailed", "error", error.what(), "model", "");
         }
@@ -1081,17 +1083,18 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     // Pre-run phase of docs/proposals/numericalStabilityDiagnostics.md: a local, linearized
     // Explicit Euler stability check per node, against the active run configuration's step size.
     // Only attempted once every structural check above has already run, and only when there is a
-    // concrete step size to check against (see activeGlobalTimeStep's own comment). Compiling the
-    // document here is new: nothing else in this function needs a compiled ExecutionPlan, only the
-    // raw ptree -- but assessNodeStability needs the same resolved bindings/parameters/dependency
-    // ordering compileExecutionPlan already produces, and reproducing that logic against the ptree
-    // directly would duplicate it rather than reuse it. A document that fails to compile for any
+    // concrete step size to check against (see activeGlobalTimeStep's own comment). It needs a
+    // compiled ExecutionPlan, the one the relationship check above compiled if it did: assessNodeStability needs the
+    // same resolved bindings, parameters and dependency ordering compileExecutionPlan produces, and reproducing that
+    // logic against the ptree directly would duplicate it rather than reuse it. The plan goes back with a valid result
+    // so the run can take it too. A document that fails to compile for any
     // reason (most already reported above as a distinct error, a few not) is caught and simply
     // skipped here -- this pass is a heuristic addition, never the reason a document is invalid.
     const auto validSoFar = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
     if (activeGlobalTimeStep && validSoFar) {
         try {
-            const auto plan = compileExecutionPlan(document);
+            if (!compiledPlan) compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
+            const auto& plan = *compiledPlan;
             for (const auto& node : plan.nodes) {
                 const auto assessment = assessNodeStability(node, plan.initialStates, *activeGlobalTimeStep, plan.algebraicStateIndexes);
                 if (!assessment) continue;
@@ -1131,6 +1134,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         }
     }
     result.valid = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
+    if (result.valid) result.plan = std::move(compiledPlan);
     return result;
 }
 

@@ -491,7 +491,8 @@ void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
                    const std::filesystem::path& outputPath,
                    std::istream* controlStream,
-                   std::ostream* eventStream) {
+                   std::ostream* eventStream,
+                   std::shared_ptr<const ExecutionPlan> plan) {
     const auto targetTime = configuration.get<double>("targetTime");
     const auto globalTimeStep = configuration.get<double>("globalTimeStep", configuration.get<double>("timeStep", 0.01));
     const auto outputInterval = configuration.get<double>("outputInterval", globalTimeStep);
@@ -520,7 +521,8 @@ void runSimulation(const boost::property_tree::ptree& document,
     }
 
     const auto planningStartedAt = std::chrono::steady_clock::now();
-    const auto executionPlan = compileExecutionPlan(document);
+    if (!plan) plan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
+    const auto& executionPlan = *plan;
     ProviderConfiguration providerConfig;
     if (const auto providers = configuration.get_child_optional("providers")) {
         providerConfig.cppCompiler = providers->get<std::string>("cpp.compiler", "");

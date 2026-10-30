@@ -3,6 +3,7 @@
 #pragma once
 
 #include <boost/property_tree/ptree.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -32,11 +33,16 @@ struct ValidationIssue {
     std::optional<AttributedParameter> attributedParameter;
 };
 
+struct ExecutionPlan;
+
 struct ValidationResult {
     bool valid = true;
     std::size_t nodeCount = 0;
     std::size_t edgeCount = 0;
     std::vector<ValidationIssue> issues;
+    // The model's execution plan, when validation compiled it and found the model valid: a run of the same document
+    // can take it rather than compile the model again, which for a large model takes seconds.
+    std::shared_ptr<const ExecutionPlan> plan;
 };
 
 ValidationResult validateModel(const boost::property_tree::ptree& document);

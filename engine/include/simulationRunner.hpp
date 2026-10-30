@@ -5,11 +5,15 @@
 #include <boost/property_tree/ptree.hpp>
 #include <filesystem>
 #include <istream>
+#include <memory>
 #include <ostream>
 
 namespace konjugate {
 
-// controlStream, when non-null, must outlive the entire process: it is read from a detached
+struct ExecutionPlan;
+
+// plan, when given, is the document's execution plan already compiled (by validateModel); otherwise the run compiles
+// it. controlStream, when non-null, must outlive the entire process: it is read from a detached
 // background thread (see startControlReader() in simulationRunner.cpp) that is never joined and
 // keeps blocking on stream->read() until EOF or an error, including after runSimulation() itself
 // returns. The only real caller (main.cpp) passes &std::cin, whose lifetime already spans the
@@ -22,6 +26,7 @@ void runSimulation(const boost::property_tree::ptree& document,
                    const boost::property_tree::ptree& configuration,
                    const std::filesystem::path& outputPath,
                    std::istream* controlStream = nullptr,
-                   std::ostream* eventStream = nullptr);
+                   std::ostream* eventStream = nullptr,
+                   std::shared_ptr<const ExecutionPlan> plan = nullptr);
 
 }

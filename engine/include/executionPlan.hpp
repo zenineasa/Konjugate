@@ -300,10 +300,8 @@ struct AlgebraicOutput {
     EntityId outputStateId = 0;
     std::size_t outputStateIndex = std::numeric_limits<std::size_t>::max();
     CompiledExpression expression;
-    // The definitions it may need, directly or through other definitions, in ascending order.
-    std::vector<std::size_t> definitions;
-    // Of those, the ones it needs whatever its choices take, in ascending order: worked out before it. The rest are
-    // worked out when a branch taken reads them, and not at all otherwise.
+    // The definitions it needs whatever its choices take, directly or through other definitions, in ascending order:
+    // worked out before it. The rest are worked out when a branch taken reads them, and not at all otherwise.
     std::vector<std::size_t> eagerDefinitions;
 };
 

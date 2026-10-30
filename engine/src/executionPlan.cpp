@@ -413,15 +413,11 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
         const bool constant = binding.source == BindingSource::parameter || binding.source == BindingSource::simulationTime;
         relationship.stateReads.push_back(constant ? std::numeric_limits<std::size_t>::max() : binding.valueIndex);
     }
-    // The definitions each definition reads directly. Each output's closure over them is found by a
-    // walk, so a long chain of definitions costs in proportion to what each output needs rather than to its square.
-    std::vector<std::vector<std::size_t>> directDefinitions(relationship.definitions.size());
+    // The definitions each definition reads whatever its choices (Which) take; the others only if the branch reading them
+    // is taken. Each output's closure over them is found by a walk, so a long chain of definitions costs in proportion to
+    // what each output needs rather than to its square.
     relationship.unconditionalDefinitions.resize(relationship.definitions.size());
     for (std::size_t index = 0; index < relationship.definitions.size(); ++index) {
-        std::set<std::size_t> symbols;
-        collectSymbolIndexes(relationship.definitions[index], symbols);
-        for (const auto symbol : symbols) if (symbol >= bindingCount) directDefinitions[index].push_back(symbol - bindingCount);
-        // Those it reads whatever its choices (Which) take; the others only if the branch reading them is taken.
         std::set<std::size_t> always;
         collectUnconditionalSymbolIndexes(relationship.definitions[index], always);
         for (const auto symbol : always) if (symbol >= bindingCount) relationship.unconditionalDefinitions[index].push_back(symbol - bindingCount);
@@ -468,9 +464,6 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
         compiled.outputStateIndex = found->second;
         compiled.expression = compileExpression(output.get_child("mathJson"));
         bindExpressionNames(compiled.expression, names);
-        std::set<std::size_t> symbols;
-        collectSymbolIndexes(compiled.expression, symbols);
-        compiled.definitions = closure(symbols, directDefinitions);
         std::set<std::size_t> alwaysSymbols;
         collectUnconditionalSymbolIndexes(compiled.expression, alwaysSymbols);
         compiled.eagerDefinitions = closure(alwaysSymbols, relationship.unconditionalDefinitions);
@@ -479,35 +472,74 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
     plan.algebraicRelationships.push_back(std::move(relationship));
 }
 
-// The states an algebraic output reads: those its equation and the definitions it needs use.
-std::vector<std::size_t> algebraicOutputReads(const ExecutionPlan& plan, const AlgebraicOutput& output) {
-    const auto& relationship = plan.algebraicRelationships[output.relationship];
-    std::set<std::size_t> symbols;
-    collectSymbolIndexes(output.expression, symbols);
-    for (const auto definition : output.definitions) collectSymbolIndexes(relationship.definitions[definition], symbols);
-    std::vector<std::size_t> reads;
-    for (const auto symbol : symbols) {
-        if (symbol >= relationship.bindings.size()) continue;
-        const auto& binding = relationship.bindings[symbol];
-        if (binding.source == BindingSource::synchronizationSnapshot || binding.source == BindingSource::localState) reads.push_back(binding.valueIndex);
-    }
-    return reads;
-}
-
 // Orders the outputs so every output writing a state comes before any output reading it. A cycle
-// has no defined solution at an instant, and is refused.
+// has no defined solution at an instant, and is refused. An output reads the states its equation and the definitions
+// it needs use. Those are found for each definition once, in order, from the states it reads and those the earlier
+// definitions it reads need (a relationship's outputs share most of their definitions, which may be thousands): only the
+// states other outputs write, which are few.
 void orderAlgebraicOutputs(ExecutionPlan& plan) {
     if (plan.algebraicOutputs.empty()) return;
     std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
     for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
+    // Per relationship, a bit for each binding reading a state some output writes; per definition, the bits of those it
+    // reads directly or through the definitions it reads. A definition reads only those before it, so each one's bits
+    // are known when it is reached; most relationships read no written state and need none.
+    struct Reads {
+        std::vector<std::size_t> bitOfSymbol;
+        std::vector<std::size_t> stateOfBit;
+        std::size_t words = 0;
+        std::vector<std::uint64_t> definitionBits;
+    };
+    constexpr auto none = std::numeric_limits<std::size_t>::max();
+    std::vector<Reads> relationshipReads(plan.algebraicRelationships.size());
+    // ORs into `bits` (`words` long) those of the symbols `expression` reads.
+    const auto readBits = [&](const CompiledExpression& expression, const AlgebraicRelationship& relationship, const Reads& reads, std::uint64_t* bits) {
+        std::set<std::size_t> symbols;
+        collectSymbolIndexes(expression, symbols);
+        for (const auto symbol : symbols) {
+            if (symbol < relationship.bindings.size()) {
+                const auto bit = reads.bitOfSymbol[symbol];
+                if (bit != none) bits[bit / 64] |= std::uint64_t{1} << (bit % 64);
+                continue;
+            }
+            const auto* through = reads.definitionBits.data() + (symbol - relationship.bindings.size()) * reads.words;
+            for (std::size_t word = 0; word < reads.words; ++word) bits[word] |= through[word];
+        }
+    };
+    for (std::size_t index = 0; index < plan.algebraicRelationships.size(); ++index) {
+        const auto& relationship = plan.algebraicRelationships[index];
+        auto& reads = relationshipReads[index];
+        reads.bitOfSymbol.assign(relationship.bindings.size(), none);
+        for (std::size_t symbol = 0; symbol < relationship.bindings.size(); ++symbol) {
+            const auto& binding = relationship.bindings[symbol];
+            if (binding.source != BindingSource::synchronizationSnapshot && binding.source != BindingSource::localState) continue;
+            if (!writers.contains(binding.valueIndex)) continue;
+            reads.bitOfSymbol[symbol] = reads.stateOfBit.size();
+            reads.stateOfBit.push_back(binding.valueIndex);
+        }
+        reads.words = (reads.stateOfBit.size() + 63) / 64;
+        if (!reads.words) continue;
+        reads.definitionBits.assign(relationship.definitions.size() * reads.words, 0);
+        for (std::size_t definition = 0; definition < relationship.definitions.size(); ++definition) {
+            readBits(relationship.definitions[definition], relationship, reads, reads.definitionBits.data() + definition * reads.words);
+        }
+    }
     const auto count = plan.algebraicOutputs.size();
     std::vector<std::vector<std::size_t>> after(count);
     std::vector<std::size_t> waiting(count, 0);
+    std::vector<std::uint64_t> bits;
     for (std::size_t index = 0; index < count; ++index) {
+        const auto& output = plan.algebraicOutputs[index];
+        const auto& reads = relationshipReads[output.relationship];
+        if (!reads.words) continue;
+        bits.assign(reads.words, 0);
+        readBits(output.expression, plan.algebraicRelationships[output.relationship], reads, bits.data());
+        std::vector<std::size_t> statesRead;
+        for (std::size_t bit = 0; bit < reads.stateOfBit.size(); ++bit) if (bits[bit / 64] >> (bit % 64) & 1) statesRead.push_back(reads.stateOfBit[bit]);
         std::set<std::size_t> dependencies;
-        for (const auto read : algebraicOutputReads(plan, plan.algebraicOutputs[index])) {
-            const auto found = writers.find(read);
-            if (found != writers.end()) dependencies.insert(found->second.begin(), found->second.end());
+        for (const auto read : statesRead) {
+            const auto& writing = writers.at(read);
+            dependencies.insert(writing.begin(), writing.end());
         }
         for (const auto dependency : dependencies) {
             after[dependency].push_back(index);
@@ -521,7 +553,7 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
     while (!ready.empty()) {
         const auto index = ready.back();
         ready.pop_back();
-        ordered.push_back(plan.algebraicOutputs[index]);
+        ordered.push_back(std::move(plan.algebraicOutputs[index]));
         for (auto next = after[index].rbegin(); next != after[index].rend(); ++next) if (!--waiting[*next]) ready.push_back(*next);
     }
     if (ordered.size() != count) throw std::runtime_error("Relationships that set states' values form a loop, which has no defined solution.");

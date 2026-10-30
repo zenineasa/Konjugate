@@ -209,13 +209,15 @@ jobs:
                   name: msix-Windows-X64
                   path: out/msix/Konjugate-x64.msix
                   if-no-files-found: error
-            # The Snap Store job packs this same build rather than rebuilding it. Tarred because
-            # upload-artifact drops file permissions, which would strip the executable bits from
-            # Electron and the engine. Named so it never matches release-* (the GitHub Release's
-            # download pattern), and kept a day since only the snapRelease job needs it.
+            # The Snap Store job packs this same build rather than rebuilding it. It also needs the
+            # generated PNG icons (assets/icons is gitignored, so a fresh checkout has none), hence
+            # both in one archive, with their repo-relative paths so they unpack in place. Tarred
+            # because upload-artifact drops file permissions, which would strip the executable bits
+            # from Electron and the engine. Named so it never matches release-* (the GitHub
+            # Release's download pattern), and kept a day since only the snapRelease job needs it.
             - name: Archive the Linux package for the Snap Store job
               if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
-              run: tar -C out/package -cf out/linux-package.tar Konjugate-linux-x64
+              run: tar -cf out/linux-package.tar out/package/Konjugate-linux-x64 assets/icons/png
             - uses: actions/upload-artifact@v4
               if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
               with:
@@ -447,9 +449,9 @@ jobs:
             - name: Stage the snap's inputs
               if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
               run: |
-                  mkdir -p snap out/package
+                  mkdir -p snap
                   cp distribution/snap/snapcraft.yaml snap/snapcraft.yaml
-                  tar -C out/package -xf out/linux-package.tar
+                  tar -xf out/linux-package.tar
                   mv out/package/Konjugate-linux-x64 out/package/konjugateLinux
             - uses: canonical/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
               if: env.SNAPCRAFT_STORE_CREDENTIALS != ''

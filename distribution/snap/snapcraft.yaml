@@ -6,12 +6,14 @@
 # environment -- the repo uses neither electron-builder nor electron-installer-snap, so there's no
 # existing Snapcraft-native packaging path to hook into.
 #
-# CI (release.yml's snapRelease job) copies whichever single `Konjugate-linux-<arch>` directory
-# `make packageLinux` produced on that runner to the fixed `out/package/konjugateLinux` path this
-# part's `source:` expects, so this manifest stays arch-agnostic rather than hard-coding a suffix.
+# CI (release.yml's snapRelease job) packs the Linux build the `build` job already made: it copies
+# this file to snap/snapcraft.yaml (where snapcraft looks) and the package to the fixed
+# `out/package/konjugateLinux` path this part's `source:` expects, so this manifest stays
+# arch-agnostic rather than hard-coding a suffix.
 #
-# NOT YET VERIFIED against a real `snapcraft pack` run -- no Linux machine was available while
-# drafting this. Treat it as a first draft; see docs/packageManagerDistribution.md.
+# Verified with a real `snapcraft pack --destructive-mode` in an Ubuntu 24.04 container (arm64);
+# NOT yet verified: that the installed snap launches, or a build through canonical/action-build.
+# See docs/packageManagerDistribution.md.
 
 name: konjugate
 title: Konjugate
@@ -27,6 +29,7 @@ contact: https://github.com/zenineasa/Konjugate/issues
 issues: https://github.com/zenineasa/Konjugate/issues
 source-code: https://github.com/zenineasa/Konjugate
 license: MPL-2.0
+icon: assets/icons/png/512.png
 
 # adopt-info (rather than a hardcoded version:) points at the `konjugate` part's own
 # override-pull below, which reads package.json's real version at build time -- confirmed via a
@@ -46,7 +49,7 @@ confinement: classic
 
 apps:
   konjugate:
-    command: usr/lib/konjugate/Konjugate
+    command: usr/bin/konjugate
     desktop: usr/share/applications/com.konjugate.Konjugate.desktop
 
 parts:
@@ -61,6 +64,17 @@ parts:
     override-pull: |
       craftctl default
       craftctl set version="$(grep -m1 '"version"' "$CRAFT_PROJECT_DIR/package.json" | sed -E 's/.*"version": *"([^"]+)".*/\1/')"
+  launcher:
+    plugin: dump
+    source: distribution/snap
+    # The source folder also holds this manifest; only the launcher is staged.
+    organize:
+      launch.sh: usr/bin/konjugate
+    stage:
+      - usr/bin/konjugate
+    override-build: |
+      craftctl default
+      chmod +x "$CRAFT_PART_INSTALL/launch.sh"
   desktop-integration:
     plugin: dump
     source: packaging/linux

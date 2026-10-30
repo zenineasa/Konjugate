@@ -64,6 +64,13 @@ parts:
   desktop-integration:
     plugin: dump
     source: packaging/linux
+    # The desktop file is shared with the AppImage, where `Icon=` is a bare theme name. Snapcraft
+    # only accepts a ${SNAP}-relative path there (a bare name fails its "icon not found in prime
+    # directory" check), so rewrite just this snap's copy.
+    override-build: |
+      craftctl default
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/512x512/apps/com.konjugate.Konjugate.png|' \
+        "$CRAFT_PART_INSTALL/com.konjugate.Konjugate.desktop"
     organize:
       com.konjugate.Konjugate.desktop: usr/share/applications/com.konjugate.Konjugate.desktop
       com.konjugate.Konjugate.metainfo.xml: usr/share/metainfo/com.konjugate.Konjugate.metainfo.xml

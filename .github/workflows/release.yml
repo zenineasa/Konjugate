@@ -275,15 +275,11 @@ jobs:
     # because a channel hasn't been set up. See docs/packageManagerDistribution.md for the one-time
     # manual setup each channel needs before its secret is added.
     #
-    # The official Homebrew Cask and Snap remain deliberately deferred, with no job here (Konjugate's
-    # own Homebrew tap is automated by homebrewTapRelease below):
-    #   - official Homebrew Cask: a real `brew audit --new` run surfaced hard blockers (macOS
-    #     notarization, a project-notability bar) that aren't quick fixes.
-    #   - Snap: needs a one-time Snapcraft Store credential (SNAPCRAFT_STORE_CREDENTIALS) that
-    #     doesn't exist yet, and distribution/snap/snapcraft.yaml itself has never been run through
-    #     a real `snapcraft pack`.
-    # Re-add a job for either (see this file's git history, commit c40e5ee, for the exact
-    # configuration) once its blocker is cleared.
+    # The official Homebrew Cask remains deliberately deferred, with no job here (Konjugate's own
+    # Homebrew tap is automated by homebrewTapRelease below): a real `brew audit --new` run surfaced
+    # hard blockers (macOS notarization, a project-notability bar) that aren't quick fixes. Re-add a
+    # job for it (see this file's git history, commit c40e5ee, for the exact configuration) once
+    # they are cleared.
 
     # winget is PAUSED: the first manifest submitted to microsoft/winget-pkgs was taking too long to be approved by Microsoft's
     # moderators to plan around, so this job is commented out rather than deleted. winget-releaser only bumps a package that
@@ -408,3 +404,73 @@ jobs:
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git commit -m "konjugate $TAG"
                   git push
+
+    snapRelease:
+        needs: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        # ubuntu-22.04 for the same reason as the `build` job's Linux leg: the packaged engine links
+        # the build machine's glibc/libstdc++, so build on the oldest still-supported LTS.
+        # Rebuilds the Linux package from source because the `build` job only keeps the compressed
+        # AppImage, not the raw out/package/Konjugate-linux-<arch> tree the snap's `dump` part needs.
+        # amd64 only, like the `build` job's single Linux leg.
+        runs-on: ubuntu-22.04
+        env:
+            SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        steps:
+            # Opt-in by secret like the other channels. Setup is in docs/packageManagerDistribution.md.
+            - name: Skip when the Snap Store isn't set up yet
+              if: env.SNAPCRAFT_STORE_CREDENTIALS == ''
+              run: echo "::notice::SNAPCRAFT_STORE_CREDENTIALS is not set; skipping the Snap Store (see docs/packageManagerDistribution.md)."
+            - uses: actions/checkout@v4
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+            - uses: actions/setup-node@v4
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              with:
+                  node-version: 24.19.0
+                  cache: npm
+            - uses: actions/setup-python@v5
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              with:
+                  python-version: '3.x'
+            # Same reason as in the `build` job: lets vcpkg's x-gha binary cache authenticate.
+            - name: Export GitHub Actions cache environment variables
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+                      core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            - name: Install Linux packaging prerequisites
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+            - name: Build the Linux package
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              run: |
+                  npm ci
+                  make packageLinux
+            # The snap manifest lives under distribution/ with the other store manifests, but
+            # snapcraft only looks in snap/, and its `dump` part reads a fixed, arch-agnostic path --
+            # so place both where it expects them rather than make the manifest branch on either.
+            - name: Stage the snap's inputs
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              run: |
+                  mkdir -p snap out/package/konjugateLinux
+                  cp distribution/snap/snapcraft.yaml snap/snapcraft.yaml
+                  cp -R out/package/Konjugate-linux-*/. out/package/konjugateLinux/
+            - uses: canonical/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              id: build
+            # Kept so a failed publish (or a classic-confinement rejection) can be inspected.
+            - uses: actions/upload-artifact@v4
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              with:
+                  name: snap-Linux-X64
+                  path: ${{ steps.build.outputs.snap }}
+            # `edge` only: classic confinement needs Canonical's manual approval before the snap can
+            # go to a stable channel, and that is requested from the Snap Store dashboard, not here.
+            - uses: canonical/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
+              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+              with:
+                  store_login: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+                  snap: ${{ steps.build.outputs.snap }}
+                  release: edge

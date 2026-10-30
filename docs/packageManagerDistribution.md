@@ -15,7 +15,7 @@ Konjugate's release pipeline (`.github/workflows/release.yml`) already builds an
 
 Two decisions shape everything below, both made deliberately: Konjugate ships **unsigned** for now (no Apple Developer ID, no Windows code-signing certificate — revisit once there's real traction), and none of the channels here cost anything to register on or publish through, so nothing is being skipped for budget reasons.
 
-**Current status:** Chocolatey and Konjugate's own Homebrew tap have CI jobs in `release.yml` (`chocolateyRelease`, `homebrewTapRelease`) that run on every `v*` tag but are opt-in by secret — with `CHOCOLATEY_API_KEY` / `HOMEBREW_TAP_TOKEN` unset, the job skips its real step with a notice instead of failing, so a release never goes red for a channel that isn't set up yet. Each needs a one-time human setup step first (see their sections). The official Homebrew Cask and Snap are deferred with no job (the Cask is blocked by notarization and notability requirements; Snap by a missing store credential and an untested `snapcraft.yaml`), and Flathub is blocked by its own project-maturity and AI-content policies (see its section) — revisit once those no longer apply.
+**Current status:** Chocolatey, Konjugate's own Homebrew tap and the Snap Store have CI jobs in `release.yml` (`chocolateyRelease`, `homebrewTapRelease`, `snapRelease`) that run on every `v*` tag but are opt-in by secret — with `CHOCOLATEY_API_KEY` / `HOMEBREW_TAP_TOKEN` / `SNAPCRAFT_STORE_CREDENTIALS` unset, the job skips its real step with a notice instead of failing, so a release never goes red for a channel that isn't set up yet. Each needs a one-time human setup step first (see their sections). The official Homebrew Cask is deferred with no job (blocked by notarization and notability requirements), and Flathub is blocked by its own project-maturity and AI-content policies (see its section) — revisit once those no longer apply.
 
 ## Shared app metadata
 
@@ -112,17 +112,17 @@ From the next tag on, the job opens the bump PR automatically. Microsoft's bots 
 
 ## Snap
 
-**Automated today:** nothing — no `snapRelease` job exists in `release.yml` right now (removed rather than left permanently failing on a missing credential). It would rebuild the Linux package from source (there's no raw `out/package/Konjugate-linux-<arch>` tree published as an artifact, only the compressed AppImage) and publish via `canonical/action-build` + `canonical/action-publish`.
+**Automated today:** the `snapRelease` job in `release.yml` runs on every `v*` tag once the `SNAPCRAFT_STORE_CREDENTIALS` secret is set (without it, the job only prints a notice). It rebuilds the Linux package from source on `ubuntu-22.04` (there's no raw `out/package/Konjugate-linux-<arch>` tree published as an artifact, only the compressed AppImage), copies the manifest to `snap/snapcraft.yaml` and the package to `out/package/konjugateLinux` where it expects them, builds with `canonical/action-build`, keeps the `.snap` as the `snap-Linux-X64` artifact, and publishes to the `edge` channel with `canonical/action-publish`. amd64 only, matching the single Linux leg of the `build` job. A manual `workflow_dispatch` run never publishes, like every other channel.
 
 `distribution/snap/snapcraft.yaml` uses `confinement: classic`, not `strict`, deliberately: Konjugate's inline C++/Python provider feature spawns whichever host compiler/interpreter it finds (`src/main.mjs` — `clang++`/`cl.exe`/`g++`/`c++`, `python3`/`python`), which strict confinement's plug model has no clean way to grant. Classic confinement requires a one-time manual Canonical review before stable-channel publication — free, but human-gated, on top of the account setup below.
 
-**One-time setup, in order:**
-1. `snapcraft login`, then `snapcraft register konjugate` — claims the name under your own Ubuntu One account.
+**One-time setup, in order (steps 1-4 done):**
+1. `snapcraft login`, then `snapcraft register konjugate` — claims the name under your own Ubuntu One account. The Snap Store's developer agreement has to be accepted at https://snapcraft.io/account first, or registering fails with `user-not-ready`.
 2. `snapcraft export-login --snaps=konjugate --acls package_access,package_push,package_update,package_release exported.txt` run locally.
 3. Paste the contents of `exported.txt` into this repo's `SNAPCRAFT_STORE_CREDENTIALS` secret.
-4. `distribution/snap/snapcraft.yaml` has not been run through a real `snapcraft pack` yet (no Linux machine was available while drafting it) — verify it builds locally before relying on CI to publish it.
-5. Re-add a `snapRelease` job to `release.yml` (see this file's git history for the exact configuration that was removed) — `needs: release`, tag-gated, rebuilding the Linux package via `make packageLinux` then publishing via `canonical/action-build` + `canonical/action-publish`.
-6. Once ready to leave the `edge` channel (which that job published to by default), request classic-confinement review via the Snap Store dashboard.
+4. `distribution/snap/snapcraft.yaml` has been packed with a real `snapcraft pack --destructive-mode` in an Ubuntu 24.04 arm64 container, and the unpacked app started under a virtual display. That does not prove the installed snap launches: the Electron `chrome-sandbox` helper is not setuid and a classic snap cannot make it so, so on systems that restrict unprivileged user namespaces (Ubuntu 24.04 by default) the app may need `--no-sandbox` or an AppArmor allowance. Check this with a real `snap install` of the first `edge` build. The classic linter also reports the binaries use the host's glibc instead of core24's dynamic linker.
+5. Push a `v*` tag; `snapRelease` publishes to `edge`. Whether the Store accepts an unreviewed classic snap even on `edge` is not confirmed — if the publish step fails, the uploaded `snap-Linux-X64` artifact is the built snap, and the classic-confinement request below may have to come first.
+6. Once ready to leave the `edge` channel, request classic-confinement review via the Snap Store dashboard (the snapcraft forum's classic-confinement request category).
 
 ## Flathub
 

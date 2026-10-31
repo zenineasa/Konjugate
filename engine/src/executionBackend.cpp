@@ -29,6 +29,7 @@ std::string_view backendSelectionReasonName(BackendSelectionReason value) noexce
         case BackendSelectionReason::explicitSelection: return "explicitSelection";
         case BackendSelectionReason::singleNode: return "singleNode";
         case BackendSelectionReason::belowParallelWorkThreshold: return "belowParallelWorkThreshold";
+        case BackendSelectionReason::stateHandoverOutweighsWork: return "stateHandoverOutweighsWork";
         case BackendSelectionReason::partitionCommunicationCutTooHigh: return "partitionCommunicationCutTooHigh";
         case BackendSelectionReason::partitionCutWithinLimit: return "partitionCutWithinLimit";
         case BackendSelectionReason::independentParallelWork: return "independentParallelWork";
@@ -42,7 +43,8 @@ ExecutionBackendDecision selectExecutionBackend(ExecutionBackend requestedBacken
                                                 std::size_t automaticParallelThreshold,
                                                 std::size_t communicationCutWeight,
                                                 std::size_t totalCommunicationWeight,
-                                                double maximumPartitionCutFraction) {
+                                                double maximumPartitionCutFraction,
+                                                std::size_t statesPerSynchronization) {
     if (!(maximumPartitionCutFraction >= 0 && maximumPartitionCutFraction <= 1) ||
         !std::isfinite(maximumPartitionCutFraction)) {
         throw std::runtime_error("execution.automaticMaximumPartitionCutFraction must be between 0 and 1.");
@@ -53,6 +55,11 @@ ExecutionBackendDecision selectExecutionBackend(ExecutionBackend requestedBacken
     if (nodeCount < 2) return {ExecutionBackend::serial, BackendSelectionReason::singleNode, cutFraction};
     if (estimatedOperationsPerSynchronization < automaticParallelThreshold * nodeCount) {
         return {ExecutionBackend::serial, BackendSelectionReason::belowParallelWorkThreshold, cutFraction};
+    }
+    // Every synchronization hands each worker the states its nodes hold, each copied into a message by its id: work
+    // smaller than the states handed over (a robot's many states set by relationships, say) is quicker done on one thread.
+    if (estimatedOperationsPerSynchronization < statesPerSynchronization) {
+        return {ExecutionBackend::serial, BackendSelectionReason::stateHandoverOutweighsWork, cutFraction};
     }
     if (cutFraction > maximumPartitionCutFraction) {
         return {ExecutionBackend::threadPool, BackendSelectionReason::partitionCommunicationCutTooHigh, cutFraction};

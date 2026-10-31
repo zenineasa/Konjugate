@@ -60,6 +60,34 @@ enum class ExpressionOperation {
     logicalNot
 };
 
+// What one instruction of an expression program does. Each works on a stack of values: literal and symbol push one;
+// the arithmetic ones replace the top value, or the top two, with their result; compare replaces the top two, a left
+// and a right, with the right and whether the pair holds (index names the comparison, as ExpressionOperation orders
+// them from less), so a chain can go on from the right; the jumps go to the instruction at index, the conditional ones
+// popping the value they test; fail throws (index names why). In an algebraic relationship's programs a symbol is read
+// as what it is: a state (index its place in the plan's states), a value resolved for the instant (a parameter or the
+// time, index its symbol) or a definition (index its number), worked out when first read.
+enum class InstructionCode : std::uint8_t {
+    literal, symbol, state, resolved, definition, add, multiply, negate, divide, power, squareRoot, absolute, exponential, logarithm, sine, cosine, tangent,
+    arcsine, arccosine, arctangent, arctangent2, hyperbolicTangent, minimum, maximum, compare, logicalNot,
+    jump, jumpIfZero, jumpIfNonzero, pop, fail
+};
+
+struct ExpressionInstruction {
+    InstructionCode code = InstructionCode::literal;
+    std::uint32_t index = 0;
+    double value = 0;
+};
+
+// An expression as a flat list of instructions, run from first to last with a stack at most `depth` deep: the same
+// operations in the same order as walking its tree, so the same value to the last bit, and the same choices left
+// unworked (a Which's branches not taken, the rest of a chained comparison or of And and Or once settled). Empty when
+// the expression has none, and the tree is walked instead.
+struct ExpressionProgram {
+    std::vector<ExpressionInstruction> instructions;
+    std::size_t depth = 0;
+};
+
 struct CompiledExpression {
     ExpressionOperation operation = ExpressionOperation::literal;
     double literal = 0;
@@ -148,6 +176,8 @@ struct ContributionTask {
     std::vector<CompiledBinding> bindings;
     std::vector<CompiledParameter> parameters;
     CompiledExpression expression;
+    // The expression's program, built once its symbols are bound (see compileExecutionPlan).
+    ExpressionProgram program;
     ContributionImplementation implementation = ContributionImplementation::equation;
     std::string providerSource;
     std::string providerOutputKey;
@@ -288,6 +318,8 @@ struct AlgebraicRelationship {
     // Each reads the bindings (symbols 0 .. bindings.size() - 1) and earlier definitions (symbol
     // bindings.size() + k for definition k).
     std::vector<CompiledExpression> definitions;
+    // Each definition's program, built once the plan is compiled.
+    std::vector<ExpressionProgram> definitionPrograms;
     // The definitions each definition reads whatever its choices (Which) take: all but those read only in a choice's
     // values or later conditions. The others are worked out only if the branch reading them is taken.
     std::vector<std::vector<std::size_t>> unconditionalDefinitions;
@@ -300,6 +332,8 @@ struct AlgebraicOutput {
     EntityId outputStateId = 0;
     std::size_t outputStateIndex = std::numeric_limits<std::size_t>::max();
     CompiledExpression expression;
+    // The expression's program, built once the plan is compiled.
+    ExpressionProgram program;
     // The definitions it needs whatever its choices take, directly or through other definitions, in ascending order:
     // worked out before it. The rest are worked out when a branch taken reads them, and not at all otherwise.
     std::vector<std::size_t> eagerDefinitions;

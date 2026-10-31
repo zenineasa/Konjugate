@@ -562,7 +562,7 @@ void runSimulation(const boost::property_tree::ptree& document,
     const auto backendDecision = selectExecutionBackend(
         executionSettings.requestedBackend, executionPlan.nodes.size(),
         executionSettings.estimatedOperationsPerSynchronization, executionSettings.automaticParallelThreshold,
-        partitionPlan.selected.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction);
+        partitionPlan.selected.communicationCutWeight, totalCommunicationWeight, maximumPartitionCutFraction, executionPlan.stateIds.size());
     executionSettings.backend = backendDecision.backend;
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
     // The default web build (docs/proposals/webEdition.md's "web" preset) has no pthread

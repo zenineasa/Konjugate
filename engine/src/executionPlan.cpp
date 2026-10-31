@@ -354,6 +354,272 @@ double evaluateWith(const CompiledExpression& expression, Read& read) {
     throw std::runtime_error("Executable expression operation is invalid.");
 }
 
+// Why a fail instruction throws: its index.
+constexpr const char* programFailures[] = {
+    "Executable expression has too few arguments.",
+    "No branch of a cases expression matched.",
+    "Executable expression operation is invalid.",
+    "Executable symbol binding is invalid."
+};
+
+// Writes an expression's program: each operation after its arguments, in the order the tree walks them. A sum starts
+// from 0 and a product from 1, adding or multiplying each argument in turn as the walk does, so even a sum of one
+// negative zero comes out the same. An operation short of arguments fails only if reached, as in the tree.
+struct ProgramWriter {
+    ExpressionProgram& program;
+    std::size_t depth = 0;
+
+    std::size_t add(InstructionCode code, int effect, std::uint32_t index = 0, double value = 0) {
+        program.instructions.push_back({code, index, value});
+        depth = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(depth) + effect);
+        program.depth = std::max(program.depth, depth);
+        return program.instructions.size() - 1;
+    }
+    // Points the jump at `jump` to the next instruction written.
+    void land(std::size_t jump) {
+        if (program.instructions.size() > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error("An expression is too long to compile.");
+        program.instructions[jump].index = static_cast<std::uint32_t>(program.instructions.size());
+    }
+    bool has(const CompiledExpression& expression, std::size_t count) {
+        if (expression.arguments.size() >= count) return true;
+        add(InstructionCode::fail, 1, 0);
+        return false;
+    }
+    void unary(const CompiledExpression& expression, InstructionCode code) {
+        if (!has(expression, 1)) return;
+        write(expression.arguments[0]);
+        add(code, 0);
+    }
+    void binary(const CompiledExpression& expression, InstructionCode code) {
+        if (!has(expression, 2)) return;
+        write(expression.arguments[0]);
+        write(expression.arguments[1]);
+        add(code, -1);
+    }
+
+    void write(const CompiledExpression& expression) {
+        const auto& arguments = expression.arguments;
+        const auto base = depth;
+        switch (expression.operation) {
+            case ExpressionOperation::literal: add(InstructionCode::literal, 1, 0, expression.literal); return;
+            case ExpressionOperation::symbol:
+                if (expression.symbolIndex > std::numeric_limits<std::uint32_t>::max()) add(InstructionCode::fail, 1, 3);
+                else add(InstructionCode::symbol, 1, static_cast<std::uint32_t>(expression.symbolIndex));
+                return;
+            case ExpressionOperation::add:
+            case ExpressionOperation::multiply: {
+                const bool sum = expression.operation == ExpressionOperation::add;
+                add(InstructionCode::literal, 1, 0, sum ? 0.0 : 1.0);
+                for (const auto& item : arguments) {
+                    write(item);
+                    add(sum ? InstructionCode::add : InstructionCode::multiply, -1);
+                }
+                return;
+            }
+            case ExpressionOperation::negate: unary(expression, InstructionCode::negate); return;
+            case ExpressionOperation::divide: binary(expression, InstructionCode::divide); return;
+            case ExpressionOperation::power: binary(expression, InstructionCode::power); return;
+            case ExpressionOperation::squareRoot: unary(expression, InstructionCode::squareRoot); return;
+            case ExpressionOperation::absolute: unary(expression, InstructionCode::absolute); return;
+            case ExpressionOperation::exponential: unary(expression, InstructionCode::exponential); return;
+            case ExpressionOperation::logarithm: unary(expression, InstructionCode::logarithm); return;
+            case ExpressionOperation::sine: unary(expression, InstructionCode::sine); return;
+            case ExpressionOperation::cosine: unary(expression, InstructionCode::cosine); return;
+            case ExpressionOperation::tangent: unary(expression, InstructionCode::tangent); return;
+            case ExpressionOperation::arcsine: unary(expression, InstructionCode::arcsine); return;
+            case ExpressionOperation::arccosine: unary(expression, InstructionCode::arccosine); return;
+            case ExpressionOperation::arctangent: unary(expression, InstructionCode::arctangent); return;
+            case ExpressionOperation::arctangent2: binary(expression, InstructionCode::arctangent2); return;
+            case ExpressionOperation::hyperbolicTangent: unary(expression, InstructionCode::hyperbolicTangent); return;
+            case ExpressionOperation::minimum: binary(expression, InstructionCode::minimum); return;
+            case ExpressionOperation::maximum: binary(expression, InstructionCode::maximum); return;
+            case ExpressionOperation::conditional: {
+                // Each condition, then its value if it holds; past the last pair, no branch matched.
+                std::vector<std::size_t> ends;
+                for (std::size_t index = 0; index + 1 < arguments.size(); index += 2) {
+                    write(arguments[index]);
+                    const auto skip = add(InstructionCode::jumpIfZero, -1);
+                    write(arguments[index + 1]);
+                    ends.push_back(add(InstructionCode::jump, 0));
+                    depth = base;
+                    land(skip);
+                }
+                add(InstructionCode::fail, 1, 1);
+                for (const auto end : ends) land(end);
+                depth = base + 1;
+                return;
+            }
+            case ExpressionOperation::less:
+            case ExpressionOperation::lessEqual:
+            case ExpressionOperation::greater:
+            case ExpressionOperation::greaterEqual:
+            case ExpressionOperation::equal:
+            case ExpressionOperation::notEqual: {
+                if (!has(expression, 2)) return;
+                // Each pair in turn, going on from its right; the first that fails settles the chain.
+                const auto comparison = static_cast<std::uint32_t>(static_cast<int>(expression.operation) - static_cast<int>(ExpressionOperation::less));
+                std::vector<std::size_t> fails;
+                write(arguments[0]);
+                for (std::size_t index = 1; index < arguments.size(); ++index) {
+                    write(arguments[index]);
+                    add(InstructionCode::compare, 0, comparison);
+                    fails.push_back(add(InstructionCode::jumpIfZero, -1));
+                }
+                add(InstructionCode::pop, -1);
+                add(InstructionCode::literal, 1, 0, 1.0);
+                const auto end = add(InstructionCode::jump, 0);
+                depth = base + 1;
+                for (const auto fail : fails) land(fail);
+                add(InstructionCode::pop, -1);
+                add(InstructionCode::literal, 1, 0, 0.0);
+                land(end);
+                return;
+            }
+            case ExpressionOperation::logicalAnd:
+            case ExpressionOperation::logicalOr: {
+                // The first argument false (for And) or true (for Or) settles it.
+                const bool all = expression.operation == ExpressionOperation::logicalAnd;
+                std::vector<std::size_t> settled;
+                for (const auto& item : arguments) {
+                    write(item);
+                    settled.push_back(add(all ? InstructionCode::jumpIfZero : InstructionCode::jumpIfNonzero, -1));
+                }
+                add(InstructionCode::literal, 1, 0, all ? 1.0 : 0.0);
+                const auto end = add(InstructionCode::jump, 0);
+                depth = base;
+                for (const auto jump : settled) land(jump);
+                add(InstructionCode::literal, 1, 0, all ? 0.0 : 1.0);
+                land(end);
+                return;
+            }
+            case ExpressionOperation::logicalNot: unary(expression, InstructionCode::logicalNot); return;
+        }
+        add(InstructionCode::fail, 1, 2);
+    }
+};
+
+ExpressionProgram expressionProgram(const CompiledExpression& expression) {
+    ExpressionProgram program;
+    ProgramWriter writer{program};
+    writer.write(expression);
+    return program;
+}
+
+// An algebraic relationship's expression as a program reading each symbol as what it is: a state from the states as they
+// stand, a parameter or the time as resolved for the instant, a definition worked out when first read.
+ExpressionProgram relationshipProgram(const CompiledExpression& expression, const AlgebraicRelationship& relationship) {
+    auto program = expressionProgram(expression);
+    const auto bindingCount = relationship.bindings.size();
+    for (auto& instruction : program.instructions) {
+        if (instruction.code != InstructionCode::symbol) continue;
+        const std::size_t index = instruction.index;
+        if (index >= bindingCount + relationship.definitions.size()) {
+            instruction = {InstructionCode::fail, 3, 0};
+        } else if (index >= bindingCount) {
+            instruction = {InstructionCode::definition, static_cast<std::uint32_t>(index - bindingCount), 0};
+        } else if (relationship.stateReads[index] == std::numeric_limits<std::size_t>::max()) {
+            instruction = {InstructionCode::resolved, instruction.index, 0};
+        } else if (relationship.stateReads[index] <= std::numeric_limits<std::uint32_t>::max()) {
+            instruction = {InstructionCode::state, static_cast<std::uint32_t>(relationship.stateReads[index]), 0};
+        }
+    }
+    return program;
+}
+
+// Runs a program, each symbol's value from `read`. Reading a symbol may run other programs (an algebraic relationship's
+// definitions, worked out when first read): each run keeps its own stack.
+template <typename Read>
+double runProgram(const ExpressionProgram& program, Read& read) {
+    constexpr std::size_t onFrame = 64;
+    double frame[onFrame];
+    std::vector<double> large;
+    double* stack = frame;
+    if (program.depth > onFrame) {
+        large.resize(program.depth);
+        stack = large.data();
+    }
+    std::size_t top = 0;
+    const auto* instructions = program.instructions.data();
+    const auto count = program.instructions.size();
+    for (std::size_t at = 0; at < count; ++at) {
+        const auto& instruction = instructions[at];
+        switch (instruction.code) {
+            case InstructionCode::literal: stack[top++] = instruction.value; break;
+            case InstructionCode::symbol: { const double value = read(instruction.index); stack[top++] = value; break; }
+            case InstructionCode::state:
+            case InstructionCode::resolved:
+            case InstructionCode::definition:
+                if constexpr (requires { read.definition(std::size_t{}); }) {
+                    double value = 0;
+                    if (instruction.code == InstructionCode::state) value = read.state(instruction.index);
+                    else if (instruction.code == InstructionCode::resolved) value = read.resolved(instruction.index);
+                    else value = read.definition(instruction.index);
+                    stack[top++] = value;
+                    break;
+                } else {
+                    throw std::runtime_error("Executable symbol binding is invalid.");
+                }
+            case InstructionCode::add: --top; stack[top - 1] += stack[top]; break;
+            case InstructionCode::multiply: --top; stack[top - 1] *= stack[top]; break;
+            case InstructionCode::negate: stack[top - 1] = -stack[top - 1]; break;
+            case InstructionCode::divide: --top; stack[top - 1] = stack[top - 1] / stack[top]; break;
+            case InstructionCode::power: --top; stack[top - 1] = std::pow(stack[top - 1], stack[top]); break;
+            case InstructionCode::squareRoot: stack[top - 1] = std::sqrt(stack[top - 1]); break;
+            case InstructionCode::absolute: stack[top - 1] = std::abs(stack[top - 1]); break;
+            case InstructionCode::exponential: stack[top - 1] = std::exp(stack[top - 1]); break;
+            case InstructionCode::logarithm: stack[top - 1] = std::log(stack[top - 1]); break;
+            case InstructionCode::sine: stack[top - 1] = std::sin(stack[top - 1]); break;
+            case InstructionCode::cosine: stack[top - 1] = std::cos(stack[top - 1]); break;
+            case InstructionCode::tangent: stack[top - 1] = std::tan(stack[top - 1]); break;
+            case InstructionCode::arcsine: stack[top - 1] = std::asin(stack[top - 1]); break;
+            case InstructionCode::arccosine: stack[top - 1] = std::acos(stack[top - 1]); break;
+            case InstructionCode::arctangent: stack[top - 1] = std::atan(stack[top - 1]); break;
+            case InstructionCode::arctangent2: --top; stack[top - 1] = std::atan2(stack[top - 1], stack[top]); break;
+            case InstructionCode::hyperbolicTangent: stack[top - 1] = std::tanh(stack[top - 1]); break;
+            case InstructionCode::minimum: --top; stack[top - 1] = std::min(stack[top - 1], stack[top]); break;
+            case InstructionCode::maximum: --top; stack[top - 1] = std::max(stack[top - 1], stack[top]); break;
+            case InstructionCode::compare: {
+                const double left = stack[top - 2];
+                const double right = stack[top - 1];
+                bool holds = false;
+                switch (instruction.index) {
+                    case 0: holds = left < right; break;
+                    case 1: holds = left <= right; break;
+                    case 2: holds = left > right; break;
+                    case 3: holds = left >= right; break;
+                    case 4: holds = left == right; break;
+                    default: holds = left != right; break;
+                }
+                stack[top - 2] = right;
+                stack[top - 1] = holds ? 1.0 : 0.0;
+                break;
+            }
+            case InstructionCode::logicalNot: stack[top - 1] = stack[top - 1] == 0.0 ? 1.0 : 0.0; break;
+            case InstructionCode::jump: at = instruction.index - 1; break;
+            case InstructionCode::jumpIfZero: if (stack[--top] == 0.0) at = instruction.index - 1; break;
+            case InstructionCode::jumpIfNonzero: if (stack[--top] != 0.0) at = instruction.index - 1; break;
+            case InstructionCode::pop: --top; break;
+            case InstructionCode::fail: throw std::runtime_error(programFailures[std::min<std::size_t>(instruction.index, 3)]);
+        }
+    }
+    return stack[0];
+}
+
+// An expression's value: by its program when it has one, otherwise by walking its tree.
+template <typename Read>
+double evaluateCompiled(const CompiledExpression& expression, const ExpressionProgram& program, Read& read) {
+    return program.instructions.empty() ? evaluateWith(expression, read) : runProgram(program, read);
+}
+
+// A task's equation's value from its symbols' values.
+double evaluateTask(const ContributionTask& task, const std::vector<double>& symbols) {
+    const auto read = [&](std::size_t index) {
+        if (index >= symbols.size()) throw std::runtime_error("Executable symbol binding is invalid.");
+        return symbols[index];
+    };
+    return evaluateCompiled(task.expression, task.program, read);
+}
+
 }
 
 double CompiledExpression::evaluate(const std::vector<double>& symbols) const {
@@ -854,6 +1120,18 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             return std::any_of(task.parameters.begin(), task.parameters.end(), [](const auto& parameter) { return parameter.schedule != nullptr; });
         });
     };
+    // Each equation as a program, now that its symbols are bound and nothing changes them.
+    for (auto& node : plan.nodes) {
+        for (auto* tasks : {&node.contributions, &node.algebraicTasks}) {
+            for (auto& task : *tasks) if (task.implementation == ContributionImplementation::equation) task.program = expressionProgram(task.expression);
+        }
+    }
+    for (auto& relationship : plan.algebraicRelationships) {
+        relationship.definitionPrograms.clear();
+        relationship.definitionPrograms.reserve(relationship.definitions.size());
+        for (const auto& definition : relationship.definitions) relationship.definitionPrograms.push_back(relationshipProgram(definition, relationship));
+    }
+    for (auto& output : plan.algebraicOutputs) output.program = relationshipProgram(output.expression, plan.algebraicRelationships[output.relationship]);
     for (auto& node : plan.nodes) {
         node.hasParameterSchedules = scheduled(node.contributions) || scheduled(node.algebraicTasks) || (node.nodeProvider &&
             std::any_of(node.nodeProvider->parameters.begin(), node.nodeProvider->parameters.end(), [](const auto& parameter) { return parameter.schedule != nullptr; }));
@@ -923,7 +1201,7 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
         }
 
         if (task.implementation == ContributionImplementation::equation) {
-            const auto contribution = finalizeContribution(task, task.expression.evaluate(symbols));
+            const auto contribution = finalizeContribution(task, evaluateTask(task, symbols));
             evaluated.push_back({task.sequence, task.outputStateIndex, contribution});
         } else {
             const auto& key = providerProcessKey(task);
@@ -1172,7 +1450,7 @@ void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, St
 
         double value = 0;
         if (task.implementation == ContributionImplementation::equation) {
-            value = task.expression.evaluate(symbols);
+            value = evaluateTask(task, symbols);
         } else {
             if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
             const std::vector<const ContributionTask*> batchTasks{&task};
@@ -1289,6 +1567,8 @@ namespace {
 // reached later may read one settled since an earlier one), a parameter or the time as resolved for the instant, and a
 // definition as worked out when first read: with the definitions it reads whatever its choices take, in ascending
 // order, so working one out recurses only as deep as its choices are nested, never down a long chain of definitions.
+const ExpressionProgram noProgram;
+
 struct DefinitionReader {
     const AlgebraicRelationship& relationship;
     const StateValues& states;
@@ -1310,9 +1590,17 @@ struct DefinitionReader {
         if (done[index - bindingCount] != 1) workOut(index - bindingCount);
         return symbols[index];
     }
+    // As a relationship's program reads them (see relationshipProgram).
+    double state(std::size_t index) const { return states[index]; }
+    double resolved(std::size_t index) const { return symbols[index]; }
+    double definition(std::size_t definition) {
+        if (done[definition] != 1) workOut(definition);
+        return symbols[relationship.bindings.size() + definition];
+    }
 
     void workOutOne(std::size_t definition) {
-        symbols[relationship.bindings.size() + definition] = evaluateWith(relationship.definitions[definition], *this);
+        symbols[relationship.bindings.size() + definition] =
+            evaluateCompiled(relationship.definitions[definition], relationship.definitionPrograms.empty() ? noProgram : relationship.definitionPrograms[definition], *this);
         done[definition] = 1;
         ++worked;
     }
@@ -1378,7 +1666,7 @@ std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValue
         // The definitions it reads whatever its choices take, in ascending order; any other when a branch taken reads it.
         DefinitionReader read{relationship, states, symbols, done, definitionsWorked, found, pending};
         for (const auto definition : output.eagerDefinitions) if (done[definition] != 1) read.workOutOne(definition);
-        const auto result = evaluateWith(output.expression, read);
+        const auto result = evaluateCompiled(output.expression, output.program, read);
         if (!std::isfinite(result)) {
             throw std::runtime_error("The relationship " + std::to_string(relationship.edgeId) + " produced a non-finite value for state " +
                 std::to_string(output.outputStateId) + " at " + std::to_string(simulationTime) + " s.");

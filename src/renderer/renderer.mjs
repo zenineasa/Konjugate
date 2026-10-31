@@ -5197,6 +5197,7 @@ function renderExecutionSummary() {
         explicitSelection: 'This backend was selected explicitly in the run configuration.',
         singleNode: 'Serial execution was selected because the model has only one node.',
         belowParallelWorkThreshold: 'Serial execution was selected because the estimated work is below the parallel threshold.',
+        stateHandoverOutweighsWork: 'Serial execution was selected because handing the states to workers each step would take longer than the work it spreads.',
         independentParallelWork: 'Partitioned execution was selected because the heavy node workloads are independent.',
         partitionCutWithinLimit: 'Partitioned execution was selected because the communication cut remains within the configured limit.',
         partitionCommunicationCutTooHigh: 'The shared thread pool was selected to avoid an expensive partition communication cut.'

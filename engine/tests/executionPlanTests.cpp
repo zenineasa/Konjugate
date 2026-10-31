@@ -723,6 +723,13 @@ void automaticBackendSelectionAccountsForWorkAndCommunication() {
     const auto explicitBackend = konjugate::selectExecutionBackend(ExecutionBackend::threadPool, 8, 8192, 128, 20, 20, 0);
     require(explicitBackend.backend == ExecutionBackend::threadPool && explicitBackend.reason == BackendSelectionReason::explicitSelection,
         "An explicit backend selection was overridden.");
+    // A robot imported with contact: a little node work and many states, mostly set by relationships, which every step
+    // would hand to the workers. On one thread it ran in two thirds of the time.
+    const auto manyStates = konjugate::selectExecutionBackend(ExecutionBackend::automatic, 9, 1248, 128, 0, 0, 0.25, 19000);
+    require(manyStates.backend == ExecutionBackend::serial && manyStates.reason == BackendSelectionReason::stateHandoverOutweighsWork,
+        "Work smaller than the states handed to workers each step was parallelized automatically.");
+    const auto fewStates = konjugate::selectExecutionBackend(ExecutionBackend::automatic, 8, 8192, 128, 0, 0, 0.25, 64);
+    require(fewStates.backend == ExecutionBackend::partitioned, "Heavy work over few states should still be partitioned.");
 }
 
 }

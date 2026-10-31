@@ -7,6 +7,7 @@
 #include "executionPlan.hpp"
 #include "modelValidator.hpp"
 #include <boost/property_tree/json_parser.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -308,6 +309,79 @@ void outputsAreOrderedByStatesTheirDefinitionsReadOnceEach() {
     require(seconds < 3, "Compiling should not look through the definitions once per output: it took " + std::to_string(seconds) + " s.");
 }
 
+// Each equation is worked out by a flat program of instructions. Every operation gives what walking its tree gives,
+// to the last bit: a sum adds its terms from zero in turn, a product multiplies them from one.
+void everyOperationIsWorkedOutToTheLastBit() {
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0.7}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "S", "symbol": "s", "initialValue": 0},
+                                          {"id": 22, "name": "P", "symbol": "p", "initialValue": 0},
+                                          {"id": 23, "name": "C", "symbol": "c", "initialValue": 0}], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "All", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "definitions": [{"symbol": "h", "mathJson": ["Divide", "x", 3]}],
+            "outputs": [
+                {"role": "target", "stateId": 21, "setsValue": true, "mathJson": ["Add", ["Sin", "x"], ["Cos", "x"], ["Tan", "x"], ["Arcsin", "x"],
+                    ["Arccos", "x"], ["Arctan", "x"], ["Arctan2", "x", 2], ["Tanh", "x"], ["Exp", "x"], ["Ln", "x"], ["Sqrt", "x"],
+                    ["Abs", ["Negate", "x"]], ["Power", "x", 3], ["Divide", 1, "x"], ["Min", "x", 0.5], ["Max", "x", 0.5], "h"]},
+                {"role": "target", "stateId": 22, "setsValue": true, "mathJson": ["Multiply", 0.1, "x", ["Add", "x", 0.3], "h"]},
+                {"role": "target", "stateId": 23, "setsValue": true, "mathJson": ["Which", ["Greater", "x", 1], 10,
+                    ["Less", 0, "x", 0.5], 20, ["And", ["LessEqual", 0.5, "x"], ["NotEqual", "x", 0.8]], 30, "True", 40]}
+            ]}}
+    ]})json");
+    require(konjugate::validateModel(document).valid, "A relationship using every operation should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto values = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, values, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return values.at(plan.stateIndexes.at(id)); };
+    const double x = 0.7;
+    const double h = x / 3;
+    double sum = 0;
+    for (const double term : {std::sin(x), std::cos(x), std::tan(x), std::asin(x), std::acos(x), std::atan(x), std::atan2(x, 2.0), std::tanh(x),
+                              std::exp(x), std::log(x), std::sqrt(x), std::abs(-x), std::pow(x, 3.0), 1 / x, std::min(x, 0.5), std::max(x, 0.5), h}) {
+        sum += term;
+    }
+    double product = 1;
+    for (const double factor : {0.1, x, x + 0.3, h}) product *= factor;
+    require(at(21) == sum, "The sum of every operation should be what adding them in turn gives, to the last bit.");
+    require(at(22) == product, "The product should be what multiplying in turn gives, to the last bit.");
+    require(at(23) == 30, "With x = 0.7 the choice should take its third branch.");
+}
+
+// A choice settled early leaves the rest unworked: a chained comparison stops at its first pair that fails, And at its
+// first false argument, Or at its first true one, so a definition read only after that is not worked out.
+void aChoiceSettledEarlyLeavesTheRestUnworked() {
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0.7}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "U", "symbol": "u", "initialValue": 0},
+                                          {"id": 22, "name": "V", "symbol": "v", "initialValue": 0},
+                                          {"id": 23, "name": "W", "symbol": "w", "initialValue": 0}], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "Choices", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "definitions": [{"symbol": "a", "mathJson": ["Multiply", 2, "x"]}, {"symbol": "b", "mathJson": ["Multiply", 3, "x"]},
+                            {"symbol": "c", "mathJson": ["Multiply", 4, "x"]}],
+            "outputs": [
+                {"role": "target", "stateId": 21, "setsValue": true, "mathJson": ["Which", ["Greater", "x", 5], 9, ["Less", "x", 0, "a"], 1, "True", 2]},
+                {"role": "target", "stateId": 22, "setsValue": true, "mathJson": ["Which", ["Greater", "x", 5], 9, ["And", ["Greater", "x", 1], ["Greater", "b", 0]], 3, "True", 4]},
+                {"role": "target", "stateId": 23, "setsValue": true, "mathJson": ["Which", ["Greater", "x", 5], 9, ["Or", ["Greater", "x", 0], ["Greater", "c", 0]], 5, "True", 6]}
+            ]}}
+    ]})json");
+    require(konjugate::validateModel(document).valid, "A relationship of choices should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto values = plan.initialStates;
+    const auto worked = konjugate::evaluateAlgebraicRelationships(plan, values, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return values.at(plan.stateIndexes.at(id)); };
+    require(at(21) == 2 && at(22) == 4 && at(23) == 5, "With x = 0.7 the choices should give 2, 4 and 5.");
+    require(worked == 0, "No definition should be worked out once each choice is settled, not " + std::to_string(worked) + ".");
+    values.at(plan.stateIndexes.at(11)) = -1;
+    const auto workedThen = konjugate::evaluateAlgebraicRelationships(plan, values, {}, {}, 0);
+    require(at(21) == 2 && at(23) == 6 && workedThen == 2, "With x = -1 the chain and Or should read a and c, and only those.");
+}
+
 // A valid model's validation hands back the plan it compiled, so a run need not compile it again; an invalid one's none.
 void validationHandsBackTheCompiledPlan() {
     const auto document = parse(chainProject());
@@ -341,6 +415,8 @@ int main() {
         aDefinitionReadOnlyInABranchNotTakenIsNotWorkedOut();
         outputsAreOrderedByStatesTheirDefinitionsReadOnceEach();
         validationHandsBackTheCompiledPlan();
+        everyOperationIsWorkedOutToTheLastBit();
+        aChoiceSettledEarlyLeavesTheRestUnworked();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

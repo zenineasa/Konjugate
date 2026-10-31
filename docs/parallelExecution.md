@@ -118,7 +118,7 @@ The compiled execution plan estimates each node's work from expression operation
 automaticParallelThreshold × nodeCount
 ```
 
-Work below that value selects serial execution. For larger models, the partitioner computes:
+Work below that value selects serial execution. So does work smaller than the model's number of states: every synchronization hands each worker the states its nodes hold, one by one, and a model whose states far outnumber its node operations (a robot whose many states are set by relationships, say) runs faster on one thread. For larger models, the partitioner computes:
 
 ```text
 communicationCutFraction = cutCommunicationWeight / totalCommunicationWeight
@@ -133,6 +133,7 @@ Selection reasons recorded in results are:
 | `explicitSelection` | The run configuration requested a non-automatic backend |
 | `singleNode` | There is no node-level parallel work |
 | `belowParallelWorkThreshold` | Estimated work is too small to justify parallel overhead |
+| `stateHandoverOutweighsWork` | Estimated work is smaller than the number of states handed to workers each step |
 | `partitionCommunicationCutTooHigh` | Parallel work is worthwhile, but the proposed partition boundary is too communication-heavy |
 | `partitionCutWithinLimit` | The proposed communication cut is acceptable |
 | `independentParallelWork` | Substantial node work exists without inter-node communication |

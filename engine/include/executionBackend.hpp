@@ -13,6 +13,7 @@ enum class BackendSelectionReason {
     explicitSelection,
     singleNode,
     belowParallelWorkThreshold,
+    stateHandoverOutweighsWork,
     partitionCommunicationCutTooHigh,
     partitionCutWithinLimit,
     independentParallelWork
@@ -34,6 +35,7 @@ ExecutionBackendDecision selectExecutionBackend(ExecutionBackend requestedBacken
                                                 std::size_t automaticParallelThreshold,
                                                 std::size_t communicationCutWeight,
                                                 std::size_t totalCommunicationWeight,
-                                                double maximumPartitionCutFraction);
+                                                double maximumPartitionCutFraction,
+                                                std::size_t statesPerSynchronization = 0);
 
 }

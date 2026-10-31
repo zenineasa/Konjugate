@@ -60,8 +60,10 @@ jobs:
             # catalog's test flagged the ubuntu-latest (24.04, glibc 2.38+) build as too new;
             # the convention is to build on the oldest still-supported Ubuntu LTS. Move this
             # forward only when that release leaves standard support (22.04: April 2027).
+            # ubuntu-22.04-arm builds the Linux arm64 AppImage natively on the same glibc floor, so
+            # nothing is cross-compiled; the Makefile derives the architecture from the machine.
             matrix:
-                os: [macos-latest, macos-15-intel, ubuntu-22.04, windows-latest]
+                os: [macos-latest, macos-15-intel, ubuntu-22.04, ubuntu-22.04-arm, windows-latest]
         runs-on: ${{ matrix.os }}
         steps:
             - uses: actions/checkout@v4
@@ -145,7 +147,7 @@ jobs:
               run: |
                   sudo apt-get update
                   sudo apt-get install -y librsvg2-bin zsync
-                  curl -L -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+                  curl -L -o /usr/local/bin/appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$(uname -m).AppImage"
                   chmod +x /usr/local/bin/appimagetool
             - run: npm ci
             - name: Build distributable
@@ -211,17 +213,18 @@ jobs:
                   if-no-files-found: error
             # The Snap Store job packs this same build rather than rebuilding it. It also needs the
             # generated PNG icons (assets/icons is gitignored, so a fresh checkout has none), hence
-            # both in one archive, with their repo-relative paths so they unpack in place. Tarred
+            # both in one archive, with their repo-relative paths so they unpack in place. Each Linux
+            # runner builds one architecture, so the archive is named after the runner's. Tarred
             # because upload-artifact drops file permissions, which would strip the executable bits
             # from Electron and the engine. Named so it never matches release-* (the GitHub
             # Release's download pattern), and kept a day since only the snapRelease job needs it.
             - name: Archive the Linux package for the Snap Store job
               if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
-              run: tar -cf out/linux-package.tar out/package/Konjugate-linux-x64 assets/icons/png
+              run: tar -cf out/linux-package.tar out/package/Konjugate-linux-* assets/icons/png
             - uses: actions/upload-artifact@v4
               if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
               with:
-                  name: linux-package-X64
+                  name: linux-package-${{ runner.arch }}
                   path: out/linux-package.tar
                   retention-days: 1
                   if-no-files-found: error
@@ -275,7 +278,8 @@ jobs:
                       echo
                       echo "## Downloads"
                       echo
-                      assetLink '*.AppImage' 'Linux'
+                      assetLink '*-x86_64.AppImage' 'Linux (x86_64)'
+                      assetLink '*-aarch64.AppImage' 'Linux (arm64)'
                       assetLink '*-setup.exe' 'Windows'
                       assetLink '*-arm64.dmg' 'macOS (Apple silicon)'
                       assetLink '*-x64.dmg' 'macOS (Intel)'
@@ -426,9 +430,19 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         # Packs the Linux build the `build` job already made (downloaded below) instead of
         # rebuilding it, so this job has no Node/Python/vcpkg setup. That build ran on ubuntu-22.04
-        # for glibc compatibility; snapcraft itself builds in its own core24 environment, so this
-        # runner's version doesn't matter. amd64 only, like the `build` job's single Linux leg.
-        runs-on: ubuntu-latest
+        # for glibc compatibility; snapcraft itself builds in its own core24 environment, so the
+        # runner's version doesn't matter. One run per architecture, each on a native runner,
+        # downloading the package the matching `build` leg made. Each architecture is its own
+        # revision of the one snap, so a failure on one doesn't stop the other (fail-fast: false).
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: ubuntu-latest
+                      arch: X64
+                    - runner: ubuntu-24.04-arm
+                      arch: ARM64
+        runs-on: ${{ matrix.runner }}
         env:
             SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         steps:
@@ -441,7 +455,7 @@ jobs:
             - uses: actions/download-artifact@v4
               if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
               with:
-                  name: linux-package-X64
+                  name: linux-package-${{ matrix.arch }}
                   path: out
             # The snap manifest lives under distribution/ with the other store manifests, but
             # snapcraft only looks in snap/, and its `dump` part reads a fixed, arch-agnostic path --
@@ -452,7 +466,7 @@ jobs:
                   mkdir -p snap
                   cp distribution/snap/snapcraft.yaml snap/snapcraft.yaml
                   tar -xf out/linux-package.tar
-                  mv out/package/Konjugate-linux-x64 out/package/konjugateLinux
+                  mv out/package/Konjugate-linux-* out/package/konjugateLinux
             - uses: canonical/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
               if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
               id: build
@@ -460,7 +474,7 @@ jobs:
             - uses: actions/upload-artifact@v4
               if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
               with:
-                  name: snap-Linux-X64
+                  name: snap-Linux-${{ matrix.arch }}
                   path: ${{ steps.build.outputs.snap }}
             # `edge` only: classic confinement needs Canonical's manual approval before the snap can
             # go to a stable channel, and that is requested from the Snap Store dashboard, not here.

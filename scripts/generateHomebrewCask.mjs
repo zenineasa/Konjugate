@@ -51,10 +51,10 @@ async function sha256ForAsset(assetName) {
     return createHash('sha256').update(bytes).digest('hex');
 }
 
-// Only x64 Linux exists today -- release.yml's build matrix only runs Linux on ubuntu-22.04
-// (x64), no arm64 Linux runner -- so, unlike the macOS side, the Linux artifact isn't
-// arch-conditional. depends_on arch: :x86_64 below (scoped inside on_linux, not top-level, so it
-// doesn't also restrict macOS) stops this from being offered to an arm64 Linux user it can't run on.
+// The cask only offers the x86_64 AppImage, so unlike the macOS side the Linux artifact isn't
+// arch-conditional. release.yml now also builds an aarch64 AppImage, but nothing here installs it:
+// depends_on arch: :x86_64 below (scoped inside on_linux, not top-level, so it doesn't also
+// restrict macOS) stops the x86_64 file being offered to an arm64 Linux user it can't run on.
 const [armSha256, intelSha256, linuxSha256] = await Promise.all([
     sha256ForAsset(`Konjugate-${version}-arm64.dmg`),
     sha256ForAsset(`Konjugate-${version}-x64.dmg`),

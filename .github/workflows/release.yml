@@ -149,6 +149,12 @@ jobs:
                   sudo apt-get install -y librsvg2-bin zsync
                   curl -L -o /usr/local/bin/appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$(uname -m).AppImage"
                   chmod +x /usr/local/bin/appimagetool
+            - name: Install the pinned CMake
+              shell: bash
+              run: |
+                  python -m pip install cmake==4.3.4
+                  cmake --version
+                  cmake --version | head -n1 | grep -q "version 4.3.4"
             - run: npm ci
             - name: Build distributable
               # Unsigned for now -- macSignIdentity/appleNotaryProfile are left unset, which the

@@ -11,6 +11,7 @@
         { "id": "thermalManagement", "domains": ["thermal", "electrical"] },
         { "id": "pumpSuctionHydraulics", "domains": ["fluid"] },
         { "id": "heatedWaterTank", "domains": ["thermal"] },
+        { "id": "tankCalibration", "domains": ["thermal"] },
         { "id": "springMassDamper", "domains": ["mechanical"] },
         { "id": "twoRoomBuilding", "domains": ["thermal"] },
         { "id": "thermalEquilibrium", "domains": ["thermal"] }

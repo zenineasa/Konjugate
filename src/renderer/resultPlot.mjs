@@ -244,3 +244,23 @@ export async function renderMeasuredVsSimulatedComparison(element, entries) {
         modeBarButtonsToRemove: ['lasso2d', 'select2d']
     });
 }
+
+// What tuning towards an objective changed, for the states the objective names: the run with the starting parameter values (dotted) and with
+// the tuned ones (solid). entries: [{ name, unit, times, before, after }], each index-paired.
+export async function renderBeforeAfterComparison(element, entries) {
+    if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
+    const labelFor = (entry, kind) => (entries.length > 1 ? `${entry.name}: ${kind}` : kind);
+    const traces = entries.flatMap((entry) => {
+        const unitSuffix = entry.unit ? ` ${entry.unit}` : '';
+        return [
+            { type: 'scatter', mode: 'lines', name: labelFor(entry, 'Before tuning'), legendrank: 1, x: entry.times, y: entry.before, line: { width: 2, dash: 'dot', color: measuredColor }, hovertemplate: `${entry.name} before<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>` },
+            { type: 'scatter', mode: 'lines', name: labelFor(entry, 'After tuning'), legendrank: 2, x: entry.times, y: entry.after, line: { width: 2, color: simulatedColor }, hovertemplate: `${entry.name} after<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>` }
+        ];
+    });
+    const axis = { gridcolor: '#1d303a', zerolinecolor: '#2b414c', automargin: true };
+    await globalThis.Plotly.newPlot(element, traces, {
+        autosize: true, margin: { l: 48, r: 18, t: 34, b: 34 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(7,15,21,.52)',
+        font: { color: '#8297a1', family: 'system-ui, sans-serif', size: 9 }, hovermode: 'x unified', showlegend: true,
+        legend: { orientation: 'h', x: 0, y: 1.14, yanchor: 'bottom' }, xaxis: { ...axis, title: { text: 'Time (s)', standoff: 4 } }, yaxis: axis
+    }, { responsive: true, displaylogo: false, scrollZoom: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] });
+}

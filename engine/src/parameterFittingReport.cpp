@@ -33,6 +33,11 @@ void writeFittingReport(const std::filesystem::path& path, const FittingReport& 
     message.set_converged(report.converged);
     message.set_termination_reason(report.terminationReason);
     message.set_final_loss(report.finalLoss);
+    message.set_evaluations(report.evaluations);
+    message.set_failed_trials(report.failedTrials);
+    message.set_elapsed_seconds(report.elapsedSeconds);
+    message.set_stopped(report.stopped);
+    message.set_final_violation(report.finalViolation);
     for (const auto& update : report.iterations) {
         auto* entry = message.add_iterations();
         entry->set_iteration(update.iteration);

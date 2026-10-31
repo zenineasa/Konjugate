@@ -571,6 +571,30 @@ void writeFittingReportPreservesNonFiniteValues() {
 
 }
 
+void fittingObjectiveSummarisesARunAndRejectsWhatIsNotANumber() {
+    using Kind = konjugate::ObjectiveVariable::Kind;
+    const std::vector<konjugate::ObjectiveVariable> variables = {
+        {"block", Kind::state, 7, "", 0.0}, {"k", Kind::parameter, 3, "", 2.0}, {"reading", Kind::measured, 0, "reading", 0.0}};
+    konjugate::ObjectiveData data;
+    data.times = {0.0, 1.0, 2.0};
+    data.states[7] = {1.0, 3.0, 5.0};
+    data.measured["reading"] = {1.0, 2.0, 5.0};
+    data.parameters[3] = 4.0;
+    const auto value = [&](const std::string& text) { return konjugate::FittingObjective(text, variables).evaluate(data); };
+    require(approxEqual(value("final(block)"), 5.0, 1e-12), "final reads the last sample.");
+    require(approxEqual(value("max(block) - min(block)"), 4.0, 1e-12), "max and min read the extremes.");
+    require(approxEqual(value("mean(block)"), 3.0, 1e-12), "mean averages the samples.");
+    require(approxEqual(value("integral(block)"), 6.0, 1e-12), "integral is the trapezoid rule over the sample times.");
+    require(approxEqual(value("integral((block - reading)^2)"), 0.5 * (0.0 + 1.0) + 0.5 * (1.0 + 0.0), 1e-12), "squared error integrates.");
+    require(approxEqual(value("-2^2 + k"), 0.0, 1e-12), "unary minus binds looser than a power.");
+    require(approxEqual(value("1e1 * 2 \xE2\x88\x92 3"), 17.0, 1e-12), "a typed minus sign and scientific notation are read.");
+    for (const std::string bad : {"block", "final(unknown)", "final(final(block))", "final(block", "sqrt", "1 +", "", "wobble(block)"}) {
+        bool rejected = false;
+        try { value(bad); } catch (const std::invalid_argument&) { rejected = true; }
+        require(rejected, "expected the objective '" + bad + "' to be rejected.");
+    }
+}
+
 int main() {
     try {
         findTunableParametersIgnoresParametersWithoutTuning();
@@ -585,6 +609,7 @@ int main() {
         runParameterFitRejectsAnUnrecognizedBackendId();
         modelValidatorRejectsATuningInitialValueOutsideItsOwnBounds();
         runParameterFitRecoversAKnownRateAtItsOwnTuningBoundary();
+        fittingObjectiveSummarisesARunAndRejectsWhatIsNotANumber();
         std::cout << "Parameter fitting tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

@@ -25,6 +25,10 @@ export default {
     validate: (content) => validateWithWebEngine(engineModuleUrl, content),
     infer: (csv, config) => inferWithWebEngine(engineModuleUrl, csv, config),
     fit: (content, csv, config) => fitWithWebEngine(engineModuleUrl, content, csv, config),
+    // The web engine reports a fit only when it ends: there is no progress to show and nothing to stop part way.
+    onFitProgress: () => {},
+    stopFit: async () => false,
+    discardFit: async () => false,
     checkSubstepConvergence: () => checkSubstepConvergenceWithWebEngine(),
     run: (content, configuration) => runWithWebEngine(engineModuleUrl, content, configuration),
     start: (content, configuration) => startWebEngineLiveRun(engineModuleUrl, content, configuration),

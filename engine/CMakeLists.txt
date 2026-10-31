@@ -135,6 +135,7 @@ add_executable(konjugateEngine
     src/main.cpp
     src/modelValidator.cpp
     src/nloptBackend.cpp
+    src/fittingObjective.cpp
     src/parameterFitting.cpp
     src/parameterFittingReport.cpp
     src/partitionPlan.cpp
@@ -421,6 +422,7 @@ if(BUILD_TESTING)
         src/executionBackend.cpp
         src/executionPlan.cpp
         src/finiteDifferenceGradient.cpp
+        src/fittingObjective.cpp
         src/modelValidator.cpp
         src/nloptBackend.cpp
         src/parameterFitting.cpp

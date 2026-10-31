@@ -33,6 +33,9 @@ using FittingProgressCallback = std::function<void(const FittingProgressUpdate&)
 struct FittingOptions {
     std::size_t maxIterations = 200;
     double tolerance = 1e-8;
+    // Stop the search after this many seconds (0 for no limit), keeping the best found. Checked between simulations, so a
+    // single long simulation can overrun it.
+    double maxSeconds = 0.0;
 };
 
 struct OptimizationResult {

@@ -10,7 +10,7 @@ status: draft
 
 # Parameter tuning with a custom objective, and feedback while it runs
 
-**Status: draft.** Written down before any code, like [The guided tour](guidedTour.md), so the interface and the engine changes can be reviewed first. The decisions at the end were settled as recommended.
+**Status: all four stages built, with a text box where the proposal has the visual equation editor.** Stage 1 is progress, estimate, stop and keep the best, time and simulation limits, failed simulations scored as the worst, and the toolbar chip. Stage 2 is the objective: the card has a goal choice, **Match measured data** or **Optimise an objective**, and the second takes an expression with Minimise / Maximise, with buttons that insert state and parameter names and wrap the expression in a summary. Stage 3 is the parameter table: every parameter in one list with a Tune box and its bounds, editing the same field as the Parameters table. Stage 4 is the saved setup (`tuningSetup` in the project, restored when the card opens), the before-and-after plot for an objective, and limits (constraints) entered as rows beside the objective and applied as penalties. Still to do: the visual equation editor for the objective, the "Match measured data" preset written as an objective with **Edit as expression**, an automatic optimiser choice with an Advanced section, and progress and stop in the web edition. Written down before any code, like [The guided tour](guidedTour.md), so the interface and the engine changes could be reviewed first. The decisions at the end were settled as recommended.
 
 ## The decision this rests on
 
@@ -98,9 +98,9 @@ The setup (the goal, the objective expression and direction, the mapping, the li
 
 ## Order of work
 
-1. **Progress and control for the tuning that exists:** streamed progress events, the baseline estimate, the convergence plot, "Stop and use best so far", failed trials scored as the worst value, and the toolbar chip. Both kinds of tuning use it, and it can ship by itself.
-2. **The objective:** summaries and the expression in the engine, the `fit` option, and the objective editor with the Minimise / Maximise switch, with the fitting preset written through it.
+1. **(Built.) Progress and control for the tuning that exists:** streamed progress events, the baseline estimate, the convergence plot, "Stop and use best so far", failed trials scored as the worst value, and the toolbar chip. Both kinds of tuning use it, and it can ship by itself.
+2. **(Built, with a text box in place of the equation editor.) The objective:** summaries and the expression in the engine, the `fit` option, and the objective editor with the Minimise / Maximise switch, with the fitting preset written through it.
 3. **The unified card:** the Goal choice, reference data in the editor, and the single parameter table with inline bounds.
-4. **Saved setup and the review's before/after,** then **constraints** (for example "max temperature ≤ 350 K", entered as a list beside the objective and applied as penalties) as a follow-up.
+4. **(Built.) Saved setup and the review's before/after,** then **constraints** (for example "max temperature ≤ 350 K", entered as a list beside the objective and applied as penalties) as a follow-up.
 
 Each stage leaves tuning working, and the first needs no new concept for the person using it.

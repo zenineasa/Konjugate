@@ -23,7 +23,7 @@ protobuf.configure();
 // eslint-disable-next-line import/first -- must follow the Long-disabling configuration above.
 import { konjugate } from './generated/reportMessages.mjs';
 
-const { ValidationReport, InspectionReport, InferenceReport, FittingReport } = konjugate.protocol;
+const { ValidationReport, InspectionReport, InferenceReport, FittingReport, FittingProgressEvent } = konjugate.protocol;
 
 // arrays: true keeps every repeated field as [] rather than absent when empty; defaults: true
 // keeps every scalar field at its zero value rather than absent, and -- as importantly -- leaves
@@ -46,4 +46,26 @@ export function decodeInferenceReport(buffer) {
 
 export function decodeFittingReport(buffer) {
     return FittingReport.toObject(FittingReport.decode(buffer), toObjectOptions);
+}
+
+export function decodeFittingProgressEvent(buffer) {
+    return FittingProgressEvent.toObject(FittingProgressEvent.decode(buffer), toObjectOptions);
+}
+
+// Splits a stream into the messages the engine writes framed to stdout (a 4-byte big-endian length, then that many bytes), however
+// the stream happened to be cut into chunks. Returns each complete message's bytes as chunks arrive; a partial one is kept for the next.
+export class FramedMessageReader {
+    #pending = Buffer.alloc(0);
+
+    append(chunk) {
+        this.#pending = Buffer.concat([this.#pending, chunk]);
+        const messages = [];
+        while (this.#pending.length >= 4) {
+            const length = this.#pending.readUInt32BE(0);
+            if (this.#pending.length < 4 + length) break;
+            messages.push(this.#pending.subarray(4, 4 + length));
+            this.#pending = this.#pending.subarray(4 + length);
+        }
+        return messages;
+    }
 }

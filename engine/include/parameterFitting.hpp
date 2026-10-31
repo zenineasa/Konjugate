@@ -3,9 +3,11 @@
 #pragma once
 
 #include "causalInference.hpp"
+#include "fittingObjective.hpp"
 #include "optimizerBackend.hpp"
 #include <boost/property_tree/ptree.hpp>
 #include <cstdint>
+#include <functional>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -56,6 +58,15 @@ std::vector<TunableParameter> findTunableParameters(const boost::property_tree::
 std::vector<FittingSignalMapping> autoMapColumnsToStates(const std::vector<std::string>& csvColumnNames,
     const boost::property_tree::ptree& document);
 
+// A limit on a number the run produces, written like an objective: `expression` stays at most (or at least) `limit`. The search is not
+// forbidden from breaking it; breaking it adds a penalty to the score that grows with the square of how far past the limit it went,
+// relative to the limit, and is large against the starting objective, so the search settles inside the limit when it can.
+struct FittingConstraint {
+    std::string expression;
+    bool atMost = true;
+    double limit = 0.0;
+};
+
 struct FittingProblem {
     boost::property_tree::ptree baseDocument;
     InferenceSeries measured; // parseInferenceCsv()'s output -- reused as-is for the measured data
@@ -63,6 +74,16 @@ struct FittingProblem {
     std::vector<TunableParameter> tunableParameters;
     std::string optimizerBackendId = "nlopt-bobyqa";
     FittingOptions options;
+    // An objective written as an expression (see fittingObjective.hpp) in place of the squared error against `measured`. When it is set the
+    // run's length and step come from targetTime and timeStep, since no measured series defines them, `mapping` is not used, and
+    // `measured` (if any) is only there for columns the expression names. `maximize` makes the search maximise it; every value
+    // the fit reports (events, the report) is the objective as written, rising when maximising.
+    std::string objective;
+    bool maximize = false;
+    std::vector<ObjectiveVariable> objectiveVariables;
+    double targetTime = 0.0;
+    double timeStep = 0.0;
+    std::vector<FittingConstraint> constraints; // used with an objective only
 };
 
 struct FittingReport {
@@ -72,6 +93,34 @@ struct FittingReport {
     bool converged = false;
     std::string terminationReason;
     double finalLoss = 0.0;
+    std::size_t evaluations = 0;
+    std::size_t failedTrials = 0;
+    double elapsedSeconds = 0.0;
+    bool stopped = false; // ended by a stop request or the time limit, with the best found so far
+    double finalViolation = 0.0; // the largest relative constraint violation of the best values, 0 when they all hold
+};
+
+// One simulation of a fit, as it finishes: what the app shows while a fit runs (see FittingProgressEvent in the protocol).
+struct FittingTrialEvent {
+    std::size_t iteration = 0;
+    double loss = 0.0;
+    double bestLoss = 0.0;
+    bool failed = false;
+    std::size_t failedTrials = 0;
+    double elapsedSeconds = 0.0;
+    std::vector<double> parameterValues;
+    std::vector<double> bestParameterValues;
+    bool baseline = false;
+    std::vector<std::uint64_t> parameterIds; // set on the baseline event only
+    double violation = 0.0;
+    double bestViolation = 0.0;
+};
+
+// What a caller may watch and ask of a running fit. Both are optional.
+struct FittingMonitor {
+    std::function<void(const FittingTrialEvent&)> onTrial;
+    // Polled before each simulation; true ends the search at once, and the report carries the best found so far.
+    std::function<bool()> stopRequested;
 };
 
 // The packed samples read back from a completed simulation's binary result file (see
@@ -94,11 +143,26 @@ SimulationSamples readSimulationSamples(const std::filesystem::path& resultPath)
 // construction). `scratchOutputPath` is a file the trial's simulation result is written to and
 // then read back from -- reused across every trial in one fit run rather than one temp file per
 // trial.
+// One simulation, scored: the objective (negated when maximising, since the search always minimises) and how far the constraints were
+// broken: the sum of squares of the relative violations, which is what the penalty is made from, and the largest single one.
+struct FittingTrialScore {
+    double objective = 0.0;
+    double violationSquares = 0.0;
+    double worstViolation = 0.0;
+};
+FittingTrialScore evaluateFittingTrial(const FittingProblem& problem, const std::vector<double>& parameterValues,
+    const std::filesystem::path& scratchOutputPath);
+
 double evaluateFittingLoss(const FittingProblem& problem, const std::vector<double>& parameterValues,
     const std::filesystem::path& scratchOutputPath);
 
 // Drives the chosen optimizer backend (see optimizerBackend.hpp, nloptBackend.hpp) to minimize
 // evaluateFittingLoss() over problem.tunableParameters, starting from their current values.
-FittingReport runParameterFit(const FittingProblem& problem, const FittingProgressCallback& onProgress = nullptr);
+//
+// A simulation that fails (it throws, or scores a value that is not a number) does not end the search: it scores as ten times the
+// worst finite loss seen so far (1e12 before there is one), so the optimizer steers away from it, and it is counted in the report.
+// The report always carries the best values actually simulated, which is what an optimizer's own answer is expected to be anyway.
+FittingReport runParameterFit(const FittingProblem& problem, const FittingProgressCallback& onProgress = nullptr,
+    const FittingMonitor& monitor = {});
 
 }

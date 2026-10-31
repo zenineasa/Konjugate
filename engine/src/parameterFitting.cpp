@@ -6,6 +6,9 @@
 #include "engineProtocol.pb.h"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cmath>
+#include <limits>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -218,6 +221,11 @@ std::vector<FittingSignalMapping> autoMapColumnsToStates(const std::vector<std::
 
 double evaluateFittingLoss(const FittingProblem& problem, const std::vector<double>& parameterValues,
     const std::filesystem::path& scratchOutputPath) {
+    return evaluateFittingTrial(problem, parameterValues, scratchOutputPath).objective;
+}
+
+FittingTrialScore evaluateFittingTrial(const FittingProblem& problem, const std::vector<double>& parameterValues,
+    const std::filesystem::path& scratchOutputPath) {
     // ptree assignment is a deep copy -- each trial gets its own document, the base is untouched.
     boost::property_tree::ptree document = problem.baseDocument;
     auto& edges = document.get_child("edges");
@@ -234,15 +242,53 @@ double evaluateFittingLoss(const FittingProblem& problem, const std::vector<doub
         childAt(parameters, tunable.parameterIndex).put("value", parameterValues[index]);
     }
 
+    const bool useObjective = !problem.objective.empty();
     const auto rowCount = problem.measured.rows.size();
-    if (rowCount < 2) throw std::runtime_error("The measured series needs at least two rows to define a fitting run's duration.");
     boost::property_tree::ptree configuration;
-    configuration.put("targetTime", problem.measured.timeStep * static_cast<double>(rowCount - 1));
-    configuration.put("globalTimeStep", problem.measured.timeStep);
-    configuration.put("outputInterval", problem.measured.timeStep);
+    if (useObjective) {
+        if (!(problem.targetTime > 0.0) || !(problem.timeStep > 0.0)) throw std::runtime_error("An objective needs a run length and a time step above zero.");
+        configuration.put("targetTime", problem.targetTime);
+        configuration.put("globalTimeStep", problem.timeStep);
+        configuration.put("outputInterval", problem.timeStep);
+    } else {
+        if (rowCount < 2) throw std::runtime_error("The measured series needs at least two rows to define a fitting run's duration.");
+        configuration.put("targetTime", problem.measured.timeStep * static_cast<double>(rowCount - 1));
+        configuration.put("globalTimeStep", problem.measured.timeStep);
+        configuration.put("outputInterval", problem.measured.timeStep);
+    }
 
     runSimulation(document, configuration, scratchOutputPath);
     const auto samples = readSimulationSamples(scratchOutputPath);
+
+    if (useObjective) {
+        ObjectiveData data;
+        data.times = samples.times;
+        for (std::size_t column = 0; column < samples.stateIds.size(); ++column) {
+            auto& series = data.states[samples.stateIds[column]];
+            series.reserve(samples.valuesByTime.size());
+            for (const auto& row : samples.valuesByTime) series.push_back(row[column]);
+        }
+        for (std::size_t column = 0; column < problem.measured.columnNames.size(); ++column) {
+            auto& series = data.measured[problem.measured.columnNames[column]];
+            for (const auto& row : problem.measured.rows) series.push_back(row[column]);
+        }
+        for (std::size_t index = 0; index < problem.tunableParameters.size(); ++index) {
+            data.parameters[problem.tunableParameters[index].parameterId] = parameterValues[index];
+        }
+        const double value = FittingObjective(problem.objective, problem.objectiveVariables).evaluate(data);
+        FittingTrialScore score;
+        score.objective = problem.maximize ? -value : value;
+        for (const auto& constraint : problem.constraints) {
+            const double reached = FittingObjective(constraint.expression, problem.objectiveVariables).evaluate(data);
+            const double excess = constraint.atMost ? reached - constraint.limit : constraint.limit - reached;
+            // Relative to the limit; against the size of the value itself when the limit is zero, which has no size to be relative to.
+            const double scale = constraint.limit != 0.0 ? std::abs(constraint.limit) : std::max(1.0, std::abs(reached));
+            const double relative = std::isnan(excess) ? std::numeric_limits<double>::infinity() : std::max(0.0, excess) / scale;
+            score.violationSquares += relative * relative;
+            score.worstViolation = std::max(score.worstViolation, relative);
+        }
+        return score;
+    }
 
     // Resolve each mapping's simulated-state column index and measured-CSV column index once,
     // outside the row loop below, rather than searching per row.
@@ -274,11 +320,28 @@ double evaluateFittingLoss(const FittingProblem& problem, const std::vector<doub
             totalLoss += problem.mapping[mappingIndex].weight * residual * residual;
         }
     }
-    return totalLoss;
+    FittingTrialScore score;
+    score.objective = totalLoss;
+    return score;
 }
 
-FittingReport runParameterFit(const FittingProblem& problem, const FittingProgressCallback& onProgress) {
+namespace {
+// Thrown from inside the loss to unwind an optimizer when the fit is to end now; the optimizer backends turn any exception from the
+// loss into an early return, and runParameterFit() reads the best simulated values from its own record, not from the optimizer.
+struct FittingStopped : std::runtime_error {
+    explicit FittingStopped(const std::string& reason) : std::runtime_error(reason) {}
+};
+}
+
+FittingReport runParameterFit(const FittingProblem& problem, const FittingProgressCallback& onProgress, const FittingMonitor& monitor) {
     const auto backend = createOptimizerBackend(problem.optimizerBackendId);
+    // An objective that cannot be read is the person's to fix, so it ends the fit before any simulation instead of scoring every trial as failed.
+    if (!problem.objective.empty()) {
+        FittingObjective(problem.objective, problem.objectiveVariables);
+        for (const auto& constraint : problem.constraints) FittingObjective(constraint.expression, problem.objectiveVariables);
+    }
+    // The search always minimises; maximising searches for the smallest negative. What is reported is the objective as written.
+    const auto shown = [&](double loss) { return problem.maximize ? -loss : loss; };
     const auto scratchPath = std::filesystem::temp_directory_path() /
         ("konjugateFittingTrial-" + std::to_string(reinterpret_cast<std::uintptr_t>(&problem)) + ".bin");
 
@@ -291,10 +354,82 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
         bounds.push_back(tunable.bounds);
     }
 
-    std::vector<FittingProgressUpdate> iterationLog;
-    const LossFunction loss = [&](const std::vector<double>& values) {
-        return evaluateFittingLoss(problem, values, scratchPath);
+    const auto started = std::chrono::steady_clock::now();
+    const auto elapsedSeconds = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(); };
+    std::size_t evaluations = 0;
+    std::size_t failedTrials = 0;
+    double bestLoss = std::numeric_limits<double>::infinity();
+    double worstLoss = 0.0;
+    bool haveFinite = false;
+    std::vector<double> bestValues = initialValues;
+    std::string stopReason;
+    // Constraints add `penaltyScale * (relative violation)^2` to the score. The scale is set from the starting values' own objective, so that
+    // breaking a limit by 1% costs about a tenth of it, and any real violation outweighs the objective's own changes.
+    double penaltyScale = 0.0;
+    double bestViolation = 0.0;
+
+    // Every simulation goes through here: it asks whether to go on, runs it, keeps the best, and tells the monitor.
+    const auto score = [&](const std::vector<double>& values, bool baseline) {
+        if (!baseline) {
+            if (monitor.stopRequested && monitor.stopRequested()) {
+                stopReason = "stoppedByUser";
+                throw FittingStopped(stopReason);
+            }
+            if (problem.options.maxSeconds > 0.0 && elapsedSeconds() >= problem.options.maxSeconds) {
+                stopReason = "maxTimeReached";
+                throw FittingStopped(stopReason);
+            }
+        }
+        evaluations += 1;
+        double loss = 0.0;
+        double violation = 0.0;
+        bool failed = false;
+        try {
+            const auto trial = evaluateFittingTrial(problem, values, scratchPath);
+            if (baseline) penaltyScale = std::isfinite(trial.objective) ? 1e3 * std::max(1.0, std::abs(trial.objective)) : 1e6;
+            loss = trial.objective + penaltyScale * trial.violationSquares;
+            violation = trial.worstViolation;
+            failed = !std::isfinite(loss);
+        } catch (const std::exception&) {
+            failed = true;
+        }
+        if (failed) {
+            failedTrials += 1;
+            loss = haveFinite ? std::max(10.0 * worstLoss, 1e-12) : 1e12;
+        } else {
+            haveFinite = true;
+            worstLoss = std::max(worstLoss, loss);
+            if (loss < bestLoss) {
+                bestLoss = loss;
+                bestValues = values;
+                bestViolation = violation;
+            }
+        }
+        if (monitor.onTrial) {
+            FittingTrialEvent event;
+            event.iteration = evaluations;
+            event.loss = shown(loss);
+            event.bestLoss = shown(bestLoss);
+            event.failed = failed;
+            event.failedTrials = failedTrials;
+            event.elapsedSeconds = elapsedSeconds();
+            event.parameterValues = values;
+            event.bestParameterValues = bestValues;
+            event.baseline = baseline;
+            event.violation = failed ? 0.0 : violation;
+            event.bestViolation = bestViolation;
+            if (baseline) for (const auto& tunable : problem.tunableParameters) event.parameterIds.push_back(tunable.parameterId);
+            monitor.onTrial(event);
+        }
+        return loss;
     };
+
+    // The starting values first, on their own: it is what every later value is compared with, and how long it took is the cost of
+    // one simulation, which is what lets the app say how long the rest should take.
+    score(initialValues, true);
+
+    std::vector<FittingProgressUpdate> iterationLog;
+    const LossFunction loss = [&](const std::vector<double>& values) { return score(values, false); };
     const FittingProgressCallback captureProgress = [&](const FittingProgressUpdate& update) {
         iterationLog.push_back(update);
         if (onProgress) onProgress(update);
@@ -308,12 +443,20 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
     FittingReport report;
     report.backend = problem.optimizerBackendId;
     report.iterations = std::move(iterationLog);
-    report.converged = outcome.converged;
-    report.terminationReason = outcome.terminationReason;
-    report.finalLoss = outcome.loss;
+    report.stopped = !stopReason.empty();
+    report.converged = report.stopped ? false : outcome.converged;
+    report.terminationReason = report.stopped ? stopReason : outcome.terminationReason;
+    report.evaluations = evaluations;
+    report.failedTrials = failedTrials;
+    report.elapsedSeconds = elapsedSeconds();
+    // The best values actually simulated, unless every simulation failed, when the optimizer's own answer is all there is.
+    const bool haveBest = std::isfinite(bestLoss);
+    report.finalLoss = shown(haveBest ? bestLoss : outcome.loss);
+    report.finalViolation = haveBest ? bestViolation : 0.0;
+    const auto& finalValues = haveBest ? bestValues : outcome.parameterValues;
     report.finalParameters.reserve(problem.tunableParameters.size());
     for (std::size_t index = 0; index < problem.tunableParameters.size(); ++index) {
-        report.finalParameters.emplace_back(problem.tunableParameters[index].parameterId, outcome.parameterValues[index]);
+        report.finalParameters.emplace_back(problem.tunableParameters[index].parameterId, finalValues[index]);
     }
     return report;
 }

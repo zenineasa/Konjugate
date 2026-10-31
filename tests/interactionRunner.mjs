@@ -3667,10 +3667,30 @@ export async function runInteractionTests(driver) {
             'The backend dropdown should list exactly the ids the engine binary itself reports supporting.');
         await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(csvLines.join('\n'))})`);
         await waitFor(window, `!document.querySelector('#parameterTuningParametersSection').hidden`, 'Tunable parameters section did not appear.', 5000);
-        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows > div').length`), 2);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked').length`), 2);
+
+        // A long fit can be stopped part way and still be used: the slow global search below would run for ages on its own.
+        await evaluate(window, `(() => { const backend = document.querySelector('#parameterTuningBackend'); backend.value = 'nlopt-isres'; backend.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#parameterTuningMaxSimulations').value = '100000'; })()`);
+        await evaluate(window, `document.querySelector('#runParameterTuning').click()`);
+        await waitFor(window, `window.__debugParameterTuning.simulations() >= 8`, 'The fit reported no progress.', 60000);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningStats').hidden`), false, 'The numbers beside the plot should be showing.');
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningEstimate').textContent`), /^One simulation takes .+ up to 100000 simulations/);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningChip').hidden`), false, 'The toolbar chip should show while a fit runs.');
+        assert.equal(await evaluate(window, `document.querySelector('#cancelParameterTuning').textContent`), 'Discard');
+        await waitFor(window, `document.querySelector('#parameterTuningConvergencePlot').data?.length === 2`, 'The convergence plot was not drawn.', 15000);
+        await evaluate(window, `document.querySelector('#stopParameterTuning').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'Stopping the fit did not lead to the review.', 60000);
+        const stoppedReport = await evaluate(window, `window.__debugParameterTuning.report()`);
+        assert.equal(stoppedReport.stopped, true);
+        assert.equal(stoppedReport.terminationReason, 'stoppedByUser');
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningProgress').textContent`), /^Stopped: using the best found/);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningChip').hidden`), true, 'The chip should go when the fit has ended.');
+        assert.equal(await evaluate(window, `document.querySelector('#cancelParameterTuning').textContent`), 'Cancel');
+        await evaluate(window, `(() => { const backend = document.querySelector('#parameterTuningBackend'); backend.value = 'nlopt-bobyqa'; document.querySelector('#parameterTuningMaxSimulations').value = '200'; })()`);
+        await waitFor(window, `!document.querySelector('#runParameterTuning').disabled`, 'The fit could not be run again.', 30000);
 
         await evaluate(window, `document.querySelector('#runParameterTuning').click()`);
-        await waitFor(window, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'Review section did not appear after running the fit.', 60000);
+        await waitFor(window, `!document.querySelector('#parameterTuningReviewSection').hidden && window.__debugParameterTuning.report()?.stopped === false`, 'Review section did not appear after running the fit.', 60000);
         const report = await evaluate(window, `window.__debugParameterTuning.report()`);
         assert.equal(report.finalParameters.length, 2);
         assert.deepEqual(new Set(report.finalParameters.map((entry) => entry.parameterId)), new Set([tunableParameter.id, tunableSourceParameter.id]));
@@ -3710,6 +3730,73 @@ export async function runInteractionTests(driver) {
         assert.equal(undoneParameter.value, beforeValue, 'Undo should restore the pre-fit parameter value in one step.');
         assert.equal(undoneSourceParameter.value, sourceBeforeValue, 'The same undo should restore the source-term parameter value.');
         await evaluate(window, `document.querySelector('#redoButton').click()`);
+
+        // The other goal: an objective written as an expression, tuned with the same card, progress and review.
+        await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not reopen.');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjectiveSection').hidden`), true, 'The objective editor belongs to the objective goal only.');
+        await evaluate(window, `document.querySelector('#parameterTuningGoalObjective').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuningObjectiveSection').hidden && !document.querySelector('#runParameterTuning').hidden`, 'Choosing the objective goal did not show its editor.', 5000);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningGoalObjective').getAttribute('aria-pressed')`), 'true');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningMappingSection').hidden`), true, 'There is no column mapping without measured data.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked').length`), 2);
+        // The card edits what is tunable itself: untick both and there is nothing to run; tick one back, with its bounds, and there is.
+        const tuneBox = (index) => `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked')[${index}]`;
+        await evaluate(window, `(() => { const box = ${tuneBox(0)}; box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(window, `(() => { const box = ${tuneBox(0)}; box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), true, 'With nothing ticked there is nothing to run.');
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningTuneHint').textContent`), /Tick Tune/);
+        assert.equal((await evaluate(window, `window.__debugCausalInference.document()`)).edges.flatMap((edge) => edge.parameters ?? []).some((parameter) => parameter.tuning), false, 'Unticking edits the model\'s own tuning field.');
+        for (let ticked = 0; ticked < 2; ticked += 1) {
+            await evaluate(window, `(() => { const box = [...document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]')].find((candidate) => !candidate.checked && !candidate.disabled); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        }
+        assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked').length`), 2);
+        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), false);
+        const stateName = await evaluate(window, `(() => {
+            const chip = [...document.querySelectorAll('#parameterTuningStateChips button')].find((button) => button.textContent.includes(${JSON.stringify(targetState.name)}));
+            chip.click();
+            return chip.title.replace('Insert ', '');
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjective').value`), stateName, 'A state button inserts its name.');
+        await evaluate(window, `[...document.querySelectorAll('#parameterTuningSummaryButtons button')].find((button) => button.textContent === 'final(…)').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjective').value`), `final(${stateName})`, 'A summary button wraps the expression.');
+
+        // A name that stands for something that changes over the run is refused, with the engine's reason, before any simulation.
+        await evaluate(window, `(() => { document.querySelector('#parameterTuningObjective').value = ${JSON.stringify(stateName)}; document.querySelector('#parameterTuningRunTime').value = '10'; document.querySelector('#parameterTuningTimeStep').value = '1'; document.querySelector('#runParameterTuning').click(); })()`);
+        await waitFor(window, `document.querySelector('#parameterTuningObjectiveStatus').textContent.includes('needs a summary')`, 'A bare state should be refused with an explanation.', 30000);
+        await waitFor(window, `!document.querySelector('#runParameterTuning').disabled`, 'The card did not recover from a refused objective.', 10000);
+
+        // A limit: half-filled is explained, filled in is kept to (a huge bound here, so that it holds).
+        await evaluate(window, `document.querySelector('#addParameterTuningConstraint').click()`);
+        await evaluate(window, `(() => { document.querySelector('#parameterTuningConstraintRows [data-field="expression"]').value = ${JSON.stringify(`max(${stateName})`)}; document.querySelector('#parameterTuningObjective').value = ${JSON.stringify(`final(${stateName})`)}; document.querySelector('#runParameterTuning').click(); })()`);
+        await waitFor(window, `document.querySelector('#parameterTuningObjectiveStatus').textContent.includes('Limit 1 needs a number')`, 'A limit without a number should be explained.', 5000);
+        await evaluate(window, `document.querySelector('#parameterTuningConstraintRows [data-field="limit"]').value = '1000000000'`);
+        await evaluate(window, `(() => {
+            document.querySelector('#parameterTuningObjective').value = ${JSON.stringify(`final(${stateName})`)};
+            document.querySelector('#parameterTuningDirection').value = 'maximise';
+            document.querySelector('#parameterTuningMaxSimulations').value = '30';
+            document.querySelector('#runParameterTuning').click();
+        })()`);
+        await waitFor(window, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'The objective tuning did not reach its review.', 60000);
+        const objectiveReport = await evaluate(window, `window.__debugParameterTuning.report()`);
+        assert.equal(objectiveReport.finalParameters.length, 2);
+        assert.ok(Number.isFinite(objectiveReport.finalLoss), 'The objective ends on a number.');
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningProgress').textContent`), /objective/);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), /^Maximised objective: .*All limits hold\./);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningStatImprovement').previousElementSibling.textContent`), 'Higher by');
+        await waitFor(window, `document.querySelector('#parameterTuningComparisonPlot').data?.length === 2`, 'The before-and-after plot was not drawn for the state the objective names.', 60000);
+        assert.deepEqual(await evaluate(window, `document.querySelector('#parameterTuningComparisonPlot').data.map((trace) => trace.name)`), ['Before tuning', 'After tuning']);
+        await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
+
+        // The setup of that run was kept with the project: opening the card again finds the objective as it was written.
+        assert.equal((await evaluate(window, `window.__debugParameterTuning.setup()`)).objective.expression, `final(${stateName})`);
+        await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(window, `document.querySelector('#parameterTuningObjective').value === ${JSON.stringify(`final(${stateName})`)}`, 'The card did not restore the last objective.', 5000);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningDirection').value`), 'maximise');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningMaxSimulations').value`), '30');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningConstraintRows [data-field="limit"]').value`), '1000000000', 'The limit comes back with the objective.');
+        await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjectiveSection').hidden`), true, 'Closing the card puts it back to the measured-data goal.');
     });
 
     await run('Results Analysis timeline seek only redraws the scatter trail once the run is completed, not while running or paused', async () => {
@@ -4326,7 +4413,7 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning panel did not open.');
         await evaluate(opened, `window.__debugParameterTuning.loadCsv('time,level\\n0,0\\n1,1\\n2,2\\n3,3\\n4,4\\n5,5\\n6,6\\n7,7\\n8,8\\n9,9\\n10,10\\n11,11\\n')`);
         await waitFor(opened, `document.querySelector('#parameterTuningParameterRows').textContent.includes('Shared')`, 'The tuning panel did not offer the shared parameter.');
-        assert.equal(await evaluate(opened, `document.querySelectorAll('#parameterTuningParameterRows > *').length`), 1, 'One shared parameter is one fitting variable however many parameters link to it.');
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked').length`), 1, 'One shared parameter is one fitting variable however many parameters link to it.');
         await evaluate(opened, `document.querySelector('#parameterTuning [data-close-card]').click()`);
 
         // Clicking an owner opens its editor while the table stays open.

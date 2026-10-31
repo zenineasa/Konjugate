@@ -552,6 +552,7 @@
             </div>
         </div>
         <div class="toolSpacer"></div>
+        <button id="parameterTuningChip" class="simulationReadout tuningChip" type="button" hidden title="Parameter tuning is running: open it"><i></i><span id="parameterTuningChipText">Tuning</span></button>
         <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
         <div class="labelControls" aria-label="Label detail">
             <span>Details</span>
@@ -983,15 +984,37 @@
         </div>
 
         <div id="parameterTuning" class="contextCard editorCard parameterTuning hidden">
-            <header><div><span class="contextKicker">Analysis</span><strong>Digital twin tuning</strong></div><button data-close-card type="button">×</button></header>
+            <header><div><span class="contextKicker">Analysis</span><strong>Parameter tuning</strong></div><button data-close-card type="button">×</button></header>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <section>
-                <p class="builderHint">Fit this model's tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship's editor first, then import a CSV of measured signals here.</p>
+                <div id="parameterTuningGoal" class="parameterTuningGoal" role="group" aria-label="What to tune for">
+                    <button id="parameterTuningGoalData" type="button" aria-pressed="true">Match measured data</button>
+                    <button id="parameterTuningGoalObjective" type="button" aria-pressed="false">Optimise an objective</button>
+                </div>
+                <p id="parameterTuningGoalHint" class="builderHint">Fit this model's tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship's editor first, then import a CSV of measured signals here.</p>
                 <label class="geometrySourceButton">
                     <input id="parameterTuningFile" type="file" accept=".csv">
-                    <span>↥ Choose CSV file</span>
+                    <span id="parameterTuningFileLabel">↥ Choose CSV file</span>
                 </label>
                 <div id="parameterTuningStatus" class="equationDiagnostics" role="status"></div>
+            </section>
+            <section id="parameterTuningObjectiveSection" hidden>
+                <h3>Objective</h3>
+                <p class="builderHint">Write one number the search should make as small or as large as it can. A state changes over the run, so wrap it in a summary: final(…) is its last value, max(…) and min(…) its extremes, mean(…) its average, integral(…) its total over time. Parameters are single numbers and can be used as they are.</p>
+                <label class="editorField"><span>Goal</span><select id="parameterTuningDirection"><option value="minimise">Minimise</option><option value="maximise">Maximise</option></select></label>
+                <textarea id="parameterTuningObjective" class="parameterTuningObjective" rows="3" spellcheck="false" autocomplete="off" aria-label="Objective" placeholder="integral((block - 320)^2) + 0.1 * k^2"></textarea>
+                <div class="parameterTuningConstraints">
+                    <span>Limits (optional): keep a number from the run within a bound. Breaking one is penalised, so the search settles inside it when it can.</span>
+                    <div id="parameterTuningConstraintRows"></div>
+                    <button id="addParameterTuningConstraint" type="button">+ Add a limit</button>
+                </div>
+                <div class="referencePicker"><span>Summaries: wrap what is selected, or everything</span><div id="parameterTuningSummaryButtons"></div></div>
+                <div class="referencePicker"><span>States</span><div id="parameterTuningStateChips"></div></div>
+                <div class="referencePicker"><span>Parameters</span><div id="parameterTuningParameterChips"></div></div>
+                <div id="parameterTuningMeasuredPicker" class="referencePicker" hidden><span>Measured data</span><div id="parameterTuningMeasuredChips"></div></div>
+                <label class="editorField"><span>Each simulation runs for (s)</span><input id="parameterTuningRunTime" type="number" min="0" step="any" value="1"></label>
+                <label class="editorField"><span>Time step (s)</span><input id="parameterTuningTimeStep" type="number" min="0" step="any" value="1"></label>
+                <div id="parameterTuningObjectiveStatus" class="equationDiagnostics" role="status"></div>
             </section>
             <section id="parameterTuningMappingSection" hidden>
                 <h3>Column mapping</h3>
@@ -999,15 +1022,35 @@
                 <div id="parameterTuningMappingRows"></div>
             </section>
             <section id="parameterTuningParametersSection" hidden>
-                <h3>Tunable parameters</h3>
-                <p class="builderHint">Found on the model's relationships. Their current value is the optimizer's starting point.</p>
+                <h3>Parameters to tune</h3>
+                <p class="builderHint">Tick Tune on each parameter the search may change, and give the range it may search within. The value it has now is where the search starts.</p>
                 <div id="parameterTuningParameterRows"></div>
+                <div id="parameterTuningTuneHint" class="equationDiagnostics" role="status"></div>
                 <label class="editorField"><span>Optimizer</span><select id="parameterTuningBackend"></select></label>
+                <label class="editorField"><span>Simulations (at most)</span><input id="parameterTuningMaxSimulations" type="number" min="1" step="1" value="200"></label>
+                <label class="editorField"><span>Time limit (minutes, optional)</span><input id="parameterTuningMaxMinutes" type="number" min="0" step="any" placeholder="No limit"></label>
             </section>
             <section id="parameterTuningProgressSection" hidden>
-                <h3>Fitting…</h3>
-                <p class="builderHint">Running the optimizer through the real simulator. This can take a while depending on how many tunable parameters there are and how long one simulation takes -- there's no progress detail yet, just a final result.</p>
+                <h3 id="parameterTuningProgressTitle">Fitting…</h3>
+                <p id="parameterTuningEstimate" class="builderHint"></p>
+                <div id="parameterTuningConvergencePlot" class="parameterTuningConvergencePlot" role="img" aria-label="Loss of each simulation, and the best so far" hidden></div>
+                <label class="parameterTuningLogToggle" id="parameterTuningLogField" hidden><input id="parameterTuningLogScale" type="checkbox"><span>Log scale</span></label>
+                <dl id="parameterTuningStats" class="parameterTuningStats" hidden>
+                    <div><dt>Simulations</dt><dd id="parameterTuningStatSimulations">0</dd></div>
+                    <div><dt>Elapsed</dt><dd id="parameterTuningStatElapsed">—</dd></div>
+                    <div><dt>Rate</dt><dd id="parameterTuningStatRate">—</dd></div>
+                    <div><dt>Best</dt><dd id="parameterTuningStatBest">—</dd></div>
+                    <div><dt>Started at</dt><dd id="parameterTuningStatStart">—</dd></div>
+                    <div><dt>Lower by</dt><dd id="parameterTuningStatImprovement">—</dd></div>
+                </dl>
+                <progress id="parameterTuningProgressBar" max="1" value="0" hidden></progress>
+                <div id="parameterTuningBestValues" class="parameterTuningBestValues"></div>
+                <div id="parameterTuningWarnings" class="parameterTuningWarnings" role="status"></div>
                 <div id="parameterTuningProgress" class="equationDiagnostics" role="status"></div>
+                <div id="parameterTuningRunActions" class="parameterTuningRunActions" hidden>
+                    <button id="stopParameterTuning" type="button" title="End the search now and use the best values found so far">Stop and use best so far</button>
+                    <button id="applyBestParameterTuning" type="button" title="End the search now and apply the best values found so far to the model">Apply best so far</button>
+                </div>
             </section>
             <section id="parameterTuningReviewSection" hidden>
                 <h3>Review fitted values</h3>

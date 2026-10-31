@@ -104,6 +104,12 @@ std::filesystem::path optionPath(int argc, char** argv, const std::string& optio
     return {};
 }
 
+// A switch with no value after it.
+bool hasFlag(int argc, char** argv, const std::string& flag) {
+    for (int index = 3; index < argc; ++index) if (std::string(argv[index]) == flag) return true;
+    return false;
+}
+
 bool hasKjtExtension(const std::filesystem::path& path) {
     auto extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char character) {
@@ -271,7 +277,7 @@ int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
                       "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]\n"
-                      "       konjugateEngine fit <project.kjt> <measured.csv> --report report.json [--backend nlopt-bobyqa] [--max-iterations 200]\n";
+                      "       konjugateEngine fit <project.kjt> <measured.csv> --report report.json [--backend nlopt-bobyqa] [--max-iterations 200] [--max-seconds 600] [--stop-file path] [--progress-stream] [--objective-file objective.json]\n";
         std::_Exit(64);
     }
     const std::string command = argv[1];
@@ -321,20 +327,76 @@ int main(int argc, char** argv) {
         if (command == "fit") {
             konjugate::FittingProblem problem;
             problem.baseDocument = document;
-            problem.measured = konjugate::parseInferenceCsv(readTextFile(argv[3]));
-            problem.mapping = konjugate::autoMapColumnsToStates(problem.measured.columnNames, document);
+            // An objective file replaces the squared error against the CSV with an expression (see fittingObjective.hpp); the CSV is then
+            // optional and only supplies columns the expression names.
+            const auto objectiveFile = optionPath(argc, argv, "--objective-file");
+            const auto csvText = readTextFile(argv[3]);
+            if (objectiveFile.empty() || csvText.find_first_not_of(" \t\r\n") != std::string::npos) problem.measured = konjugate::parseInferenceCsv(csvText);
             problem.tunableParameters = konjugate::findTunableParameters(document);
             if (problem.tunableParameters.empty()) {
                 throw std::runtime_error("The model has no parameters marked tunable (parameters[].tuning).");
             }
-            if (problem.mapping.empty()) {
-                throw std::runtime_error("None of the measured CSV's columns matched a state in the model.");
+            if (objectiveFile.empty()) {
+                problem.mapping = konjugate::autoMapColumnsToStates(problem.measured.columnNames, document);
+                if (problem.mapping.empty()) {
+                    throw std::runtime_error("None of the measured CSV's columns matched a state in the model.");
+                }
+            } else {
+                boost::property_tree::ptree objective;
+                boost::property_tree::read_json(objectiveFile.string(), objective);
+                problem.objective = objective.get<std::string>("expression");
+                problem.maximize = objective.get<std::string>("direction", "minimise") == "maximise";
+                problem.targetTime = objective.get<double>("targetTime", 0.0);
+                problem.timeStep = objective.get<double>("timeStep", 0.0);
+                if (const auto constraints = objective.get_child_optional("constraints")) for (const auto& entry : *constraints) {
+                    konjugate::FittingConstraint constraint;
+                    constraint.expression = entry.second.get<std::string>("expression");
+                    constraint.atMost = entry.second.get<std::string>("relation", "<=") != ">=";
+                    constraint.limit = entry.second.get<double>("limit");
+                    problem.constraints.push_back(std::move(constraint));
+                }
+                if (const auto variables = objective.get_child_optional("variables")) for (const auto& entry : *variables) {
+                    konjugate::ObjectiveVariable variable;
+                    variable.name = entry.second.get<std::string>("name");
+                    const auto kind = entry.second.get<std::string>("kind");
+                    variable.kind = kind == "state" ? konjugate::ObjectiveVariable::Kind::state
+                        : kind == "measured" ? konjugate::ObjectiveVariable::Kind::measured : konjugate::ObjectiveVariable::Kind::parameter;
+                    variable.id = entry.second.get<std::uint64_t>("id", 0);
+                    variable.column = entry.second.get<std::string>("column", "");
+                    variable.value = entry.second.get<double>("value", 0.0);
+                    problem.objectiveVariables.push_back(std::move(variable));
+                }
             }
             const auto backendOption = optionPath(argc, argv, "--backend").string();
             if (!backendOption.empty()) problem.optimizerBackendId = backendOption;
             const auto maxIterationsOption = optionPath(argc, argv, "--max-iterations").string();
             if (!maxIterationsOption.empty()) problem.options.maxIterations = static_cast<std::size_t>(std::stoul(maxIterationsOption));
-            const auto fittingReport = konjugate::runParameterFit(problem);
+            const auto maxSecondsOption = optionPath(argc, argv, "--max-seconds").string();
+            if (!maxSecondsOption.empty()) problem.options.maxSeconds = std::stod(maxSecondsOption);
+            // The app asks a running fit to stop by creating this file (a file, not a signal or a message, so it works the same on
+            // every platform and from any language); the best values found so far are then reported as usual.
+            const auto stopFile = optionPath(argc, argv, "--stop-file");
+            konjugate::FittingMonitor monitor;
+            if (!stopFile.empty()) monitor.stopRequested = [stopFile] { std::error_code ignored; return std::filesystem::exists(stopFile, ignored); };
+            if (hasFlag(argc, argv, "--progress-stream")) {
+                monitor.onTrial = [](const konjugate::FittingTrialEvent& trial) {
+                    konjugate::protocol::FittingProgressEvent event;
+                    event.set_iteration(trial.iteration);
+                    event.set_loss(trial.loss);
+                    event.set_best_loss(trial.bestLoss);
+                    event.set_failed(trial.failed);
+                    event.set_failed_trials(trial.failedTrials);
+                    event.set_elapsed_seconds(trial.elapsedSeconds);
+                    for (const auto value : trial.parameterValues) event.add_parameter_values(value);
+                    for (const auto value : trial.bestParameterValues) event.add_best_parameter_values(value);
+                    event.set_baseline(trial.baseline);
+                    event.set_violation(trial.violation);
+                    event.set_best_violation(trial.bestViolation);
+                    for (const auto id : trial.parameterIds) event.add_parameter_ids(id);
+                    writeFramedMessage(std::cout, event);
+                };
+            }
+            const auto fittingReport = konjugate::runParameterFit(problem, nullptr, monitor);
             konjugate::writeFittingReport(report, fittingReport);
             std::_Exit(fittingReport.converged ? 0 : 1);
         }

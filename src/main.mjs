@@ -2743,15 +2743,48 @@ ipcMain.handle('engineInfer', async (event, csvContent, config) => {
     }
 });
 
+// A fit reports after every simulation, which for a quick model is many a second: they are handed to the window in batches, so
+// the plot gets every point without a message for each. `engineFitStop` asks the running fit to end now and report the best it found.
 ipcMain.handle('engineFit', async (event, content, csvContent, config) => {
-    const active = { owner: event.sender, controller: new AbortController(), completion: null };
+    const owner = event.sender;
+    const active = { owner, controller: new AbortController(), completion: null, requestStop: null };
     activeFittingOperations.add(active);
+    let batch = [];
+    let flushTimer = null;
+    const flush = () => {
+        flushTimer = null;
+        if (batch.length && !owner.isDestroyed()) owner.send('engineFitProgress', batch);
+        batch = [];
+    };
     try {
-        active.completion = fitWithEngine(content, csvContent, config, { ...await engineOptions(), signal: active.controller.signal });
+        active.completion = fitWithEngine(content, csvContent, config, {
+            ...await engineOptions(),
+            signal: active.controller.signal,
+            onStart: ({ requestStop }) => { active.requestStop = requestStop; },
+            onProgress: (progress) => {
+                batch.push(progress);
+                flushTimer ??= setTimeout(flush, 250);
+            }
+        });
         return await active.completion;
     } finally {
+        if (flushTimer) clearTimeout(flushTimer);
+        flush();
         activeFittingOperations.delete(active);
     }
+});
+ipcMain.handle('engineFitStop', async (event) => {
+    const active = [...activeFittingOperations].find((operation) => operation.owner === event.sender);
+    if (!active?.requestStop) return false;
+    await active.requestStop();
+    return true;
+});
+
+// Discarding ends the fit's process and keeps nothing, unlike a stop.
+ipcMain.handle('engineFitDiscard', (event) => {
+    const operations = [...activeFittingOperations].filter((operation) => operation.owner === event.sender);
+    operations.forEach((operation) => operation.controller.abort());
+    return operations.length > 0;
 });
 
 ipcMain.handle('engineRun', async (event, content, configuration) => {

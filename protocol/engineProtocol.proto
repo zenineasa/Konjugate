@@ -322,4 +322,34 @@ message FittingReport {
     double final_loss = 6;
     repeated FittingProgressUpdateReport iterations = 7;
     repeated FittedParameterReport final_parameters = 8;
+    // How many simulations were run (every evaluation the optimizer asked for, finite-difference probes included), how many of
+    // them failed (an unstable or erroring simulation, scored as the worst value seen so the search carried on), how long the
+    // search took, and whether it was ended by a stop request or its time limit rather than by the optimizer finishing.
+    uint64 evaluations = 9;
+    uint64 failed_trials = 10;
+    double elapsed_seconds = 11;
+    bool stopped = 12;
+    // For a fit with constraints: the largest relative amount by which the best values break one (0 when they all hold), where a
+    // violation is measured against the constraint's limit (see FittingConstraint in parameterFitting.hpp).
+    double final_violation = 13;
+}
+
+// One per simulation the fit runs, written framed (a 4-byte big-endian length, then the message) to stdout when `fit` is given
+// --progress-stream, so the app can draw the search as it happens. `baseline` marks the first one, the starting parameter
+// values, whose elapsed_seconds is the cost of one simulation and whose loss is what everything is compared with.
+message FittingProgressEvent {
+    uint64 iteration = 1;
+    double loss = 2;
+    double best_loss = 3;
+    bool failed = 4;
+    uint64 failed_trials = 5;
+    double elapsed_seconds = 6;
+    repeated double parameter_values = 7;
+    repeated double best_parameter_values = 8;
+    bool baseline = 9;
+    // Which parameter each value above is, in order. Sent on the baseline event only.
+    repeated uint64 parameter_ids = 10;
+    // The largest relative constraint violation of this simulation and of the best one so far (0 when there are no constraints).
+    double violation = 11;
+    double best_violation = 12;
 }

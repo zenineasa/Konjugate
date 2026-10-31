@@ -9,6 +9,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import 'mathlive';
 import { DocumentController } from './documentController.mjs';
 import { createTour } from './tour.mjs';
+import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
+import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
+import { constraintRows, insertName, objectivePayload, objectiveVocabulary, runSettingsError, summaryFunctions, wrapInSummary } from './tuningObjective.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
@@ -52,7 +55,7 @@ import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
-import { nearestSampleIndex, nodeResultSeries, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
+import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
@@ -402,6 +405,9 @@ let currentProjectPath = null;
 // model rather than in it: it is read when a project is loaded and written when it is saved, and never reaches
 // the engine, validation, copy and paste, or the undo history.
 let projectAddonData = {};
+// The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
+// as unsaved work (addonDataUnsaved) when a run changes it.
+let projectTuningSetup = null;
 // A launcher's session kept with the project since it was last saved or opened (see onKeepAddonData).
 let addonDataUnsaved = false;
 const addonDataOf = (document) => (document?.addonData && typeof document.addonData === 'object' && !Array.isArray(document.addonData) ? document.addonData : {});
@@ -7441,6 +7447,7 @@ async function loadProjectDocument(document, {
     hideAssistantPanel();
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
+    projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
     addonDataUnsaved = false;
     clearRenderedModel();
     model.metadata = nextModel.metadata;
@@ -8490,13 +8497,15 @@ function findTunableParametersInModel() {
 
 function resetParameterTuning() {
     parameterTuningState = null;
+    setParameterTuningGoalUi('data');
     $('#parameterTuningFile').value = '';
     $('#parameterTuningStatus').className = 'equationDiagnostics';
     $('#parameterTuningStatus').textContent = '';
     $('#parameterTuningMappingSection').hidden = true;
     $('#parameterTuningMappingRows').replaceChildren();
-    $('#parameterTuningParametersSection').hidden = true;
-    $('#parameterTuningParameterRows').replaceChildren();
+    $('#parameterTuningParametersSection').hidden = false;
+    renderParameterTuningParameters();
+    $('#parameterTuningTuneHint').textContent = '';
     if (!$('#parameterTuningBackend').options.length) {
         loadParameterTuningBackendIds().then((ids) => {
             if ($('#parameterTuningBackend').options.length) return; // a concurrent call already populated it
@@ -8505,6 +8514,13 @@ function resetParameterTuning() {
     }
     $('#parameterTuningProgressSection').hidden = true;
     $('#parameterTuningProgress').textContent = '';
+    $('#parameterTuningEstimate').textContent = '';
+    $('#parameterTuningStats').hidden = true;
+    $('#parameterTuningBestValues').replaceChildren();
+    $('#parameterTuningWarnings').replaceChildren();
+    $('#parameterTuningLogField').hidden = true;
+    if (!$('#parameterTuningConvergencePlot').hidden) globalThis.Plotly?.purge($('#parameterTuningConvergencePlot'));
+    $('#parameterTuningConvergencePlot').hidden = true;
     $('#parameterTuningReviewSection').hidden = true;
     $('#parameterTuningReviewRows').replaceChildren();
     $('#parameterTuningReviewStatus').textContent = '';
@@ -8517,10 +8533,177 @@ function resetParameterTuning() {
     $('#commitParameterTuning').disabled = true;
 }
 
+// The card has two goals that share everything after "what to score": fitting measured data (a CSV, columns matched to states) or
+// an objective the person writes. `parameterTuningGoal` is which one the card is set up for; it goes back to data whenever the card resets.
+let parameterTuningGoal = 'data';
+
+function setParameterTuningGoalUi(goal) {
+    parameterTuningGoal = goal;
+    const objective = goal === 'objective';
+    $('#parameterTuningGoalData').setAttribute('aria-pressed', String(!objective));
+    $('#parameterTuningGoalObjective').setAttribute('aria-pressed', String(objective));
+    $('#parameterTuningGoalHint').textContent = objective
+        ? 'Find the parameter values that make an objective you write as small or as large as it can be. Mark a parameter "Tunable" with bounds in its relationship\'s editor first. Measured data is optional: add a CSV if the objective compares the model with it.'
+        : 'Fit this model\'s tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship\'s editor first, then import a CSV of measured signals here.';
+    $('#parameterTuningFileLabel').textContent = objective ? '↥ Add measured data (optional)' : '↥ Choose CSV file';
+    $('#parameterTuningObjectiveSection').hidden = !objective;
+    $('#parameterTuningObjectiveStatus').textContent = '';
+}
+
+const parameterTuningObjectiveWord = () => (parameterTuningGoal === 'objective' ? 'objective' : 'loss');
+
+// The name and summary buttons edit whichever of the objective or a limit's expression was last in use.
+let parameterTuningEditField = null;
+const objectiveEditTarget = () => (parameterTuningEditField?.isConnected ? parameterTuningEditField : $('#parameterTuningObjective'));
+$('#parameterTuningObjective').addEventListener('focus', (event) => { parameterTuningEditField = event.target; });
+
+function addParameterTuningConstraintRow({ expression = '', relation = '<=', limit = '' } = {}) {
+    const row = document.createElement('div');
+    row.className = 'parameterTuningConstraintRow';
+    const expressionInput = document.createElement('input');
+    expressionInput.dataset.field = 'expression';
+    expressionInput.placeholder = 'max(…) of a state';
+    expressionInput.value = expression;
+    expressionInput.spellcheck = false;
+    expressionInput.setAttribute('aria-label', 'What to limit');
+    expressionInput.addEventListener('focus', () => { parameterTuningEditField = expressionInput; });
+    const relationSelect = document.createElement('select');
+    relationSelect.dataset.field = 'relation';
+    relationSelect.setAttribute('aria-label', 'Stay at most or at least');
+    relationSelect.append(new Option('at most', '<='), new Option('at least', '>='));
+    relationSelect.value = relation;
+    const limitInput = document.createElement('input');
+    limitInput.dataset.field = 'limit';
+    limitInput.type = 'number';
+    limitInput.step = 'any';
+    limitInput.placeholder = 'limit';
+    limitInput.value = String(limit);
+    limitInput.setAttribute('aria-label', 'The limit');
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = 'Remove this limit';
+    remove.addEventListener('click', () => row.remove());
+    row.append(expressionInput, relationSelect, limitInput, remove);
+    $('#parameterTuningConstraintRows').append(row);
+    return row;
+}
+$('#addParameterTuningConstraint').addEventListener('click', () => addParameterTuningConstraintRow().querySelector('input').focus());
+const parameterTuningConstraintInputs = () => $$('#parameterTuningConstraintRows .parameterTuningConstraintRow').map((row) => ({
+    expression: $('[data-field="expression"]', row).value, relation: $('[data-field="relation"]', row).value, limit: $('[data-field="limit"]', row).value
+}));
+
+function refreshParameterTuningObjectiveButtons() {
+    const vocabulary = parameterTuningState.vocabulary;
+    const addChips = (container, entries) => {
+        container.replaceChildren(...entries.map((entry) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = entry.label;
+            button.title = `Insert ${entry.name}`;
+            button.addEventListener('click', () => {
+                const textarea = objectiveEditTarget();
+                const edited = insertName(textarea.value, textarea.selectionStart, textarea.selectionEnd, entry.name);
+                textarea.value = edited.text;
+                textarea.focus();
+                textarea.setSelectionRange(edited.selectionStart, edited.selectionEnd);
+            });
+            return button;
+        }));
+        if (!entries.length) container.textContent = 'None';
+    };
+    addChips($('#parameterTuningStateChips'), vocabulary.states);
+    addChips($('#parameterTuningParameterChips'), vocabulary.parameters.map((parameter) => ({ ...parameter, label: parameter.tunable ? `${parameter.name} (tuned)` : parameter.name })));
+    addChips($('#parameterTuningMeasuredChips'), vocabulary.measured);
+    $('#parameterTuningMeasuredPicker').hidden = !vocabulary.measured.length;
+}
+
+// The names are listed beside the buttons, so a person can read what each one stands for and not only click it.
+function describeParameterTuningNames() {
+    const vocabulary = parameterTuningState.vocabulary;
+    const lines = [...vocabulary.states.map((entry) => `${entry.name}: ${entry.label}`), ...vocabulary.parameters.map((entry) => `${entry.name}: ${entry.label}${entry.tunable ? ' (tuned)' : ''}`), ...vocabulary.measured.map((entry) => `${entry.name}: measured column "${entry.label}"`)];
+    $('#parameterTuningObjective').title = lines.join('\n');
+}
+
+function startParameterTuningObjective() {
+    setParameterTuningGoalUi('objective');
+    parameterTuningState = { goal: 'objective', csvContent: '', mapping: [], measuredColumns: [], tunableParameters: findTunableParametersInModel(), report: null };
+    parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument());
+    refreshParameterTuningObjectiveButtons();
+    describeParameterTuningNames();
+    const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
+    $('#parameterTuningRunTime').value = String(runLaunchSettings.targetTime);
+    $('#parameterTuningTimeStep').value = String(configuration?.globalTimeStep ?? 1);
+    $('#parameterTuningObjective').value = '';
+    $('#parameterTuningConstraintRows').replaceChildren();
+    parameterTuningEditField = null;
+    renderParameterTuningParameters();
+    refreshParameterTuningRunnable();
+}
+
+$('#parameterTuningGoalData').addEventListener('click', () => {
+    if (parameterTuningRun || parameterTuningGoal === 'data') return;
+    resetParameterTuning();
+});
+$('#parameterTuningGoalObjective').addEventListener('click', () => {
+    if (parameterTuningRun || parameterTuningGoal === 'objective') return;
+    resetParameterTuning();
+    startParameterTuningObjective();
+});
+$('#parameterTuningSummaryButtons').replaceChildren(...summaryFunctions.map((summary) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `${summary.name}(…)`;
+    button.title = `Wrap in ${summary.name}: ${summary.hint}`;
+    button.addEventListener('click', () => {
+        const textarea = objectiveEditTarget();
+        const edited = wrapInSummary(textarea.value, textarea.selectionStart, textarea.selectionEnd, summary.name);
+        textarea.value = edited.text;
+        textarea.focus();
+        textarea.setSelectionRange(edited.selectionStart, edited.selectionEnd);
+    });
+    return button;
+}));
+
+// Puts the card back as it was last run in this project: the limits and optimiser, and for an objective its expression and run settings.
+// The measured file itself is not kept (a project is not the place for a large CSV), only its name, so the card says which to choose again.
+function applySavedTuningSetup() {
+    const setup = projectTuningSetup;
+    if (!setup) return;
+    if (setup.maxSimulations) $('#parameterTuningMaxSimulations').value = String(setup.maxSimulations);
+    if (setup.maxMinutes) $('#parameterTuningMaxMinutes').value = String(setup.maxMinutes);
+    if (setup.backend) {
+        const select = $('#parameterTuningBackend');
+        const apply = () => { if ([...select.options].some((option) => option.value === setup.backend)) select.value = setup.backend; };
+        apply();
+        loadParameterTuningBackendIds().then(apply);
+    }
+    const status = $('#parameterTuningStatus');
+    if (setup.goal === 'objective' && setup.objective) {
+        startParameterTuningObjective();
+        $('#parameterTuningObjective').value = setup.objective.expression;
+        $('#parameterTuningDirection').value = setup.objective.direction;
+        if (setup.objective.targetTime) $('#parameterTuningRunTime').value = String(setup.objective.targetTime);
+        if (setup.objective.timeStep) $('#parameterTuningTimeStep').value = String(setup.objective.timeStep);
+        (setup.objective.constraints ?? []).forEach((constraint) => addParameterTuningConstraintRow(constraint));
+        status.className = 'equationDiagnostics valid';
+        status.textContent = setup.csvFileName
+            ? `Set up as last time. It used measured data from ${setup.csvFileName}: add it again if the objective names its columns.`
+            : 'Set up as last time.';
+    } else if (setup.csvFileName) {
+        status.className = 'equationDiagnostics';
+        status.textContent = `Last time this used ${setup.csvFileName}: choose it again to continue.`;
+    }
+}
+
 function openParameterTuning() {
     if (activeResult) return;
     hideCards($('#parameterTuning'));
-    resetParameterTuning();
+    // A fit still running keeps its card as it was; only a fresh one starts from nothing.
+    if (!parameterTuningRun) {
+        resetParameterTuning();
+        applySavedTuningSetup();
+    }
     $('#parameterTuning').classList.remove('hidden');
 }
 
@@ -8543,31 +8726,147 @@ function renderParameterTuningMapping() {
     });
 }
 
+// Every parameter the person can tune, in one table: a Tune box, and its bounds when it is ticked. This edits the same `tuning` field the
+// Parameters table and a relationship's own editor do (one undo step each), so there is still one place the truth lives; the card only
+// saves a trip to them. Live parameters are adjusted during a run, not fitted before it, and a parameter that only reads a shared one is
+// tuned through the shared one.
+function parameterTuningRowLabel(entry) {
+    return entry.kind === 'shared' ? `Shared · ${entry.parameter.name}` : `${entry.ownerLabel} · ${entry.parameter.name}`;
+}
+
+function syncParameterTuningTunables() {
+    if (!parameterTuningState) return;
+    parameterTuningState.tunableParameters = findTunableParametersInModel();
+    if (parameterTuningState.vocabulary) {
+        parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument(), parameterTuningState.measuredColumns ?? []);
+        refreshParameterTuningObjectiveButtons();
+        describeParameterTuningNames();
+    }
+}
+
+function refreshParameterTuningRunnable() {
+    const run = $('#runParameterTuning');
+    const ready = Boolean(parameterTuningState) && parameterTuningState.tunableParameters.length > 0;
+    run.hidden = !parameterTuningState;
+    run.disabled = !ready || Boolean(parameterTuningRun);
+    const hint = $('#parameterTuningTuneHint');
+    hint.textContent = parameterTuningState && !ready ? 'Tick Tune on at least one parameter to run.' : '';
+}
+
 function renderParameterTuningParameters() {
     const container = $('#parameterTuningParameterRows');
     container.replaceChildren();
-    parameterTuningState.tunableParameters.forEach((parameter) => {
+    const locked = Boolean(parameterTuningRun) || Boolean(parameterTuningState?.report) || Boolean(activeResult);
+    const entries = collectParameterRows().filter((entry) => entry.kind !== 'nodeProvider' && Number.isFinite(Number(entry.parameter.value)));
+    if (!entries.length) {
+        container.textContent = 'This model has no parameters to tune.';
+        return;
+    }
+    entries.forEach((entry) => {
+        const parameter = entry.parameter;
+        const live = parameter.mode === 'live';
         const row = document.createElement('div');
-        row.className = 'causalInferenceMappingRow';
-        const label = document.createElement('span');
-        label.textContent = `${parameter.edgeName ?? parameter.ownerName} · ${parameter.symbol}`;
-        const range = document.createElement('span');
-        range.textContent = `current ${parameter.value}, bounds [${parameter.tuning.minimum}, ${parameter.tuning.maximum}]`;
-        row.append(label, range);
+        row.className = 'parameterTuningRow';
+        row.dataset.parameterId = String(parameter.id);
+        const tune = document.createElement('label');
+        tune.className = 'parameterTuningToggle';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.dataset.field = 'tune';
+        checkbox.checked = Boolean(parameter.tuning);
+        checkbox.disabled = locked || live;
+        const name = document.createElement('span');
+        name.textContent = parameterTuningRowLabel(entry);
+        name.title = live ? 'A live parameter is adjusted during a run, not tuned beforehand.' : '';
+        const current = document.createElement('small');
+        current.textContent = `now ${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`;
+        tune.append(checkbox, name, current);
+        row.append(tune);
+        const bounds = document.createElement('div');
+        bounds.className = 'parameterTuningBounds';
+        bounds.hidden = !parameter.tuning;
+        const message = document.createElement('span');
+        message.className = 'parameterTuningError';
+        message.setAttribute('role', 'status');
+        const input = (field, label, value) => {
+            const wrapper = document.createElement('label');
+            const text = document.createElement('span');
+            text.textContent = label;
+            const box = document.createElement('input');
+            box.type = 'number';
+            box.step = 'any';
+            box.dataset.field = field;
+            box.value = value ?? '';
+            box.disabled = locked;
+            wrapper.append(text, box);
+            return { wrapper, box };
+        };
+        const tuning = parameter.tuning ? normalizedParameterTuning(parameter) : null;
+        const minimum = input('minimum', 'Minimum', tuning?.minimum);
+        const maximum = input('maximum', 'Maximum', tuning?.maximum);
+        bounds.append(minimum.wrapper, maximum.wrapper, message);
+        row.append(bounds);
+        const finish = (error) => {
+            if (error) {
+                message.textContent = error;
+                return false;
+            }
+            syncParameterTuningTunables();
+            renderParameterTuningParameters();
+            refreshParameterTuningRunnable();
+            return true;
+        };
+        checkbox.addEventListener('change', () => {
+            const error = editParameterRow(entry, { tuning: checkbox.checked ? normalizedParameterTuning(parameter) : null });
+            if (error) {
+                checkbox.checked = !checkbox.checked;
+                bounds.hidden = false;
+                message.textContent = error;
+                return;
+            }
+            finish('');
+        });
+        const commitBounds = () => {
+            const error = editParameterRow(entry, { tuning: { minimum: Number(minimum.box.value), maximum: Number(maximum.box.value) } });
+            finish(error);
+        };
+        minimum.box.addEventListener('change', commitBounds);
+        maximum.box.addEventListener('change', commitBounds);
         container.append(row);
     });
 }
 
-async function loadParameterTuningCsv(content) {
+// With an objective the CSV is optional extra data: its columns become names the objective can use, and, since the measured rows are
+// paired with the simulation's samples one to one, the run's length and step are set to the CSV's own.
+function loadParameterTuningMeasuredColumns(content) {
     const status = $('#parameterTuningStatus');
     try {
         const parsed = parseCsv(content);
-        const tunableParameters = findTunableParametersInModel();
-        if (!tunableParameters.length) {
-            status.className = 'equationDiagnostics';
-            status.textContent = 'No parameters are marked "Tunable" yet -- mark at least one in a relationship or source-term editor, or in the Parameters table, first.';
-            return;
-        }
+        if (parsed.rows.length < 2) throw new Error('The CSV needs at least two rows.');
+        const timeStep = parsed.rows[1].time - parsed.rows[0].time;
+        parameterTuningState.csvContent = content;
+        parameterTuningState.measuredColumns = parsed.columnNames;
+        parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument(), parsed.columnNames);
+        refreshParameterTuningObjectiveButtons();
+        describeParameterTuningNames();
+        $('#parameterTuningTimeStep').value = String(timeStep);
+        $('#parameterTuningRunTime').value = String(timeStep * (parsed.rows.length - 1));
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `Added ${parsed.columnNames.length} measured column${parsed.columnNames.length === 1 ? '' : 's'} (${parsed.rows.length} rows). Each simulation now runs for the data's ${formatDuration(timeStep * (parsed.rows.length - 1))} at its ${formatDuration(timeStep)} step, so the rows line up with the simulation.`;
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = error.message;
+    }
+}
+
+async function loadParameterTuningCsv(content) {
+    if (parameterTuningGoal === 'objective') {
+        if (parameterTuningState) loadParameterTuningMeasuredColumns(content);
+        return;
+    }
+    const status = $('#parameterTuningStatus');
+    try {
+        const parsed = parseCsv(content);
         // Existing-states-only: unlike causal inference, tuning never creates a node -- it fits a
         // model that already exists, so an unmatched CSV column is simply not usable here.
         const mapping = mapColumnsToNodes(parsed.columnNames, existingNodesForMapping()).filter((entry) => !entry.createNew);
@@ -8576,20 +8875,18 @@ async function loadParameterTuningCsv(content) {
             status.textContent = 'None of the CSV columns matched an existing state by name.';
             return;
         }
-        parameterTuningState = { csvContent: content, mapping, tunableParameters, report: null };
+        parameterTuningState = { csvContent: content, mapping, tunableParameters: findTunableParametersInModel(), report: null };
         status.className = 'equationDiagnostics valid';
         status.textContent = `Parsed ${parsed.columnNames.length} column${parsed.columnNames.length === 1 ? '' : 's'}, ${parsed.rows.length} rows. `
             + `Matched ${mapping.length} to existing states.`;
         renderParameterTuningMapping();
         renderParameterTuningParameters();
         $('#parameterTuningMappingSection').hidden = false;
-        $('#parameterTuningParametersSection').hidden = false;
         $('#parameterTuningProgressSection').hidden = true;
         $('#parameterTuningReviewSection').hidden = true;
         $('#commitParameterTuning').hidden = true;
         $('#commitParameterTuning').disabled = true;
-        $('#runParameterTuning').hidden = false;
-        $('#runParameterTuning').disabled = false;
+        refreshParameterTuningRunnable();
     } catch (error) {
         status.className = 'equationDiagnostics';
         status.textContent = error.message;
@@ -8600,13 +8897,16 @@ $('#parameterTuningFile').addEventListener('change', async () => {
     const file = $('#parameterTuningFile').files[0];
     if (!file) return;
     await loadParameterTuningCsv(await file.text());
+    if (parameterTuningState) parameterTuningState.csvFileName = file.name;
 });
 
 // Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
 // driven by this app's interaction-test harness.
 window.__debugParameterTuning = {
     loadCsv: (content) => loadParameterTuningCsv(content),
-    report: () => structuredClone(parameterTuningState?.report ?? null)
+    report: () => structuredClone(parameterTuningState?.report ?? null),
+    simulations: () => parameterTuningRun?.events.length ?? 0,
+    setup: () => structuredClone(projectTuningSetup)
 };
 
 function renderParameterTuningReview() {
@@ -8636,6 +8936,27 @@ function renderParameterTuningReview() {
     });
 }
 
+// The project as it would be saved with the tuned values in place of the parameters' own. serializeProjectDocument()'s edges reference the
+// live model's own parameter objects directly (edge.parameters ?? []) rather than cloning them, so mutating them in place without
+// cloning first would corrupt the in-editor model.
+function documentWithFittedValues() {
+    const document_ = structuredClone(serializeProjectDocument());
+    const fittedById = new Map(parameterTuningState.report.finalParameters.map((entry) => [entry.parameterId, entry.value]));
+    document_.edges.forEach((edge) => {
+        (edge.parameters ?? []).forEach((parameter) => {
+            if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
+        });
+    });
+    document_.nodes.forEach((node) => (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => {
+        if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
+    })));
+    // A fitted shared parameter is one variable for everything linked to it, the provider of a node included.
+    (document_.sharedParameters ?? []).forEach((parameter) => {
+        if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
+    });
+    return document_;
+}
+
 // Runs one more simulation with the just-fitted parameter values applied, on the same time grid
 // as the measured CSV (matching the fitting loop's own "no interpolation, paired by row index"
 // convention -- see engine/src/parameterFitting.cpp), and plots each mapped signal's measured and
@@ -8662,23 +8983,7 @@ async function renderParameterTuningComparison() {
         const timeStep = parsed.rows[1].time - parsed.rows[0].time;
         const targetTime = timeStep * (parsed.rows.length - 1);
 
-        // serializeProjectDocument()'s edges reference the live model's own parameter objects
-        // directly (edge.parameters ?? []) rather than cloning them, so mutating them in place
-        // here without cloning first would corrupt the in-editor model.
-        const document_ = structuredClone(serializeProjectDocument());
-        const fittedById = new Map(parameterTuningState.report.finalParameters.map((entry) => [entry.parameterId, entry.value]));
-        document_.edges.forEach((edge) => {
-            (edge.parameters ?? []).forEach((parameter) => {
-                if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
-            });
-        });
-        document_.nodes.forEach((node) => (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => {
-            if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
-        })));
-        // A fitted shared parameter is one variable for everything linked to it, the provider of a node included.
-        (document_.sharedParameters ?? []).forEach((parameter) => {
-            if (fittedById.has(parameter.id)) parameter.value = fittedById.get(parameter.id);
-        });
+        const document_ = documentWithFittedValues();
 
         const runResult = await window.engine.run(JSON.stringify(document_), { globalTimeStep: timeStep, outputInterval: timeStep, targetTime });
         if (!runResult.available) throw new Error('The native simulation engine is unavailable.');
@@ -8717,38 +9022,265 @@ async function renderParameterTuningComparison() {
     }
 }
 
+// A fit that is running: every progress event the engine has sent for it (one per simulation), the limits it was started with, and
+// what the person has asked of it since. Null when none is.
+let parameterTuningRun = null;
+window.engine.onFitProgress?.((batch) => {
+    if (!parameterTuningRun || parameterTuningRun.discarded) return;
+    parameterTuningRun.events.push(...batch);
+    updateParameterTuningProgress();
+});
+
+const parameterTuningParameterLabel = (parameterId) => {
+    const parameter = parameterTuningState?.tunableParameters.find((candidate) => candidate.parameterId === parameterId);
+    return parameter ? `${parameter.edgeName ?? parameter.ownerName} · ${parameter.symbol}` : `Parameter ${parameterId}`;
+};
+
+async function drawParameterTuningPlot(run) {
+    const element = $('#parameterTuningConvergencePlot');
+    if (!globalThis.Plotly || !run.events.length) return;
+    element.hidden = false;
+    $('#parameterTuningLogField').hidden = false;
+    const { attempts, best } = convergenceTraces(run.events);
+    const log = $('#parameterTuningLogScale').checked && [...attempts.y, ...best.y].every((value) => value > 0);
+    const axis = { gridcolor: '#1d303a', zerolinecolor: '#2b414c', automargin: true };
+    await globalThis.Plotly.react(element, [
+        { type: 'scatter', mode: 'markers', name: 'Each simulation', x: attempts.x, y: attempts.y, marker: { size: 4, color: 'rgba(57,135,229,.55)' }, hovertemplate: `Simulation %{x}<br>${parameterTuningObjectiveWord()} %{y:.4g}<extra></extra>` },
+        { type: 'scatter', mode: 'lines', name: 'Best so far', x: best.x, y: best.y, line: { width: 2, color: '#42c9bc', shape: 'hv' }, hovertemplate: 'Best after %{x}: %{y:.4g}<extra></extra>' }
+    ], {
+        autosize: true, margin: { l: 48, r: 12, t: 8, b: 32 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(7,15,21,.52)',
+        font: { color: '#8297a1', family: 'system-ui, sans-serif', size: 9 }, showlegend: true, legend: { orientation: 'h', x: 0, y: 1.12, yanchor: 'bottom' },
+        xaxis: { ...axis, title: { text: 'Simulation', standoff: 4 } }, yaxis: { ...axis, type: log ? 'log' : 'linear', title: { text: parameterTuningGoal === 'objective' ? 'Objective' : 'Loss', standoff: 4 } }
+    }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'] });
+    run.lastDrawAt = Date.now();
+    run.lastDrawnBest = run.events.at(-1).bestLoss;
+}
+
+// The numbers, the estimate, the warnings and the toolbar chip follow every batch; the plot is redrawn when a new best has come in
+// (at most four times a second) and otherwise at most once a second, so a fast fit does not keep the page busy drawing.
+function updateParameterTuningProgress() {
+    const run = parameterTuningRun;
+    const summary = run && summarizeTuning(run.events, run.limits);
+    if (!summary) return;
+    run.parameterIds ??= run.events[0].parameterIds;
+    const estimate = estimateText(run.events, run.limits);
+    $('#parameterTuningEstimate').textContent = summary.remainingSeconds !== null ? `${estimate} About ${formatDuration(summary.remainingSeconds)} left.` : estimate;
+    $('#parameterTuningStats').hidden = false;
+    $('#parameterTuningStatSimulations').textContent = String(summary.simulations);
+    $('#parameterTuningStatElapsed').textContent = formatDuration(summary.elapsedSeconds);
+    $('#parameterTuningStatRate').textContent = `${summary.simulationsPerSecond >= 10 ? Math.round(summary.simulationsPerSecond) : summary.simulationsPerSecond.toFixed(1)}/s`;
+    $('#parameterTuningStatBest').textContent = formatLoss(summary.bestLoss);
+    $('#parameterTuningStatStart').textContent = formatLoss(summary.baselineLoss);
+    $('#parameterTuningStatImprovement').previousElementSibling.textContent = run.limits.maximize ? 'Higher by' : 'Lower by';
+    $('#parameterTuningStatImprovement').textContent = summary.improvement === null ? '—' : `${(summary.improvement * 100).toFixed(summary.improvement >= 0.1 ? 0 : 1)}%`;
+    $('#parameterTuningProgressBar').hidden = summary.progress === null;
+    if (summary.progress !== null) $('#parameterTuningProgressBar').value = summary.progress;
+    $('#parameterTuningBestValues').replaceChildren(...(run.parameterIds ?? []).map((parameterId, index) => {
+        const row = document.createElement('div');
+        const name = document.createElement('span');
+        name.textContent = parameterTuningParameterLabel(parameterId);
+        const value = document.createElement('span');
+        value.textContent = `${Number(run.events[0].parameterValues[index]).toPrecision(5)} → ${Number(summary.bestParameterValues[index]).toPrecision(5)}`;
+        row.append(name, value);
+        return row;
+    }));
+    $('#parameterTuningWarnings').replaceChildren(...tuningWarnings(summary).map((text) => {
+        const warning = document.createElement('p');
+        warning.textContent = text;
+        return warning;
+    }));
+    $('#parameterTuningChipText').textContent = `Tuning · ${summary.simulations} · best ${formatLoss(summary.bestLoss)}`;
+    const sinceDraw = Date.now() - (run.lastDrawAt ?? 0);
+    if (run.lastDrawAt === undefined || (run.events.at(-1).bestLoss < run.lastDrawnBest && sinceDraw >= 250) || sinceDraw >= 1000) drawParameterTuningPlot(run);
+}
+
+function setParameterTuningRunning(running) {
+    $('#parameterTuningRunActions').hidden = !running;
+    $('#stopParameterTuning').disabled = false;
+    $('#applyBestParameterTuning').disabled = false;
+    $('#stopParameterTuning').textContent = 'Stop and use best so far';
+    $('#cancelParameterTuning').textContent = running ? 'Discard' : 'Cancel';
+    $('#cancelParameterTuning').title = running ? 'End the search and keep nothing' : '';
+    $('#parameterTuningChip').hidden = !running;
+    $('#parameterTuningProgressTitle').textContent = running ? 'Fitting…' : 'Fit';
+}
+
+// Asks the engine to end the search now; the fit then finishes normally, reporting the best values it simulated.
+async function stopParameterTuning({ applyWhenDone = false } = {}) {
+    const run = parameterTuningRun;
+    if (!run || run.stopping) return;
+    run.stopping = true;
+    run.applyWhenDone = applyWhenDone;
+    $('#stopParameterTuning').disabled = true;
+    $('#applyBestParameterTuning').disabled = true;
+    $('#stopParameterTuning').textContent = 'Stopping…';
+    await window.engine.stopFit();
+}
+$('#stopParameterTuning').addEventListener('click', () => stopParameterTuning());
+$('#applyBestParameterTuning').addEventListener('click', () => stopParameterTuning({ applyWhenDone: true }));
+$('#parameterTuningLogScale').addEventListener('change', () => { if (parameterTuningRun) drawParameterTuningPlot(parameterTuningRun); });
+$('#parameterTuningChip').addEventListener('click', () => {
+    hideCards($('#parameterTuning'));
+    $('#parameterTuning').classList.remove('hidden');
+});
+
+const parameterTuningEndText = (report) => {
+    const word = parameterTuningObjectiveWord();
+    const finalLossText = report.finalLoss === null ? 'not finite' : formatLoss(report.finalLoss);
+    const took = `${report.evaluations} simulations in ${formatDuration(report.elapsedSeconds)}`;
+    if (report.terminationReason === 'stoppedByUser') return `Stopped: using the best found, ${word} ${finalLossText} (${took}).`;
+    if (report.terminationReason === 'maxTimeReached') return `Time limit reached: using the best found, ${word} ${finalLossText} (${took}).`;
+    // finalLoss is JSON `null` (not a number) when the fit diverged to a non-finite value --
+    // Number(null) silently coerces to 0, which would misleadingly read as a perfect fit.
+    return `${report.converged ? 'Converged' : 'Did not fully converge'} (${report.terminationReason}), final ${word} ${finalLossText} (${took}).`;
+};
+
 $('#runParameterTuning').addEventListener('click', async () => {
-    if (!parameterTuningState || activeResult) return;
+    if (!parameterTuningState || activeResult || parameterTuningRun) return;
     const button = $('#runParameterTuning');
     const progress = $('#parameterTuningProgress');
+    const simulations = Math.max(1, Math.round(Number($('#parameterTuningMaxSimulations').value) || 200));
+    const minutes = Number($('#parameterTuningMaxMinutes').value);
+    const seconds = minutes > 0 ? minutes * 60 : 0;
+    let objective = null;
+    if (parameterTuningState.goal === 'objective') {
+        const objectiveStatus = $('#parameterTuningObjectiveStatus');
+        const expression = $('#parameterTuningObjective').value;
+        const targetTime = Number($('#parameterTuningRunTime').value);
+        const timeStep = Number($('#parameterTuningTimeStep').value);
+        const problem = !expression.trim() ? 'Write an objective first, for example final(…) or integral(…) of a state.' : runSettingsError(targetTime, timeStep);
+        objectiveStatus.className = 'equationDiagnostics';
+        objectiveStatus.textContent = problem;
+        if (problem) return;
+        const limits = constraintRows(parameterTuningConstraintInputs());
+        if (limits.error) {
+            objectiveStatus.textContent = limits.error;
+            return;
+        }
+        objective = objectivePayload({ expression, direction: $('#parameterTuningDirection').value, targetTime, timeStep, variables: parameterTuningState.vocabulary.variables, constraints: limits.constraints });
+    }
+    const setup = tuningSetupFromRun({
+        goal: parameterTuningState.goal === 'objective' ? 'objective' : 'data', backend: $('#parameterTuningBackend').value, maxSimulations: simulations,
+        maxMinutes: minutes > 0 ? minutes : null, csvFileName: parameterTuningState.csvFileName, objective
+    });
+    if (!sameTuningSetup(setup, projectTuningSetup)) {
+        projectTuningSetup = setup;
+        addonDataUnsaved = true;
+        updateHistoryControls();
+    }
+    const run = { events: [], limits: { simulations, seconds: seconds || null, maximize: objective?.direction === 'maximise' }, discarded: false, stopping: false, applyWhenDone: false };
+    parameterTuningRun = run;
     button.disabled = true;
     $('#parameterTuningProgressSection').hidden = false;
     $('#parameterTuningReviewSection').hidden = true;
     $('#commitParameterTuning').hidden = true;
     $('#commitParameterTuning').disabled = true;
-    progress.textContent = 'Running…';
+    $('#parameterTuningEstimate').textContent = 'Timing one simulation with the starting values…';
+    $('#parameterTuningStats').hidden = true;
+    $('#parameterTuningBestValues').replaceChildren();
+    $('#parameterTuningWarnings').replaceChildren();
+    $('#parameterTuningProgressBar').hidden = true;
+    $('#parameterTuningLogField').hidden = true;
+    if (!$('#parameterTuningConvergencePlot').hidden) globalThis.Plotly?.purge($('#parameterTuningConvergencePlot'));
+    $('#parameterTuningConvergencePlot').hidden = true;
+    progress.textContent = '';
+    setParameterTuningRunning(true);
     try {
         const content = JSON.stringify(serializeProjectDocument());
-        const config = { backend: $('#parameterTuningBackend').value };
+        const config = { backend: $('#parameterTuningBackend').value, maxIterations: simulations, ...(seconds ? { maxSeconds: seconds } : {}), ...(objective ? { objective } : {}) };
         const result = await window.engine.fit(content, parameterTuningState.csvContent, config);
+        if (run.discarded) return;
+        // The search is over from here: what follows (the review, the comparison run) is not the fit running.
+        if (parameterTuningRun === run) {
+            parameterTuningRun = null;
+            setParameterTuningRunning(false);
+        }
         if (!result.available) throw new Error('The native fitting engine is unavailable.');
         parameterTuningState.report = result.report;
-        // finalLoss is JSON `null` (not a number) when the fit diverged to a non-finite value --
-        // Number(null) silently coerces to 0, which would misleadingly read as a perfect fit.
-        const finalLossText = result.report.finalLoss === null ? 'not finite' : Number(result.report.finalLoss).toPrecision(4);
-        progress.textContent = `${result.report.converged ? 'Converged' : 'Did not fully converge'} (${result.report.terminationReason}), `
-            + `final loss ${finalLossText}.`;
+        progress.textContent = parameterTuningEndText(result.report);
+        $('#parameterTuningEstimate').textContent = '';
+        await drawParameterTuningPlot(run);
         renderParameterTuningReview();
         $('#parameterTuningReviewSection').hidden = false;
         $('#commitParameterTuning').hidden = false;
         $('#commitParameterTuning').disabled = false;
-        await renderParameterTuningComparison();
+        // A person who is somewhere else while a long fit runs is told when it is done.
+        if (!document.hasFocus() && globalThis.Notification) {
+            try {
+                const show = () => new Notification('Parameter tuning finished', { body: progress.textContent });
+                if (Notification.permission === 'granted') show();
+                else if (Notification.permission !== 'denied') Notification.requestPermission().then((permission) => { if (permission === 'granted') show(); });
+            } catch { /* notifications are a courtesy */ }
+        }
+        if (objective) await renderParameterTuningObjectiveOutcome(run, objective);
+        else await renderParameterTuningComparison();
+        if (run.applyWhenDone && !run.discarded) await commitParameterTuning();
     } catch (error) {
-        progress.textContent = error.message;
+        if (!run.discarded) {
+            // The engine's own sentence, without its error-code prefix: it says what is wrong with the objective, when that is the reason.
+            progress.textContent = error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?ENGINE_FAILURE: /, '');
+            if (objective) {
+                $('#parameterTuningObjectiveStatus').className = 'equationDiagnostics';
+                $('#parameterTuningObjectiveStatus').textContent = progress.textContent;
+            }
+        }
     } finally {
+        if (parameterTuningRun === run) {
+            parameterTuningRun = null;
+            setParameterTuningRunning(false);
+        }
         button.disabled = false;
     }
 });
+
+// What an objective's tuning leaves for the review: where the value went, as written (a maximised value rose), and the states the
+// objective names run with the starting values and with the tuned ones, so the change can be seen and not only read as a number.
+async function renderParameterTuningObjectiveOutcome(run, objective) {
+    const status = $('#parameterTuningComparisonStatus');
+    const plotElement = $('#parameterTuningComparisonPlot');
+    const first = run.events[0]?.loss;
+    const last = parameterTuningState.report.finalLoss;
+    status.className = 'equationDiagnostics';
+    status.textContent = `${objective.direction === 'maximise' ? 'Maximised' : 'Minimised'} objective: ${formatLoss(first)} at the starting values, ${last === null ? 'not finite' : formatLoss(last)} with the tuned ones.`;
+    const violation = parameterTuningState.report.finalViolation ?? 0;
+    if (objective.constraints.length) {
+        status.textContent += violation > 1e-3
+            ? ` The best values still break a limit by up to ${(violation * 100).toFixed(violation >= 0.1 ? 0 : 1)}%: the limits may not be reachable together with the parameters' bounds.`
+            : ' All limits hold.';
+    }
+    plotElement.hidden = true;
+    const summary = status.textContent;
+    try {
+        if (parameterTuningState.report.finalParameters.some((entry) => entry.value === null)) return;
+        const mentioned = parameterTuningState.vocabulary.states.filter((state) => new RegExp(`\\b${state.name}\\b`).test(objective.expression));
+        const stateIds = mentioned.map((state) => parameterTuningState.vocabulary.variables.find((variable) => variable.name === state.name).id);
+        if (!stateIds.length) return;
+        status.textContent = `${summary} Running the model before and after for the plot…`;
+        const configuration = { globalTimeStep: objective.timeStep, outputInterval: objective.timeStep, targetTime: objective.targetTime };
+        const before = await window.engine.run(JSON.stringify(serializeProjectDocument()), configuration);
+        const after = await window.engine.run(JSON.stringify(documentWithFittedValues()), configuration);
+        if (!before.available || !after.available) throw new Error('The native simulation engine is unavailable.');
+        const beforeSeries = resultSeriesForStateIds(before.result, stateIds);
+        const afterSeries = resultSeriesForStateIds(after.result, stateIds);
+        const entries = mentioned.map((state, index) => {
+            const id = stateIds[index];
+            const owner = model.nodes.flatMap((node) => node.states.map((candidate) => ({ node, candidate }))).find((entry) => entry.candidate.id === id);
+            return {
+                name: owner ? `${owner.node.title} · ${owner.candidate.label}` : state.label, unit: owner?.candidate.unit ?? '',
+                times: (beforeSeries.get(id) ?? []).map((sample) => sample.time),
+                before: (beforeSeries.get(id) ?? []).map((sample) => sample.value),
+                after: (afterSeries.get(id) ?? []).map((sample) => sample.value)
+            };
+        }).filter((entry) => entry.times.length && entry.before.length === entry.after.length);
+        status.textContent = summary;
+        if (!entries.length) return;
+        // Shown before drawing, so Plotly measures the real width of the panel (see the note in renderParameterTuningComparison).
+        plotElement.hidden = false;
+        await renderBeforeAfterComparison(plotElement, entries);
+    } catch (error) {
+        status.textContent = `${summary} The before-and-after plot is unavailable: ${error.message}`;
+    }
+}
 
 async function commitParameterTuning() {
     if (!parameterTuningState?.report) return;
@@ -8801,7 +9333,15 @@ async function commitParameterTuning() {
     $('#statusText').textContent = 'Fitted parameters applied. Use Save As to keep this as a new project -- the original is untouched until you do.';
 }
 
+// While a fit runs this is Discard: the search is ended and nothing is kept (Stop and use best so far is the way to keep it).
 $('#cancelParameterTuning').addEventListener('click', () => {
+    if (parameterTuningRun) {
+        parameterTuningRun.discarded = true;
+        parameterTuningRun = null;
+        window.engine.discardFit?.();
+        setParameterTuningRunning(false);
+        $('#runParameterTuning').disabled = false;
+    }
     resetParameterTuning();
     $('#parameterTuning').classList.add('hidden');
 });
@@ -10438,7 +10978,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         const contentChoice = hasEmbeddableResult ? await requestSaveContentChoice() : 'model';
         if (!contentChoice) return false;
         const includeResults = contentChoice === 'modelAndResults';
-        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}) }, null, 4)}\n`;
+        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
         const activeBranchRecord = branches.get(activeBranchUuid);

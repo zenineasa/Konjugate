@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
 import { scheduleModeNumbers, waveformProblem } from './parameterSchedule.mjs';
-import { decodeFittingReport, decodeInferenceReport, decodeValidationReport } from './reportProtocol.mjs';
+import { decodeFittingProgressEvent, decodeFittingReport, decodeInferenceReport, decodeValidationReport, FramedMessageReader } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
 import { resolveInstalledFmus } from './fmiResolver.mjs';
 // A deliberate circular import: postRunStabilityDiagnostics.mjs's own checkSubstepConvergence()
@@ -163,13 +163,15 @@ export async function inferWithEngine(csvContent, config, options) {
     }
 }
 
-// Digital-twin parameter fitting -- deliberately a one-shot process spawn like inferWithEngine()
-// above, not a long-lived streamed one like startEngineRun() below: the whole optimization loop
-// runs in-process inside the engine binary itself (see engine/src/parameterFitting.cpp), so there
-// is no per-trial IPC to relay, only a final report to read back. Live progress streaming
-// (a FittingProgress protobuf event, analogous to run's sample stream) is a real gap for a
-// long-running fit with no feedback until it finishes -- left for a follow-up once this base path
-// is proven.
+// Digital-twin parameter fitting. The whole optimization loop runs inside the engine binary itself (see
+// engine/src/parameterFitting.cpp), so there is one process per fit, not one per trial. While it runs the engine writes a framed
+// FittingProgressEvent to stdout after every simulation, which `onProgress` receives, and a person's "stop" reaches it through a
+// file it checks between simulations (`requestStop`, handed to `onStart`): it then ends the search and reports the best values it
+// found, as if it had finished, unlike aborting the signal, which kills the process and keeps nothing.
+//
+// `config.objective` ({ expression, direction: 'minimise' | 'maximise', targetTime, timeStep, variables, constraints: [{ expression, relation: '<=' | '>=', limit }] }) replaces the squared error
+// against the CSV with an expression of the run (engine/include/fittingObjective.hpp); `csvContent` may then be empty, and only supplies
+// columns the expression names. The values in events and in the report are the objective as written, rising when it is maximised.
 export async function fitWithEngine(content, csvContent, config, options) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };
@@ -177,14 +179,22 @@ export async function fitWithEngine(content, csvContent, config, options) {
     const inputPath = join(directory, 'input.kjt');
     const csvPath = join(directory, 'measured.csv');
     const reportPath = join(directory, 'fitting.bin');
+    const stopPath = join(directory, 'stop');
     try {
         const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
-        await writeFile(csvPath, csvContent, 'utf8');
-        const args = ['fit', inputPath, csvPath, '--report', reportPath];
+        await writeFile(csvPath, csvContent ?? '', 'utf8');
+        const args = ['fit', inputPath, csvPath, '--report', reportPath, '--progress-stream', '--stop-file', stopPath];
+        if (config?.objective) {
+            const objectivePath = join(directory, 'objective.json');
+            await writeFile(objectivePath, JSON.stringify(config.objective), 'utf8');
+            args.push('--objective-file', objectivePath);
+        }
         if (config?.backend !== undefined) args.push('--backend', config.backend);
         if (config?.maxIterations !== undefined) args.push('--max-iterations', String(config.maxIterations));
-        const execution = await runEngine(executable, args, {}, options.signal);
+        if (config?.maxSeconds > 0) args.push('--max-seconds', String(config.maxSeconds));
+        options.onStart?.({ requestStop: () => writeFile(stopPath, '') });
+        const execution = await runEngineWithFramedOutput(executable, args, options.signal, (message) => options.onProgress?.(decodeFittingProgressEvent(message)));
         if (execution.code !== 0 && execution.code !== 1) {
             // Exit code 1 is a completed-but-not-converged fit (see main.cpp's fit branch) --
             // still a real report worth reading back, unlike every other nonzero code here.
@@ -194,6 +204,27 @@ export async function fitWithEngine(content, csvContent, config, options) {
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// Like runEngine, but reads stdout as framed messages, handing each to `onMessage` as it arrives.
+function runEngineWithFramedOutput(executable, args, signal, onMessage) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], ...(signal ? { signal } : {}) });
+        const reader = new FramedMessageReader();
+        let diagnostics = '';
+        let processError = null;
+        child.stdout.on('data', (chunk) => {
+            for (const message of reader.append(chunk)) {
+                try { onMessage(message); } catch (error) { console.warn('A fitting progress message could not be read.', error); }
+            }
+        });
+        child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+        child.once('error', (error) => { processError = error; });
+        child.once('close', (code) => {
+            if (processError) reject(processError);
+            else resolve({ code, diagnostics: diagnostics.trim() });
+        });
+    });
 }
 
 export async function runWithEngine(content, configuration, options) {

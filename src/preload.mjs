@@ -197,6 +197,10 @@ contextBridge.exposeInMainWorld('engine', {
     validate: (content, options = {}) => ipcRenderer.invoke('engineValidate', content, options),
     infer: (csv, config) => ipcRenderer.invoke('engineInfer', csv, config),
     fit: (content, csv, config) => ipcRenderer.invoke('engineFit', content, csv, config),
+    // A running fit's progress, in batches of one event per simulation, and the request to end it now keeping the best found.
+    onFitProgress: (callback) => ipcRenderer.on('engineFitProgress', (_event, batch) => callback(batch)),
+    stopFit: () => ipcRenderer.invoke('engineFitStop'),
+    discardFit: () => ipcRenderer.invoke('engineFitDiscard'),
     checkSubstepConvergence: (content, runConfiguration, nodeIds) => ipcRenderer.invoke('engineCheckSubstepConvergence', content, runConfiguration, nodeIds),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),

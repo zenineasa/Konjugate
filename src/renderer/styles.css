@@ -1682,3 +1682,43 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
     .tourRing.tourRingPulse { animation: none; }
 }
+
+/* Parameter tuning while it runs: the convergence plot, the numbers beside it, the warnings, and the chip that reopens the card. */
+.parameterTuningConvergencePlot { width: 100%; height: 190px; margin-top: 6px; }
+#parameterTuningObjectiveSection[hidden], #parameterTuningMeasuredPicker[hidden], .parameterTuningConvergencePlot[hidden], .parameterTuningStats[hidden], .parameterTuningLogToggle[hidden], #parameterTuningProgressBar[hidden], .parameterTuningRunActions[hidden], .tuningChip[hidden] { display: none; }
+.parameterTuningLogToggle { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: #8da3b0; font-size: 11px; }
+.parameterTuningRow { padding: 6px 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 9px; }
+.parameterTuningRow .parameterTuningToggle { display: flex; align-items: baseline; gap: 6px; color: #b8c7ce; }
+.parameterTuningRow .parameterTuningToggle small { margin-left: auto; color: #7d929c; font-size: 8px; }
+.parameterTuningBounds { display: flex; flex-wrap: wrap; gap: 8px; margin: 5px 0 0 20px; }
+.parameterTuningBounds[hidden] { display: none; }
+.parameterTuningBounds label { display: flex; align-items: center; gap: 4px; color: #7d929c; }
+.parameterTuningBounds input { width: 84px; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.parameterTuningBounds .parameterTuningError { flex-basis: 100%; color: #e08a7d; }
+.parameterTuningConstraints { margin: 9px 0; color: #607581; font-size: 8px; }
+.parameterTuningConstraints > span { display: block; margin-bottom: 6px; }
+.parameterTuningConstraints > button { padding: 4px 8px; color: #7dbab5; background: transparent; border: 1px dashed #29454a; border-radius: 4px; font-size: 8px; }
+.parameterTuningConstraintRow { display: flex; gap: 5px; align-items: center; margin-bottom: 5px; }
+.parameterTuningConstraintRow input, .parameterTuningConstraintRow select { padding: 4px 6px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.parameterTuningConstraintRow input[data-field="expression"] { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.parameterTuningConstraintRow input[data-field="limit"] { width: 70px; }
+.parameterTuningConstraintRow button { color: #8297a1; background: transparent; border: 0; font-size: 12px; }
+.parameterTuningGoal { display: flex; gap: 0; margin: 0 0 8px; }
+.parameterTuningGoal button { flex: 1; padding: 6px 8px; color: #8297a1; background: #111f28; border: 1px solid #243640; font-size: 9px; }
+.parameterTuningGoal button:first-child { border-radius: 4px 0 0 4px; }
+.parameterTuningGoal button:last-child { border-radius: 0 4px 4px 0; border-left: 0; }
+.parameterTuningGoal button[aria-pressed="true"] { color: #d8fffb; background: rgb(66 201 188 / 16%); border-color: #3b8f88; }
+.parameterTuningObjective { width: 100%; box-sizing: border-box; resize: vertical; padding: 7px 8px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 4px; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.parameterTuningObjective:focus { outline: 0; border-color: #3b8f88; }
+.parameterTuningStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; margin: 8px 0; }
+.parameterTuningStats div { min-width: 0; }
+.parameterTuningStats dt { color: #7d929c; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.parameterTuningStats dd { margin: 1px 0 0; color: #dbe7eb; font-size: 13px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#parameterTuningProgressBar { width: 100%; height: 6px; margin: 2px 0 8px; accent-color: var(--accent); }
+.parameterTuningBestValues { margin: 4px 0; color: #b9ccd4; font-size: 12px; }
+.parameterTuningBestValues div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; border-bottom: 1px solid rgb(255 255 255 / 5%); font-variant-numeric: tabular-nums; }
+.parameterTuningWarnings p { margin: 6px 0 0; padding: 6px 8px; color: #e9b872; background: rgb(237 159 82 / 8%); border-radius: 6px; font-size: 12px; line-height: 1.4; }
+.parameterTuningRunActions { display: flex; gap: 8px; margin-top: 10px; }
+.parameterTuningRunActions button { flex: 1; height: 30px; color: #dbe7eb; background: transparent; border: 1px solid #3b5460; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.parameterTuningRunActions button:first-child { color: #061412; background: #42c9bc; border-color: #42c9bc; }
+.parameterTuningRunActions button:disabled { opacity: .5; cursor: default; }

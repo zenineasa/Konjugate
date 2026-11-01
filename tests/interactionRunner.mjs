@@ -3752,27 +3752,30 @@ export async function runInteractionTests(driver) {
         }
         assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked').length`), 2);
         assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), false);
-        const stateName = await evaluate(window, `(() => {
-            const chip = [...document.querySelectorAll('#parameterTuningStateChips button')].find((button) => button.textContent.includes(${JSON.stringify(targetState.name)}));
-            chip.click();
-            return chip.title.replace('Insert ', '');
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjective').value`), stateName, 'A state button inserts its name.');
-        await evaluate(window, `[...document.querySelectorAll('#parameterTuningSummaryButtons button')].find((button) => button.textContent === 'final(…)').click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjective').value`), `final(${stateName})`, 'A summary button wraps the expression.');
+        // The objective is written in the equation editor an edge uses: a summary button opens an empty summary, a state button fills it.
+        const stateName = await evaluate(window, `window.__debugParameterTuning.vocabulary().states.find((state) => state.label.includes(${JSON.stringify(targetState.name)})).name`);
+        const setLatex = (selector, latex) => evaluate(window, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(latex)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(window, `[...document.querySelectorAll('#parameterTuningSummaryButtons button')].find((button) => button.textContent === 'final').click()`);
+        await evaluate(window, `[...document.querySelectorAll('#parameterTuningStateChips button')].find((button) => button.textContent.includes(${JSON.stringify(targetState.name)})).click()`);
+        const objectiveLatex = await evaluate(window, `document.querySelector('#parameterTuningMathField').value`);
+        assert.ok(objectiveLatex.includes('lim') && objectiveLatex.includes(stateName), `The buttons should have written a final value of the state: ${objectiveLatex}`);
+        await waitFor(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent === 'Valid objective'`, 'A final value of a state should read as a valid objective.', 10000);
 
-        // A name that stands for something that changes over the run is refused, with the engine's reason, before any simulation.
-        await evaluate(window, `(() => { document.querySelector('#parameterTuningObjective').value = ${JSON.stringify(stateName)}; document.querySelector('#parameterTuningRunTime').value = '10'; document.querySelector('#parameterTuningTimeStep').value = '1'; document.querySelector('#runParameterTuning').click(); })()`);
-        await waitFor(window, `document.querySelector('#parameterTuningObjectiveStatus').textContent.includes('needs a summary')`, 'A bare state should be refused with an explanation.', 30000);
+        // A name that stands for something that changes over the run is refused as it is written, with the engine's reason, and again if run.
+        await setLatex('#parameterTuningMathField', `\\mathrm{${stateName}}`);
+        await waitFor(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent.includes('needs a summary')`, 'A bare state should be explained as it is written.', 15000);
+        await evaluate(window, `(() => { document.querySelector('#parameterTuningRunTime').value = '10'; document.querySelector('#parameterTuningTimeStep').value = '1'; document.querySelector('#runParameterTuning').click(); })()`);
+        await waitFor(window, `document.querySelector('#parameterTuningObjectiveStatus').textContent.includes('needs a summary')`, 'A bare state should be refused when run.', 30000);
         await waitFor(window, `!document.querySelector('#runParameterTuning').disabled`, 'The card did not recover from a refused objective.', 10000);
 
-        // A limit: half-filled is explained, filled in is kept to (a huge bound here, so that it holds).
+        // A limit is the same editor: half-filled is explained, filled in is kept to (a huge bound here, so that it holds).
         await evaluate(window, `document.querySelector('#addParameterTuningConstraint').click()`);
-        await evaluate(window, `(() => { document.querySelector('#parameterTuningConstraintRows [data-field="expression"]').value = ${JSON.stringify(`max(${stateName})`)}; document.querySelector('#parameterTuningObjective').value = ${JSON.stringify(`final(${stateName})`)}; document.querySelector('#runParameterTuning').click(); })()`);
+        await setLatex('#parameterTuningConstraintRows math-field', `\\max\\left(\\mathrm{${stateName}}\\right)`);
+        await setLatex('#parameterTuningMathField', objectiveLatex);
+        await evaluate(window, `document.querySelector('#runParameterTuning').click()`);
         await waitFor(window, `document.querySelector('#parameterTuningObjectiveStatus').textContent.includes('Limit 1 needs a number')`, 'A limit without a number should be explained.', 5000);
         await evaluate(window, `document.querySelector('#parameterTuningConstraintRows [data-field="limit"]').value = '1000000000'`);
         await evaluate(window, `(() => {
-            document.querySelector('#parameterTuningObjective').value = ${JSON.stringify(`final(${stateName})`)};
             document.querySelector('#parameterTuningDirection').value = 'maximise';
             document.querySelector('#parameterTuningMaxSimulations').value = '30';
             document.querySelector('#runParameterTuning').click();
@@ -3791,7 +3794,7 @@ export async function runInteractionTests(driver) {
         // The setup of that run was kept with the project: opening the card again finds the objective as it was written.
         assert.equal((await evaluate(window, `window.__debugParameterTuning.setup()`)).objective.expression, `final(${stateName})`);
         await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
-        await waitFor(window, `document.querySelector('#parameterTuningObjective').value === ${JSON.stringify(`final(${stateName})`)}`, 'The card did not restore the last objective.', 5000);
+        await waitFor(window, `document.querySelector('#parameterTuningMathField').value === ${JSON.stringify(objectiveLatex)}`, 'The card did not restore the last objective.', 5000);
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningDirection').value`), 'maximise');
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningMaxSimulations').value`), '30');
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningConstraintRows [data-field="limit"]').value`), '1000000000', 'The limit comes back with the objective.');

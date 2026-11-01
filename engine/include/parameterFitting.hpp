@@ -86,6 +86,14 @@ struct FittingProblem {
     std::vector<FittingConstraint> constraints; // used with an objective only
 };
 
+// Reads the objective file `fit --objective-file` takes -- { expression, direction, targetTime, timeStep, variables, constraints } -- into
+// `problem` (see FittingProblem). Throws on a file that is not that shape.
+void loadFittingObjective(const std::filesystem::path& path, FittingProblem& problem);
+
+// Throws std::invalid_argument, with a sentence a person can act on, when the objective or a limit in `problem` cannot be used.
+void checkFittingObjective(const FittingProblem& problem);
+
+
 struct FittingReport {
     std::string backend;
     std::vector<FittingProgressUpdate> iterations;

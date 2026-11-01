@@ -35,4 +35,5 @@ test('what a run records round-trips, and an unchanged setup is recognised', () 
 test('saved limits keep their relation and number, and a limit without a usable number is dropped', () => {
     const setup = normalizeTuningSetup({ goal: 'objective', objective: { expression: 'a', direction: 'minimise', constraints: [{ expression: 'max(a)', relation: '>=', limit: '2' }, { expression: 'min(a)', limit: 'many' }, { expression: '  ', limit: 1 }] } });
     assert.deepEqual(setup.objective.constraints, [{ expression: 'max(a)', relation: '>=', limit: 2 }]);
+    assert.equal(normalizeTuningSetup({ goal: 'objective', objective: { expression: 'a', latex: '\\mathrm{a}', constraints: [{ expression: 'b', latex: 'b', limit: 1 }] } }).objective.latex, '\\mathrm{a}', 'the LaTeX the objective was written in is kept to show it again');
 });

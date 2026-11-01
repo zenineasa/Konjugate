@@ -9,9 +9,12 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import 'mathlive';
 import { DocumentController } from './documentController.mjs';
 import { createTour } from './tour.mjs';
+import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEditor.mjs';
+import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
+import { objectiveSummaries } from '../objectiveText.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
-import { constraintRows, insertName, objectivePayload, objectiveVocabulary, runSettingsError, summaryFunctions, wrapInSummary } from './tuningObjective.mjs';
+import { constraintRows, objectivePayload, objectiveVocabulary, runSettingsError } from './tuningObjective.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
@@ -93,6 +96,35 @@ const modelSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 // The Alt key as each platform names it, for shortcut hints: Option (⌥) on a Mac.
 const altKeyLabel = isMac ? '⌥' : 'Alt+';
+
+// The four places a relationship or source-term formula is written, each one EquationEditor (equationEditor.mjs); what a change does
+// to the model is each one's own. They are made here, before anything runs, so every function below can use them.
+const builderEquation = new EquationEditor({
+    mathField: $('#edgeMathField'), source: $('#edgeEquation'), diagnostics: $('#builderEquationDiagnostics'),
+    modeButtons: $$('[data-builder-equation-mode]'), modeKey: 'builderEquationMode', references: $('#stateReferenceChips'),
+    onInput: () => renderBuilderEquationDiagnostics()
+});
+const edgeEquation = new EquationEditor({
+    mathField: $('#editEdgeMathField'), source: $('#editEdgeEquation'), diagnostics: $('#equationDiagnostics'),
+    modeButtons: $$('[data-equation-mode]'), modeKey: 'equationMode', references: $('#editStateReferenceChips'),
+    canEdit: () => !activeResult,
+    onInput: (latex, origin) => previewEdgeEquation(latex, origin),
+    onCommit: () => finishEquationEdit(),
+    onModeChange: (mode) => switchSeveralEquationsMode(mode)
+});
+const sourceTermEquation = new EquationEditor({
+    mathField: $('#termMathField'), source: $('#termEquation'), diagnostics: $('#termEquationDiagnostics'),
+    modeButtons: $$('[data-term-equation-mode]'), modeKey: 'termEquationMode', references: $('#termStateReferenceChips'),
+    canEdit: () => !activeResult,
+    onInput: (latex, origin) => previewSourceTermExpression(latex, origin),
+    onCommit: () => finishEquationEdit()
+});
+const groupEquation = new EquationEditor({
+    mathField: $('#groupMathField'), source: $('#groupEquation'), diagnostics: $('#groupEquationDiagnostics'),
+    modeButtons: $$('[data-group-equation-mode]'), modeKey: 'groupEquationMode',
+    onInput: (latex, origin) => previewGroupEquation(latex, origin),
+    onCommit: () => finishEquationEdit()
+});
 
 // Backstop so any console.error/console.warn -- including ones nobody has wired up to a
 // dedicated UI element -- still reaches the user via the quiet diagnostics badge/panel below,
@@ -2210,28 +2242,6 @@ function normalizeSourceTermExpressionModel(definition, term, expressionModel = 
     return { latex: base.latex ?? '', output, bindings, mathJson: validation.valid ? validation.mathJson : null };
 }
 
-function renderSourceTermDiagnostics(latex, bindings) {
-    const diagnostics = $('#termEquationDiagnostics');
-    const validation = validateEquationLatex(latex, bindings);
-    diagnostics.classList.toggle('valid', validation.valid);
-    diagnostics.textContent = validation.valid ? 'Valid expression · MathJSON ready' : validation.errors.join(' ');
-    return validation;
-}
-
-function insertSourceTermBinding(binding) {
-    if (activeResult) return;
-    const latex = latexForBinding(binding);
-    if ($('#termMathField').hidden) {
-        const source = $('#termEquation');
-        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
-        source.dispatchEvent(new Event('input', { bubbles: true }));
-        source.focus();
-    } else {
-        $('#termMathField').insert(latex);
-        $('#termMathField').focus();
-    }
-}
-
 function changeSourceTermModel(node, termId, mutate) {
     changeNodeModel(node, (snapshot) => {
         const term = snapshot.sourceTerms.find((candidate) => candidate.id === termId);
@@ -2395,31 +2405,16 @@ function renderSourceTermEditor(node, term) {
     const output = $('#termOutputState');
     output.replaceChildren(...definition.states.map((state) => new Option(state.symbol, state.id)));
 
-    const mathField = $('#termMathField');
-    const latexSource = $('#termEquation');
     if (isEquation) {
         term.expressionModel = normalizeSourceTermExpressionModel(definition, term);
         term.expression = term.expressionModel.latex;
-        const latexMode = $('[data-term-equation-mode="latex"]').classList.contains('active');
-        mathField.hidden = latexMode;
-        latexSource.hidden = !latexMode;
-        mathField.value = term.expressionModel.latex;
-        latexSource.value = term.expressionModel.latex;
+        sourceTermEquation.show(true);
+        sourceTermEquation.load(term.expressionModel.latex);
         output.value = term.expressionModel.output.stateId ?? '';
-        renderSourceTermDiagnostics(term.expressionModel.latex, term.expressionModel.bindings);
-        const references = $('#termStateReferenceChips');
-        references.replaceChildren();
-        term.expressionModel.bindings.forEach((binding) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = binding.label;
-            button.title = bindingInsertTitle(binding);
-            button.addEventListener('click', () => insertSourceTermBinding(binding));
-            references.appendChild(button);
-        });
+        sourceTermEquation.diagnose(term.expressionModel.bindings, term.expressionModel.latex);
+        sourceTermEquation.renderReferences(term.expressionModel.bindings);
     } else {
-        mathField.hidden = true;
-        latexSource.hidden = true;
+        sourceTermEquation.show(false);
         output.value = term.implementation.output?.stateId ?? '';
         const fromPlugin = implementationKind === 'plugin';
         $('#termProviderCode').hidden = fromPlugin;
@@ -2454,9 +2449,7 @@ function previewSourceTermExpression(latex, origin) {
     beginEquationEditSession(`sourceTerm:${term.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
     term.expressionModel = normalizeSourceTermExpressionModel(definition, term, { ...term.expressionModel, latex });
     term.expression = latex;
-    if (origin !== 'visual') $('#termMathField').setValue(latex, { silenceNotifications: true });
-    if (origin !== 'latex') $('#termEquation').value = latex;
-    renderSourceTermDiagnostics(latex, term.expressionModel.bindings);
+    sourceTermEquation.diagnose(term.expressionModel.bindings, latex);
     updateValidationStatus();
 }
 
@@ -2923,31 +2916,16 @@ function renderEdgeEditor(definition) {
         });
     });
 
-    const mathField = $('#editEdgeMathField');
-    const latexSource = $('#editEdgeEquation');
     if (isEquation) {
         definition.equationModel = normalizeEdgeEquationModel(definition);
         definition.equation = definition.equationModel.latex;
-        const latexMode = $('[data-equation-mode="latex"]').classList.contains('active');
-        mathField.hidden = latexMode;
-        latexSource.hidden = !latexMode;
-        mathField.value = definition.equationModel.latex;
-        latexSource.value = definition.equationModel.latex;
+        edgeEquation.show(true);
+        edgeEquation.load(definition.equationModel.latex);
         output.value = equationOutputValue(definition.equationModel.output.role, definition.equationModel.output.stateId);
-        renderEquationDiagnostics(definition.equationModel.latex, definition.equationModel.bindings);
-        const references = $('#editStateReferenceChips');
-        references.replaceChildren();
-        definition.equationModel.bindings.forEach((binding) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = binding.label;
-            button.title = bindingInsertTitle(binding);
-            button.addEventListener('click', () => insertEquationBinding(binding));
-            references.appendChild(button);
-        });
+        edgeEquation.diagnose(definition.equationModel.bindings, definition.equationModel.latex);
+        edgeEquation.renderReferences(definition.equationModel.bindings);
     } else {
-        mathField.hidden = true;
-        latexSource.hidden = true;
+        edgeEquation.show(false);
         const fromPlugin = implementationKind === 'plugin';
         $('#editEdgeProviderCode').hidden = fromPlugin;
         $('#editEdgePluginProviderFields').hidden = !fromPlugin;
@@ -2981,7 +2959,7 @@ function compileSeveral(snapshot) {
 let severalFocus = null;
 
 function severalLatexMode() {
-    return $('[data-equation-mode="latex"]').classList.contains('active');
+    return edgeEquation.mode === 'latex';
 }
 
 function renderSeveralEquations(definition) {
@@ -3293,11 +3271,6 @@ $('#termPluginProvider').addEventListener('change', (event) => {
     changeSourceTermModel(nodeObjects.get(selectedSourceTermNodeId), selectedSourceTermId, (term) => Object.assign(term.implementation, reference));
 });
 
-function bindingInsertTitle(binding) {
-    if (binding.kind === 'time') return 'Insert simulation time (seconds)';
-    return binding.kind === 'parameter' ? 'Insert parameter' : 'Insert state reference';
-}
-
 // Providers get simulation time from their evaluation context, so time is not a bindable input.
 function providerReferenceCandidates(definition) {
     const sourceNode = model.nodes.find((node) => node.id === definition.source);
@@ -3355,30 +3328,6 @@ function renderProviderBindingRows(definition) {
         }));
         container.appendChild(row);
     });
-}
-
-function renderEquationDiagnostics(latex, bindings) {
-    const diagnostics = $('#equationDiagnostics');
-    const validation = validateEquationLatex(latex, bindings);
-    diagnostics.classList.toggle('valid', validation.valid);
-    diagnostics.textContent = validation.valid
-        ? 'Valid expression · MathJSON ready'
-        : validation.errors.join(' ');
-    return validation;
-}
-
-function insertEquationBinding(binding) {
-    if (activeResult) return;
-    const latex = latexForBinding(binding);
-    if ($('#editEdgeMathField').hidden) {
-        const source = $('#editEdgeEquation');
-        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
-        source.dispatchEvent(new Event('input', { bubbles: true }));
-        source.focus();
-    } else {
-        $('#editEdgeMathField').insert(latex);
-        $('#editEdgeMathField').focus();
-    }
 }
 
 // A group-member edge is never edited on its own -- no override without detaching, per
@@ -4581,8 +4530,6 @@ function startEndpointPick(endpoint) {
 }
 
 function refreshStateReferences() {
-    const container = $('#stateReferenceChips');
-    container.replaceChildren();
     const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
     const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
     const parameters = $$('.parameterRow').map((row, index) => ({
@@ -4590,14 +4537,7 @@ function refreshStateReferences() {
         symbol: $('[data-field="symbol"]', row).value.trim()
     })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
     const bindings = reconcileEquationBindings([], sourceNode, targetNode, parameters);
-    bindings.forEach((binding) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = binding.label;
-        button.title = bindingInsertTitle(binding);
-        button.addEventListener('click', () => insertBuilderEquationBinding(binding));
-        container.appendChild(button);
-    });
+    builderEquation.renderReferences(bindings);
     const output = $('#edgeEquationOutput');
     const selectedOutput = output.value;
     output.replaceChildren();
@@ -4650,23 +4590,7 @@ function renderBuilderEquationDiagnostics(bindings = null) {
         })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
         return reconcileEquationBindings([], sourceNode, targetNode, parameters);
     })();
-    const validation = validateEquationLatex($('#edgeMathField').value, availableBindings);
-    const diagnostics = $('#builderEquationDiagnostics');
-    diagnostics.classList.toggle('valid', validation.valid);
-    diagnostics.textContent = validation.valid ? 'Valid expression · MathJSON ready' : validation.errors.join(' ');
-}
-
-function insertBuilderEquationBinding(binding) {
-    const latex = latexForBinding(binding);
-    if ($('#edgeMathField').hidden) {
-        const source = $('#edgeEquation');
-        source.setRangeText(latex, source.selectionStart, source.selectionEnd, 'end');
-        source.dispatchEvent(new Event('input', { bubbles: true }));
-        source.focus();
-    } else {
-        $('#edgeMathField').insert(latex);
-        $('#edgeMathField').focus();
-    }
+    builderEquation.diagnose(availableBindings);
 }
 
 function updateModelStatus() {
@@ -8497,6 +8421,7 @@ function findTunableParametersInModel() {
 
 function resetParameterTuning() {
     parameterTuningState = null;
+    clearParameterTuningConstraintRows();
     setParameterTuningGoalUi('data');
     $('#parameterTuningFile').value = '';
     $('#parameterTuningStatus').className = 'equationDiagnostics';
@@ -8552,25 +8477,48 @@ function setParameterTuningGoalUi(goal) {
 
 const parameterTuningObjectiveWord = () => (parameterTuningGoal === 'objective' ? 'objective' : 'loss');
 
-// The name and summary buttons edit whichever of the objective or a limit's expression was last in use.
-let parameterTuningEditField = null;
-const objectiveEditTarget = () => (parameterTuningEditField?.isConnected ? parameterTuningEditField : $('#parameterTuningObjective'));
-$('#parameterTuningObjective').addEventListener('focus', (event) => { parameterTuningEditField = event.target; });
+// The objective and each limit are one ObjectiveEditor (objectiveEditor.mjs), the equation editor edges use. The name and summary
+// buttons edit whichever of them was last in use; the Visual / LaTeX buttons switch all of them together.
+const parameterTuningLimits = [];
+let parameterTuningEditor = null;
+// The engine has the last word on whether a formula is a single number; the editors ask it a moment after typing stops.
+const checkParameterTuningText = (text) => window.engine.checkObjective({
+    expression: text, direction: 'minimise', variables: parameterTuningState?.vocabulary?.variables ?? []
+});
+const parameterTuningObjective = new ObjectiveEditor({
+    mathField: $('#parameterTuningMathField'), source: $('#parameterTuningObjective'), diagnostics: $('#parameterTuningObjectiveDiagnostics'),
+    modeButtons: $$('[data-objective-equation-mode]'), modeKey: 'objectiveEquationMode',
+    canEdit: () => !parameterTuningRun,
+    checkWithEngine: checkParameterTuningText,
+    onInput: () => parameterTuningObjective.diagnose(),
+    onModeChange: (mode) => { parameterTuningLimits.forEach((limit) => limit.editor.setMode(mode)); return false; }
+});
+parameterTuningEditor = parameterTuningObjective;
+for (const field of [parameterTuningObjective.mathField, parameterTuningObjective.source]) field.addEventListener('focusin', () => { parameterTuningEditor = parameterTuningObjective; });
+const activeParameterTuningEditor = () => (parameterTuningEditor === parameterTuningObjective || parameterTuningLimits.some((limit) => limit.editor === parameterTuningEditor)
+    ? parameterTuningEditor : parameterTuningObjective);
 
-function addParameterTuningConstraintRow({ expression = '', relation = '<=', limit = '' } = {}) {
+// One limit: a formula for a number from the run, whether it must stay at most or at least, and the bound.
+function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = '' } = {}) {
     const row = document.createElement('div');
     row.className = 'parameterTuningConstraintRow';
-    const expressionInput = document.createElement('input');
-    expressionInput.dataset.field = 'expression';
-    expressionInput.placeholder = 'max(…) of a state';
-    expressionInput.value = expression;
-    expressionInput.spellcheck = false;
-    expressionInput.setAttribute('aria-label', 'What to limit');
-    expressionInput.addEventListener('focus', () => { parameterTuningEditField = expressionInput; });
+    const mathField = document.createElement('math-field');
+    mathField.className = 'equationMathField';
+    mathField.setAttribute('aria-label', 'What to limit');
+    const source = document.createElement('textarea');
+    source.className = 'equationSource';
+    source.rows = 2;
+    source.spellcheck = false;
+    source.setAttribute('aria-label', 'What to limit, as LaTeX');
+    const diagnostics = document.createElement('div');
+    diagnostics.className = 'equationDiagnostics';
+    diagnostics.setAttribute('role', 'status');
+    const bound = document.createElement('div');
+    bound.className = 'parameterTuningConstraintBound';
     const relationSelect = document.createElement('select');
     relationSelect.dataset.field = 'relation';
     relationSelect.setAttribute('aria-label', 'Stay at most or at least');
-    relationSelect.append(new Option('at most', '<='), new Option('at least', '>='));
+    relationSelect.append(new Option('stays at most', '<='), new Option('stays at least', '>='));
     relationSelect.value = relation;
     const limitInput = document.createElement('input');
     limitInput.dataset.field = 'limit';
@@ -8583,46 +8531,60 @@ function addParameterTuningConstraintRow({ expression = '', relation = '<=', lim
     remove.type = 'button';
     remove.textContent = '×';
     remove.title = 'Remove this limit';
-    remove.addEventListener('click', () => row.remove());
-    row.append(expressionInput, relationSelect, limitInput, remove);
+    bound.append(relationSelect, limitInput, remove);
+    row.append(mathField, source, diagnostics, bound);
     $('#parameterTuningConstraintRows').append(row);
-    return row;
+    const editor = new LimitEditor({
+        mathField, source, diagnostics, canEdit: () => !parameterTuningRun, checkWithEngine: checkParameterTuningText,
+        onInput: () => editor.diagnose()
+    });
+    editor.setNames(parameterTuningState?.vocabulary?.variables.map((variable) => variable.name) ?? []);
+    editor.setMode(parameterTuningObjective.mode);
+    for (const field of [mathField, source]) field.addEventListener('focusin', () => { parameterTuningEditor = editor; });
+    const entry = { row, editor, relationSelect, limitInput };
+    parameterTuningLimits.push(entry);
+    remove.addEventListener('click', () => {
+        parameterTuningLimits.splice(parameterTuningLimits.indexOf(entry), 1);
+        row.remove();
+    });
+    if (latex) {
+        editor.load(latex);
+        editor.diagnose();
+    }
+    return entry;
 }
-$('#addParameterTuningConstraint').addEventListener('click', () => addParameterTuningConstraintRow().querySelector('input').focus());
-const parameterTuningConstraintInputs = () => $$('#parameterTuningConstraintRows .parameterTuningConstraintRow').map((row) => ({
-    expression: $('[data-field="expression"]', row).value, relation: $('[data-field="relation"]', row).value, limit: $('[data-field="limit"]', row).value
-}));
+$('#addParameterTuningConstraint').addEventListener('click', () => addParameterTuningConstraintRow().editor.focus());
+const clearParameterTuningConstraintRows = () => {
+    parameterTuningLimits.length = 0;
+    $('#parameterTuningConstraintRows').replaceChildren();
+};
+// What each limit row holds, in the shape constraintRows() reads.
+const parameterTuningConstraintInputs = () => parameterTuningLimits.map(({ editor, relationSelect, limitInput }) => {
+    const validation = editor.diagnose();
+    return { expression: validation.valid ? editor.text : '', latex: editor.latex, problem: validation.errors.join(' '), relation: relationSelect.value, limit: limitInput.value };
+});
+
+$('#parameterTuningSummaryButtons').replaceChildren();
+new ReferenceChips($('#parameterTuningSummaryButtons')).render(objectiveSummaries.map((summary) => ({
+    label: summary.label, title: summary.title, onClick: () => activeParameterTuningEditor().insertSummary(summary)
+})));
 
 function refreshParameterTuningObjectiveButtons() {
     const vocabulary = parameterTuningState.vocabulary;
-    const addChips = (container, entries) => {
-        container.replaceChildren(...entries.map((entry) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = entry.label;
-            button.title = `Insert ${entry.name}`;
-            button.addEventListener('click', () => {
-                const textarea = objectiveEditTarget();
-                const edited = insertName(textarea.value, textarea.selectionStart, textarea.selectionEnd, entry.name);
-                textarea.value = edited.text;
-                textarea.focus();
-                textarea.setSelectionRange(edited.selectionStart, edited.selectionEnd);
-            });
-            return button;
-        }));
+    const chips = (selector, entries) => {
+        const container = $(selector);
         if (!entries.length) container.textContent = 'None';
+        else new ReferenceChips(container).render(entries.map((entry) => ({
+            label: entry.label, title: `Insert ${entry.label}`, onClick: () => activeParameterTuningEditor().insertName(entry.name)
+        })));
     };
-    addChips($('#parameterTuningStateChips'), vocabulary.states);
-    addChips($('#parameterTuningParameterChips'), vocabulary.parameters.map((parameter) => ({ ...parameter, label: parameter.tunable ? `${parameter.name} (tuned)` : parameter.name })));
-    addChips($('#parameterTuningMeasuredChips'), vocabulary.measured);
+    chips('#parameterTuningStateChips', vocabulary.states);
+    chips('#parameterTuningParameterChips', vocabulary.parameters.map((parameter) => ({ ...parameter, label: parameter.tunable ? `${parameter.label} (tuned)` : parameter.label })));
+    chips('#parameterTuningMeasuredChips', vocabulary.measured.map((column) => ({ ...column, label: `${column.label} (measured)` })));
     $('#parameterTuningMeasuredPicker').hidden = !vocabulary.measured.length;
-}
-
-// The names are listed beside the buttons, so a person can read what each one stands for and not only click it.
-function describeParameterTuningNames() {
-    const vocabulary = parameterTuningState.vocabulary;
-    const lines = [...vocabulary.states.map((entry) => `${entry.name}: ${entry.label}`), ...vocabulary.parameters.map((entry) => `${entry.name}: ${entry.label}${entry.tunable ? ' (tuned)' : ''}`), ...vocabulary.measured.map((entry) => `${entry.name}: measured column "${entry.label}"`)];
-    $('#parameterTuningObjective').title = lines.join('\n');
+    const names = vocabulary.variables.map((variable) => variable.name);
+    parameterTuningObjective.setNames(names);
+    parameterTuningLimits.forEach((limit) => limit.editor.setNames(names));
 }
 
 function startParameterTuningObjective() {
@@ -8630,13 +8592,13 @@ function startParameterTuningObjective() {
     parameterTuningState = { goal: 'objective', csvContent: '', mapping: [], measuredColumns: [], tunableParameters: findTunableParametersInModel(), report: null };
     parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument());
     refreshParameterTuningObjectiveButtons();
-    describeParameterTuningNames();
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#parameterTuningRunTime').value = String(runLaunchSettings.targetTime);
     $('#parameterTuningTimeStep').value = String(configuration?.globalTimeStep ?? 1);
-    $('#parameterTuningObjective').value = '';
-    $('#parameterTuningConstraintRows').replaceChildren();
-    parameterTuningEditField = null;
+    parameterTuningObjective.load('');
+    parameterTuningObjective.showVerdict(false, '');
+    clearParameterTuningConstraintRows();
+    parameterTuningEditor = parameterTuningObjective;
     renderParameterTuningParameters();
     refreshParameterTuningRunnable();
 }
@@ -8650,20 +8612,6 @@ $('#parameterTuningGoalObjective').addEventListener('click', () => {
     resetParameterTuning();
     startParameterTuningObjective();
 });
-$('#parameterTuningSummaryButtons').replaceChildren(...summaryFunctions.map((summary) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = `${summary.name}(…)`;
-    button.title = `Wrap in ${summary.name}: ${summary.hint}`;
-    button.addEventListener('click', () => {
-        const textarea = objectiveEditTarget();
-        const edited = wrapInSummary(textarea.value, textarea.selectionStart, textarea.selectionEnd, summary.name);
-        textarea.value = edited.text;
-        textarea.focus();
-        textarea.setSelectionRange(edited.selectionStart, edited.selectionEnd);
-    });
-    return button;
-}));
 
 // Puts the card back as it was last run in this project: the limits and optimiser, and for an objective its expression and run settings.
 // The measured file itself is not kept (a project is not the place for a large CSV), only its name, so the card says which to choose again.
@@ -8681,7 +8629,10 @@ function applySavedTuningSetup() {
     const status = $('#parameterTuningStatus');
     if (setup.goal === 'objective' && setup.objective) {
         startParameterTuningObjective();
-        $('#parameterTuningObjective').value = setup.objective.expression;
+        if (setup.objective.latex) {
+            parameterTuningObjective.load(setup.objective.latex);
+            parameterTuningObjective.diagnose();
+        }
         $('#parameterTuningDirection').value = setup.objective.direction;
         if (setup.objective.targetTime) $('#parameterTuningRunTime').value = String(setup.objective.targetTime);
         if (setup.objective.timeStep) $('#parameterTuningTimeStep').value = String(setup.objective.timeStep);
@@ -8740,8 +8691,7 @@ function syncParameterTuningTunables() {
     if (parameterTuningState.vocabulary) {
         parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument(), parameterTuningState.measuredColumns ?? []);
         refreshParameterTuningObjectiveButtons();
-        describeParameterTuningNames();
-    }
+        }
 }
 
 function refreshParameterTuningRunnable() {
@@ -8848,8 +8798,7 @@ function loadParameterTuningMeasuredColumns(content) {
         parameterTuningState.measuredColumns = parsed.columnNames;
         parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument(), parsed.columnNames);
         refreshParameterTuningObjectiveButtons();
-        describeParameterTuningNames();
-        $('#parameterTuningTimeStep').value = String(timeStep);
+            $('#parameterTuningTimeStep').value = String(timeStep);
         $('#parameterTuningRunTime').value = String(timeStep * (parsed.rows.length - 1));
         status.className = 'equationDiagnostics valid';
         status.textContent = `Added ${parsed.columnNames.length} measured column${parsed.columnNames.length === 1 ? '' : 's'} (${parsed.rows.length} rows). Each simulation now runs for the data's ${formatDuration(timeStep * (parsed.rows.length - 1))} at its ${formatDuration(timeStep)} step, so the rows line up with the simulation.`;
@@ -8906,7 +8855,8 @@ window.__debugParameterTuning = {
     loadCsv: (content) => loadParameterTuningCsv(content),
     report: () => structuredClone(parameterTuningState?.report ?? null),
     simulations: () => parameterTuningRun?.events.length ?? 0,
-    setup: () => structuredClone(projectTuningSetup)
+    setup: () => structuredClone(projectTuningSetup),
+    vocabulary: () => structuredClone(parameterTuningState?.vocabulary ?? null)
 };
 
 function renderParameterTuningReview() {
@@ -9145,10 +9095,12 @@ $('#runParameterTuning').addEventListener('click', async () => {
     let objective = null;
     if (parameterTuningState.goal === 'objective') {
         const objectiveStatus = $('#parameterTuningObjectiveStatus');
-        const expression = $('#parameterTuningObjective').value;
+        const latex = parameterTuningObjective.latex;
+        const verdict = parameterTuningObjective.diagnose();
+        const expression = verdict.valid ? parameterTuningObjective.text : '';
         const targetTime = Number($('#parameterTuningRunTime').value);
         const timeStep = Number($('#parameterTuningTimeStep').value);
-        const problem = !expression.trim() ? 'Write an objective first, for example final(…) or integral(…) of a state.' : runSettingsError(targetTime, timeStep);
+        const problem = !latex.trim() ? 'Write an objective first, for example the final value of a state.' : !verdict.valid ? verdict.errors.join(' ') : runSettingsError(targetTime, timeStep);
         objectiveStatus.className = 'equationDiagnostics';
         objectiveStatus.textContent = problem;
         if (problem) return;
@@ -9157,7 +9109,7 @@ $('#runParameterTuning').addEventListener('click', async () => {
             objectiveStatus.textContent = limits.error;
             return;
         }
-        objective = objectivePayload({ expression, direction: $('#parameterTuningDirection').value, targetTime, timeStep, variables: parameterTuningState.vocabulary.variables, constraints: limits.constraints });
+        objective = objectivePayload({ expression, latex, direction: $('#parameterTuningDirection').value, targetTime, timeStep, variables: parameterTuningState.vocabulary.variables, constraints: limits.constraints });
     }
     const setup = tuningSetupFromRun({
         goal: parameterTuningState.goal === 'objective' ? 'objective' : 'data', backend: $('#parameterTuningBackend').value, maxSimulations: simulations,
@@ -9830,10 +9782,8 @@ function openEdgeBuilder(clientX, clientY) {
     $('#newEdgeDirectionality').value = 'directed';
     $('#newEdgeColor').value = '#9c83c4';
     $('#edgeImplementationKind').value = 'equation';
-    $('#edgeEquation').value = '';
-    $('#edgeMathField').setValue('', { silenceNotifications: true });
-    $('#edgeMathField').hidden = false;
-    $('#edgeEquation').hidden = true;
+    builderEquation.load('');
+    builderEquation.show(true);
     $('#edgeEquationHeading').hidden = false;
     $('#builderEquationDiagnostics').hidden = false;
     $('#edgeReferencePicker').hidden = false;
@@ -9842,9 +9792,7 @@ function openEdgeBuilder(clientX, clientY) {
     $('#insertProviderTemplate').hidden = true;
     $('#providerOutputKey').value = '';
     $('#providerBindingRows').replaceChildren();
-    $$('[data-builder-equation-mode]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.builderEquationMode === 'visual');
-    });
+    builderEquation.setMode('visual');
     $('#edgeParameterRows').replaceChildren();
     finishEndpointPick();
     $('#edgeSource').replaceChildren();
@@ -10368,25 +10316,11 @@ function previewEdgeEquation(latex, origin) {
     });
     definition.equationModel = equationModel;
     definition.equation = latex;
-    if (origin !== 'visual') $('#editEdgeMathField').setValue(latex, { silenceNotifications: true });
-    if (origin !== 'latex') $('#editEdgeEquation').value = latex;
-    renderEquationDiagnostics(latex, equationModel.bindings);
+    edgeEquation.diagnose(equationModel.bindings, latex);
     updateRelationships();
     updateValidationStatus();
 }
 
-$('#editEdgeMathField').addEventListener('input', (event) => {
-    previewEdgeEquation(event.target.value, 'visual');
-});
-$('#editEdgeMathField').addEventListener('change', (event) => {
-    finishEquationEdit();
-});
-$('#editEdgeEquation').addEventListener('input', (event) => {
-    previewEdgeEquation(event.target.value, 'latex');
-});
-$('#editEdgeEquation').addEventListener('change', (event) => {
-    finishEquationEdit();
-});
 $('#editEquationOutput').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     const picked = parseEquationOutput(event.target.value);
@@ -10628,21 +10562,6 @@ $('#termProviderOutputKey').addEventListener('change', (event) => {
         term.implementation.output = { ...term.implementation.output, key: event.target.value.trim() };
     });
 });
-$('#termMathField').addEventListener('input', (event) => {
-    previewSourceTermExpression(event.target.value, 'visual');
-});
-$('#termMathField').addEventListener('change', () => finishEquationEdit());
-$('#termEquation').addEventListener('input', (event) => {
-    previewSourceTermExpression(event.target.value, 'latex');
-});
-$('#termEquation').addEventListener('change', () => finishEquationEdit());
-$$('[data-term-equation-mode]').forEach((button) => button.addEventListener('click', () => {
-    $$('[data-term-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
-    const latexMode = button.dataset.termEquationMode === 'latex';
-    $('#termMathField').hidden = latexMode;
-    $('#termEquation').hidden = !latexMode;
-    (latexMode ? $('#termEquation') : $('#termMathField')).focus();
-}));
 $('[data-delete-source-term]').addEventListener('click', () => {
     if (!selectedSourceTermNodeId || !selectedSourceTermId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
@@ -10654,22 +10573,18 @@ $('[data-delete-source-term]').addEventListener('click', () => {
     $('#sourceTermEditor').classList.add('hidden');
     openNodeEditor(node.userData.definition);
 });
-$$('[data-equation-mode]').forEach((button) => button.addEventListener('click', () => {
-    $$('[data-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
-    const latexMode = button.dataset.equationMode === 'latex';
-    if (selectedRelationship && isSeveralEquations(selectedRelationship.equationModel)) {
-        // Every row of a relationship with several equations switches, and the keyboard stays on the row it was on.
-        $$('#editEdgeEquationsList .severalRow').forEach((row) => {
-            $('math-field', row).hidden = latexMode;
-            $('textarea', row).hidden = !latexMode;
-        });
-        if (severalFocus) focusSeveralRow(severalFocus.kind, severalFocus.index);
-        return;
-    }
-    $('#editEdgeMathField').hidden = latexMode;
-    $('#editEdgeEquation').hidden = !latexMode;
-    (latexMode ? $('#editEdgeEquation') : $('#editEdgeMathField')).focus();
-}));
+// A relationship with several equations has a row of fields per equation: the mode switches every row, and the keyboard stays on the
+// row it was on. The editor's own fields are then not showing, so it leaves showing and hiding to this.
+function switchSeveralEquationsMode(mode) {
+    if (!selectedRelationship || !isSeveralEquations(selectedRelationship.equationModel)) return false;
+    const latexMode = mode === 'latex';
+    $$('#editEdgeEquationsList .severalRow').forEach((row) => {
+        $('math-field', row).hidden = latexMode;
+        $('textarea', row).hidden = !latexMode;
+    });
+    if (severalFocus) focusSeveralRow(severalFocus.kind, severalFocus.index);
+    return true;
+}
 $('#editAddEdgeParameter').addEventListener('click', () => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
@@ -12253,21 +12168,6 @@ $('#addSourceTerm').addEventListener('click', addSourceTermRow);
 $('#addEdgeParameter').addEventListener('click', () => addEdgeParameterRow());
 $('#edgeSource').addEventListener('change', refreshStateReferences);
 $('#edgeTarget').addEventListener('change', refreshStateReferences);
-$('#edgeMathField').addEventListener('input', (event) => {
-    $('#edgeEquation').value = event.target.value;
-    renderBuilderEquationDiagnostics();
-});
-$('#edgeEquation').addEventListener('input', (event) => {
-    $('#edgeMathField').setValue(event.target.value, { silenceNotifications: true });
-    renderBuilderEquationDiagnostics();
-});
-$$('[data-builder-equation-mode]').forEach((button) => button.addEventListener('click', () => {
-    $$('[data-builder-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
-    const latexMode = button.dataset.builderEquationMode === 'latex';
-    $('#edgeMathField').hidden = latexMode;
-    $('#edgeEquation').hidden = !latexMode;
-    (latexMode ? $('#edgeEquation') : $('#edgeMathField')).focus();
-}));
 function builderProviderBindingKeys() {
     return $$('#providerBindingRows .providerBindingRow [data-field="key"]').map((input) => ({ key: input.value }));
 }
@@ -12282,9 +12182,7 @@ $('#edgeImplementationKind').addEventListener('change', (event) => {
     // The math-field/latex-textarea toggle their own `hidden` directly (matching the existing
     // Visual/LaTeX mode toggle) rather than through a hidden ancestor: MathLive's custom element
     // does not reliably accept focus again once an ancestor of it has been display:none'd.
-    const latexMode = $('[data-builder-equation-mode="latex"]').classList.contains('active');
-    $('#edgeMathField').hidden = !isEquation || latexMode;
-    $('#edgeEquation').hidden = !isEquation || !latexMode;
+    builderEquation.show(isEquation);
     if (!isEquation && !$('#edgeProviderSource').value.trim()) {
         $('#edgeProviderSource').value = defaultProviderSource(
             kind, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
@@ -12518,7 +12416,7 @@ $('#createEdge').addEventListener('click', () => {
     if (implementationKind === 'equation') {
         if (definition.equation && definition.equationModel.mathJson === null) {
             renderBuilderEquationDiagnostics(definition.equationModel.bindings);
-            ($('#edgeMathField').hidden ? $('#edgeEquation') : $('#edgeMathField')).focus();
+            builderEquation.focus();
             return;
         }
     } else {
@@ -13240,12 +13138,7 @@ function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
 function renderGroupEquationDiagnostics(group) {
     const [previewSource, previewTarget] = groupPreviewPair(group);
     const bindings = reconcileEquationBindings([], previewSource, previewTarget, group.definition.parameters);
-    const latex = ($('#groupMathField').hidden ? $('#groupEquation') : $('#groupMathField')).value;
-    const validation = validateEquationLatex(latex, bindings);
-    const diagnostics = $('#groupEquationDiagnostics');
-    diagnostics.classList.toggle('valid', validation.valid);
-    diagnostics.textContent = validation.valid ? 'Valid expression · MathJSON ready' : validation.errors.join(' ');
-    return { validation, bindings };
+    return { validation: groupEquation.diagnose(bindings), bindings };
 }
 
 function renderEdgeGroupEditor(group) {
@@ -13298,14 +13191,9 @@ function renderEdgeGroupEditor(group) {
     if (!group.definition.parameters.length) parameterContainer.innerHTML = '<p class="emptyEditorState">No parameters defined</p>';
     else group.definition.parameters.forEach((parameter) => addGroupParameterRow(parameterContainer, parameter, group));
 
-    const mathField = $('#groupMathField');
-    const latexSource = $('#groupEquation');
     if (isEquation) {
-        const latexMode = $('[data-group-equation-mode="latex"]').classList.contains('active');
-        mathField.hidden = latexMode;
-        latexSource.hidden = !latexMode;
-        mathField.value = group.definition.equation;
-        latexSource.value = group.definition.equation;
+        groupEquation.show(true);
+        groupEquation.load(group.definition.equation);
         const portList = (role, node) => node?.states.length
             ? node.states.map((state) => `${role}${state.symbol[0].toUpperCase()}${state.symbol.slice(1)}`).join(', ')
             : 'none';
@@ -13314,8 +13202,7 @@ function renderEdgeGroupEditor(group) {
             : 'Add at least two members to see available equation references.';
         renderGroupEquationDiagnostics(group);
     } else {
-        mathField.hidden = true;
-        latexSource.hidden = true;
+        groupEquation.show(false);
         const fromPlugin = group.definition.implementation?.kind === 'plugin';
         $('#groupProviderCode').hidden = fromPlugin;
         $('#groupPluginProviderFields').hidden = !fromPlugin;
@@ -13398,8 +13285,6 @@ function previewGroupEquation(latex, origin) {
     beginEquationEditSession(`group:${group.id}`, () => captureEdgeGroupModel(group), (snapshot) => applyEdgeGroupModel(group, snapshot));
     group.definition.equation = latex;
     applyEdgeGroupModel(group, captureEdgeGroupModel(group), { rerenderEditor: false });
-    if (origin !== 'visual') $('#groupMathField').setValue(latex, { silenceNotifications: true });
-    if (origin !== 'latex') $('#groupEquation').value = latex;
     renderGroupEquationDiagnostics(group);
 }
 
@@ -13806,9 +13691,7 @@ $('#groupImplementationKind').addEventListener('change', (event) => {
     $('#groupFunctions').hidden = !isEquation;
     $('#groupReferenceHint').hidden = !isEquation;
     $('#groupProviderSection').hidden = isEquation;
-    const latexMode = $('[data-group-equation-mode="latex"]').classList.contains('active');
-    $('#groupMathField').hidden = !isEquation || latexMode;
-    $('#groupEquation').hidden = !isEquation || !latexMode;
+    groupEquation.show(isEquation);
     if (!group) return;
     const kind = event.target.value;
     changeEdgeGroupModel(group, (snapshot) => {
@@ -13864,21 +13747,6 @@ $('#groupAddProviderBinding').addEventListener('click', () => {
             candidateToGroupBinding(`input${snapshot.definition.implementation.bindings.length + 1}`, candidates[0], previewSource, previewTarget));
     });
 });
-$('#groupMathField').addEventListener('input', (event) => {
-    previewGroupEquation(event.target.value, 'visual');
-});
-$('#groupMathField').addEventListener('change', () => finishEquationEdit());
-$('#groupEquation').addEventListener('input', (event) => {
-    previewGroupEquation(event.target.value, 'latex');
-});
-$('#groupEquation').addEventListener('change', () => finishEquationEdit());
-$$('[data-group-equation-mode]').forEach((button) => button.addEventListener('click', () => {
-    $$('[data-group-equation-mode]').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
-    const latexMode = button.dataset.groupEquationMode === 'latex';
-    $('#groupMathField').hidden = latexMode;
-    $('#groupEquation').hidden = !latexMode;
-    (latexMode ? $('#groupEquation') : $('#groupMathField')).focus();
-}));
 
 // Tooltips for the title bar and the toolstrip are drawn here, in one fixed layer of their own, not as a
 // ::after of each button. Both bars clip their contents (so a narrow window scrolls or truncates instead of

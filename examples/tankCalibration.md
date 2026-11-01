@@ -98,7 +98,7 @@ From the starting guesses the model warms too slowly and settles too high, well 
 
 ## Try an objective instead
 
-The same card can tune towards a goal rather than towards data. Choose **Optimise an objective**, set the goal to **Maximise**, and click the Water tank's temperature under States, then **final(…)**, so the box reads `final(waterTank_tankTemperature)`. Set each simulation to run for 28800 s with a 600 s step and run it: the search drives both parameters to their lower bounds, since a smaller thermal mass warms faster and a smaller loss coefficient leaks less heat, and the progress plot shows the final temperature rising rather than a loss falling. Apply it only if you want to keep the result; the calibrated model is the one to keep.
+The same card can tune towards a goal rather than towards data. Choose **Optimise an objective**, set the goal to **Maximise**, and write the objective in the editor, which works like an edge's equation: click **final** under Summaries, then click Water tank · Water temperature under States, so it reads as the final value of the water temperature. Set each simulation to run for 28800 s with a 600 s step and run it: the search drives both parameters to their lower bounds, since a smaller thermal mass warms faster and a smaller loss coefficient leaks less heat, and the progress plot shows the final temperature rising rather than a loss falling. Add a limit with the plus beside Limits, such as the max of the water temperature staying at most 340, and run it again to see the search settle just under it. Apply a result only if you want to keep it; the calibrated model is the one to keep.
 
 ## Simplifications
 

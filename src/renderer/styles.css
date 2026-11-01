@@ -1695,21 +1695,18 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningBounds label { display: flex; align-items: center; gap: 4px; color: #7d929c; }
 .parameterTuningBounds input { width: 84px; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
 .parameterTuningBounds .parameterTuningError { flex-basis: 100%; color: #e08a7d; }
-.parameterTuningConstraints { margin: 9px 0; color: #607581; font-size: 8px; }
-.parameterTuningConstraints > span { display: block; margin-bottom: 6px; }
-.parameterTuningConstraints > button { padding: 4px 8px; color: #7dbab5; background: transparent; border: 1px dashed #29454a; border-radius: 4px; font-size: 8px; }
-.parameterTuningConstraintRow { display: flex; gap: 5px; align-items: center; margin-bottom: 5px; }
-.parameterTuningConstraintRow input, .parameterTuningConstraintRow select { padding: 4px 6px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
-.parameterTuningConstraintRow input[data-field="expression"] { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.parameterTuningConstraintRow input[data-field="limit"] { width: 70px; }
-.parameterTuningConstraintRow button { color: #8297a1; background: transparent; border: 0; font-size: 12px; }
+.parameterTuningConstraints { margin: 9px 0; }
+.parameterTuningConstraints h3 button { padding: 0 6px; color: #7dbab5; background: transparent; border: 0; font-size: 12px; }
+.parameterTuningConstraintRow { margin-bottom: 8px; padding: 6px; background: #111f28; border: 1px solid #243640; border-radius: 4px; }
+.parameterTuningConstraintRow .parameterTuningConstraintBound { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
+.parameterTuningConstraintRow select, .parameterTuningConstraintRow input { padding: 4px 6px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.parameterTuningConstraintRow input[data-field="limit"] { width: 90px; }
+.parameterTuningConstraintRow .parameterTuningConstraintBound button { margin-left: auto; color: #8297a1; background: transparent; border: 0; font-size: 12px; }
 .parameterTuningGoal { display: flex; gap: 0; margin: 0 0 8px; }
 .parameterTuningGoal button { flex: 1; padding: 6px 8px; color: #8297a1; background: #111f28; border: 1px solid #243640; font-size: 9px; }
 .parameterTuningGoal button:first-child { border-radius: 4px 0 0 4px; }
 .parameterTuningGoal button:last-child { border-radius: 0 4px 4px 0; border-left: 0; }
 .parameterTuningGoal button[aria-pressed="true"] { color: #d8fffb; background: rgb(66 201 188 / 16%); border-color: #3b8f88; }
-.parameterTuningObjective { width: 100%; box-sizing: border-box; resize: vertical; padding: 7px 8px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 4px; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.parameterTuningObjective:focus { outline: 0; border-color: #3b8f88; }
 .parameterTuningStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; margin: 8px 0; }
 .parameterTuningStats div { min-width: 0; }
 .parameterTuningStats dt { color: #7d929c; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }

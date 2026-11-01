@@ -28,6 +28,7 @@ export default {
     // The web engine reports a fit only when it ends: there is no progress to show and nothing to stop part way.
     onFitProgress: () => {},
     stopFit: async () => false,
+    checkObjective: async () => ({ available: false }),
     discardFit: async () => false,
     checkSubstepConvergence: () => checkSubstepConvergenceWithWebEngine(),
     run: (content, configuration) => runWithWebEngine(engineModuleUrl, content, configuration),

@@ -22,14 +22,14 @@ export function normalizeTuningSetup(raw) {
     if (maxMinutes) setup.maxMinutes = maxMinutes;
     if (typeof raw.csvFileName === 'string' && raw.csvFileName) setup.csvFileName = raw.csvFileName;
     if (goal === 'objective' && raw.objective && typeof raw.objective === 'object' && typeof raw.objective.expression === 'string') {
-        setup.objective = { expression: raw.objective.expression, direction: directions.includes(raw.objective.direction) ? raw.objective.direction : 'minimise' };
+        setup.objective = { expression: raw.objective.expression, ...(typeof raw.objective.latex === 'string' && raw.objective.latex ? { latex: raw.objective.latex } : {}), direction: directions.includes(raw.objective.direction) ? raw.objective.direction : 'minimise' };
         const targetTime = finitePositive(raw.objective.targetTime);
         const timeStep = finitePositive(raw.objective.timeStep);
         if (targetTime) setup.objective.targetTime = targetTime;
         if (timeStep) setup.objective.timeStep = timeStep;
         const constraints = (Array.isArray(raw.objective.constraints) ? raw.objective.constraints : [])
             .filter((entry) => entry && typeof entry.expression === 'string' && entry.expression.trim() && Number.isFinite(Number(entry.limit)))
-            .map((entry) => ({ expression: entry.expression, relation: entry.relation === '>=' ? '>=' : '<=', limit: Number(entry.limit) }));
+            .map((entry) => ({ expression: entry.expression, ...(typeof entry.latex === 'string' && entry.latex ? { latex: entry.latex } : {}), relation: entry.relation === '>=' ? '>=' : '<=', limit: Number(entry.limit) }));
         if (constraints.length) setup.objective.constraints = constraints;
     }
     return setup;
@@ -39,7 +39,7 @@ export function normalizeTuningSetup(raw) {
 export function tuningSetupFromRun({ goal, backend, maxSimulations, maxMinutes, csvFileName, objective }) {
     return normalizeTuningSetup({
         goal, backend, maxSimulations, maxMinutes, csvFileName,
-        objective: goal === 'objective' && objective ? { expression: objective.expression, direction: objective.direction, targetTime: objective.targetTime, timeStep: objective.timeStep, constraints: objective.constraints } : null
+        objective: goal === 'objective' && objective ? { expression: objective.expression, latex: objective.latex, direction: objective.direction, targetTime: objective.targetTime, timeStep: objective.timeStep, constraints: objective.constraints } : null
     });
 }
 

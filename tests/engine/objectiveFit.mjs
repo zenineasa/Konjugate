@@ -11,7 +11,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { fitWithEngine } from '../../src/engineAdapter.mjs';
+import { checkObjectiveWithEngine, fitWithEngine } from '../../src/engineAdapter.mjs';
+import { latexToObjectiveText } from '../../src/objectiveText.mjs';
 import { decodeProjectFile } from '../../src/projectFile.mjs';
 import { tankCalibration } from '../../scripts/generateTankCalibrationExample.mjs';
 
@@ -65,6 +66,24 @@ const value = (report, parameterId) => report.finalParameters.find((entry) => en
     assert.ok(report.finalViolation < 0.002, `The best values should keep to the limit: violation ${report.finalViolation}.`);
     assert.ok(events[0].violation > 0.04, `The starting values reach 355 K, 4.4% over the limit: ${events[0].violation}.`);
     console.log(`A 340 K limit holds the maximum to ${report.finalLoss.toFixed(1)} K (violation ${report.finalViolation.toExponential(1)}).`);
+}
+
+// 5. What the equation editor writes is what the engine accepts, and the engine says in words what it refuses: this is the check a person
+// sees under the formula as they write it.
+{
+    const names = variables.map((variable) => variable.name);
+    const check = async (latex) => {
+        const converted = latexToObjectiveText(latex, names);
+        assert.ok(converted.valid, `${latex}: ${converted.errors.join(' ')}`);
+        return checkObjectiveWithEngine({ expression: converted.text, direction: 'minimise', variables }, engineOptions);
+    };
+    for (const latex of ['\\lim_{t\\to T}\\left(\\mathrm{tank}\\right)', '\\int_{0}^{T}\\left(\\mathrm{tank}-\\mathrm{reading}\\right)^{2}\\,dt+0.01\\cdot\\mathrm{capacitance}', '\\operatorname{mean}\\left(\\mathrm{tank}\\right)\\cdot\\max\\left(\\mathrm{tank}\\right)']) {
+        assert.deepEqual(await check(latex), { available: true, valid: true }, latex);
+    }
+    const refused = await check('\\mathrm{tank}+\\mathrm{capacitance}');
+    assert.equal(refused.valid, false);
+    assert.match(refused.message, /changes over the run/);
+    console.log('The editor\'s objectives are accepted by the engine, and a bare state is refused in words.');
 }
 
 // 3. An objective that is not a number is refused up front, saying why.

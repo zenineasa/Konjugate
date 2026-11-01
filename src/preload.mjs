@@ -200,6 +200,8 @@ contextBridge.exposeInMainWorld('engine', {
     // A running fit's progress, in batches of one event per simulation, and the request to end it now keeping the best found.
     onFitProgress: (callback) => ipcRenderer.on('engineFitProgress', (_event, batch) => callback(batch)),
     stopFit: () => ipcRenderer.invoke('engineFitStop'),
+    // Whether a tuning objective is usable and, if not, why, in the engine's words.
+    checkObjective: (objective) => ipcRenderer.invoke('engineCheckObjective', objective),
     discardFit: () => ipcRenderer.invoke('engineFitDiscard'),
     checkSubstepConvergence: (content, runConfiguration, nodeIds) => ipcRenderer.invoke('engineCheckSubstepConvergence', content, runConfiguration, nodeIds),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),

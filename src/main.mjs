@@ -9,7 +9,7 @@ import { release as osRelease, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { checkObjectiveWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
@@ -2773,6 +2773,8 @@ ipcMain.handle('engineFit', async (event, content, csvContent, config) => {
         activeFittingOperations.delete(active);
     }
 });
+ipcMain.handle('engineCheckObjective', async (event, objective) => checkObjectiveWithEngine(objective, await engineOptions()));
+
 ipcMain.handle('engineFitStop', async (event) => {
     const active = [...activeFittingOperations].find((operation) => operation.owner === event.sender);
     if (!active?.requestStop) return false;

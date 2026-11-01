@@ -190,6 +190,26 @@ int main(int argc, char** argv) {
     // Every parameter schedule mode this build evaluates (executionPlan.cpp's evaluateParameterSchedule).
     const std::vector<std::string> parameterScheduleModes = {"step", "ramp", "pulse", "piecewise", "waveform"};
 
+    // Says whether an objective file (the one `fit --objective-file` reads) is a usable objective, as one line of JSON on stdout, so the
+    // app can tell a person what is wrong as they write it, with the same rules the fit applies. Exit status 0 either way.
+    if (argc == 3 && std::string(argv[1]) == "check-objective") {
+        std::string message;
+        try {
+            konjugate::FittingProblem problem;
+            konjugate::loadFittingObjective(argv[2], problem);
+            konjugate::checkFittingObjective(problem);
+        } catch (const std::exception& error) {
+            message = error.what();
+        }
+        std::string escaped;
+        for (const char character : message) {
+            if (character == '"' || character == '\\') { escaped += '\\'; escaped += character; }
+            else if (character == '\n') escaped += "\\n";
+            else escaped += character;
+        }
+        std::cout << (message.empty() ? std::string("{\"valid\":true}") : "{\"valid\":false,\"message\":\"" + escaped + "\"}") << std::endl;
+        std::_Exit(0);
+    }
     if (argc == 3 && std::string(argv[1]) == "capabilities" && std::string(argv[2]) == "--protobuf") {
         konjugate::protocol::EngineEvent event;
         event.set_protocol_version(1);
@@ -342,30 +362,7 @@ int main(int argc, char** argv) {
                     throw std::runtime_error("None of the measured CSV's columns matched a state in the model.");
                 }
             } else {
-                boost::property_tree::ptree objective;
-                boost::property_tree::read_json(objectiveFile.string(), objective);
-                problem.objective = objective.get<std::string>("expression");
-                problem.maximize = objective.get<std::string>("direction", "minimise") == "maximise";
-                problem.targetTime = objective.get<double>("targetTime", 0.0);
-                problem.timeStep = objective.get<double>("timeStep", 0.0);
-                if (const auto constraints = objective.get_child_optional("constraints")) for (const auto& entry : *constraints) {
-                    konjugate::FittingConstraint constraint;
-                    constraint.expression = entry.second.get<std::string>("expression");
-                    constraint.atMost = entry.second.get<std::string>("relation", "<=") != ">=";
-                    constraint.limit = entry.second.get<double>("limit");
-                    problem.constraints.push_back(std::move(constraint));
-                }
-                if (const auto variables = objective.get_child_optional("variables")) for (const auto& entry : *variables) {
-                    konjugate::ObjectiveVariable variable;
-                    variable.name = entry.second.get<std::string>("name");
-                    const auto kind = entry.second.get<std::string>("kind");
-                    variable.kind = kind == "state" ? konjugate::ObjectiveVariable::Kind::state
-                        : kind == "measured" ? konjugate::ObjectiveVariable::Kind::measured : konjugate::ObjectiveVariable::Kind::parameter;
-                    variable.id = entry.second.get<std::uint64_t>("id", 0);
-                    variable.column = entry.second.get<std::string>("column", "");
-                    variable.value = entry.second.get<double>("value", 0.0);
-                    problem.objectiveVariables.push_back(std::move(variable));
-                }
+                konjugate::loadFittingObjective(objectiveFile, problem);
             }
             const auto backendOption = optionPath(argc, argv, "--backend").string();
             if (!backendOption.empty()) problem.optimizerBackendId = backendOption;

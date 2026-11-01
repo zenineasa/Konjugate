@@ -4,6 +4,7 @@
 #include "nloptBackend.hpp"
 #include "simulationRunner.hpp"
 #include "engineProtocol.pb.h"
+#include <boost/property_tree/json_parser.hpp>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -219,6 +220,39 @@ std::vector<FittingSignalMapping> autoMapColumnsToStates(const std::vector<std::
     return mapping;
 }
 
+void loadFittingObjective(const std::filesystem::path& path, FittingProblem& problem) {
+    boost::property_tree::ptree objective;
+    boost::property_tree::read_json(path.string(), objective);
+    problem.objective = objective.get<std::string>("expression");
+    problem.maximize = objective.get<std::string>("direction", "minimise") == "maximise";
+    problem.targetTime = objective.get<double>("targetTime", 0.0);
+    problem.timeStep = objective.get<double>("timeStep", 0.0);
+    if (const auto constraints = objective.get_child_optional("constraints")) for (const auto& entry : *constraints) {
+        FittingConstraint constraint;
+        constraint.expression = entry.second.get<std::string>("expression");
+        constraint.atMost = entry.second.get<std::string>("relation", "<=") != ">=";
+        constraint.limit = entry.second.get<double>("limit");
+        problem.constraints.push_back(std::move(constraint));
+    }
+    if (const auto variables = objective.get_child_optional("variables")) for (const auto& entry : *variables) {
+        ObjectiveVariable variable;
+        variable.name = entry.second.get<std::string>("name");
+        const auto kind = entry.second.get<std::string>("kind");
+        variable.kind = kind == "state" ? ObjectiveVariable::Kind::state
+            : kind == "measured" ? ObjectiveVariable::Kind::measured : ObjectiveVariable::Kind::parameter;
+        variable.id = entry.second.get<std::uint64_t>("id", 0);
+        variable.column = entry.second.get<std::string>("column", "");
+        variable.value = entry.second.get<double>("value", 0.0);
+        problem.objectiveVariables.push_back(std::move(variable));
+    }
+}
+
+void checkFittingObjective(const FittingProblem& problem) {
+    if (problem.objective.empty()) return;
+    FittingObjective(problem.objective, problem.objectiveVariables);
+    for (const auto& constraint : problem.constraints) FittingObjective(constraint.expression, problem.objectiveVariables);
+}
+
 double evaluateFittingLoss(const FittingProblem& problem, const std::vector<double>& parameterValues,
     const std::filesystem::path& scratchOutputPath) {
     return evaluateFittingTrial(problem, parameterValues, scratchOutputPath).objective;
@@ -336,10 +370,7 @@ struct FittingStopped : std::runtime_error {
 FittingReport runParameterFit(const FittingProblem& problem, const FittingProgressCallback& onProgress, const FittingMonitor& monitor) {
     const auto backend = createOptimizerBackend(problem.optimizerBackendId);
     // An objective that cannot be read is the person's to fix, so it ends the fit before any simulation instead of scoring every trial as failed.
-    if (!problem.objective.empty()) {
-        FittingObjective(problem.objective, problem.objectiveVariables);
-        for (const auto& constraint : problem.constraints) FittingObjective(constraint.expression, problem.objectiveVariables);
-    }
+    checkFittingObjective(problem);
     // The search always minimises; maximising searches for the smallest negative. What is reported is the objective as written.
     const auto shown = [&](double loss) { return problem.maximize ? -loss : loss; };
     const auto scratchPath = std::filesystem::temp_directory_path() /

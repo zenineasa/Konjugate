@@ -78,11 +78,11 @@ function containsSymbol(expression, names) {
     return Array.isArray(expression) && expression.slice(1).some((operand) => containsSymbol(operand, names));
 }
 
-function collectUnsupportedOperators(expression, unsupported = new Set()) {
+function collectUnsupportedOperators(expression, unsupported = new Set(), allowed = allowedOperators) {
     if (!Array.isArray(expression)) return unsupported;
     const [operator, ...operands] = expression;
-    if (typeof operator === 'string' && !allowedOperators.has(operator)) unsupported.add(operator);
-    operands.forEach((operand) => collectUnsupportedOperators(operand, unsupported));
+    if (typeof operator === 'string' && !allowed.has(operator)) unsupported.add(operator);
+    operands.forEach((operand) => collectUnsupportedOperators(operand, unsupported, allowed));
     return unsupported;
 }
 
@@ -210,15 +210,29 @@ export function mathJsonToLatex(expression) {
     }
 }
 
-export function validateEquationLatex(latex, bindings = []) {
+// The parser decides what an unknown symbol is from where it first meets it, and keeps that for the next formula it reads: after
+// `\operatorname{mean}(x)`, x is a list, and `\max(x)` then fails. A formula whose every name is a number (a tuning objective's) is read by
+// an engine of its own, made fresh with those names declared as numbers, so one formula's reading never leaks into the next.
+function numbersEngine(names) {
+    const engine = new ComputeEngine();
+    for (const name of new Set(names)) {
+        try { engine.declare(name, 'real'); } catch { /* a name the parser already uses keeps its own meaning */ }
+    }
+    return engine;
+}
+
+// `extraOperators` are further operations the owner understands (a tuning objective's summaries), `extraSymbols` further names that are
+// known without being a reference (the end of the run, `T`, in an objective's integral). `numbersOnly` is for a formula whose names
+// are all numbers (see numbersEngine).
+export function validateEquationLatex(latex, bindings = [], { extraOperators = [], extraSymbols = [], numbersOnly = false } = {}) {
     if (!latex?.trim()) return { valid: false, mathJson: null, symbols: [], errors: ['Enter an expression.'] };
-    const parsed = computeEngine.parse(latex);
+    const parsed = (numbersOnly ? numbersEngine([...bindings.map((binding) => binding.symbol), ...extraSymbols]) : computeEngine).parse(latex);
     const expression = { errors: parsed.errors, unknowns: parsed.unknowns, symbols: parsed.symbols, json: canonicalFunctions(parsed.json) };
     const errors = expression.errors.map(() => 'The LaTeX expression could not be parsed.');
-    const knownSymbols = new Set(bindings.map((binding) => binding.symbol));
+    const knownSymbols = new Set([...bindings.map((binding) => binding.symbol), ...extraSymbols]);
     const unknownSymbols = expression.unknowns.filter((symbol) => !knownSymbols.has(symbol));
     if (unknownSymbols.length) errors.push(`Unknown ${unknownSymbols.length === 1 ? 'symbol' : 'symbols'}: ${unknownSymbols.join(', ')}.`);
-    const unsupported = [...collectUnsupportedOperators(expression.json)];
+    const unsupported = [...collectUnsupportedOperators(expression.json, new Set(), new Set([...allowedOperators, ...extraOperators]))];
     if (containsSymbol(expression.json, nonFiniteSymbols)) errors.push('The expression divides by zero or is otherwise not a number.');
     if (unsupported.length) errors.push(`Unsupported ${unsupported.length === 1 ? 'operation' : 'operations'}: ${unsupported.join(', ')}.`);
     else errors.push(...collectConditionErrors(expression.json));

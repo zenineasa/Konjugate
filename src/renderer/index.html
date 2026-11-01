@@ -999,19 +999,21 @@
                 <div id="parameterTuningStatus" class="equationDiagnostics" role="status"></div>
             </section>
             <section id="parameterTuningObjectiveSection" hidden>
-                <h3>Objective</h3>
-                <p class="builderHint">Write one number the search should make as small or as large as it can. A state changes over the run, so wrap it in a summary: final(…) is its last value, max(…) and min(…) its extremes, mean(…) its average, integral(…) its total over time. Parameters are single numbers and can be used as they are.</p>
                 <label class="editorField"><span>Goal</span><select id="parameterTuningDirection"><option value="minimise">Minimise</option><option value="maximise">Maximise</option></select></label>
-                <textarea id="parameterTuningObjective" class="parameterTuningObjective" rows="3" spellcheck="false" autocomplete="off" aria-label="Objective" placeholder="integral((block - 320)^2) + 0.1 * k^2"></textarea>
-                <div class="parameterTuningConstraints">
-                    <span>Limits (optional): keep a number from the run within a bound. Breaking one is penalised, so the search settles inside it when it can.</span>
-                    <div id="parameterTuningConstraintRows"></div>
-                    <button id="addParameterTuningConstraint" type="button">+ Add a limit</button>
-                </div>
-                <div class="referencePicker"><span>Summaries: wrap what is selected, or everything</span><div id="parameterTuningSummaryButtons"></div></div>
+                <div class="equationHeading"><h3>Objective</h3><div class="equationModes"><button class="active" data-objective-equation-mode="visual" type="button">Visual</button><button data-objective-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <p class="builderHint">One number the search makes as small or as large as it can. A state changes over the run, so put it in a summary: final value, max, min, mean, or its total over time.</p>
+                <math-field id="parameterTuningMathField" class="equationMathField" aria-label="Objective"></math-field>
+                <textarea id="parameterTuningObjective" class="equationSource" rows="3" spellcheck="false" placeholder="Choose the buttons below, or enter LaTeX" hidden></textarea>
+                <div id="parameterTuningObjectiveDiagnostics" class="equationDiagnostics" role="status"></div>
+                <div class="referencePicker"><span>Summaries over the run</span><div id="parameterTuningSummaryButtons"></div></div>
                 <div class="referencePicker"><span>States</span><div id="parameterTuningStateChips"></div></div>
                 <div class="referencePicker"><span>Parameters</span><div id="parameterTuningParameterChips"></div></div>
                 <div id="parameterTuningMeasuredPicker" class="referencePicker" hidden><span>Measured data</span><div id="parameterTuningMeasuredChips"></div></div>
+                <div class="parameterTuningConstraints">
+                    <h3>Limits <button id="addParameterTuningConstraint" type="button" title="Add a limit">＋</button></h3>
+                    <p class="builderHint">Keep a number from the run within a bound. Breaking one is penalised, so the search settles inside it when it can.</p>
+                    <div id="parameterTuningConstraintRows"></div>
+                </div>
                 <label class="editorField"><span>Each simulation runs for (s)</span><input id="parameterTuningRunTime" type="number" min="0" step="any" value="1"></label>
                 <label class="editorField"><span>Time step (s)</span><input id="parameterTuningTimeStep" type="number" min="0" step="any" value="1"></label>
                 <div id="parameterTuningObjectiveStatus" class="equationDiagnostics" role="status"></div>

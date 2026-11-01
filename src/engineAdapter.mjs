@@ -86,6 +86,31 @@ export async function getEngineCapabilities(options) {
     });
 }
 
+// Whether a tuning objective (the same { expression, variables, constraints } `fitWithEngine` takes as `config.objective`) can be used, and
+// if not, why, in the engine's own words: { available, valid, message }. The rules are the engine's alone, so the card can say what is wrong
+// as a person writes, with exactly the answer a run would give.
+export async function checkObjectiveWithEngine(objective, options) {
+    const executable = await resolveEnginePath(options);
+    if (!executable) return { available: false };
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateObjective-'));
+    try {
+        const objectivePath = join(directory, 'objective.json');
+        await writeFile(objectivePath, JSON.stringify(objective), 'utf8');
+        const stdout = await new Promise((resolve, reject) => {
+            const child = spawn(executable, ['check-objective', objectivePath], { stdio: ['ignore', 'pipe', 'pipe'], ...(options.signal ? { signal: options.signal } : {}) });
+            let output = '';
+            let diagnostics = '';
+            child.stdout.on('data', (chunk) => { output += chunk; });
+            child.stderr.on('data', (chunk) => { diagnostics += chunk; });
+            child.once('error', reject);
+            child.once('close', (code) => (code === 0 ? resolve(output) : reject(new Error(diagnostics.trim() || `The engine exited with code ${code}.`))));
+        });
+        return { available: true, ...JSON.parse(stdout) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}
+
 export async function validateWithEngine(content, options) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };

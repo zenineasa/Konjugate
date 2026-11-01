@@ -4,14 +4,7 @@
 // the expression may use, worked out from the project, and the small text edits the summary buttons make. The engine reads the
 // expression (engine/include/fittingObjective.hpp); this only decides what the names are and what they stand for. Pure functions.
 
-export const summaryFunctions = Object.freeze([
-    { name: 'final', hint: 'the value at the end of the run' },
-    { name: 'max', hint: 'the highest value reached' },
-    { name: 'min', hint: 'the lowest value reached' },
-    { name: 'mean', hint: 'the average over the run' },
-    { name: 'integral', hint: 'the total over the run: the value added up over time, in its unit times seconds' }
-]);
-
+const upperFirst = (text) => (text ? `${text[0].toUpperCase()}${text.slice(1)}` : text);
 const camel = (text) => {
     const words = String(text ?? '').split(/[^A-Za-z0-9]+/).filter(Boolean);
     const joined = words.map((word, index) => (index === 0 ? word[0].toLowerCase() : word[0].toUpperCase()) + word.slice(1)).join('');
@@ -38,7 +31,7 @@ export function objectiveVocabulary(document, measuredColumns = []) {
     const states = [];
     for (const node of document.nodes ?? []) {
         for (const state of node.states ?? []) {
-            const name = unique(`${camel(node.name)}_${state.symbol || camel(state.name)}`);
+            const name = unique(`${camel(node.name)}${upperFirst(state.symbol || camel(state.name))}`);
             variables.push({ name, kind: 'state', id: state.id });
             states.push({ name, label: `${node.name} · ${state.name}` });
         }
@@ -59,59 +52,44 @@ export function objectiveVocabulary(document, measuredColumns = []) {
     for (const { parameter } of numeric) symbolCounts.set(parameter.symbol, (symbolCounts.get(parameter.symbol) ?? 0) + 1);
     const parameters = [];
     for (const { owner, parameter, label } of [...numeric.filter(({ parameter }) => parameter.tuning), ...numeric.filter(({ parameter }) => !parameter.tuning)]) {
-        const name = unique(owner && symbolCounts.get(parameter.symbol) > 1 ? `${camel(owner)}_${parameter.symbol}` : parameter.symbol);
+        const name = unique(owner && symbolCounts.get(parameter.symbol) > 1 ? `${camel(owner)}${upperFirst(parameter.symbol)}` : parameter.symbol);
         variables.push({ name, kind: 'parameter', id: parameter.id, value: Number(parameter.value) });
         parameters.push({ name, label, tunable: Boolean(parameter.tuning) });
     }
 
     const measured = [];
     for (const column of measuredColumns) {
-        const name = unique(`measured_${camel(column)}`);
+        const name = unique(`measured${upperFirst(camel(column))}`);
         variables.push({ name, kind: 'measured', column });
         measured.push({ name, label: column });
     }
     return { variables, states, parameters, measured };
 }
 
-// Puts `functionName(` … `)` around the selected text, or around the whole expression when nothing is selected and it is not empty,
-// or inserts `functionName()` with the cursor inside it for an empty one. Returns the new text and where the selection goes.
-export function wrapInSummary(text, selectionStart, selectionEnd, functionName) {
-    const hasSelection = selectionEnd > selectionStart;
-    const start = hasSelection ? selectionStart : 0;
-    const end = hasSelection ? selectionEnd : text.length;
-    const inner = text.slice(start, end);
-    if (!inner.trim()) {
-        const insertion = `${functionName}()`;
-        return { text: `${text.slice(0, selectionStart)}${insertion}${text.slice(selectionEnd)}`, selectionStart: selectionStart + functionName.length + 1, selectionEnd: selectionStart + functionName.length + 1 };
-    }
-    const wrapped = `${functionName}(${inner})`;
-    return { text: `${text.slice(0, start)}${wrapped}${text.slice(end)}`, selectionStart: start, selectionEnd: start + wrapped.length };
-}
-
-// Inserts a name at the cursor, replacing a selection, with a cursor just after it.
-export function insertName(text, selectionStart, selectionEnd, name) {
-    const caret = selectionStart + name.length;
-    return { text: `${text.slice(0, selectionStart)}${name}${text.slice(selectionEnd)}`, selectionStart: caret, selectionEnd: caret };
-}
-
 // What `window.engine.fit` is given as `config.objective` (see fitWithEngine in src/engineAdapter.mjs).
-export function objectivePayload({ expression, direction, targetTime, timeStep, variables, constraints = [] }) {
+// `latex` is how the objective is written in the editor, kept so it can be shown again; the engine reads `expression`, its text form.
+export function objectivePayload({ expression, latex = '', direction, targetTime, timeStep, variables, constraints = [] }) {
     return {
-        expression: expression.trim(), direction: direction === 'maximise' ? 'maximise' : 'minimise', targetTime, timeStep, variables,
-        constraints: constraints.map(({ expression: limited, relation, limit }) => ({ expression: limited.trim(), relation: relation === '>=' ? '>=' : '<=', limit: Number(limit) }))
+        expression: expression.trim(), latex, direction: direction === 'maximise' ? 'maximise' : 'minimise', targetTime, timeStep, variables,
+        constraints: constraints.map(({ expression: limited, latex = '', relation, limit }) => ({ expression: limited.trim(), latex, relation: relation === '>=' ? '>=' : '<=', limit: Number(limit) }))
     };
 }
 
-// The limit rows a person has filled in, or why one is not usable. A row left entirely empty is just ignored.
+// The limit rows a person has filled in, or why one is not usable. A row is { expression, latex, relation, limit, problem }: `expression` is
+// the objective editor's text for it (empty while the formula does not read) and `problem` what is wrong with it then. A row left entirely
+// empty is just ignored.
 export function constraintRows(rows) {
     const constraints = [];
     for (const [index, row] of rows.entries()) {
         const expression = String(row.expression ?? '').trim();
         const limit = String(row.limit ?? '').trim();
-        if (!expression && !limit) continue;
-        if (!expression) return { error: `Limit ${index + 1} needs something to limit, for example max(…) of a state.`, constraints: [] };
+        const written = String(row.latex ?? '').trim() !== '' || expression !== '';
+        if (!written && !limit) continue;
+        if (!expression) {
+            return { error: written ? `Limit ${index + 1}: ${row.problem || 'the formula cannot be read.'}` : `Limit ${index + 1} needs something to limit, for example the max of a state.`, constraints: [] };
+        }
         if (!limit || !Number.isFinite(Number(limit))) return { error: `Limit ${index + 1} needs a number to stay within.`, constraints: [] };
-        constraints.push({ expression, relation: row.relation === '>=' ? '>=' : '<=', limit: Number(limit) });
+        constraints.push({ expression, latex: String(row.latex ?? ''), relation: row.relation === '>=' ? '>=' : '<=', limit: Number(limit) });
     }
     return { error: '', constraints };
 }

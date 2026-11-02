@@ -224,16 +224,17 @@ jobs:
             # because upload-artifact drops file permissions, which would strip the executable bits
             # from Electron and the engine. Named so it never matches release-* (the GitHub
             # Release's download pattern), and kept a day since only the snapRelease job needs it.
-            - name: Archive the Linux package for the Snap Store job
-              if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
-              run: tar -cf out/linux-package.tar out/package/Konjugate-linux-* assets/icons/png
-            - uses: actions/upload-artifact@v4
-              if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
-              with:
-                  name: linux-package-${{ runner.arch }}
-                  path: out/linux-package.tar
-                  retention-days: 1
-                  if-no-files-found: error
+            # PAUSED with the snapRelease job below, the only thing that reads this archive: restore both together.
+            # - name: Archive the Linux package for the Snap Store job
+            #   if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
+            #   run: tar -cf out/linux-package.tar out/package/Konjugate-linux-* assets/icons/png
+            # - uses: actions/upload-artifact@v4
+            #   if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
+            #   with:
+            #       name: linux-package-${{ runner.arch }}
+            #       path: out/linux-package.tar
+            #       retention-days: 1
+            #       if-no-files-found: error
             - uses: actions/upload-artifact@v4
               with:
                   # runner.arch disambiguates the two macOS runners (macos-latest and
@@ -431,62 +432,67 @@ jobs:
                   git commit -m "konjugate $TAG"
                   git push
 
-    snapRelease:
-        needs: release
-        if: startsWith(github.ref, 'refs/tags/v')
-        # Packs the Linux build the `build` job already made (downloaded below) instead of
-        # rebuilding it, so this job has no Node/Python/vcpkg setup. That build ran on ubuntu-22.04
-        # for glibc compatibility; snapcraft itself builds in its own core24 environment, so the
-        # runner's version doesn't matter. One run per architecture, each on a native runner,
-        # downloading the package the matching `build` leg made. Each architecture is its own
-        # revision of the one snap, so a failure on one doesn't stop the other (fail-fast: false).
-        strategy:
-            fail-fast: false
-            matrix:
-                include:
-                    - runner: ubuntu-latest
-                      arch: X64
-                    - runner: ubuntu-24.04-arm
-                      arch: ARM64
-        runs-on: ${{ matrix.runner }}
-        env:
-            SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        steps:
-            # Opt-in by secret like the other channels. Setup is in docs/packageManagerDistribution.md.
-            - name: Skip when the Snap Store isn't set up yet
-              if: env.SNAPCRAFT_STORE_CREDENTIALS == ''
-              run: echo "::notice::SNAPCRAFT_STORE_CREDENTIALS is not set; skipping the Snap Store (see docs/packageManagerDistribution.md)."
-            - uses: actions/checkout@v4
-              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-            - uses: actions/download-artifact@v4
-              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-              with:
-                  name: linux-package-${{ matrix.arch }}
-                  path: out
-            # The snap manifest lives under distribution/ with the other store manifests, but
-            # snapcraft only looks in snap/, and its `dump` part reads a fixed, arch-agnostic path --
-            # so place both where it expects them rather than make the manifest branch on either.
-            - name: Stage the snap's inputs
-              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-              run: |
-                  mkdir -p snap
-                  cp distribution/snap/snapcraft.yaml snap/snapcraft.yaml
-                  tar -xf out/linux-package.tar
-                  mv out/package/Konjugate-linux-* out/package/konjugateLinux
-            - uses: canonical/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
-              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-              id: build
-            # Kept so a failed publish (or a classic-confinement rejection) can be inspected.
-            - uses: actions/upload-artifact@v4
-              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-              with:
-                  name: snap-Linux-${{ matrix.arch }}
-                  path: ${{ steps.build.outputs.snap }}
-            # `edge` only: classic confinement needs Canonical's manual approval before the snap can
-            # go to a stable channel, and that is requested from the Snap Store dashboard, not here.
-            - uses: canonical/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
-              if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-              with:
-                  store_login: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-                  snap: ${{ steps.build.outputs.snap }}
-                  release: edge
+    # snapRelease is PAUSED until the Snap Store team gives the green light (classic confinement needs their approval before the snap can
+    # go to a stable channel), so the job is commented out rather than deleted. To restore it, uncomment the job below and the two steps
+    # in the `build` job that archive and upload the Linux package for it (search for "Snap Store job"), and set
+    # SNAPCRAFT_STORE_CREDENTIALS (see docs/packageManagerDistribution.md).
+    #
+    # snapRelease:
+    #     needs: release
+    #     if: startsWith(github.ref, 'refs/tags/v')
+    #     # Packs the Linux build the `build` job already made (downloaded below) instead of
+    #     # rebuilding it, so this job has no Node/Python/vcpkg setup. That build ran on ubuntu-22.04
+    #     # for glibc compatibility; snapcraft itself builds in its own core24 environment, so the
+    #     # runner's version doesn't matter. One run per architecture, each on a native runner,
+    #     # downloading the package the matching `build` leg made. Each architecture is its own
+    #     # revision of the one snap, so a failure on one doesn't stop the other (fail-fast: false).
+    #     strategy:
+    #         fail-fast: false
+    #         matrix:
+    #             include:
+    #                 - runner: ubuntu-latest
+    #                   arch: X64
+    #                 - runner: ubuntu-24.04-arm
+    #                   arch: ARM64
+    #     runs-on: ${{ matrix.runner }}
+    #     env:
+    #         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+    #     steps:
+    #         # Opt-in by secret like the other channels. Setup is in docs/packageManagerDistribution.md.
+    #         - name: Skip when the Snap Store isn't set up yet
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS == ''
+    #           run: echo "::notice::SNAPCRAFT_STORE_CREDENTIALS is not set; skipping the Snap Store (see docs/packageManagerDistribution.md)."
+    #         - uses: actions/checkout@v4
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+    #         - uses: actions/download-artifact@v4
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+    #           with:
+    #               name: linux-package-${{ matrix.arch }}
+    #               path: out
+    #         # The snap manifest lives under distribution/ with the other store manifests, but
+    #         # snapcraft only looks in snap/, and its `dump` part reads a fixed, arch-agnostic path --
+    #         # so place both where it expects them rather than make the manifest branch on either.
+    #         - name: Stage the snap's inputs
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+    #           run: |
+    #               mkdir -p snap
+    #               cp distribution/snap/snapcraft.yaml snap/snapcraft.yaml
+    #               tar -xf out/linux-package.tar
+    #               mv out/package/Konjugate-linux-* out/package/konjugateLinux
+    #         - uses: canonical/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+    #           id: build
+    #         # Kept so a failed publish (or a classic-confinement rejection) can be inspected.
+    #         - uses: actions/upload-artifact@v4
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+    #           with:
+    #               name: snap-Linux-${{ matrix.arch }}
+    #               path: ${{ steps.build.outputs.snap }}
+    #         # `edge` only: classic confinement needs Canonical's manual approval before the snap can
+    #         # go to a stable channel, and that is requested from the Snap Store dashboard, not here.
+    #         - uses: canonical/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
+    #           if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+    #           with:
+    #               store_login: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+    #               snap: ${{ steps.build.outputs.snap }}
+    #               release: edge

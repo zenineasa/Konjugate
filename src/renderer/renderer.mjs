@@ -57,7 +57,7 @@ import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, ins
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterAbovePhone, declutterLabels } from './labelDeclutter.mjs';
 import { phoneMaxWidth } from './phoneMenu.mjs';
-import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
+import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
@@ -1540,9 +1540,9 @@ dragControls.addEventListener('dragend', (event) => {
         waypointDragStart = null;
         return;
     }
-    if (dragStartPositions && !event.object.position.equals(dragStartPositions.get(event.object.userData.id))) {
-        const from = new Map([...dragStartPositions].map(([id, position]) => [id, position.clone()]));
-        const to = new Map([...selectedNodeIds].map((id) => [id, nodeObjects.get(id).position.clone()]));
+    const moved = draggedNodePositions(dragStartPositions, event.object.userData.id, (id) => nodeObjects.get(id)?.position);
+    if (moved) {
+        const { from, to } = moved;
         const applyPositions = (positions) => {
             positions.forEach((position, id) => nodeObjects.get(id)?.position.copy(position));
             updateRelationships();

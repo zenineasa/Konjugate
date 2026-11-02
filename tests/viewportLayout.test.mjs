@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from '../src/renderer/viewportLayout.mjs';
+import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from '../src/renderer/viewportLayout.mjs';
 
 test('virtualKeyboardInset reserves only visible keyboard space', () => {
     assert.equal(virtualKeyboardInset(900, { top: 620 }, true), 280);
@@ -55,4 +55,30 @@ test('a canvas object\'s label is found on the object, drawn into the page yet o
     // A node not on the canvas (a result naming a state whose node is not drawn) is no error.
     assert.equal(labelElementOf(undefined, 'node-label-container'), null);
     assert.equal(labelElementOf({}, 'node-label-container'), null);
+});
+
+// A position with the two methods a drag's record uses, standing in for a three.js Vector3.
+const at = (x) => ({ x, equals: (other) => other.x === x, clone: () => at(x) });
+
+test('a finished drag records where the dragged nodes started and where they are now', () => {
+    const now = new Map([[1, at(5)], [2, at(8)]]);
+    const moved = draggedNodePositions(new Map([[1, at(0)], [2, at(3)]]), 1, (id) => now.get(id));
+    assert.deepEqual([...moved.from].map(([id, position]) => [id, position.x]), [[1, 0], [2, 3]]);
+    assert.deepEqual([...moved.to].map(([id, position]) => [id, position.x]), [[1, 5], [2, 8]]);
+});
+
+test('a drag that did not move the node, or has no start for it, records nothing and does not throw', () => {
+    const now = new Map([[1, at(0)], [2, at(8)]]);
+    assert.equal(draggedNodePositions(new Map([[1, at(0)]]), 1, (id) => now.get(id)), null, 'It did not move.');
+    // The selection changed after the drag began, and the browser then cancelled the touch: the node it ends on has no recorded start.
+    assert.equal(draggedNodePositions(new Map([[1, at(0)]]), 2, (id) => now.get(id)), null);
+    assert.equal(draggedNodePositions(null, 1, (id) => now.get(id)), null, 'No drag was in progress.');
+    assert.equal(draggedNodePositions(new Map([[1, at(0)]]), 1, () => undefined), null, 'The node is gone.');
+});
+
+test('a node deleted during a drag is left out of what is recorded', () => {
+    const now = new Map([[1, at(5)]]);
+    const moved = draggedNodePositions(new Map([[1, at(0)], [2, at(3)]]), 1, (id) => now.get(id));
+    assert.deepEqual([...moved.to.keys()], [1]);
+    assert.deepEqual([...moved.from.keys()], [1, 2]);
 });

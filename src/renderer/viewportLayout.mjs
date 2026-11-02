@@ -35,3 +35,19 @@ export function farPlaneFor(viewDistance, minimum = 300) {
 export function labelElementOf(object, className) {
     return object?.children?.find((child) => child.element?.classList?.contains(className))?.element ?? null;
 }
+
+// What a finished node drag changes, for the undo history: where the nodes that were dragged together started (`startPositions`, by id,
+// taken when the drag began) and where they are now, or null when there is nothing to record. A drag can end without the node it began
+// on being among those starts (the browser cancels a held touch, and the selection may have changed since the drag began), and a node
+// can have been deleted meanwhile, so neither is taken for granted.
+export function draggedNodePositions(startPositions, draggedId, currentPosition) {
+    const start = startPositions?.get(draggedId);
+    const current = currentPosition(draggedId);
+    if (!start || !current || current.equals(start)) return null;
+    const from = new Map([...startPositions].map(([id, position]) => [id, position.clone()]));
+    const to = new Map([...startPositions.keys()].flatMap((id) => {
+        const position = currentPosition(id);
+        return position ? [[id, position.clone()]] : [];
+    }));
+    return { from, to };
+}

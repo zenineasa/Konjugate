@@ -17,6 +17,7 @@ export const phoneMenuEntries = [
     { id: 'parametersButton', label: 'Parameters' },
     { id: 'providerToolchainsButton', label: 'Provider toolchains' },
     { id: 'diagnosticsButton', label: 'Diagnostics log' },
+    { id: 'offlineButton', label: 'Use offline' },
     { id: 'welcomeButton', label: 'About Konjugate', separated: true },
     { id: 'zoomInButton', label: 'Larger interface', keepOpen: true },
     { id: 'zoomOutButton', label: 'Smaller interface', keepOpen: true }
@@ -28,7 +29,8 @@ export function visiblePhoneMenuEntries(lookup, entries = phoneMenuEntries) {
     return entries.flatMap((entry) => {
         const button = lookup(entry.id);
         if (!button || button.hidden) return [];
-        return [{ ...entry, disabled: Boolean(button.disabled) }];
+        // A button that states its own current meaning (the offline one says how far along it is) is listed under that.
+        return [{ ...entry, label: button.dataset?.menuLabel || entry.label, disabled: Boolean(button.disabled) }];
     });
 }
 

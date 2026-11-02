@@ -10,6 +10,7 @@
 import engine from './engine.mjs';
 import projectFiles, { setPendingDroppedFile } from './projectFiles.mjs';
 import providerEditor from './providerEditor.mjs';
+import { installOffline } from './offline.mjs';
 import {
     addons, aiProviders, applicationInfo, componentLibrary, diagnostics, extensions,
     helpFeedback, modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
@@ -61,5 +62,16 @@ banner.innerHTML = '<span>This is a free, lightweight trial of Konjugate running
     'experience, <a href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" ' +
     'rel="noopener">download the free desktop app</a>.</span>' +
     '<button type="button" aria-label="Dismiss">×</button>';
-banner.querySelector('button').addEventListener('click', () => banner.remove());
+// The offline button lives in the banner while there is one, and in a hidden holder after it is dismissed, so the phone menu (which
+// presses the real button) can still reach it.
+const dismissButton = banner.querySelector('button[aria-label="Dismiss"]');
+const offlineHolder = document.createElement('div');
+offlineHolder.hidden = true;
+document.body.append(offlineHolder);
+const offline = installOffline({ host: offlineHolder });
+if (offline) banner.insertBefore(offline.button, dismissButton);
+dismissButton.addEventListener('click', () => {
+    if (offline) offlineHolder.append(offline.button);
+    banner.remove();
+});
 document.body.prepend(banner);

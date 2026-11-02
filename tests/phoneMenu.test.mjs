@@ -14,3 +14,9 @@ test('every phone menu entry is a distinct button', () => {
     const ids = phoneMenuEntries.map((entry) => entry.id);
     assert.equal(new Set(ids).size, ids.length);
 });
+
+test('a button that states its own meaning is listed under it, the others under the entry\'s label', () => {
+    const buttons = { offlineButton: { dataset: { menuLabel: 'Saving for offline use… 40%' } }, saveButton: { dataset: {} } };
+    const shown = visiblePhoneMenuEntries((id) => buttons[id]);
+    assert.deepEqual(shown.map((entry) => entry.label), ['Save project', 'Saving for offline use… 40%']);
+});

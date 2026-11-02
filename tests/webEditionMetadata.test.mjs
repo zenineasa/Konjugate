@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     WEB_EDITION_TITLE, WEB_EDITION_DESCRIPTION, WEB_EDITION_IMAGE, WEB_EDITION_IMAGE_ALT, WEB_EDITION_DOWNLOAD_URL,
-    webEditionHead, webEditionNoscript, webEditionRootPage, webEditionStructuredData
+    webEditionHead, webEditionManifest, webEditionNoscript, webEditionRootPage, webEditionStructuredData
 } from '../scripts/webEditionMetadata.mjs';
 
 const url = 'https://web.konjugate.com/';
@@ -126,4 +126,23 @@ test('the root page still redirects, and also carries the metadata and a plain l
     assert.match(page, /<link rel="canonical" href="https:\/\/web\.konjugate\.com\/">/);
     assert.match(page, /<a href="renderer\/index\.html">Open the web edition<\/a>/);
     assert.ok(page.startsWith('<!doctype html>'));
+});
+
+test('the manifest makes the app installable: a name, a standalone display, an in-scope start page and large icons', () => {
+    const manifest = webEditionManifest();
+    assert.equal(manifest.display, 'standalone');
+    assert.ok(manifest.name && manifest.short_name.length <= 12);
+    // Chrome installs a page only when its start page lies within the manifest's scope.
+    assert.equal(new URL(manifest.start_url, new URL(manifest.scope, url)).href.startsWith(new URL(manifest.scope, url).href), true);
+    const sizes = manifest.icons.map((icon) => Number.parseInt(icon.sizes, 10));
+    assert.ok(sizes.some((size) => size >= 192) && sizes.includes(512));
+    assert.match(manifest.theme_color, /^#[0-9a-f]{6}$/i);
+});
+
+test('both pages link the manifest, resolved from the page that carries it, and set the theme colour', () => {
+    assert.match(webEditionHead({ url }), /<link rel="manifest" href="manifest\.webmanifest">/);
+    assert.match(webEditionHead({ url, assetPrefix: '../' }), /<link rel="manifest" href="\.\.\/manifest\.webmanifest">/);
+    assert.match(webEditionRootPage({ url }), /<link rel="manifest" href="manifest\.webmanifest">/);
+    assert.match(webEditionHead({ url }), /<meta name="theme-color" content="#081018">/);
+    assert.match(webEditionHead({ url }), /<meta name="apple-mobile-web-app-capable" content="yes">/);
 });

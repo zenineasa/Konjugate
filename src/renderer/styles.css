@@ -1106,6 +1106,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 }
 .resultTransport.liveMode { width: max-content; min-width: min(680px, calc(100% - 48px)); max-width: min(800px, calc(100% - 48px)); }
 .resultTransport[hidden] { display: none; }
+.resultTransport .transportToggle { display: none; }
 
 /* Tier 1: Scrubbing Timeline Track */
 .transportTimelineTrack {
@@ -1526,6 +1527,21 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     padding: 2px 4px;
 }
 
+/* The banner's offline button, and the notice that a newer build is ready. */
+.webEditionBanner .offlineButton {
+    flex: 0 1 auto; padding: 4px 10px; color: #74ddd3; background: rgb(66 201 188 / 10%); border: 1px solid #2c6b66; border-radius: 6px;
+    font-size: 11.5px; font-weight: 600; line-height: 1.3; text-align: center;
+}
+.webEditionBanner .offlineButton:disabled { color: #8da2ad; border-color: #354954; background: none; cursor: default; }
+.webEditionUpdate {
+    position: fixed; z-index: 60; left: 50%; bottom: 14px; display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100% - 24px);
+    padding: 10px 12px 10px 16px; color: #d8e5ea; background: rgb(12 24 33 / 97%); border: 1px solid #2c6b66; border-radius: 10px;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 45%); transform: translateX(-50%); font-size: 12px; line-height: 1.45;
+}
+.webEditionUpdate[hidden] { display: none; }
+.webEditionUpdate button { padding: 5px 10px; color: #d8e5ea; background: #15232c; border: 1px solid #354954; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
+.webEditionUpdate .webEditionUpdateReload { color: #07161a; background: #42c9bc; border-color: #42c9bc; }
+
 /* Minimal in-page provider editor (docs/proposals/webEdition.md, phase 4) -- only ever created
    by src/renderer/webShims/providerEditor.mjs, never referenced by the desktop app. */
 .webProviderEditorDialog {
@@ -1744,6 +1760,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* The first things a visitor meets must fit the screen. */
     [data-web-edition] .webEditionBanner { top: calc(var(--title-height) + var(--tools-height) + 8px); right: 8px; left: 8px; width: auto; transform: none; padding: 8px 8px 8px 12px; font-size: 11px; line-height: 1.45; }
     .webEditionBannerDetail { display: none; }
+    /* The text keeps the first row with the dismiss button; the offline button, whose label is long, takes a row to itself. */
+    [data-web-edition] .webEditionBanner { flex-wrap: wrap; align-items: center; }
+    .webEditionBanner > span { flex: 1 1 0; min-width: 0; }
+    .webEditionBanner .offlineButton { order: 3; flex: 1 1 100%; }
+    .webEditionUpdate { width: calc(100% - 24px); flex-wrap: wrap; }
+    .webEditionUpdate span { flex: 1 1 100%; }
+    .webEditionUpdate button { flex: 1 1 0; }
     .tourFloating { top: auto !important; right: 12px !important; bottom: 12px !important; left: 12px !important; width: auto; }
 
     /* Dialogs take the width of the screen, and a two-column one stacks. */
@@ -1814,6 +1837,12 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .transportControlBar { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
     .transportControlBar > div { flex: 1 1 100%; flex-wrap: wrap; justify-content: center; min-width: 0; }
     .transportPlaybackGroup { flex-shrink: 1; }
+    /* The handle folds the sheet down to the scrubber and playback, leaving the model most of the screen. */
+    .resultTransport .transportToggle {
+        display: block; align-self: stretch; height: 22px; margin: -10px -12px -2px; padding: 0; background: none; border: 0; border-radius: 16px 16px 0 0;
+    }
+    .resultTransport .transportToggle::before { content: ''; display: block; width: 40px; height: 4px; margin: 9px auto 0; background: rgb(255 255 255 / 25%); border-radius: 2px; }
+    .resultTransport.collapsed :is(.transportStatusGroup, .transportActionsGroup, #resultExtent) { display: none; }
     .canvas:has(> .resultTransport:not([hidden])) .viewCube { top: 10px; bottom: auto; }
 
     /* More controls than a phone is wide: the strip scrolls sideways, and Run stays in reach at its end. */

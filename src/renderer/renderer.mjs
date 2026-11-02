@@ -6859,6 +6859,19 @@ function openRunDialog() {
     $('#runLaunchError').textContent = currentValidation.valid ? '' : 'The model has errors. Settings can be saved now; a run can start once the errors are fixed.';
     $('#runLaunchDialog').showModal();
 }
+// On a phone the results sheet starts folded down to the scrubber and playback, so the model stays in view.
+{
+    const transport = $('#resultTransport');
+    const toggle = $('#transportToggle');
+    const setCollapsed = (collapsed) => {
+        transport.classList.toggle('collapsed', collapsed);
+        toggle.ariaExpanded = String(!collapsed);
+        toggle.ariaLabel = collapsed ? 'Show more result controls' : 'Show fewer result controls';
+    };
+    setCollapsed(window.matchMedia(`(max-width: ${phoneMaxWidth}px)`).matches);
+    toggle.addEventListener('click', () => setCollapsed(!transport.classList.contains('collapsed')));
+}
+
 $('#runButton').addEventListener('click', openRunDialog);
 $('#runLaunchCancel').addEventListener('click', () => $('#runLaunchDialog').close());
 function updateRunModeFields() {
@@ -9890,22 +9903,42 @@ function updateSelectionRectangle(clientX, clientY) {
     rectangle.style.height = `${Math.abs(clientY - rectangleSelection.startY)}px`;
 }
 
+// A finger draws the rectangle only while it is the only one down: a second finger turns the gesture into a pinch for the camera,
+// which the controls keep listening to while the tool is on (see setTool), so the rectangle is dropped.
+const touchPointerIds = new Set();
+const forgetTouchPointer = (event) => { if (event.pointerType === 'touch') touchPointerIds.delete(event.pointerId); };
+window.addEventListener('pointerup', forgetTouchPointer, { capture: true });
+window.addEventListener('pointercancel', (event) => {
+    forgetTouchPointer(event);
+    if (rectangleSelection?.pointerId === event.pointerId) cancelRectangleSelection();
+}, { capture: true });
+
+function cancelRectangleSelection() {
+    rectangleSelection = null;
+    $('#selectionRectangle').hidden = true;
+}
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'touch') {
+        touchPointerIds.add(event.pointerId);
+        if (touchPointerIds.size > 1) cancelRectangleSelection();
+    }
     if (currentTool !== 'rectangleSelect' || event.button !== 0 || activeResult) return;
+    if (event.pointerType === 'touch' && touchPointerIds.size > 1) return;
     event.preventDefault();
-    event.stopImmediatePropagation();
-    rectangleSelection = { startX: event.clientX, startY: event.clientY, additive: event.shiftKey };
+    if (event.pointerType !== 'touch') event.stopImmediatePropagation();
+    rectangleSelection = { startX: event.clientX, startY: event.clientY, additive: event.shiftKey, pointerId: event.pointerId };
     const rectangle = $('#selectionRectangle');
     rectangle.hidden = false;
     updateSelectionRectangle(event.clientX, event.clientY);
 }, { capture: true });
 
 window.addEventListener('pointermove', (event) => {
-    if (rectangleSelection) updateSelectionRectangle(event.clientX, event.clientY);
+    if (rectangleSelection && event.pointerId === rectangleSelection.pointerId) updateSelectionRectangle(event.clientX, event.clientY);
 });
 
 window.addEventListener('pointerup', (event) => {
-    if (!rectangleSelection || event.button !== 0) return;
+    if (!rectangleSelection || event.button !== 0 || event.pointerId !== rectangleSelection.pointerId) return;
     const selection = rectangleSelection;
     rectangleSelection = null;
     $('#selectionRectangle').hidden = true;
@@ -12757,7 +12790,9 @@ function setTool(tool) {
     currentTool = tool;
     dragControls.enabled = !activeResult && tool === 'select';
     transformControls.enabled = !activeResult && tool in transformPropertyForTool;
-    orbitControls.enabled = tool !== 'rectangleSelect';
+    // With the rectangle tool a finger draws and a pinch still moves the camera, so on a touch screen the controls stay on and ignore one finger.
+    orbitControls.enabled = tool !== 'rectangleSelect' || window.matchMedia('(pointer: coarse)').matches;
+    orbitControls.touches.ONE = tool === 'rectangleSelect' ? null : THREE.TOUCH.ROTATE;
 
     if (tool in transformPropertyForTool) transformControls.setMode(tool === 'move' ? 'translate' : tool);
     if (!(tool in transformPropertyForTool)) transformControls.detach();

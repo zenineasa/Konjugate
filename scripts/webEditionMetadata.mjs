@@ -21,6 +21,31 @@ export const WEB_EDITION_FAVICON = 'favicon.ico';
 // The screenshot the README already uses, copied into the build as assets/social-preview.png.
 export const WEB_EDITION_IMAGE = { path: 'assets/social-preview.png', width: 1920, height: 1080 };
 
+// What the installed app is called, the colour behind it while it starts and the bar above it, and where it opens. The manifest sits at
+// the root of the site and the app is one folder down, so start_url and scope are relative to the manifest. The icons are the desktop
+// app's own, served from the site (the page's Content-Security-Policy allows images only from its own origin).
+export const WEB_EDITION_MANIFEST = 'manifest.webmanifest';
+export const WEB_EDITION_THEME_COLOR = '#081018';
+
+export function webEditionManifest({ target = 'renderer/index.html' } = {}) {
+    return {
+        id: target,
+        name: 'Konjugate Web Edition',
+        short_name: 'Konjugate',
+        description: WEB_EDITION_DESCRIPTION,
+        start_url: target,
+        scope: './',
+        display: 'standalone',
+        orientation: 'any',
+        background_color: WEB_EDITION_THEME_COLOR,
+        theme_color: WEB_EDITION_THEME_COLOR,
+        icons: [
+            { src: 'assets/icons/png/256.png', sizes: '256x256', type: 'image/png', purpose: 'any' },
+            { src: 'assets/icons/png/512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }
+        ]
+    };
+}
+
 const escapeHtml = (text) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
 // JSON for an inline <script type="application/ld+json">: the characters that could end the script or the markup around it are
@@ -69,6 +94,12 @@ export function webEditionHead({ url, indent = '    ', assetPrefix = '' }) {
         `<link rel="icon" type="image/png" sizes="32x32" href="${assetPrefix}assets/icons/favicon32.png">`,
         `<link rel="icon" type="image/png" sizes="16x16" href="${assetPrefix}assets/icons/favicon16.png">`,
         `<link rel="apple-touch-icon" href="${assetPrefix}assets/icons/appleTouchIcon.png">`,
+        `<link rel="manifest" href="${assetPrefix}${WEB_EDITION_MANIFEST}">`,
+        `<meta name="theme-color" content="${WEB_EDITION_THEME_COLOR}">`,
+        // Safari's own spelling of the same thing, which it reads rather than the manifest when a page is added to the home screen.
+        '<meta name="apple-mobile-web-app-capable" content="yes">',
+        '<meta name="apple-mobile-web-app-title" content="Konjugate">',
+        '<meta name="apple-mobile-web-app-status-bar-style" content="black">',
         `<meta name="description" content="${escapeHtml(WEB_EDITION_DESCRIPTION)}">`,
         // Index and follow, and allow the large preview image and full snippets the tags below are written for.
         '<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">',

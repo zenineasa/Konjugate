@@ -95,9 +95,18 @@ export const tourSteps = Object.freeze([
         text: 'Save it from the toolbar if you want to keep it. The Examples menu has finished models to open and study. Edges can also run C++ or Python programs, and results can be charted further.',
         desktopText: ' Add-ons and plugins in the desktop app\'s Extensions dialog chart results, drive runs and add new kinds of nodes and edges: have a look there next.',
         webText: ' The desktop app adds add-ons and plugins that chart results, drive runs and add new kinds of nodes and edges.',
-        advance: 'next', nextLabel: 'Finish', done: () => false
+        advance: 'next', nextLabel: 'Finish', bonus: true, done: () => false
     }
 ]);
+
+// What the card says above a step's title: the welcome has no number, the closing card is a bonus (the model is already built and run
+// by then, so it is not one of the numbered steps), and every other step is counted out of the numbered ones.
+export function stepLabel(index, steps = tourSteps) {
+    const step = steps[index];
+    if (!step || step.id === 'welcome') return '';
+    if (step.bonus) return 'Bonus step';
+    return `Step ${index} of ${steps.filter((candidate) => candidate.id !== 'welcome' && !candidate.bonus).length}`;
+}
 
 // The text a step shows in an edition (the finish step ends with a sentence on the desktop app's extras).
 export const stepText = (step, edition) => `${step.text}${edition === 'desktop' ? step.desktopText ?? '' : step.webText ?? ''}`;

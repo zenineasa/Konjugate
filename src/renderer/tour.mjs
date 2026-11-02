@@ -5,7 +5,7 @@
 // What the steps say and how each is judged lives in ../tour/tourSteps.mjs, shared by both editions; what this file knows about the
 // page is only what it is handed: how to read the facts the checks need, and how to fill a step in.
 
-import { brokenStepBefore, currentStepIndex, stepText, tourSteps } from '../tour/tourSteps.mjs';
+import { brokenStepBefore, currentStepIndex, stepLabel, stepText, tourSteps } from '../tour/tourSteps.mjs';
 
 const element = (tag, className, text) => {
     const created = document.createElement(tag);
@@ -125,7 +125,7 @@ export function createTour({ getFacts, fill = {}, edition, onFinish = () => {}, 
         const step = tourSteps[reached];
         const broken = brokenStepBefore(facts, reached);
         card.hidden = false;
-        progress.textContent = step.id === 'welcome' ? '' : `Step ${reached} of ${tourSteps.length - 2}`;
+        progress.textContent = stepLabel(reached);
         title.textContent = step.title;
         text.textContent = stepText(step, edition);
         next.hidden = step.advance !== 'next';

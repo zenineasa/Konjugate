@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { brokenStepBefore, currentStepIndex, stepText, tourModel, tourSteps } from '../src/tour/tourSteps.mjs';
+import { brokenStepBefore, currentStepIndex, stepLabel, stepText, tourModel, tourSteps } from '../src/tour/tourSteps.mjs';
 
 const node = (id) => ({ id, states: [{ id: id + 1, symbol: 'T' }] });
 const edge = (from, to, equation = 'k * (sourceT - targetT)', role = 'target') => ({ id: 30, equation, equationModel: { output: { role } }, source: { nodeId: from }, target: { nodeId: to } });
@@ -72,4 +72,13 @@ test('the finish step ends with a sentence about the desktop app\'s extras, said
 test('the model the tour builds is the one its steps describe', () => {
     assert.ok(tourModel.source.temperature > tourModel.target.temperature, 'Heat must flow from the heater to the block.');
     for (const candidate of tourSteps.filter((item) => item.id === 'firstNode' || item.id === 'secondNode')) assert.match(candidate.text, /Temperature/);
+});
+
+test('the numbered steps count up to their own total, and the welcome and the closing card are not among them', () => {
+    const numbered = tourSteps.length - 2;
+    assert.equal(stepLabel(0), '');
+    assert.equal(stepLabel(1), `Step 1 of ${numbered}`);
+    assert.equal(stepLabel(numbered), `Step ${numbered} of ${numbered}`);
+    assert.equal(stepLabel(tourSteps.length - 1), 'Bonus step');
+    assert.equal(stepLabel(99), '');
 });

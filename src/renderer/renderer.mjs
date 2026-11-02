@@ -12675,8 +12675,9 @@ function refreshLabelDeclutter() {
     const declutterNodes = nodeObjects.size > (phone ? declutterAbovePhone : declutterAbove) && labelModes.nodes !== 'hidden' && !activeEndpointPick;
     const declutterEdges = phone && labelModes.edges !== 'hidden' && !activeEndpointPick;
     if (!declutterNodes && !declutterEdges) { clear(); return; }
-    const width = labelRenderer.domElement.clientWidth;
-    const height = labelRenderer.domElement.clientHeight;
+    const interfaceZoom = Number.parseFloat(document.documentElement.style.zoom) || 1;
+    const width = labelRenderer.domElement.clientWidth * interfaceZoom;
+    const height = labelRenderer.domElement.clientHeight * interfaceZoom;
     if (!width || !height) return;
     const degree = new Map();
     model.relationships.forEach((relationship) => {
@@ -12685,7 +12686,6 @@ function refreshLabelDeclutter() {
     const labels = [];
     // The canvas is measured in screen pixels but an element's own size is not, once the interface is zoomed (the web edition's A+ and
     // the phone's default), so what is measured of a label is scaled to match.
-    const interfaceZoom = Number.parseFloat(document.documentElement.style.zoom) || 1;
     nodeObjects.forEach((object, id) => {
         const label = object.children.find((child) => child.element?.classList.contains('node-label-container'));
         if (!label) return;
@@ -14158,7 +14158,9 @@ function resizeRenderer() {
     camera.aspect = rect.width / rect.height;
     camera.updateProjectionMatrix();
     renderer.setSize(rect.width, rect.height, false);
-    labelRenderer.setSize(rect.width, rect.height);
+    // The label layer is sized in the page's own (layout) pixels, which the interface zoom then scales to the screen; rect is already in
+    // screen pixels, so using it would stretch the layer, and push every label away from its node, by the zoom factor.
+    labelRenderer.setSize(webglContainer.clientWidth, webglContainer.clientHeight);
 }
 
 new ResizeObserver(resizeRenderer).observe(webglContainer);

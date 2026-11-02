@@ -11,6 +11,7 @@
     --accent: #42c9bc;
     --accent-bright: #6ce0d5;
     --orange: #ed9f52;
+    --early-finding: #7fa3ad;
     --blue: #63bee8;
     --purple: #c18de1;
     --surface: #111d27;
@@ -710,6 +711,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .node-label-container.disabled .disabledBadge { display: inline-block; }
 .stabilityBadge { display: none; width: 15px; height: 15px; padding: 0; color: var(--orange); background: rgb(237 159 82 / 14%); border: 0; border-radius: 3px; font-size: 8px; line-height: 15px; text-align: center; cursor: pointer; }
 .stabilityBadge:hover { background: rgb(237 159 82 / 26%); }
+.node-label-container.earlyStabilityOnly .stabilityBadge { color: var(--early-finding); background: rgb(127 163 173 / 14%); }
+.node-label-container.earlyStabilityOnly .stabilityBadge:hover { background: rgb(127 163 173 / 26%); }
 .node-label-container.hasStabilityFinding .stabilityBadge { display: inline-block; }
 .objectLabel dl { display: none; gap: 5px; margin: 9px 0 5px; padding-top: 7px; border-top: 1px solid #263a45; }
 .objectLabel dl div { display: flex; align-items: center; justify-content: space-between; }
@@ -1211,6 +1214,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Stability Pill with Glowing Indicator */
 .stabilitySummaryButton i { width: 6px; height: 6px; background: #465862; border-radius: 50%; }
 .stabilitySummaryButton.hasFindings i { background: var(--orange); box-shadow: 0 0 7px rgb(237 159 82 / 60%); }
+.stabilitySummaryButton.hasFindings.earlyOnly i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--early-finding); }
 
 /* Playback Controls Capsule */
 .transportGroup { display: flex; align-items: center; gap: 4px; }
@@ -1303,6 +1307,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .stabilityFinding { display: grid; width: 100%; grid-template-columns: 8px 1fr; gap: 8px; padding: 10px 12px; color: #91a3ad; background: transparent; border: 0; border-bottom: 1px solid #23343e; text-align: left; }
 .stabilityFinding:hover { background: #182832; }
 .stabilityFinding i { width: 7px; height: 7px; margin-top: 2px; background: var(--orange); border-radius: 50%; }
+.stabilityFinding.early i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--early-finding); }
 .stabilityFinding strong, .stabilityFinding small { display: block; user-select: text; }
 .stabilityFinding strong { color: #becdd3; font-size: 8px; line-height: 1.4; }
 .stabilityFinding small { margin-top: 3px; color: #5f747f; font-size: 7px; }

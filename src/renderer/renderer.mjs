@@ -57,6 +57,7 @@ import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, ins
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterAbovePhone, declutterLabels } from './labelDeclutter.mjs';
 import { phoneMaxWidth } from './phoneMenu.mjs';
+import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle, stabilityGroupWhen } from '../stabilityFindingGroups.mjs';
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
@@ -5217,20 +5218,23 @@ function describeStabilityFinding(finding) {
     const nodeTitle = nodeObjects.get(finding.nodeId)?.userData?.definition?.title;
     const state = finding.stateId ? node?.states.find((candidate) => candidate.id === finding.stateId) : null;
     const subject = state ? `${nodeTitle ?? 'Node'} · ${state.symbol}` : (nodeTitle ?? `Node ${finding.nodeId}`);
-    const when = Number.isFinite(finding.globalTime) ? `at ${formatResultTime(finding.globalTime)}` : 'across the run';
+    const when = stabilityGroupWhen({ count: finding.count ?? 1, firstTime: finding.firstTime ?? finding.globalTime, lastTime: finding.lastTime ?? finding.globalTime }, formatResultTime);
     return { subject, when };
 }
 
 function renderStabilityFindings() {
-    const findings = resolvedStabilityFindings();
+    const occurrences = resolvedStabilityFindings();
+    // The same finding raised again and again for one state is listed once (src/stabilityFindingGroups.mjs); the timeline still marks each time.
+    const findings = groupStabilityFindings(occurrences);
     $('#stabilitySummaryButton').hidden = !findings.length;
     $('#stabilitySummaryButton').classList.toggle('hasFindings', findings.length > 0);
+    $('#stabilitySummaryButton').classList.toggle('earlyOnly', findings.length > 0 && findings.every(isEarlyStabilityFinding));
     $('#stabilityFindingsCount').textContent = findings.length ? String(findings.length) : '';
     if (!findings.length) {
         $('#stabilityFindingsCard').classList.add('hidden');
         $('#stabilitySummaryButton').ariaExpanded = 'false';
     }
-    $('#stabilityFindingsTitle').textContent = findings.length === 1 ? '1 finding' : `${findings.length} findings`;
+    $('#stabilityFindingsTitle').textContent = stabilityFindingsTitle(findings);
 
     const list = $('#stabilityFindingsList');
     list.replaceChildren();
@@ -5245,6 +5249,11 @@ function renderStabilityFindings() {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'stabilityFinding';
+        // An early check is drawn as a hollow dot: it is not a confirmed problem, and an ordinary transient raises it.
+        if (isEarlyStabilityFinding(finding)) {
+            button.classList.add('early');
+            button.title = 'An early check: this state\'s change grew for several steps in a row. Ordinary behaviour does that too, so it is not a confirmed problem.';
+        }
         button.dataset.nodeId = String(finding.nodeId);
         button.innerHTML = `<i></i><span><strong>${escapeHtml(subject)}</strong><small>${escapeHtml(finding.message)} · ${escapeHtml(when)}</small></span>`;
         button.addEventListener('click', () => navigateToStabilityFinding(finding));
@@ -5252,18 +5261,22 @@ function renderStabilityFindings() {
     });
 
     const nodeIdsWithFindings = new Set(findings.map((finding) => finding.nodeId));
+    const nodeIdsWithConfirmedFindings = new Set(findings.filter((finding) => !isEarlyStabilityFinding(finding)).map((finding) => finding.nodeId));
     $$('.node-label-container').forEach((label) => {
-        label.classList.toggle('hasStabilityFinding', nodeIdsWithFindings.has(Number(label.dataset.node)));
+        const nodeId = Number(label.dataset.node);
+        label.classList.toggle('hasStabilityFinding', nodeIdsWithFindings.has(nodeId));
+        label.classList.toggle('earlyStabilityOnly', nodeIdsWithFindings.has(nodeId) && !nodeIdsWithConfirmedFindings.has(nodeId));
     });
     renderStabilityConvergenceSection(nodeIdsWithFindings);
 
     const extent = Math.max(Number(activeResult?.targetTime) || 0, Number(activeResult?.availableResultTime) || 0,
         activeResult?.samples.at(-1)?.time ?? 0, Number.EPSILON);
-    const timedFindings = findings.filter((finding) => Number.isFinite(finding.globalTime));
+    const timedFindings = occurrences.filter((finding) => Number.isFinite(finding.globalTime));
     if (timedFindings.length) {
         const marks = timedFindings.map((finding) => {
             const percent = Math.min(100, Math.max(0, 100 * finding.globalTime / extent));
-            return `linear-gradient(to right, transparent calc(${percent}% - 1px), var(--orange) calc(${percent}% - 1px), var(--orange) calc(${percent}% + 1px), transparent calc(${percent}% + 1px))`;
+            const color = isEarlyStabilityFinding(finding) ? 'var(--early-finding)' : 'var(--orange)';
+            return `linear-gradient(to right, transparent calc(${percent}% - 1px), ${color} calc(${percent}% - 1px), ${color} calc(${percent}% + 1px), transparent calc(${percent}% + 1px))`;
         });
         $('#resultTimeline').style.setProperty('--stability-marks', marks.join(', '));
     } else {

@@ -14,10 +14,14 @@ export const phoneMenuEntries = [
     { id: 'exampleButton', label: 'Examples', separated: true },
     { id: 'exampleGuideButton', label: 'About this example' },
     { id: 'assistantButton', label: 'Model assistant', separated: true },
+    { id: 'causalInferenceButton', label: 'Causal inference' },
+    { id: 'parameterTuningButton', label: 'Parameter tuning' },
     { id: 'parametersButton', label: 'Parameters' },
     { id: 'providerToolchainsButton', label: 'Provider toolchains' },
     { id: 'diagnosticsButton', label: 'Diagnostics log' },
     { id: 'offlineButton', label: 'Use offline' },
+    { id: 'nodeLabelsButton', label: 'Node labels', useTitle: true, keepOpen: true, separated: true },
+    { id: 'edgeLabelsButton', label: 'Relationship labels', useTitle: true, keepOpen: true },
     { id: 'welcomeButton', label: 'About Konjugate', separated: true },
     { id: 'zoomInButton', label: 'Larger interface', keepOpen: true },
     { id: 'zoomOutButton', label: 'Smaller interface', keepOpen: true }
@@ -29,8 +33,9 @@ export function visiblePhoneMenuEntries(lookup, entries = phoneMenuEntries) {
     return entries.flatMap((entry) => {
         const button = lookup(entry.id);
         if (!button || button.hidden) return [];
-        // A button that states its own current meaning (the offline one says how far along it is) is listed under that.
-        return [{ ...entry, label: button.dataset?.menuLabel || entry.label, disabled: Boolean(button.disabled) }];
+        // A button that states its own current meaning (the offline one says how far along it is) is listed under that, and one whose
+        // title does (a label button says which of its three modes it is in) under its title.
+        return [{ ...entry, label: button.dataset?.menuLabel || (entry.useTitle && button.title) || entry.label, disabled: Boolean(button.disabled) }];
     });
 }
 
@@ -59,6 +64,8 @@ function installPhoneMenu() {
             item.addEventListener('click', () => {
                 if (!entry.keepOpen) close();
                 document.getElementById(entry.id).click();
+                // An entry that stays open and says what it did (a label mode) is read again.
+                if (entry.useTitle) { const [fresh] = visiblePhoneMenuEntries((id) => document.getElementById(id), [entry]); item.textContent = fresh.label; }
             });
             return item;
         }));
@@ -78,4 +85,25 @@ function installPhoneMenu() {
     window.matchMedia(`(min-width: ${phoneMaxWidth + 1}px)`).addEventListener('change', (event) => { if (event.matches) close(); });
 }
 
-if (typeof document !== 'undefined') installPhoneMenu();
+// The selection tools (select, several, rectangle, move, rotate, scale) are one button on a phone, showing the tool in use: pressing it
+// opens the others beneath the strip, and choosing one, or pressing anywhere else, puts them away again.
+function installToolFlyout() {
+    const group = document.querySelector('.toolGroup[aria-label="Selection tools"]');
+    if (!group) return;
+    const phone = () => window.matchMedia(`(max-width: ${phoneMaxWidth}px)`).matches;
+    const visible = (button) => button.classList.contains('active') || button.getAttribute('aria-pressed') === 'true';
+    group.addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button || !phone()) return;
+        // Capturing, so that which tools were on show is read before the tool's own handler changes which they are.
+        if (group.classList.contains('open')) group.classList.remove('open');
+        else if (visible(button)) group.classList.add('open');
+    }, true);
+    document.addEventListener('pointerdown', (event) => { if (!group.contains(event.target)) group.classList.remove('open'); });
+    window.matchMedia(`(min-width: ${phoneMaxWidth + 1}px)`).addEventListener('change', (event) => { if (event.matches) group.classList.remove('open'); });
+}
+
+if (typeof document !== 'undefined') {
+    installPhoneMenu();
+    installToolFlyout();
+}

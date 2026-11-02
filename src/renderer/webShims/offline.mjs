@@ -18,6 +18,7 @@ export function offlineButtonState(status, { failed = false, shortage = false } 
     if (status.state === 'ready') return { label: 'Available offline ✓ (remove)', disabled: false };
     if (shortage) return { label: 'Not enough storage for offline use', disabled: true };
     if (failed) return { label: 'Offline copy failed, try again', disabled: false };
+    if (status.saved > 0 && status.total) return { label: `Continue saving for offline use (${Math.floor(100 * status.saved / status.total)}% done)`, disabled: false };
     return { label: `Use offline (${megabytes(status.bytes)} MB)`, disabled: false };
 }
 
@@ -43,6 +44,15 @@ export function installOffline({ host }) {
     let status = null;
     let failed = false;
     let shortage = false;
+    // Set from the person's tap until the copy is complete: while it is, an interruption is picked up again rather than reported.
+    let wanted = false;
+    let wakeLock = null;
+    let retries = 0;
+    const holdScreenAwake = async () => {
+        try { if (wanted && !wakeLock && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+        wakeLock?.addEventListener?.('release', () => { wakeLock = null; });
+    };
+    const releaseScreen = () => { wakeLock?.release?.().catch(() => {}); wakeLock = null; };
     const render = () => {
         const { label, disabled } = offlineButtonState(status, { failed, shortage });
         button.textContent = label;
@@ -60,12 +70,15 @@ export function installOffline({ host }) {
         const message = event.data;
         if (message?.type === 'status') {
             status = message;
-            if (message.state === 'ready') failed = false;
+            if (message.state === 'off' && wanted && !failed) send({ type: 'enableOffline' });
+            if (message.state === 'ready') { failed = false; wanted = false; retries = 0; releaseScreen(); }
         } else if (message?.type === 'progress') {
             status = { ...(status ?? {}), state: 'saving', ...message };
         } else if (message?.type === 'error') {
-            failed = true;
             console.warn(`Offline copy failed: ${message.message}`);
+            // What was fetched is kept, so trying again only fetches the rest.
+            if (wanted && retries < 5) { retries += 1; setTimeout(() => send({ type: 'enableOffline' }), 3000 * retries); }
+            else { failed = true; wanted = false; releaseScreen(); }
         }
         render();
     });
@@ -76,8 +89,11 @@ export function installOffline({ host }) {
             return;
         }
         failed = false;
+        wanted = true;
+        retries = 0;
+        holdScreenAwake();
         shortage = !await enoughStorage(status?.bytes ?? 0);
-        if (shortage) { render(); return; }
+        if (shortage) { wanted = false; releaseScreen(); render(); return; }
         // Asks the browser not to clear the copy when the device runs short of space.
         navigator.storage?.persist?.().catch(() => {});
         await send({ type: 'enableOffline' });
@@ -93,7 +109,14 @@ export function installOffline({ host }) {
         });
         // An installed app is often suspended rather than closed, and a browser checks for a newer worker only when a page loads, so
         // look again whenever the app comes back to the front.
-        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') registration.update().catch(() => {}); });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            registration.update().catch(() => {});
+            // A phone may have stopped the worker while the screen was off; asking again carries on from what was saved.
+            if (wanted) { holdScreenAwake(); send({ type: 'enableOffline' }); }
+        });
+        // The worker can also be stopped while the screen is on, and then reports that it is no longer saving.
+        setInterval(() => { if (wanted && status?.state === 'saving') send({ type: 'status' }); }, 15000);
         send({ type: 'status' });
     }).catch((error) => console.warn(`The service worker did not register: ${error.message}`));
 

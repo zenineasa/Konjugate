@@ -286,6 +286,9 @@ for (const packageName of vendoredPackages) {
 // importer (about 35 MB); the worker keeps those when they are first used.
 const notPrecached = [/^node_modules\/(pyodide|@wasmer|occt-import-js)\//, /(^|\/)\.DS_Store$/];
 
+// Files this large are copied a piece at a time, so a dropped connection costs one piece and not the whole file.
+const largeFileBytes = 8 * 1024 * 1024;
+
 async function listFiles(directory, prefix = '') {
     const files = [];
     for (const entry of await readdir(join(directory, prefix), { withFileTypes: true })) {
@@ -301,14 +304,17 @@ if (!threads) {
     const hash = createHash('sha256');
     const precachePaths = [''];
     let precacheBytes = 0;
+    const largeFiles = {};
     for (const path of files) {
         hash.update(`${path}\0`).update(await readFile(join(outputDirectory, path))).update('\0');
         if (notPrecached.some((pattern) => pattern.test(path))) continue;
         precachePaths.push(path);
-        precacheBytes += (await stat(join(outputDirectory, path))).size;
+        const { size } = await stat(join(outputDirectory, path));
+        precacheBytes += size;
+        if (size >= largeFileBytes) largeFiles[path] = size;
     }
     const template = await readFile(join(rootDirectory, 'scripts', 'webServiceWorker.js'), 'utf8');
-    const values = { __BUILD_ID__: hash.digest('hex').slice(0, 16), __PRECACHE_PATHS__: JSON.stringify(precachePaths), __PRECACHE_BYTES__: String(precacheBytes) };
+    const values = { __BUILD_ID__: hash.digest('hex').slice(0, 16), __PRECACHE_PATHS__: JSON.stringify(precachePaths), __PRECACHE_BYTES__: String(precacheBytes), __LARGE_FILES__: JSON.stringify(largeFiles) };
     await writeFile(join(outputDirectory, 'sw.js'), template.replace(/__[A-Z_]+__/g, (name) => {
         if (!(name in values)) throw new Error(`webServiceWorker.js has a placeholder, ${name}, that the build does not fill.`);
         return values[name];

@@ -82,3 +82,8 @@ test('the numbered steps count up to their own total, and the welcome and the cl
     assert.equal(stepLabel(tourSteps.length - 1), 'Bonus step');
     assert.equal(stepLabel(99), '');
 });
+
+test('the card that follows the second node tells a person to drag the overlapping nodes apart', () => {
+    // The builder puts every new node at the same position, so the nodes sit on top of each other until one is moved.
+    assert.match(stepText(step('addEdge'), 'web'), /same spot.*drag one of them aside/);
+});

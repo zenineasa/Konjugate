@@ -57,7 +57,7 @@ export const tourSteps = Object.freeze([
     {
         id: 'addEdge',
         title: 'Connect them',
-        text: `An edge is a relationship: an equation that says how one node changes another. Open the Add menu, choose Edge, and make it go from ${tourModel.source.name} to ${tourModel.target.name}.`,
+        text: `Both nodes start in the same spot, so one hides the other: drag one of them aside on the canvas first. An edge is a relationship: an equation that says how one node changes another. Open the Add menu, choose Edge, and make it go from ${tourModel.source.name} to ${tourModel.target.name}.`,
         target: (ui) => (ui.edgeBuilderOpen ? '#edgeBuilder' : '#addButton'), fill: 'edgeEndpoints',
         done: ({ document, ui }) => (ui.edgeBuilderOpen && ui.edgeSourceNodeId && ui.edgeTargetNodeId && ui.edgeSourceNodeId !== ui.edgeTargetNodeId) || edgesBetweenNodes(document).length >= 1
     },

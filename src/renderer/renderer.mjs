@@ -55,7 +55,8 @@ import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
 import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
 import { stateValueText } from './valueFormat.mjs';
-import { declutterAbove, declutterLabels } from './labelDeclutter.mjs';
+import { declutterAbove, declutterAbovePhone, declutterLabels } from './labelDeclutter.mjs';
+import { phoneMaxWidth } from './phoneMenu.mjs';
 import { canvasFog, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
@@ -493,6 +494,9 @@ let labelSystemReady = false;
 // them all: by node id. A label that must stay is never among them.
 const declutteredNodeIds = new Set();
 const nodeLabelSizes = new Map();
+// The same for the edge labels, by bundle key (phones only).
+const declutteredBundleKeys = new Set();
+const bundleLabelSizes = new Map();
 const labelProbe = new THREE.Vector3();
 let hoverFrame = null;
 // Handles are pushed into nodePickTargets (not a separate DragControls instance) -- DragControls'
@@ -7165,7 +7169,7 @@ function createRelationshipBundleOverlay(key) {
         event.currentTarget.textContent = pinned ? '−' : '＋';
         event.currentTarget.title = pinned ? 'Use automatic detail' : 'Keep expanded';
     });
-    return { anchor, element, signature: '' };
+    return { anchor, element, signature: '', key };
 }
 
 function renderRelationshipBundle(overlay, bundle) {
@@ -9838,6 +9842,23 @@ function waypointInsertionIndex(definition, hitSegmentIndex) {
     return waypoints.filter((_, i) => (i + 1) / (waypoints.length + 1) < tHit).length;
 }
 
+// A touch screen has no Shift key, which is what adds to a selection (and what a rectangle drag adds with). While the Multi-select
+// toggle is on, every press, release and click on the canvas reads as if Shift were held, so the whole of that behaviour comes with
+// it: a tap adds a node or takes it away, and a rectangle adds to what is selected. Done on the event itself, before anything
+// listening to it sees it, since the code that answers Shift reads it from the event in a dozen places.
+let touchMultiSelect = false;
+for (const type of ['pointerdown', 'pointerup', 'click']) {
+    window.addEventListener(type, (event) => {
+        if (touchMultiSelect && event.target.closest?.('#canvas')) Object.defineProperty(event, 'shiftKey', { value: true });
+    }, { capture: true });
+}
+$('#multiSelectButton').addEventListener('click', () => {
+    touchMultiSelect = !touchMultiSelect;
+    $('#multiSelectButton').classList.toggle('active', touchMultiSelect);
+    $('#multiSelectButton').ariaPressed = String(touchMultiSelect);
+    $('#statusText').textContent = touchMultiSelect ? 'Multi-select · tap nodes to add or remove them' : 'Multi-select off';
+});
+
 function captureAdditiveNodeSelection(event) {
     if (event.button !== 0 || !event.shiftKey || activeEndpointPick || currentTool === 'rectangleSelect') return;
     const label = event.target.closest?.('.node-label-container');
@@ -9930,6 +9951,64 @@ window.addEventListener('pointerup', (event) => {
 }, { capture: true });
 function stageContextMenuAction(action) {
     stagedContextMenuAction = action;
+}
+
+// A touch screen has no right button, and iOS Safari sends no `contextmenu` for a long press the way Android's Chrome does. So
+// holding one finger still on the canvas or a label for longPressDelayMs stands in for a right click: the same `contextmenu` event
+// is sent to what is under the finger, so every handler above answers it as it would a right click, and what it staged is opened at
+// once (there is no button release to wait for, and a finger that moved has already cancelled the hold). It is slower than the
+// edge-line hold (relationshipHoldDurationMs), which keeps starting waypoint editing on a held edge line.
+const longPressDelayMs = 600;
+const longPressTravelLimit = 10;
+let longPress = null;
+let swallowNextClick = false;
+function cancelLongPress() {
+    if (longPress) clearTimeout(longPress.timer);
+    longPress = null;
+}
+window.addEventListener('pointerdown', (event) => {
+    cancelLongPress();
+    swallowNextClick = false;
+    if (event.pointerType !== 'touch' || !event.isPrimary) return;
+    // What was selected before this press: with Multi-select on, the press itself toggles a node, which a hold must not do.
+    longPress = { x: event.clientX, y: event.clientY, selected: new Set(selectedNodeIds), timer: setTimeout(fireLongPress, longPressDelayMs) };
+}, { capture: true });
+window.addEventListener('pointermove', (event) => {
+    if (longPress && Math.hypot(event.clientX - longPress.x, event.clientY - longPress.y) > longPressTravelLimit) cancelLongPress();
+}, { capture: true });
+window.addEventListener('pointerup', cancelLongPress, { capture: true });
+window.addEventListener('pointercancel', cancelLongPress, { capture: true });
+// A second finger is a pinch or a two-finger pan, not a hold.
+window.addEventListener('touchstart', (event) => { if (event.touches.length > 1) cancelLongPress(); }, { capture: true, passive: true });
+// The click that follows lifting the finger would select, open or dismiss what the menu was just opened for.
+window.addEventListener('click', (event) => {
+    if (!swallowNextClick) return;
+    swallowNextClick = false;
+    event.stopPropagation();
+    event.preventDefault();
+}, { capture: true });
+function fireLongPress() {
+    if (!longPress) return;
+    const { x, y, selected } = longPress;
+    longPress = null;
+    if (relationshipPointerDown?.holdTriggered) return;
+    if (touchMultiSelect) {
+        for (const id of new Set([...selected, ...selectedNodeIds])) {
+            if (selected.has(id) !== selectedNodeIds.has(id)) selectNode(nodeObjects.get(id), { additive: true });
+        }
+    }
+    const target = document.elementFromPoint(x, y);
+    if (!target) return;
+    stagedContextMenuAction = null;
+    nodePointerDown = null;
+    if (relationshipPointerDown) clearTimeout(relationshipPointerDown.timer);
+    relationshipPointerDown = null;
+    target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, view: window }));
+    const action = stagedContextMenuAction;
+    stagedContextMenuAction = null;
+    if (!action) return;
+    swallowNextClick = true;
+    action();
 }
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
@@ -12512,7 +12591,8 @@ function relationshipBundleKey(relationship) {
 // renderer then skips them entirely, which is what keeps a model with hundreds of relationships
 // responsive once its labels are hidden. The exceptions are the labels that must stay.
 function bundleLabelAllowed(overlay) {
-    return labelModes.edges !== 'hidden' || overlay.element.classList.contains('pinned') || overlay.element.classList.contains('peek');
+    if (overlay.element.classList.contains('pinned') || overlay.element.classList.contains('peek')) return true;
+    return labelModes.edges !== 'hidden' && !declutteredBundleKeys.has(overlay.key);
 }
 function refreshLabelObjectVisibility() {
     nodeObjects.forEach((object, id) => {
@@ -12525,25 +12605,30 @@ function refreshLabelObjectVisibility() {
     relationshipBundleObjects.forEach((overlay) => { overlay.anchor.visible = (overlay.baseVisible ?? true) && bundleLabelAllowed(overlay); });
 }
 
-// Works out again which node labels to leave out, from where they fall on screen now: called a few times a second,
-// since the camera moving is what changes it. A model of up to `declutterAbove` nodes keeps every label, as does
-// picking an endpoint, where the labels are what is picked.
+// Works out again which labels to leave out, from where they fall on screen now: called a few times a second, since
+// the camera moving is what changes it. A model of up to `declutterAbove` nodes keeps every node label, as does picking
+// an endpoint, where the labels are what is picked. On a phone the edge labels are left out where they overlap too, in
+// the same pass, so a node's name is written before an edge's.
 function refreshLabelDeclutter() {
     // Said on the Nodes control, so shapes without a name are no puzzle.
     const say = () => {
         const button = $('[data-detail="nodes"]');
         const base = button.dataset.baseTitle ?? button.title;
         button.title = declutteredNodeIds.size ? `${base} · ${declutteredNodeIds.size} left out where they would overlap: zoom in, or point at a shape` : base;
-        canvas.dataset.labelsLeftOut = String(declutteredNodeIds.size);
+        canvas.dataset.labelsLeftOut = String(declutteredNodeIds.size + declutteredBundleKeys.size);
     };
     const clear = () => {
-        if (!declutteredNodeIds.size) return;
+        if (!declutteredNodeIds.size && !declutteredBundleKeys.size) return;
         declutteredNodeIds.clear();
+        declutteredBundleKeys.clear();
         refreshLabelObjectVisibility();
         updateHoverTracking();
         say();
     };
-    if (nodeObjects.size <= declutterAbove || labelModes.nodes === 'hidden' || activeEndpointPick) { clear(); return; }
+    const phone = window.matchMedia(`(max-width: ${phoneMaxWidth}px)`).matches;
+    const declutterNodes = nodeObjects.size > (phone ? declutterAbovePhone : declutterAbove) && labelModes.nodes !== 'hidden' && !activeEndpointPick;
+    const declutterEdges = phone && labelModes.edges !== 'hidden' && !activeEndpointPick;
+    if (!declutterNodes && !declutterEdges) { clear(); return; }
     const width = labelRenderer.domElement.clientWidth;
     const height = labelRenderer.domElement.clientHeight;
     if (!width || !height) return;
@@ -12552,26 +12637,51 @@ function refreshLabelDeclutter() {
         for (const end of [relationship.source, relationship.target]) degree.set(end, (degree.get(end) ?? 0) + 1);
     });
     const labels = [];
+    // The canvas is measured in screen pixels but an element's own size is not, once the interface is zoomed (the web edition's A+ and
+    // the phone's default), so what is measured of a label is scaled to match.
+    const interfaceZoom = Number.parseFloat(document.documentElement.style.zoom) || 1;
     nodeObjects.forEach((object, id) => {
         const label = object.children.find((child) => child.element?.classList.contains('node-label-container'));
         if (!label) return;
         const element = label.element;
         // A label left out has no size to measure: its last, or a card's usual.
-        if (element.offsetWidth) nodeLabelSizes.set(id, [element.offsetWidth, element.offsetHeight]);
+        if (element.offsetWidth) nodeLabelSizes.set(id, [element.offsetWidth * interfaceZoom, element.offsetHeight * interfaceZoom]);
         const [labelWidth, labelHeight] = nodeLabelSizes.get(id) ?? [170, 38];
         label.getWorldPosition(labelProbe).project(camera);
         if (labelProbe.z > 1 || Math.abs(labelProbe.x) > 1.5 || Math.abs(labelProbe.y) > 1.5) return;
         const classes = element.classList;
         labels.push({
-            id, left: (labelProbe.x * 0.5 + 0.5) * width, top: (-labelProbe.y * 0.5 + 0.5) * height - labelHeight / 2, width: labelWidth, height: labelHeight,
-            priority: degree.get(id) ?? 0, shown: !declutteredNodeIds.has(id),
-            keep: classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding')
+            id: `n${id}`, left: (labelProbe.x * 0.5 + 0.5) * width, top: (-labelProbe.y * 0.5 + 0.5) * height - labelHeight / 2, width: labelWidth, height: labelHeight,
+            // Nodes first, then the edges between the most-connected.
+            priority: 1000 + (degree.get(id) ?? 0), shown: !declutteredNodeIds.has(id),
+            keep: !declutterNodes || classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding')
         });
     });
+    if (declutterEdges) {
+        relationshipBundleObjects.forEach((overlay, key) => {
+            if (!(overlay.baseVisible ?? true)) return;
+            const element = overlay.element;
+            if (element.offsetWidth) bundleLabelSizes.set(key, [element.offsetWidth * interfaceZoom, element.offsetHeight * interfaceZoom]);
+            const [labelWidth, labelHeight] = bundleLabelSizes.get(key) ?? [140, 40];
+            overlay.anchor.getWorldPosition(labelProbe).project(camera);
+            if (labelProbe.z > 1 || Math.abs(labelProbe.x) > 1.5 || Math.abs(labelProbe.y) > 1.5) return;
+            const classes = element.classList;
+            labels.push({
+                id: `b${key}`, left: (labelProbe.x * 0.5 + 0.5) * width - labelWidth / 2, top: (-labelProbe.y * 0.5 + 0.5) * height - labelHeight / 2,
+                width: labelWidth, height: labelHeight, priority: element.querySelectorAll('.relationshipRow').length, shown: !declutteredBundleKeys.has(key),
+                keep: classes.contains('pinned') || classes.contains('peek')
+            });
+        });
+    }
     const hidden = declutterLabels(labels);
-    if (hidden.size === declutteredNodeIds.size && [...hidden].every((id) => declutteredNodeIds.has(id))) return;
+    const hiddenNodes = new Set([...hidden].filter((id) => id.startsWith('n')).map((id) => Number(id.slice(1))));
+    const hiddenBundles = new Set([...hidden].filter((id) => id.startsWith('b')).map((id) => id.slice(1)));
+    const same = (previous, next) => previous.size === next.size && [...next].every((id) => previous.has(id));
+    if (same(declutteredNodeIds, hiddenNodes) && same(declutteredBundleKeys, hiddenBundles)) return;
     declutteredNodeIds.clear();
-    hidden.forEach((id) => declutteredNodeIds.add(id));
+    hiddenNodes.forEach((id) => declutteredNodeIds.add(id));
+    declutteredBundleKeys.clear();
+    hiddenBundles.forEach((key) => declutteredBundleKeys.add(key));
     refreshLabelObjectVisibility();
     say();
 }

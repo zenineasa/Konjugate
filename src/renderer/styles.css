@@ -1719,3 +1719,118 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningRunActions button { flex: 1; height: 30px; color: #dbe7eb; background: transparent; border: 1px solid #3b5460; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .parameterTuningRunActions button:first-child { color: #061412; background: #42c9bc; border-color: #42c9bc; }
 .parameterTuningRunActions button:disabled { opacity: .5; cursor: default; }
+
+/* Phones (see phoneMenu.mjs): the title bar keeps only the project name and a menu button, everything else it carried is listed in
+   that menu, and the canvas gets the whole width. Desktop windows never reach this narrow, so none of it applies there. */
+.windowControls .phoneMenuButton, .phoneMenu, .multiSelectTool { display: none; }
+@media (max-width: 700px) {
+    :root { --rail-width: 0px; }
+    .windowTitle .welcomeButton, .documentActions, .windowControls > :not(.phoneMenuButton), .canvasHelp, .addonRail { display: none; }
+    .windowTitle { padding-left: 10px; }
+    .windowTitle .documentTitle { max-width: none; margin-left: 0; font-size: 13px; }
+    .toolstrip .multiSelectTool { display: flex; }
+    .windowControls .phoneMenuButton { display: grid; width: 44px; height: 100%; padding: 0; place-items: center; background: transparent; border: 0; font-size: 22px; line-height: 1; }
+    .phoneMenu {
+        position: fixed; z-index: 60; top: var(--title-height); right: 8px; left: 8px; display: flex; max-height: calc(100% - var(--title-height) - 16px);
+        flex-direction: column; padding: 6px; overflow-y: auto; background: rgb(14 25 34 / 98%); border: 1px solid #3a4d58; border-radius: 10px;
+        box-shadow: 0 16px 38px rgb(0 0 0 / 55%);
+    }
+    .phoneMenu[hidden] { display: none; }
+    .phoneMenu button { height: 44px; padding: 0 12px; color: #dbe7ec; background: transparent; border: 0; border-radius: 6px; font-size: 14px; text-align: left; }
+    .phoneMenu button:active { background: #17232c; }
+    .phoneMenu button:disabled { color: #4a5f6a; }
+    .phoneMenu button.separated { margin-top: 5px; border-top: 1px solid #22343e; border-radius: 0 0 6px 6px; }
+
+    /* The first things a visitor meets must fit the screen. */
+    [data-web-edition] .webEditionBanner { top: calc(var(--title-height) + var(--tools-height) + 8px); right: 8px; left: 8px; width: auto; transform: none; padding: 8px 8px 8px 12px; font-size: 11px; line-height: 1.45; }
+    .webEditionBannerDetail { display: none; }
+    .tourFloating { top: auto !important; right: 12px !important; bottom: 12px !important; left: 12px !important; width: auto; }
+
+    /* Dialogs take the width of the screen, and a two-column one stacks. */
+    dialog.passwordDialog { width: calc(100% - 16px); max-width: none; max-height: calc(100% - 16px); overflow-y: auto; }
+    /* The interface is enlarged on a phone (webShims/misc.mjs), which leaves a viewport unit wider than the page, so these go by percentage. */
+    .helpFeedbackDialog form { max-height: none; }
+    .extensionsDialog { --extensions-pane-height: 360px; }
+    .webProviderEditorDialog { width: calc(100% - 16px); }
+    .contextCard.nodeEditor, .contextCard.edgeEditor, .contextCard.edgeBuilder { width: calc(100% - 20px); }
+    .assistantPanel { width: calc(100% - 20px); height: calc(100% - var(--title-height) - var(--tools-height) - 24px); }
+    .examplesExplorerBody { grid-template-columns: 1fr; }
+    .examplesExplorerResults { height: 300px; }
+    .examplesExplorerDetail { height: auto; min-height: 120px; }
+    .tourFloating button { height: 40px; }
+
+    /* The 3D cube and pan pad need room a phone does not have; pinching and dragging do their job, and Fit and zoom stay. */
+    .viewCube { bottom: 12px; left: 12px; display: flex; width: auto; height: auto; align-items: center; gap: 6px; padding: 4px; border-radius: 26px; }
+    .viewCube :is(.viewCubeScene, .panPad) { display: none; }
+    .viewCube .viewNavActions { position: static; height: auto; gap: 6px; }
+    #viewCube #lock2DButton { position: static; width: 40px; height: 40px; }
+    .modelStatus { display: none; }
+
+    /* The interface zoom would make the cards on the canvas too big to leave room between them, so they stay near their desktop size. */
+    :is(.objectLabel, .bundleLabel) { zoom: .72; }
+
+    /* The panels that sit beside the canvas on a desktop come up from the bottom edge instead, over everything but the title bar, as a
+       sheet the width of the screen with room above it to see the model, and a handle that says it is a sheet. */
+    :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel) {
+        position: fixed; z-index: 45; inset: auto 0 0 0; width: auto; max-height: 62%; border-bottom: 0; border-radius: 16px 16px 0 0;
+        box-shadow: 0 -12px 34px rgb(0 0 0 / 50%);
+    }
+    /* A menu opened by a long press is a sheet too: it is placed where the finger was, which on a phone is never a place it fits. */
+    :is(#nodeContextMenu, #edgeContextMenu, #waypointContextMenu, #addPalette) {
+        position: fixed; z-index: 45; inset: auto 0 0 0 !important; width: auto !important; max-height: 62%; overflow-y: auto; border-bottom: 0; border-radius: 16px 16px 0 0;
+        box-shadow: 0 -12px 34px rgb(0 0 0 / 50%);
+    }
+    :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel, #nodeContextMenu, #edgeContextMenu, #waypointContextMenu, #addPalette)::before {
+        display: block; width: 38px; height: 4px; margin: 7px auto 0; background: #3a4d58; border-radius: 2px; content: '';
+    }
+
+    /* The parameters table is a card per parameter, its columns labelled above each value, not 720 pixels of columns to scroll along. */
+    .parametersPanel > header { flex-wrap: wrap; }
+    .parametersPanel > header .parametersControls { order: 3; flex: 1 1 100%; }
+    .parametersControls input { flex: 1; width: auto; }
+    #parametersTable, #parametersTable tbody { display: block; min-width: 0; }
+    #parametersTable thead { display: none; }
+    #parametersTable tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid #1e313b; }
+    #parametersTable td { display: block; min-width: 0; padding: 0; border: 0; }
+    #parametersTable td:is(:nth-child(1), :nth-child(2), :nth-child(7)) { grid-column: 1 / -1; }
+    #parametersTable td:nth-child(1) { font-size: 1.15em; }
+    #parametersTable td:is(:nth-child(3), :nth-child(4), :nth-child(5), :nth-child(6), :nth-child(7))::before { display: block; margin-bottom: 2px; color: #647984; font-size: .85em; letter-spacing: .06em; text-transform: uppercase; }
+    #parametersTable td:nth-child(3)::before { content: 'Value'; }
+    #parametersTable td:nth-child(4)::before { content: 'Unit'; }
+    #parametersTable td:nth-child(5)::before { content: 'Mode'; }
+    #parametersTable td:nth-child(6)::before { content: 'Fit'; }
+    #parametersTable td:nth-child(7)::before { content: 'Belongs to'; }
+    #parametersTable :is(input[type="number"], input[data-field="unit"], select) { box-sizing: border-box; width: 100%; height: 30px; }
+    #parametersTable td:empty { display: none; }
+
+    /* The results bar is the bottom edge's own sheet, its rows wrapping to the width, with the camera controls moved clear above it. */
+    .resultTransport, .resultTransport.liveMode {
+        position: fixed; z-index: 44; inset: auto 0 0 0; width: auto; min-width: 0; max-width: none; padding: 10px 12px 14px; transform: none;
+        border-bottom: 0; border-radius: 16px 16px 0 0;
+    }
+    .transportTimelineTrack { flex-wrap: wrap; row-gap: 4px; }
+    .transportTimelineTrack input[type="range"] { flex: 1 1 120px; min-width: 0; }
+    .transportTimelineTrack #resultExtent { order: 3; flex-basis: 100%; min-width: 0; text-align: center; }
+    .transportControlBar { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .transportControlBar > div { flex: 1 1 100%; flex-wrap: wrap; justify-content: center; min-width: 0; }
+    .transportPlaybackGroup { flex-shrink: 1; }
+    .canvas:has(> .resultTransport:not([hidden])) .viewCube { top: 10px; bottom: auto; }
+
+    /* More controls than a phone is wide: the strip scrolls sideways, and Run stays in reach at its end. */
+    .toolstrip { overflow-x: auto; scrollbar-width: none; }
+    .toolstrip::-webkit-scrollbar { display: none; }
+    .toolstripLeft { flex-shrink: 0; overflow: visible; }
+    #runButton { position: sticky; right: 0; }
+}
+
+/* Anything touched rather than pointed at: the controls people tap are big enough to hit. */
+@media (pointer: coarse) and (min-width: 701px) {
+    .squareTool, .toolButton, .viewNavActions button { min-width: 40px; height: 40px; }
+    :root { --tools-height: 52px; }
+    #runButton { height: 40px; }
+}
+
+/* A held finger is a context menu (see the long press in renderer.mjs), not a text selection or a share sheet. */
+@media (pointer: coarse) {
+    .webglSurface, .css2dContainer { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}

@@ -29,6 +29,12 @@ function applyZoom(factor) {
     document.documentElement.style.zoom = currentZoom;
     return currentZoom;
 }
+// Much of the interface is set in 6 to 9 pixel type, which is dense on a desktop and unreadable on a phone, so a phone starts
+// enlarged. The same A+ and A- (in the phone menu) still adjust it. The width is the one src/renderer/phoneMenu.mjs and the
+// phone block of styles.css change layout at.
+const phoneMaxWidth = 700;
+const phoneUiZoom = 1.4;
+if (window.matchMedia?.(`(max-width: ${phoneMaxWidth}px)`).matches) applyZoom(phoneUiZoom);
 export const uiZoom = {
     get: () => currentZoom,
     increase: () => applyZoom(currentZoom + uiZoomStep),

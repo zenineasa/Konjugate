@@ -55,8 +55,8 @@ await mkdir(outputDirectory, { recursive: true });
 // `new URL(..., import.meta.url)` -- webShims/engine.mjs also uses that construction for the
 // WASM engine's .js/.wasm asset URL, which is not an ES module and must not be walked as one) --
 // so every .mjs file actually needed gets copied automatically instead of hand-listed and
-// risking drift as those imports change.
-const importPattern = /(?:from\s+|import\()\s*['"](\.[^'"]+)['"]|new\s+Worker\(\s*new URL\(\s*['"](\.[^'"]+)['"]/g;
+// risking drift as those imports change. A side-effect import (`import './x.mjs';`, no `from`) counts too, at the start of a line.
+const importPattern = /(?:from\s+|import\(|^import\s+)\s*['"](\.[^'"]+)['"]|new\s+Worker\(\s*new URL\(\s*['"](\.[^'"]+)['"]/gm;
 const visitedModules = new Set();
 async function walk(absolutePath) {
     if (visitedModules.has(absolutePath)) return;

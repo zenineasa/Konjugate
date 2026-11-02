@@ -10,6 +10,9 @@
 // them apart.
 export const declutterAbove = 30;
 
+// On a phone the canvas is a fraction as wide, so cards meet at far fewer nodes.
+export const declutterAbovePhone = 6;
+
 // `labels`: [{ id, left, top, width, height, priority, keep, shown }] in screen pixels. `keep`: must stay (selected,
 // pointed at, flagged); `priority`: higher is written first (a node's number of relationships); `shown`: it was
 // written last time, which breaks a tie in its favour so labels do not flicker as the camera moves. Returns the ids

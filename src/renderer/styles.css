@@ -8,6 +8,7 @@
     font-synthesis: none;
     --title-height: 38px;
     --tools-height: 44px;
+    --dock-width: 0px;
     --accent: #42c9bc;
     --accent-bright: #6ce0d5;
     --orange: #ed9f52;
@@ -668,7 +669,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantPanel footer button:disabled { opacity: .45; cursor: default; }
 
 .canvas {
-    position: fixed; inset: calc(var(--title-height) + var(--tools-height)) 0 0 var(--rail-width); overflow: hidden;
+    position: fixed; inset: calc(var(--title-height) + var(--tools-height)) var(--dock-width) 0 var(--rail-width); overflow: hidden;
     background-color: #0a131b;
     background-image:
         linear-gradient(30deg, transparent 49.8%, rgb(49 72 84 / 18%) 50%, transparent 50.2%),
@@ -822,6 +823,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .editorCard [data-node-panel][hidden] { display: none; }
 .nodeResultsPanel { position: relative; min-height: 285px; padding: 8px !important; }
 .nodeResultPlot { width: 100%; height: 270px; }
+.plotChips { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 4px 6px 2px; }
+.plotChip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; color: #9db0b9; background: none; border: 0; font-size: 10px; }
+.plotChip i { width: 14px; height: 3px; border-radius: 2px; }
+.plotChip[aria-pressed="false"] { opacity: .4; text-decoration: line-through; }
 .parameterTuningComparisonPlot { width: 100%; height: 310px; margin-top: 9px; }
 .parameterTuningComparisonPlot[hidden] { display: none; }
 .nodeResultEmpty { display: grid; min-height: 260px; place-content: center; gap: 6px; color: #5f747f; text-align: center; }
@@ -1533,6 +1538,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 }
 
 /* The banner's offline button, and the notice that a newer build is ready. */
+.webEditionBannerShort { display: none; }
 .webEditionBanner .offlineButton {
     flex: 0 1 auto; padding: 4px 10px; color: #74ddd3; background: rgb(66 201 188 / 10%); border: 1px solid #2c6b66; border-radius: 6px;
     font-size: 11.5px; font-weight: 600; line-height: 1.3; text-align: center;
@@ -1744,7 +1750,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Phones (see phoneMenu.mjs): the title bar keeps only the project name and a menu button, everything else it carried is listed in
    that menu, and the canvas gets the whole width. Desktop windows never reach this narrow, so none of it applies there. */
 .windowControls .phoneMenuButton, .phoneMenu, .multiSelectTool { display: none; }
-@media (max-width: 700px) {
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
     :root { --rail-width: 0px; }
     .windowTitle .welcomeButton, .documentActions, .windowControls > :not(.phoneMenuButton), .canvasHelp, .addonRail { display: none; }
     .windowTitle { padding-left: 10px; }
@@ -1764,7 +1770,12 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 
     /* The first things a visitor meets must fit the screen. */
     [data-web-edition] .webEditionBanner { top: calc(var(--title-height) + var(--tools-height) + 8px); right: 8px; left: 8px; width: auto; transform: none; padding: 8px 8px 8px 12px; font-size: 11px; line-height: 1.45; }
-    .webEditionBannerDetail { display: none; }
+    .webEditionBannerDetail, .webEditionBannerFull, .webEditionBanner .offlineButton { display: none; }
+    .webEditionBannerShort { display: inline; }
+    .webEditionBannerShort + .webEditionBannerDetail + .webEditionBannerFull + a { display: inline-block; }
+    .webEditionBanner a::first-letter { text-transform: uppercase; }
+    /* One thing at a time while the tour is up. */
+    body:has(.tourFloating:not([hidden])) .webEditionBanner { display: none; }
     /* The text keeps the first row with the dismiss button; the offline button, whose label is long, takes a row to itself. */
     [data-web-edition] .webEditionBanner { flex-wrap: wrap; align-items: center; }
     .webEditionBanner > span { flex: 1 1 0; min-width: 0; }
@@ -1780,7 +1791,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .helpFeedbackDialog form { max-height: none; }
     .extensionsDialog { --extensions-pane-height: 360px; }
     .webProviderEditorDialog { width: calc(100% - 16px); }
-    .contextCard.nodeEditor, .contextCard.edgeEditor, .contextCard.edgeBuilder { width: calc(100% - 20px); }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning) { width: calc(100% - 20px); bottom: calc(var(--math-keyboard-inset, 0px) + 10px + var(--sheet-floor, 0px)); }
     .assistantPanel { width: calc(100% - 20px); height: calc(100% - var(--title-height) - var(--tools-height) - 24px); }
     .examplesExplorerBody { grid-template-columns: 1fr; }
     .examplesExplorerResults { height: 300px; }
@@ -1800,7 +1811,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* The panels that sit beside the canvas on a desktop come up from the bottom edge instead, over everything but the title bar, as a
        sheet the width of the screen with room above it to see the model, and a handle that says it is a sheet. */
     :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel) {
-        position: fixed; z-index: 45; inset: auto 0 0 0; width: auto; max-height: 62%; border-bottom: 0; border-radius: 16px 16px 0 0;
+        position: fixed; z-index: 45; inset: auto 0 var(--sheet-floor, 0px) 0; width: auto; max-height: calc(62% - var(--sheet-floor, 0px)); border-bottom: 0; border-radius: 16px 16px 0 0;
         box-shadow: 0 -12px 34px rgb(0 0 0 / 50%);
     }
     /* A menu opened by a long press is a sheet too: it is placed where the finger was, which on a phone is never a place it fits. */
@@ -1854,6 +1865,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
        and the label detail are in the menu, the other tools open from the one in use, and the actions on a selection appear, over the
        canvas, only while there is a selection to act on. */
     #causalInferenceButton, #parameterTuningButton, .labelControls { display: none; }
+    .nodeResultPlot { height: 210px; }
     /* Without frames round each group, so the strip fits a phone's width without a scroll. */
     .toolstrip { gap: 3px; padding: 0 6px; }
     .toolstripLeft { gap: 6px; }
@@ -1870,6 +1882,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
         padding: 4px; background: rgb(14 25 34 / 98%); border-color: #3a4d58; border-radius: 10px; box-shadow: 0 10px 26px rgb(0 0 0 / 50%);
     }
     .toolGroup[aria-label="Selection tools"].open { top: calc(var(--title-height) + var(--tools-height) + 52px); z-index: 42; }
+    /* The sheets are in the canvas, which is a layer under the strip and what floats from it, so while one is up these are put away. */
+    body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .toolGroup[aria-label="Selection actions"],
+    body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .toolGroup[aria-label="Selection tools"].open { display: none; }
     /* Not over an editor, which covers the canvas and has its own Delete. */
     .toolGroup[aria-label="Selection actions"]:not(:has(> button:not(:disabled))),
     body:has(#canvas > :is(.nodeEditor, .edgeEditor, .edgeBuilder):not(.hidden)) .toolGroup[aria-label="Selection actions"] { display: none; }
@@ -1881,8 +1896,68 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     #runButton { position: sticky; right: 0; }
 }
 
+/* A phone held upright: the tools are a rail down the right edge, where the thumb is, and not a row along the top that would need sliding.
+   The screen is long, so a column has room for them all and the model keeps the whole height. Run is at the foot of the rail. */
+@media (max-width: 700px) and (orientation: portrait), (pointer: coarse) and (max-height: 500px) and (orientation: portrait) {
+    :root { --tools-height: 0px; --dock-width: 38px; }
+    .toolstrip {
+        top: var(--title-height); right: 0; bottom: 0; left: auto; width: var(--dock-width); height: auto; flex-direction: column; align-items: center;
+        justify-content: flex-start; gap: 6px; padding: 8px 0; overflow: hidden auto; border-bottom: 0; border-left: 1px solid rgb(255 255 255 / 7%);
+        box-shadow: -4px 0 16px rgb(0 0 0 / 24%);
+    }
+    .toolstripLeft { flex-direction: column; width: 100%; gap: 8px; }
+    .toolstripLeft .toolGroup { flex-direction: column; gap: 2px; }
+    .toolGroup[aria-label="Selection tools"]:not(.open)::after { padding: 0; line-height: .6; }
+    .toolstrip .toolSpacer { flex: 1 1 auto; min-height: 0; }
+    .toolstrip .simulationReadout { padding: 6px 5px; }
+    #runButton { position: static; width: 30px; height: 30px; padding: 0; justify-content: center; font-size: 0; }
+    #runButton span { font-size: 14px; }
+    /* What opens beside the rail goes to its left, as columns. */
+    .toolGroup[aria-label="Selection tools"].open, .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
+        top: calc(var(--title-height) + 8px); right: calc(var(--dock-width) + 6px); left: auto; translate: none; flex-direction: column;
+    }
+    .toolGroup[aria-label="Selection tools"].open { top: calc(var(--title-height) + 8px); right: calc(var(--dock-width) + 48px); }
+    [data-web-edition] .webEditionBanner { right: calc(var(--dock-width) + 8px); }
+    .tourFloating { right: calc(var(--dock-width) + 12px) !important; }
+    /* The cards that cover the canvas leave the rail in sight. */
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning) { right: calc(var(--dock-width) + 8px); width: calc(100% - var(--dock-width) - 16px); }
+    .assistantPanel { width: calc(100% - var(--dock-width) - 16px); }
+    /* The sheets from the bottom edge stop at the rail, so Run and the rest stay in reach. */
+    :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel, .resultTransport, .resultTransport.liveMode) { right: var(--dock-width); }
+    .resultTransport, .resultTransport.liveMode { border-radius: 16px 0 0 0; }
+}
+
+/* A phone on its side: height is what it lacks, so the title bar and the tools share one row (the menu button at its end), the panels
+   come in from the right edge beside the model and not up over it, and what the portrait strip leaves in the menu is back in the row. */
+@media (max-width: 700px) and (orientation: landscape), (pointer: coarse) and (max-height: 500px) and (orientation: landscape) {
+    :root { --title-height: 0px; }
+    #titleBar { right: 0; left: auto; width: auto; height: var(--tools-height); background: none; border: 0; z-index: 41; }
+    #titleBar .windowTitle { display: none; }
+    .toolstrip { top: 0; padding-right: 50px; }
+    #runButton { right: 0; }
+    #causalInferenceButton, #parameterTuningButton { display: flex; }
+    .labelControls { display: flex; }
+    .phoneMenu { top: var(--tools-height); left: auto; width: min(360px, 60%); }
+    :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel) {
+        inset: var(--tools-height) 0 var(--sheet-floor, 0px) auto; width: min(50%, 400px); max-height: none; border: 1px solid #3a4d58; border-right: 0; border-radius: 14px 0 0 14px;
+        box-shadow: -12px 0 34px rgb(0 0 0 / 45%);
+    }
+    :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel)::before { display: none; }
+    :is(#nodeContextMenu, #edgeContextMenu, #waypointContextMenu, #addPalette) {
+        inset: auto 8px 8px auto !important; width: min(340px, 60%) !important; max-height: calc(100% - var(--tools-height) - 16px); border: 1px solid #3a4d58; border-radius: 12px;
+    }
+    :is(#nodeContextMenu, #edgeContextMenu, #waypointContextMenu, #addPalette)::before { display: none; }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning) { width: min(440px, calc(100% - 20px)); }
+    [data-web-edition] .webEditionBanner { right: auto; left: 8px; width: min(520px, calc(100% - 16px)); }
+    .tourFloating { left: auto !important; width: min(420px, calc(100% - 24px)); }
+    .resultTransport, .resultTransport.liveMode { right: 8px; bottom: 6px; left: 8px; padding: 8px 12px 10px; }
+    /* A card open over the results gets the height: the bar keeps only its scrubber, and the card its notice. */
+    body:has(.contextCard:is(.nodeEditor, .edgeEditor, .edgeGroupEditor):not(.hidden)) .resultTransport .transportControlBar { display: none; }
+    .contextCard .resultReadOnlyNotice { display: none; }
+}
+
 /* Anything touched rather than pointed at: the controls people tap are big enough to hit. */
-@media (pointer: coarse) and (min-width: 701px) {
+@media (pointer: coarse) and (min-width: 701px) and (min-height: 501px) {
     .squareTool, .toolButton, .viewNavActions button { min-width: 40px; height: 40px; }
     :root { --tools-height: 52px; }
     #runButton { height: 40px; }

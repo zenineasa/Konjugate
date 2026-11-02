@@ -56,7 +56,9 @@ import { targetTimeIsReachable, validateRunConfigurationValues } from './runConf
 import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterAbovePhone, declutterLabels } from './labelDeclutter.mjs';
-import { phoneMaxWidth } from './phoneMenu.mjs';
+import { isPhoneLayout } from './phoneLayout.mjs';
+import './phoneMenu.mjs';
+import './phoneSheets.mjs';
 import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle, stabilityGroupWhen } from '../stabilityFindingGroups.mjs';
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
@@ -5097,7 +5099,9 @@ function activateResult(result) {
     registerActiveBranch(forkInfo);
     pendingFork = null;
     setResultModeLocked(true);
-    setLabelDetail('nodes', true);
+    // A phone keeps the cards as they are: every node's states at once are more than its screen holds, and the Node labels entry of
+    // the menu expands them when wanted.
+    if (!isPhoneLayout()) setLabelDetail('nodes', true);
     $('#resultTransport').hidden = false;
     updateLiveResultControls();
     updateResultExtent();
@@ -6881,7 +6885,7 @@ function openRunDialog() {
         toggle.ariaExpanded = String(!collapsed);
         toggle.ariaLabel = collapsed ? 'Show more result controls' : 'Show fewer result controls';
     };
-    setCollapsed(window.matchMedia(`(max-width: ${phoneMaxWidth}px)`).matches);
+    setCollapsed(isPhoneLayout());
     toggle.addEventListener('click', () => setCollapsed(!transport.classList.contains('collapsed')));
 }
 
@@ -12671,7 +12675,7 @@ function refreshLabelDeclutter() {
         updateHoverTracking();
         say();
     };
-    const phone = window.matchMedia(`(max-width: ${phoneMaxWidth}px)`).matches;
+    const phone = isPhoneLayout();
     const declutterNodes = nodeObjects.size > (phone ? declutterAbovePhone : declutterAbove) && labelModes.nodes !== 'hidden' && !activeEndpointPick;
     const declutterEdges = phone && labelModes.edges !== 'hidden' && !activeEndpointPick;
     if (!declutterNodes && !declutterEdges) { clear(); return; }

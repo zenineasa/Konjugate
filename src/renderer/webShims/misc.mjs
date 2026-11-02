@@ -14,6 +14,7 @@
 // providerEditor.mjs.
 
 import { threads, version } from './buildInfo.mjs';
+import { isPhoneLayout, onPhoneLayoutChange } from '../phoneLayout.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName } from '../../shapeLibraryCatalog.mjs';
 import { validateComponentTemplate } from '../../componentTemplate.mjs';
 import { createUserLibraryStore } from '../../userLibraryStore.mjs';
@@ -30,16 +31,26 @@ function applyZoom(factor) {
     return currentZoom;
 }
 // Much of the interface is set in 6 to 9 pixel type, which is dense on a desktop and unreadable on a phone, so a phone starts
-// enlarged. The same A+ and A- (in the phone menu) still adjust it. The width is the one src/renderer/phoneMenu.mjs and the
-// phone block of styles.css change layout at.
-const phoneMaxWidth = 700;
-const phoneUiZoom = 1.4;
-if (window.matchMedia?.(`(max-width: ${phoneMaxWidth}px)`).matches) applyZoom(phoneUiZoom);
+// enlarged. The same A+ and A- (in the phone menu) still adjust it. What a phone is is src/renderer/phoneLayout.mjs's say. Held on its
+// side it has height for little else than the model, so it is enlarged less, and the size follows the phone as it is turned until the
+// person has chosen one.
+const phoneUiZoom = { portrait: 1.4, landscape: 1.2 };
+let zoomChosen = false;
+const applyPhoneZoom = () => {
+    if (zoomChosen) return;
+    if (!isPhoneLayout()) { if (currentZoom !== 1) applyZoom(1); return; }
+    applyZoom(phoneUiZoom[window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait']);
+};
+if (window.matchMedia) {
+    applyPhoneZoom();
+    window.matchMedia('(orientation: landscape)').addEventListener('change', applyPhoneZoom);
+    onPhoneLayoutChange(applyPhoneZoom);
+}
 export const uiZoom = {
     get: () => currentZoom,
-    increase: () => applyZoom(currentZoom + uiZoomStep),
-    decrease: () => applyZoom(currentZoom - uiZoomStep),
-    reset: () => applyZoom(1),
+    increase: () => { zoomChosen = true; return applyZoom(currentZoom + uiZoomStep); },
+    decrease: () => { zoomChosen = true; return applyZoom(currentZoom - uiZoomStep); },
+    reset: () => { zoomChosen = false; applyPhoneZoom(); return currentZoom; },
     limits: { minimum: minimumUiZoom, maximum: maximumUiZoom }
 };
 

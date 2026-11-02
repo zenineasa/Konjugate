@@ -32,6 +32,7 @@ okf_version: "0.2"
 * [Package Development](packageDevelopment.md) - Building and distributing portable .kja and .kjp packages
 * [Package Registry](registry.md) - Publisher key registration, namespace prefixes, and cryptographic archive signing
 * [Package Manager Distribution](packageManagerDistribution.md) - Packaging and automated distribution for Homebrew, Flathub, and Windows stores
+* [Phone Test Checklist](phoneTestChecklist.md) - What only a real phone can confirm about the web edition's phone layout, offline copy and install
 * [Release Packaging](releasePackaging.md) - Platform packaging and release pipeline for desktop DMGs, EXEs, and AppImages
 * [How Konjugate Gets Updated](updates.md) - Who updates each install channel, what the in-app update notice does, and the Store and AppImage decisions
 

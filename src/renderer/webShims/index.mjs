@@ -56,11 +56,13 @@ document.addEventListener('drop', async (event) => {
 // missing, not carry forward a claim once it's stopped being true.
 const banner = document.createElement('div');
 banner.className = 'webEditionBanner';
-banner.innerHTML = '<span>This is a free, lightweight trial of Konjugate running in your browser. ' +
+// A phone is shown the short form (the phone block of styles.css), so the first screen is mostly the model.
+banner.innerHTML = '<span><span class="webEditionBannerFull">This is a free, lightweight trial of Konjugate running in your browser. </span>' +
+    '<span class="webEditionBannerShort">Free browser trial. </span>' +
     '<span class="webEditionBannerDetail">Run here is batch-only (no live progress or mid-run control), and programmable C++ providers, ' +
-    "FMU import/export, add-ons, and AI-assisted authoring aren't available yet.</span> For the full " +
-    'experience, <a href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" ' +
-    'rel="noopener">download the free desktop app</a>.</span>' +
+    "FMU import/export, add-ons, and AI-assisted authoring aren't available yet. </span>" +
+    '<span class="webEditionBannerFull">For the full experience, </span><a href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" ' +
+    'rel="noopener">download the free desktop app</a><span class="webEditionBannerFull">.</span></span>' +
     '<button type="button" aria-label="Dismiss">×</button>';
 // The offline button lives in the banner while there is one, and in a hidden holder after it is dismissed, so the phone menu (which
 // presses the real button) can still reach it.

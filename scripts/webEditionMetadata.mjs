@@ -97,6 +97,7 @@ export function webEditionHead({ url, indent = '    ', assetPrefix = '' }) {
         `<link rel="manifest" href="${assetPrefix}${WEB_EDITION_MANIFEST}">`,
         `<meta name="theme-color" content="${WEB_EDITION_THEME_COLOR}">`,
         // Safari's own spelling of the same thing, which it reads rather than the manifest when a page is added to the home screen.
+        '<meta name="mobile-web-app-capable" content="yes">',
         '<meta name="apple-mobile-web-app-capable" content="yes">',
         '<meta name="apple-mobile-web-app-title" content="Konjugate">',
         '<meta name="apple-mobile-web-app-status-bar-style" content="black">',

@@ -20,3 +20,14 @@ test('a button that states its own meaning is listed under it, the others under 
     const shown = visiblePhoneMenuEntries((id) => buttons[id]);
     assert.deepEqual(shown.map((entry) => entry.label), ['Save project', 'Saving for offline use… 40%']);
 });
+
+test('a button whose title says its state is listed under its title, when the entry asks for that', () => {
+    const buttons = { nodeLabelsButton: { title: 'Node labels: compact · click for expanded' }, edgeLabelsButton: { title: '' } };
+    const shown = visiblePhoneMenuEntries((id) => buttons[id]);
+    assert.deepEqual(shown.map((entry) => entry.label), ['Node labels: compact · click for expanded', 'Relationship labels']);
+});
+
+test('what the strip no longer carries on a phone is in the menu', () => {
+    const ids = phoneMenuEntries.map((entry) => entry.id);
+    for (const id of ['causalInferenceButton', 'parameterTuningButton', 'nodeLabelsButton', 'edgeLabelsButton']) assert.ok(ids.includes(id), id);
+});

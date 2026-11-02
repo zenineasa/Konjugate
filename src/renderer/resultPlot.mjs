@@ -64,6 +64,38 @@ export function paddedRange(values, paddingRatio = 0.08) {
     return [minimum - padding, maximum + padding];
 }
 
+
+import { isPhoneLayout } from './phoneLayout.mjs';
+
+// A plot narrower than this is a phone's: a legend of a node's nine states, laid out as it is for a desktop, fills the whole plot, and the
+// toolbar's buttons are bigger than the curves they sit on.
+const narrowPlotWidth = 460;
+
+
+// Whether a plot in `element` is a phone's. A plot is drawn while its panel may still be hidden, when it measures no width at all, so the
+// phone layout stands in for the width it cannot read.
+export function isNarrowPlot(element) {
+    const width = element.clientWidth;
+    return width ? width < narrowPlotWidth : isPhoneLayout();
+}
+
+// Lays `layout` and `config` out for a phone: the legend is left to chips under the plot (a legend of a node's nine states, laid out by
+// Plotly in a plot this narrow, is a column that fills it); dragging pans (a finger is not a mouse's box-select); the toolbar is left off;
+// and the extra y axes (one per unit, drawn on the right) keep their curves but not their tick labels, which at a phone's width pile on
+// top of one another.
+export function fitPlotToNarrowScreen(layout, config) {
+    layout.showlegend = false;
+    layout.margin = { ...layout.margin, t: 12, b: 38, r: 14 };
+    layout.dragmode = 'pan';
+    config.displayModeBar = false;
+    for (const key of Object.keys(layout)) {
+        if (/^yaxis[2-9]$/.test(key)) layout[key] = { ...layout[key], showticklabels: false, title: undefined };
+    }
+}
+
+// One chip per curve under a narrow plot: its colour, its name, and a tap that shows or hides the curve.
+const chipColors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+
 export class ResultPlot {
     constructor(element, { onSeek } = {}) {
         this.element = element;
@@ -75,6 +107,32 @@ export class ResultPlot {
     // branchLabel is present across series (the N-way branch comparison overlay); a single-branch
     // render (every existing caller) is byte-identical to before this parameter existed, since
     // series items with no branchLabel never populate more than one entry in branchLabels below.
+    // `traces` as Plotly was given them; none removes the chips.
+    drawChipLegend(traces) {
+        this.chips?.remove();
+        this.chips = null;
+        if (!traces.length || !this.element.parentNode) return;
+        const chips = document.createElement('div');
+        chips.className = 'plotChips';
+        traces.forEach((trace, index) => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'plotChip';
+            chip.setAttribute('aria-pressed', 'true');
+            const swatch = document.createElement('i');
+            swatch.style.background = trace.line?.color ?? chipColors[index % chipColors.length];
+            chip.append(swatch, trace.name);
+            chip.addEventListener('click', () => {
+                const shown = chip.getAttribute('aria-pressed') !== 'true';
+                chip.setAttribute('aria-pressed', String(shown));
+                globalThis.Plotly.restyle(this.element, { visible: shown }, [index]);
+            });
+            chips.append(chip);
+        });
+        this.element.after(chips);
+        this.chips = chips;
+    }
+
     async render(series, currentTime = 0, { branchColors } = {}) {
         if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
         const units = [...new Set(series.map((item) => item.unit || 'Value'))];
@@ -120,12 +178,14 @@ export class ResultPlot {
                 ...(index ? { overlaying: 'y', side: 'right', anchor: 'free', position: Math.max(.74, 1 - (index - 1) * .08) } : {})
             };
         });
-        await globalThis.Plotly.react(this.element, traces, layout, {
-            responsive: true,
-            displaylogo: false,
-            scrollZoom: true,
-            modeBarButtonsToRemove: ['lasso2d', 'select2d']
-        });
+        const config = { responsive: true, displaylogo: false, scrollZoom: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };
+        if (isNarrowPlot(this.element)) {
+            // With the axes' labels gone, the unit is what says which axis a curve is read against.
+            if (units.length > 1) traces.forEach((trace, index) => { trace.name = `${trace.name} (${series[index].unit || 'Value'})`; });
+            fitPlotToNarrowScreen(layout, config);
+        }
+        await globalThis.Plotly.react(this.element, traces, layout, config);
+        this.drawChipLegend(isNarrowPlot(this.element) ? traces : []);
         this.element.removeAllListeners?.('plotly_click');
         this.element.on?.('plotly_click', (event) => {
             const time = Number(event.points?.[0]?.x);
@@ -148,6 +208,7 @@ export class ResultPlot {
 
     clear() {
         if (this.rendered) globalThis.Plotly?.purge(this.element);
+        this.drawChipLegend([]);
         this.rendered = false;
     }
 }

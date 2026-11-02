@@ -406,6 +406,14 @@ test('a launcher may require algebraicRelationships, for models whose relationsh
     assert.throws(() => validateAddonManifest(manifest));
 });
 
+test('a launcher may require resumableDownloads, for downloads that continue where they stopped', () => {
+    const manifest = launcher();
+    manifest.requires = ['resumableDownloads'];
+    assert.doesNotThrow(() => validateAddonManifest(manifest));
+    manifest.requires = ['resumableDownloadsLater'];
+    assert.throws(() => validateAddonManifest(manifest));
+});
+
 test('the window may choose when a scenario starts, from the run\'s start up to its end', () => {
     assert.equal(checkForkTime(0, 90 * 86400), 0);
     assert.equal(checkForkTime(10 * 86400, 90 * 86400), 10 * 86400);

@@ -45,7 +45,10 @@ export const maximumVisualizerDataBytes = 1024 * 1024;
 // importProgress: an importer may say how far it has got (helpers.progress), and the window hears it with onProgress.
 // storedFiles: a launcher with files.store keeps large files for the user (downloaded, or brought in from disk) and
 // gives them to its importer as binary inputs (addonFileStore.mjs).
-export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress', 'storedFiles', 'nodeProviderInputs', 'pythonCheck', 'algebraicRelationships']);
+// resumableDownloads: a download that stops is kept, and downloading the same address again continues it (downloadFile
+// takes `fresh` to start over; its progress says `resumedFrom`); partialDownloads() lists those kept and
+// discardPartialDownload(id) gives one up.
+export const launcherFeatures = new Set(['scenarioOverrides', 'runRecord', 'projectSession', 'parameterSchedules', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'fetchCache', 'keepSession', 'openLink', 'scenarioEveryBackend', 'binaryInputs', 'multipleBinaryInputs', 'importProgress', 'storedFiles', 'nodeProviderInputs', 'pythonCheck', 'algebraicRelationships', 'resumableDownloads']);
 const launcherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'results.export', 'pages.open', 'analysis.infer', 'network.fetch', 'project.data', 'links.open', 'files.store']);
 const contributionIdPattern = /^[a-z][A-Za-z0-9]*$/;
 

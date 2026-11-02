@@ -80,7 +80,7 @@ test('a download is streamed to disk with its progress, kept with where it came 
         checksumUrl: 'https://download.geofabrik.de/europe/switzerland-latest.osm.pbf.md5', onProgress: (progress) => heard.push(progress), details: { region: 'Switzerland' }
     });
     assert.deepEqual({ ...entry, id: null }, { id: null, name: 'switzerland-latest.osm.pbf', bytes: 5500, storedAt: '2026-10-15T10:00:00.000Z', origin: { kind: 'download', url: 'https://download.geofabrik.de/europe/switzerland-latest.osm.pbf', server: 'Geofabrik' }, details: { region: 'Switzerland' } });
-    assert.deepEqual(heard.at(-1), { done: 5500, total: 5500 });
+    assert.deepEqual(heard.at(-1), { done: 5500, total: 5500, resumedFrom: 0 });
     assert.ok(heard.length >= 5 && heard.every((item, index) => index === 0 || item.done > heard[index - 1].done), 'rising, chunk by chunk');
     assert.equal(asked.length, 3, 'the redirect followed, and the sum fetched');
     assert.equal(await store.digest(entry.id), createHash('sha256').update(body).digest('hex'));
@@ -107,9 +107,137 @@ test('a download that does not match its sum, stops short, is cancelled, or come
     const cancel = new AbortController();
     const cancelled = store.download({ url: 'https://download.geofabrik.de/a.osm.pbf', hosts, fetchImpl, signal: cancel.signal, onProgress: () => cancel.abort() });
     await assert.rejects(() => cancelled, /cancelled/);
-    // Nothing half-written is left behind.
+    // Nothing is kept as a file; what arrived of the two that stopped is left to continue, and of the others nothing.
     assert.deepEqual(await store.list(), []);
-    assert.deepEqual((await readdir(directory).catch(() => [])).filter((name) => !name.endsWith('.json')), []);
+    assert.deepEqual((await store.partials()).map((item) => item.name).sort(), ['a.osm.pbf', 'short.osm.pbf']);
+});
+
+// A server that honours Range and If-Range, and can be told to drop the connection after some bytes.
+function rangeServer(files) {
+    const asked = [];
+    const fetchImpl = async (url, options) => {
+        const headers = options.headers ?? {};
+        asked.push({ url, range: headers.Range ?? null, ifRange: headers['If-Range'] ?? null });
+        const file = files[url];
+        if (!file) return new Response('not here', { status: 404 });
+        if (file.redirect) return new Response(null, { status: 302, headers: { location: file.redirect } });
+        if (file.text !== undefined) return new Response(file.text, { status: 200 });
+        const match = headers.Range ? /^bytes=(\d+)-$/.exec(headers.Range) : null;
+        const honoured = match && !file.ignoreRange && (!headers['If-Range'] || headers['If-Range'] === file.etag);
+        const start = honoured ? Number(match[1]) : 0;
+        if (honoured && start >= file.body.length) return new Response(null, { status: 416 });
+        const end = file.dropAt && !file.droppedOnce ? file.dropAt : file.body.length;
+        const chunks = [];
+        for (let at = start; at < end; at += 1000) chunks.push(file.body.subarray(at, Math.min(at + 1000, end)));
+        const cut = file.dropAt && !file.droppedOnce;
+        const stream = new ReadableStream({
+            pull(controller) {
+                const next = chunks.shift();
+                if (next) controller.enqueue(next);
+                else if (cut) { file.droppedOnce = true; controller.error(new Error('connection reset')); } else controller.close();
+            }
+        });
+        return new Response(stream, { status: honoured ? 206 : 200, headers: { etag: file.etag, 'content-length': String(file.body.length - start), ...(honoured ? { 'content-range': `bytes ${start}-${file.body.length - 1}/${file.body.length}` } : {}) } });
+    };
+    return { fetchImpl, asked };
+}
+const hosts = ['download.geofabrik.de'];
+const mapBody = () => Buffer.from(Array.from({ length: 5500 }, (_, index) => (index * 7 + 3) % 251));
+
+test('a download that stops is continued from where it stopped, and the file kept is whole and matches its sum', async () => {
+    const store = createFileStore({ directory: join(await scratch(), 'store') });
+    const body = mapBody();
+    const dated = 'https://download.geofabrik.de/europe/x-261013.osm.pbf';
+    const { fetchImpl, asked } = rangeServer({
+        'https://download.geofabrik.de/europe/x-latest.osm.pbf': { redirect: dated },
+        [dated]: { body, etag: '"a"', dropAt: 3000 },
+        'https://download.geofabrik.de/europe/x-latest.osm.pbf.md5': { text: `${md5(body)}  x-latest.osm.pbf` }
+    });
+    const url = 'https://download.geofabrik.de/europe/x-latest.osm.pbf';
+    const checksumUrl = `${url}.md5`;
+    await assert.rejects(() => store.download({ url, hosts, fetchImpl, checksumUrl, server: null, details: {} }), /connection reset/);
+    const [partial] = await store.partials();
+    assert.deepEqual({ ...partial, id: null, updatedAt: null }, { id: null, name: 'x-latest.osm.pbf', url, server: null, details: {}, bytes: 3000, total: 5500, updatedAt: null });
+    const heard = [];
+    const entry = await store.download({ url, hosts, fetchImpl, checksumUrl, onProgress: (progress) => heard.push(progress) });
+    assert.equal(entry.bytes, 5500);
+    assert.deepEqual(asked.filter((item) => item.range), [{ url: dated, range: 'bytes=3000-', ifRange: '"a"' }], 'only the rest was asked for, from the file it was reading');
+    assert.deepEqual(heard[0], { done: 4000, total: 5500, resumedFrom: 3000 });
+    assert.equal(md5(await readFile((await store.get(entry.id)).path)), md5(body));
+    assert.deepEqual(await store.partials(), [], 'nothing is left unfinished');
+});
+
+test('a download is started again, not appended to, when the file changed, the server ignores Range, or the file moved', async () => {
+    const body = mapBody();
+    const url = 'https://download.geofabrik.de/europe/y-latest.osm.pbf';
+    const dated = 'https://download.geofabrik.de/europe/y-261013.osm.pbf';
+    const files = { [url]: { redirect: dated }, [dated]: { body, etag: '"a"', dropAt: 2000 } };
+    for (const [what, change] of [
+        ['changed', () => { files[dated].etag = '"b"'; }],
+        ['no ranges', () => { files[dated].ignoreRange = true; }],
+        ['moved', () => { delete files[dated]; files['https://download.geofabrik.de/europe/y-261014.osm.pbf'] = { body }; files[url] = { redirect: 'https://download.geofabrik.de/europe/y-261014.osm.pbf' }; }]
+    ]) {
+        const store = createFileStore({ directory: join(await scratch(), 'store') });
+        Object.assign(files, { [url]: { redirect: dated }, [dated]: { body, etag: '"a"', dropAt: 2000 } });
+        delete files['https://download.geofabrik.de/europe/y-261014.osm.pbf'];
+        const { fetchImpl } = rangeServer(files);
+        await assert.rejects(() => store.download({ url, hosts, fetchImpl }), /connection reset/);
+        change();
+        const entry = await store.download({ url, hosts, fetchImpl });
+        assert.equal(entry.bytes, 5500, what);
+        assert.equal(md5(await readFile((await store.get(entry.id)).path)), md5(body), what);
+    }
+});
+
+test('an unfinished download can be given up, a different address does not share it, and one that fails its sum is not left', async () => {
+    const store = createFileStore({ directory: join(await scratch(), 'store') });
+    const body = mapBody();
+    const a = 'https://download.geofabrik.de/a.osm.pbf';
+    const files = {
+        [a]: { body, etag: '"a"', dropAt: 2000 },
+        'https://download.geofabrik.de/b.osm.pbf': { body, etag: '"a"', dropAt: 2500 },
+        'https://download.geofabrik.de/b.osm.pbf.md5': { text: `${'0'.repeat(32)}  b` }
+    };
+    const { fetchImpl, asked } = rangeServer(files);
+    const b = 'https://download.geofabrik.de/b.osm.pbf';
+    await assert.rejects(() => store.download({ url: a, hosts, fetchImpl }), /connection reset/);
+    await assert.rejects(() => store.download({ url: b, hosts, fetchImpl }), /connection reset/);
+    const partials = await store.partials();
+    assert.deepEqual(partials.map((item) => [item.name, item.bytes]).sort(), [['a.osm.pbf', 2000], ['b.osm.pbf', 2500]]);
+    await store.discardPartial(partials.find((item) => item.name === 'a.osm.pbf').id);
+    assert.deepEqual((await store.partials()).map((item) => item.name), ['b.osm.pbf']);
+    await store.discardPartial('nonsense');
+    await assert.rejects(() => store.download({ url: b, hosts, fetchImpl, checksumUrl: `${b}.md5` }), /does not match the checksum/);
+    assert.deepEqual(await store.partials(), [], 'a file known to be wrong is not kept to continue');
+    // Starting afresh ignores what is left.
+    files[a].droppedOnce = false;
+    await assert.rejects(() => store.download({ url: a, hosts, fetchImpl }), /connection reset/);
+    asked.length = 0;
+    await store.download({ url: a, hosts, fetchImpl, fresh: true });
+    assert.deepEqual(asked.filter((item) => item.range), []);
+});
+
+test('an unfinished download is kept when the server errs and removed when the file is gone, or a week old; the same file twice at once is refused', async () => {
+    let clock = Date.parse('2026-10-15T09:00:00Z');
+    const store = createFileStore({ directory: join(await scratch(), 'store'), now: () => clock });
+    const body = mapBody();
+    const url = 'https://download.geofabrik.de/c.osm.pbf';
+    const files = { [url]: { body, etag: '"a"', dropAt: 2000 } };
+    const { fetchImpl } = rangeServer(files);
+    await assert.rejects(() => store.download({ url, hosts, fetchImpl }), /connection reset/);
+    const busy = async (address, options) => (options.headers.Range ? new Response('busy', { status: 503 }) : fetchImpl(address, options));
+    await assert.rejects(() => store.download({ url, hosts, fetchImpl: busy }), /answered 503/);
+    assert.equal((await store.partials()).length, 1, 'a busy server loses nothing');
+    let release;
+    const slow = async () => new Response(new ReadableStream({ start(controller) { release = () => controller.error(new Error('stopped')); } }), { status: 200, headers: { 'content-length': '10' } });
+    const first = store.download({ url, hosts, fetchImpl: slow, fresh: true });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await assert.rejects(() => store.download({ url, hosts, fetchImpl }), /already being downloaded/);
+    assert.deepEqual(await store.partials(), [], 'one being downloaded is not offered');
+    release();
+    await assert.rejects(() => first, /stopped/);
+    clock += 8 * 24 * 60 * 60 * 1000;
+    assert.deepEqual(await store.partials(), []);
 });
 
 test('how large a file is, asked of its server before downloading it, through redirects, at a declared host only', async () => {

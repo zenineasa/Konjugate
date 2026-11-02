@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('konjugateLauncher', Object.freeze({
     storeFiles: (details, options = {}) => ipcRenderer.invoke('launcherStoreFiles', { details, accept: options?.accept ?? null, title: options?.title ?? null }),
     downloadFile: (url, options = {}) => ipcRenderer.invoke('launcherDownloadFile', { url, ...options }),
     cancelDownload: (downloadId) => ipcRenderer.invoke('launcherCancelDownload', { downloadId }),
+    partialDownloads: () => ipcRenderer.invoke('launcherPartialDownloads'),
+    discardPartialDownload: (id) => ipcRenderer.invoke('launcherDiscardPartialDownload', { id }),
     fileSize: (url) => ipcRenderer.invoke('launcherFileSize', { url }),
     describeStoredFile: (id, details) => ipcRenderer.invoke('launcherDescribeStoredFile', { id, details }),
     removeStoredFile: (id) => ipcRenderer.invoke('launcherRemoveStoredFile', { id }),

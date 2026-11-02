@@ -876,20 +876,20 @@ export function registerLauncherHandlers(deps) {
         return { files };
     }));
     // Downloads a file from a host the manifest declares, into the store, saying how far it has got.
-    ipcMain.handle('launcherDownloadFile', guarded(async ({ addon, state }, { url, name = null, server = null, checksumUrl = null, details = {}, downloadId = null }) => {
+    ipcMain.handle('launcherDownloadFile', guarded(async ({ addon, state }, { url, name = null, server = null, checksumUrl = null, details = {}, downloadId = null, fresh = false }) => {
         needs(addon, 'files.store');
         needs(addon, 'network.fetch');
         const controller = new AbortController();
         if (typeof downloadId === 'string') downloads.set(downloadId, controller);
         let last = 0;
-        const onProgress = ({ done, total }) => {
+        const onProgress = ({ done, total, resumedFrom }) => {
             const now = Date.now();
             if (now - last < 200 && done !== total) return;
             last = now;
-            if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', { stage: 'download', downloadId, done, total });
+            if (state.launcherWindow && !state.launcherWindow.isDestroyed()) state.launcherWindow.webContents.send('launcherProgress', { stage: 'download', downloadId, done, total, resumedFrom });
         };
         try {
-            const entry = await storeFor(addon).download({ url, name, server, checksumUrl, details, hosts: addon.manifest.network?.hosts ?? [], onProgress, signal: controller.signal, fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
+            const entry = await storeFor(addon).download({ url, name, server, checksumUrl, details, fresh: fresh === true, hosts: addon.manifest.network?.hosts ?? [], onProgress, signal: controller.signal, fetchImpl, userAgent: `Konjugate/${app.getVersion()}` });
             return { file: entry };
         } finally {
             if (typeof downloadId === 'string') downloads.delete(downloadId);
@@ -900,6 +900,16 @@ export function registerLauncherHandlers(deps) {
         needs(addon, 'files.store');
         needs(addon, 'network.fetch');
         return { bytes: await storeFor(addon).size({ url, hosts: addon.manifest.network?.hosts ?? [], fetchImpl, userAgent: `Konjugate/${app.getVersion()}` }) };
+    }));
+    // Downloads that stopped part way, kept to continue (by downloading the same address again) or to give up.
+    ipcMain.handle('launcherPartialDownloads', guarded(async ({ addon }) => {
+        needs(addon, 'files.store');
+        return { partials: await storeFor(addon).partials() };
+    }));
+    ipcMain.handle('launcherDiscardPartialDownload', guarded(async ({ addon }, { id }) => {
+        needs(addon, 'files.store');
+        await storeFor(addon).discardPartial(id);
+        return {};
     }));
     ipcMain.handle('launcherCancelDownload', guarded(async ({ addon }, { downloadId }) => {
         needs(addon, 'files.store');

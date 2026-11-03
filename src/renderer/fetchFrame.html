@@ -5,13 +5,29 @@
      allow-same-origin, so it has no origin (no cookies, no storage, no way into the page) and holds no code from any package, only the few lines
      below. Its policy allows requests to https addresses and nothing else; which hosts a launcher may reach is the add-on's manifest, which the
      page checks before asking and this frame checks again, on the address asked for and on the address the answer came from after any
-     redirects, before it reads a byte of the body. -->
+     redirects, before it reads a byte of the body.
+     Two kinds of request: `fetch`, a small answer returned whole, and `stream`, a large download returned in pieces (with a Range for one that
+     is being continued, and the page acknowledging each piece so the frame never runs far ahead of what the page has written). -->
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:; form-action 'none'; base-uri 'none'">
 <script>
+const exposed = ['content-length', 'content-range', 'content-encoding', 'content-type', 'etag', 'last-modified'];
+const streams = new Map();
+const maximumUnacknowledged = 8;
+const idleMilliseconds = 30000;
 addEventListener('message', async (event) => {
-    if (event.source !== parent || typeof event.data !== 'object' || event.data === null || typeof event.data.fetch !== 'object' || event.data.fetch === null) return;
-    const { id, url, hosts, maximumBytes, timeoutMilliseconds } = event.data.fetch;
+    if (event.source !== parent || typeof event.data !== 'object' || event.data === null) return;
+    const message = event.data;
+    if (message.ack !== undefined || message.cancel !== undefined) {
+        const open = streams.get(message.ack ?? message.cancel);
+        if (!open) return;
+        if (message.cancel !== undefined) open.controller.abort();
+        else { open.unacknowledged = Math.max(0, open.unacknowledged - 1); open.wake && open.wake(); }
+        return;
+    }
+    if (typeof message.stream === 'object' && message.stream !== null) return stream(message.stream);
+    if (typeof message.fetch !== 'object' || message.fetch === null) return;
+    const { id, url, hosts, maximumBytes, timeoutMilliseconds } = message.fetch;
     const reply = (body, transfer = []) => parent.postMessage({ konjugate: 'fetched', id, ...body }, '*', transfer);
     const listed = (address) => address.protocol === 'https:' && !address.username && !address.password && Array.isArray(hosts) && hosts.includes(address.hostname.toLowerCase());
     try {
@@ -50,5 +66,63 @@ addEventListener('message', async (event) => {
         reply({ error: 'network' });
     }
 });
+
+// One read, given up on if nothing arrives for a while (a connection that has gone quiet without closing).
+function readWithin(reader, milliseconds) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('idle')), milliseconds);
+        reader.read().then((step) => { clearTimeout(timer); resolve(step); }, (error) => { clearTimeout(timer); reject(error); });
+    });
+}
+
+// One download in pieces. Only a Range and an If-Range may be sent along, in the forms a continued download uses.
+async function stream({ id, url, hosts, headers, method, timeoutMilliseconds }) {
+    const reply = (body, transfer = []) => parent.postMessage({ konjugate: 'stream', id, ...body }, '*', transfer);
+    const listed = (address) => address.protocol === 'https:' && !address.username && !address.password && Array.isArray(hosts) && hosts.includes(address.hostname.toLowerCase());
+    const controller = new AbortController();
+    const open = { controller, unacknowledged: 0, wake: null };
+    streams.set(id, open);
+    try {
+        let address;
+        try { address = new URL(url); } catch { return reply({ error: 'address' }); }
+        if (!listed(address)) return reply({ error: 'host', host: address.hostname });
+        const sent = {};
+        if (headers && typeof headers.Range === 'string' && /^bytes=\d{1,15}-$/.test(headers.Range)) sent.Range = headers.Range;
+        if (headers && typeof headers['If-Range'] === 'string' && headers['If-Range'].length < 100 && !/[\r\n]/.test(headers['If-Range'])) sent['If-Range'] = headers['If-Range'];
+        let response;
+        try {
+            response = await fetch(address.href, { method: method === 'HEAD' ? 'HEAD' : 'GET', mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', redirect: 'follow', headers: sent, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMilliseconds)]) });
+        } catch (error) {
+            return reply({ error: controller.signal.aborted ? 'cancelled' : error && error.name === 'TimeoutError' ? 'timeout' : 'network' });
+        }
+        let source = address;
+        try { if (response.url) source = new URL(response.url); } catch { return reply({ error: 'host', host: '' }); }
+        if (!listed(source)) { response.body && response.body.cancel().catch(() => {}); return reply({ error: 'host', host: source.hostname }); }
+        const seen = {};
+        for (const name of exposed) { const value = response.headers.get(name); if (value !== null) seen[name] = value; }
+        reply({ head: { status: response.status, url: source.href, headers: seen } });
+        if (!response.body || method === 'HEAD') return reply({ end: true });
+        const reader = response.body.getReader();
+        controller.signal.addEventListener('abort', () => reader.cancel().catch(() => {}));
+        for (;;) {
+            while (open.unacknowledged >= maximumUnacknowledged && !controller.signal.aborted) await new Promise((resolve) => { open.wake = resolve; });
+            let step;
+            try {
+                step = await readWithin(reader, idleMilliseconds);
+            } catch (error) {
+                return reply({ error: controller.signal.aborted ? 'cancelled' : error && error.message === 'idle' ? 'timeout' : 'stopped' });
+            }
+            if (controller.signal.aborted) return reply({ error: 'cancelled' });
+            if (step.done) return reply({ end: true });
+            open.unacknowledged += 1;
+            const chunk = step.value.buffer.byteLength === step.value.length ? step.value.buffer : step.value.slice().buffer;
+            reply({ chunk }, [chunk]);
+        }
+    } catch {
+        reply({ error: 'network' });
+    } finally {
+        streams.delete(id);
+    }
+}
 parent.postMessage({ konjugate: 'fetch-shell' }, '*');
 </script>

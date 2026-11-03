@@ -10,7 +10,10 @@
 import { createVisualizerSession, publicToolstripContributions } from '../../addonHost.mjs';
 import { createVisualizerBridge } from '../../webAddonBridge.mjs';
 import { fetchAllowedFromPage } from '../../webFetch.mjs';
-import { fetchInFrame } from './fetchRunner.mjs';
+import { fetchInFrame, streamInFrame } from './fetchRunner.mjs';
+import { openOpfsVolume, removeOpfsAddonData } from './opfsVolume.mjs';
+import { createWebFileCache } from '../../webFileCache.mjs';
+import { createWebFileStore } from '../../webFileStore.mjs';
 import { createLauncherBridge } from '../../webLauncherBridge.mjs';
 import { buildAddonDocument, launcherApiSource } from '../../webAddonDocument.mjs';
 import { runImporterInFrame } from './importerRunner.mjs';
@@ -179,18 +182,34 @@ const pendingListeners = [];
 const abandonedListeners = [];
 
 // A file chosen by the person, as bytes: [{ name, bytes }], or null if none is chosen. Called inside the click that asked for it.
-function chooseFiles({ label, extensions, multiple }) {
+// The files the person picks in the browser's own file picker, or null if they cancel.
+function pickFileObjects({ label, extensions, multiple }) {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
         input.multiple = Boolean(multiple);
-        input.accept = extensions.map((extension) => `.${extension}`).join(',');
+        if (extensions?.length) input.accept = extensions.map((extension) => `.${extension}`).join(',');
         input.setAttribute('aria-label', label);
-        input.addEventListener('change', async () => resolve(await Promise.all([...input.files].map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })))), { once: true });
+        input.addEventListener('change', () => resolve([...input.files]), { once: true });
         input.addEventListener('cancel', () => resolve(null), { once: true });
         input.click();
     });
 }
+
+// A file role's files: a text role's are read now; a binary role's are noted and read when the importer runs (they may be a gigabyte).
+async function chooseFiles({ label, extensions, multiple, binary }) {
+    const picked = await pickFileObjects({ label, extensions, multiple });
+    if (!picked) return null;
+    if (binary) return picked.map((file) => ({ name: file.name, size: file.size, read: async () => new Uint8Array(await file.arrayBuffer()) }));
+    return Promise.all(picked.map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })));
+}
+
+const sha256Hex = async (input) => toHex(await crypto.subtle.digest('SHA-256', typeof input === 'string' ? new TextEncoder().encode(input) : input));
+// The stored files' downloads and their checksums are fetched by a sandboxed frame (fetchRunner.mjs), as a launcher's other fetches are.
+const downloadTransport = {
+    stream: streamInFrame,
+    fetchText: async ({ url, hosts }) => new TextDecoder().decode(await fetchAllowedFromPage({ url, hosts, transport: fetchInFrame }))
+};
 
 async function openLauncher(store, entry) {
     const { manifest } = entry;
@@ -201,11 +220,17 @@ async function openLauncher(store, entry) {
     }
     closeAddon();
     const readPackageFile = (path) => store.readFile(entry, path);
+    let storedFiles = null;
+    let fetchCache = null;
     const bridge = createLauncherBridge({
         manifest,
         host: {
             readPackageFile,
             chooseFiles,
+            pickFiles: async ({ title, extensions }) => pickFileObjects({ label: title, extensions, multiple: true }),
+            // The add-on's stored files and fetch cache, opened when first used and kept in the browser's private file system.
+            files: () => (storedFiles ??= openOpfsVolume('addonFiles', manifest.addonId).then((volume) => createWebFileStore({ volume, transport: downloadTransport, sha256Hex }))),
+            cache: () => (fetchCache ??= openOpfsVolume('addonCache', manifest.addonId).then((volume) => createWebFileCache({ volume, sha256Hex }))),
             emit: (channel, payload) => sendToFrame({ konjugate: 'event', channel, payload }),
             runImporter: async ({ importer, files, options, onProgress }) => {
                 const bytes = await readPackageFile(importer.entry);

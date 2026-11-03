@@ -11,6 +11,28 @@
 
 import { checkAddress, fetchTimeoutMilliseconds, maximumFetchBytes } from './launcherImport.mjs';
 
+// checkAddress's refusals for a download, which the stored files' messages word as downloading and not fetching.
+export function addressFailure(address, allowed, doing = 'fetch') {
+    const past = doing === 'download' ? 'downloaded' : 'fetched';
+    if (address.protocol !== 'https:') throw new Error(`Only https addresses can be ${past}.`);
+    if (address.username || address.password) throw new Error(`An address with a user name or password cannot be ${past}.`);
+    if (!allowed.has(address.hostname.toLowerCase())) throw new Error(`This window may not ${doing === 'download' ? 'download from' : 'connect to'} ${address.hostname}. It may reach: ${[...allowed].join(', ')}.`);
+}
+
+// The error a transport's failed answer stands for ({ error: 'address' | 'host' | 'timeout' | 'network' | 'size' | 'stopped' | 'cancelled', host? }), or null.
+export function transportFailure(answer, { host, allowed, timeoutMilliseconds }) {
+    switch (answer?.error) {
+        case undefined: return null;
+        case 'address': return new Error('That is not a web address.');
+        case 'host': return new Error(`The answer came from ${answer.host || 'an address that could not be read'}, which this window may not connect to. It may reach: ${[...allowed].join(', ')}.`);
+        case 'timeout': return new Error(`${host} did not answer within ${timeoutMilliseconds / 1000} seconds.`);
+        case 'size': return new Error('The answer is larger than the size limit.');
+        case 'stopped': return new Error(`The answer from ${host} stopped part way.`);
+        case 'cancelled': return new Error('The download was cancelled.');
+        default: return new Error(`Could not read ${host}. Check the connection; the server may also not allow a web page to read it, which the desktop app can.`);
+    }
+}
+
 // `transport({ url, hosts, maximumBytes, timeoutMilliseconds })` answers { status, bytes } (bytes only for a status that is ok), or
 // { error: 'address' | 'host' | 'timeout' | 'network' | 'size' | 'stopped', host? }. Resolves to the bytes, or throws a message a user can act on.
 export async function fetchAllowedFromPage({ url, hosts, transport, maximumBytes = maximumFetchBytes, timeoutMilliseconds = fetchTimeoutMilliseconds }) {
@@ -20,15 +42,8 @@ export async function fetchAllowedFromPage({ url, hosts, transport, maximumBytes
     checkAddress(address, allowed);
     const answer = await transport({ url: address.href, hosts: [...allowed], maximumBytes, timeoutMilliseconds });
     const host = address.hostname;
-    switch (answer?.error) {
-        case undefined: break;
-        case 'address': throw new Error('That is not a web address.');
-        case 'host': throw new Error(`The answer came from ${answer.host || 'an address that could not be read'}, which this window may not connect to. It may reach: ${[...allowed].join(', ')}.`);
-        case 'timeout': throw new Error(`${host} did not answer within ${timeoutMilliseconds / 1000} seconds.`);
-        case 'size': throw new Error('The answer is larger than the size limit.');
-        case 'stopped': throw new Error(`The answer from ${host} stopped part way.`);
-        default: throw new Error(`Could not read ${host}. Check the connection; the server may also not allow a web page to read it, which the desktop app can.`);
-    }
+    const failure = transportFailure(answer, { host, allowed, timeoutMilliseconds });
+    if (failure) throw failure;
     if (!(answer.status >= 200 && answer.status < 300)) throw new Error(`${host} answered ${answer.status}${answer.status === 404 ? ' (not found: check the symbol)' : answer.status === 429 ? ' (too many requests: wait a while)' : ''}.`);
     const bytes = new Uint8Array(answer.bytes);
     if (bytes.length > maximumBytes) throw new Error('The answer is larger than the size limit.');

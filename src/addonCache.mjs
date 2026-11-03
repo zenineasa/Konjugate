@@ -13,10 +13,9 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { defaultMaximumAgeDays, defaultMaximumCacheBytes, maximumAgeDaysLimit } from './addonCacheLimits.mjs';
 
-export const defaultMaximumCacheBytes = 512 * 1024 * 1024;
-export const defaultMaximumAgeDays = 30;
-export const maximumAgeDaysLimit = 3650;
+export { defaultMaximumAgeDays, defaultMaximumCacheBytes, maximumAgeDaysLimit };
 
 const keyOf = (url) => createHash('sha256').update(String(url)).digest('hex');
 const safeId = (addonId) => String(addonId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120);

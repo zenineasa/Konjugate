@@ -19,7 +19,10 @@ const emptyProject = () => ({
 });
 
 // `readPackageFile(path)`: the bytes of a file of the add-on's package, or null. Resolves to the importer's checked result.
-export function runImporterInFrame({ source, importer, files, options, onProgress, readPackageFile, timeoutMilliseconds = importerTimeoutMilliseconds }) {
+export function runImporterInFrame({ source, importer, files, options, onProgress, readPackageFile, timeoutMilliseconds = null }) {
+    // A binary input is handed over, not copied, and the importer gets more time for it by its size, as on the desktop.
+    const buffers = files.filter((file) => file.data).map((file) => file.data.buffer);
+    timeoutMilliseconds ??= importerTimeoutMilliseconds + Math.ceil(files.reduce((total, file) => total + (file.data?.byteLength ?? 0), 0) / (1024 * 1024)) * 500;
     const helperImplementations = {
         reconcileEquationBindings: (...args) => reconcileEquationBindings(...args),
         validateEquationLatex: (...args) => validateEquationLatex(...args),
@@ -54,7 +57,7 @@ export function runImporterInFrame({ source, importer, files, options, onProgres
             const message = event.data;
             if (!message || typeof message !== 'object') return;
             if (message.konjugate === 'importer-shell') {
-                frame.contentWindow.postMessage({ start: { workerSource: importerWorkerSource, run: { source, files, options } } }, '*');
+                frame.contentWindow.postMessage({ start: { workerSource: importerWorkerSource, run: { source, files, options }, transfer: buffers } }, '*', buffers);
             } else if (message.importer?.helper) {
                 const { id, name, args } = message.importer.helper;
                 let answer;

@@ -8,6 +8,7 @@
 import { version } from './buildInfo.mjs';
 import { reviewPackage } from './packageReview.mjs';
 import { createBrowserStorage, createPackageStore } from '../../webPackageStore.mjs';
+import { removeOpfsAddonData } from './opfsVolume.mjs';
 import { readPackageCompatibilityFacts } from '../../packageInspection.mjs';
 import { verifyPackageArchiveAsync } from '../../packageSignature.mjs';
 import { fetchMirrorIndex, fetchMirroredImage, fetchMirroredPackages, mirrorUpdates } from '../../webRegistry.mjs';
@@ -16,7 +17,7 @@ import { registryVideoUrlPatternForWeb } from '../../webRegistryPaths.mjs';
 let opened = null;
 // One store for the page, made when first needed, so a page that never touches packages never opens the browser's storage.
 export function packageStore() {
-    opened ??= createBrowserStorage().then((storage) => createPackageStore({ storage, appVersion: version }));
+    opened ??= createBrowserStorage().then((storage) => createPackageStore({ storage, appVersion: version, onAddonRemoved: removeOpfsAddonData }));
     return opened;
 }
 

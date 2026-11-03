@@ -10,14 +10,16 @@
 // for it answers that it is not available here.
 // No DOM and no storage in this module: the page gives it `host` callbacks.
 
+import { maximumAgeDaysLimit } from './addonCacheLimits.mjs';
 import { addressAllowed, checkedProgress, decodeText, importerInputs, maximumFetchedTextBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
+import { binaryChoice, maximumBinaryInputBytes, storedFileKinds } from './launcherFiles.mjs';
 import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
 import { attachAddonData, buildSessionEntry, sessionInputs } from './launcherSession.mjs';
 import { runScenarioFork } from './webLauncherRuns.mjs';
 
 // Of the permissions a launcher may ask for (addonHost.mjs), the ones this slice can honour, and the optional behaviours it can offer.
-export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch', 'project.data']);
-export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord', 'projectSession', 'keepSession', 'openLink']);
+export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch', 'project.data', 'files.store']);
+export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord', 'projectSession', 'keepSession', 'openLink', 'fetchCache', 'binaryInputs', 'multipleBinaryInputs', 'storedFiles', 'resumableDownloads']);
 
 const notYet = (what) => `${what} is not available in the web edition yet. It works in the desktop app.`;
 
@@ -27,24 +29,17 @@ export function webLauncherRefusal(manifest) {
     if (unavailable.length) return `This launcher asks for ${unavailable.join(', ')}, which the web edition cannot give an add-on yet. It works in the desktop app.`;
     const needs = (manifest.requires ?? []).filter((feature) => !webLauncherFeatures.has(feature));
     if (needs.length) return `This launcher needs ${needs.join(', ')}, which the web edition does not provide yet. It works in the desktop app.`;
-    const importers = manifest.contributes?.importers ?? [];
-    if (importers.some((importer) => importer.files.some((file) => file.binary))) return 'This launcher reads large binary files, which the web edition cannot give an importer yet. It works in the desktop app.';
     return null;
 }
 
 const unavailableMethods = {
-    cacheInfo: 'The download cache', clearCache: 'The download cache',
-    reloadFiles: 'Reloading files',
-    infer: 'Inference',
-    checkPython: 'Checking Python', storedFiles: 'Stored files', storeFiles: 'Stored files', downloadFile: 'Downloads', cancelDownload: 'Downloads',
-    partialDownloads: 'Downloads', discardPartialDownload: 'Downloads', fileSize: 'Downloads', describeStoredFile: 'Stored files',
-    removeStoredFile: 'Stored files', useStoredFiles: 'Stored files'
+    reloadFiles: 'Reloading files', infer: 'Inference', checkPython: 'Checking Python'
 };
 
-// `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null, runImporter({ importer, files, options, onProgress }) ->
+// `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null (for a binary role [{ name, size, read() -> Uint8Array }]), runImporter({ importer, files, options, onProgress }) ->
 // the importer's checked result, runModel({ content, config, commands }) -> the engine's decoded result, canSendCommands (whether runModel can
 // take commands), sha256(bytes) -> hex, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
-// -> hands the person those files together, keepAddonData(addonId, entry) (null removes) and requestAddonData(addonId) -> the entry the open project keeps for the add-on, or null, fetchBytes(href, hosts) -> the bytes of an answer from a listed host (webFetch.mjs), openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
+// -> hands the person those files together, files() and cache() -> the add-on's store of stored files (webFileStore.mjs) and its fetch cache (webFileCache.mjs), pickFiles({ title, extensions }) -> File[] | null, keepAddonData(addonId, entry) (null removes) and requestAddonData(addonId) -> the entry the open project keeps for the add-on, or null, fetchBytes(href, hosts) -> the bytes of an answer from a listed host (webFetch.mjs), openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
 export function createLauncherBridge({ manifest, host }) {
     const contributes = manifest.contributes ?? {};
     const permitted = new Set(manifest.permissions ?? []);
@@ -70,12 +65,16 @@ export function createLauncherBridge({ manifest, host }) {
     // What the launcher keeps with a project: its window's state and the input files the model was built from (launcherSession.mjs).
     const sessionEntry = (session) => { needs('project.data'); return buildSessionEntry({ addon: manifest, window: session, inputs: [...workspace.pending.values()] }); };
 
+    const downloads = new Map(); // a window's download id -> its AbortController
+    // A window sees an entry without the bytes behind it.
+    const shown = ({ blob, ...entry }) => entry;
+
     const handlers = {
         getManifest: () => {
             const multiple = new Set((contributes.importers ?? []).flatMap((importer) => importer.files.filter((file) => file.multiple).map((file) => file.role)));
             const files = {};
             for (const file of workspace.pending.values()) {
-                const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: Boolean(file.url) };
+                const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: Boolean(file.url), ...(file.binary ? { binary: true } : {}), ...(file.source ? { derivedFrom: file.source } : {}) };
                 if (multiple.has(file.role)) (files[file.role] ??= []).push(summary);
                 else files[file.role] = summary;
             }
@@ -98,9 +97,12 @@ export function createLauncherBridge({ manifest, host }) {
             if (bytes.length > maximumFetchedTextBytes) throw new Error('The answer is larger than a window may receive as text.');
             return { text: new TextDecoder().decode(bytes) };
         },
-        // A file from a listed host into a file role, read as a chosen file is; its address and time are kept for the run manifest. The download
-        // cache is not offered (a launcher that needs it says so in `requires` and is refused at install), so every fetch goes to the server.
-        fetchFile: async ({ importerId, role, url, name, cache = 'off' }) => {
+        // A file from a listed host into a file role, read as a chosen file is; its address and time are kept for the run manifest.
+        //
+        // With `cache: 'use'` (and `requires: ["fetchCache"]`), an answer fetched from the same address within `maximumAgeDays` (30 by default) is
+        // read from the add-on's cache instead, and a fresh one is kept there; `cache: 'refresh'` always fetches and keeps the answer; `cache: 'off'`
+        // (the default) neither reads nor keeps. The file's `retrievedAt` is when it was really fetched, whichever way it came.
+        fetchFile: async ({ importerId, role, url, name, cache = 'off', maximumAgeDays = null }) => {
             needs('network.fetch');
             needs('data.import');
             const importer = declared(contributes.importers, 'importerId', importerId, 'importer');
@@ -108,13 +110,37 @@ export function createLauncherBridge({ manifest, host }) {
             const fileName = safeFileName(name);
             if (!fileName) throw new Error('Give the series a name.');
             if (!['off', 'use', 'refresh'].includes(cache)) throw new Error('A fetch is cached with use, refresh or off.');
-            const bytes = await host.fetchBytes(addressAllowed(url, hosts), hosts);
-            const retrievedAt = new Date().toISOString();
+            const href = addressAllowed(url, hosts);
+            const store = cache === 'off' ? null : await host.cache();
+            const age = Number(maximumAgeDays) > 0 ? Math.min(Number(maximumAgeDays), maximumAgeDaysLimit) : undefined;
+            // The address is checked before the cache is read, as it is before a fetch.
+            const hit = cache === 'use' ? await store.get(href, { maximumAgeDays: age }) : null;
+            let bytes;
+            let retrievedAt;
+            if (hit) {
+                bytes = hit.bytes;
+                retrievedAt = hit.retrievedAt;
+            } else {
+                bytes = await host.fetchBytes(href, hosts);
+                retrievedAt = new Date().toISOString();
+                // A cache that cannot be written (a full disk) never stops a fetch.
+                if (store) await store.put(href, bytes, { retrievedAt }).catch(() => {});
+            }
             if (!file.multiple) dropRole(file);
             workspace.pending.set(pendingKey(file, fileName), { role, name: fileName, url, retrievedAt, ...decodeText(bytes), sha256: await host.sha256(bytes), bytes: bytes.length, sample: false });
             workspace.imported = null;
             releaseRuns();
-            return { name: fileName, bytes: bytes.length, cached: false, retrievedAt };
+            return { name: fileName, bytes: bytes.length, cached: Boolean(hit), retrievedAt };
+        },
+        // How much the add-on's cache holds ({ entries, bytes, oldest, newest }), and clearing it: for a window that lets the user see it and start afresh.
+        cacheInfo: async () => {
+            needs('network.fetch');
+            return (await host.cache()).info();
+        },
+        clearCache: async () => {
+            needs('network.fetch');
+            await (await host.cache()).clear();
+            return {};
         },
         chooseFile: async ({ importerId, role }) => {
             needs('data.import');
@@ -123,6 +149,13 @@ export function createLauncherBridge({ manifest, host }) {
             const chosen = await host.chooseFiles({ ...file, extensions: file.accept ?? ['csv'] });
             if (!chosen?.length) return { chosen: false };
             const taken = file.multiple ? chosen : chosen.slice(0, 1);
+            if (file.binary) {
+                // Noted, not read: read when the importer runs. Choosing changes no other input until then. Those chosen together replace the role's earlier ones.
+                const entries = binaryChoice(taken.map((item) => ({ path: item.name, size: item.size })), role);
+                dropRole(file);
+                entries.forEach((entry, index) => workspace.pending.set(pendingKey(file, entry.name), { ...entry, read: taken[index].read }));
+                return { chosen: true, name: entries[0].name, names: entries.map((entry) => entry.name), bytes: entries.reduce((sum, entry) => sum + entry.bytes, 0) };
+            }
             for (const item of taken) if (item.bytes.length > maximumInputBytes) throw new Error(`${item.name} is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
             if (!file.multiple) dropRole(file);
             for (const item of taken) workspace.pending.set(pendingKey(file, item.name), { role, name: item.name, ...decodeText(item.bytes), sha256: await host.sha256(item.bytes), bytes: item.bytes.length, sample: false });
@@ -163,7 +196,15 @@ export function createLauncherBridge({ manifest, host }) {
             if (missing.length) throw new Error(`Choose ${missing.map((file) => file.label).join(' and ')} first.`);
             if (JSON.stringify(options ?? {}).length > maximumOptionsBytes) throw new Error('The options are larger than the host accepts.');
             const roles = new Set(importer.files.map((file) => file.role));
-            const files = importerInputs(workspace.pending.values(), roles, options).map((file) => ({ role: file.role, name: file.name, text: file.text, encoding: file.encoding }));
+            const files = [];
+            for (const file of importerInputs(workspace.pending.values(), roles, options)) {
+                if (!file.binary) { files.push({ role: file.role, name: file.name, text: file.text, encoding: file.encoding }); continue; }
+                // A binary input is read now, into memory of its own, and handed over to the importer.
+                let data;
+                try { data = await file.read(); } catch (error) { throw new Error(error?.name === 'RangeError' || error?.name === 'NotReadableError' ? `${file.name} could not be read here: it may be too large for this device's memory, or it was moved. Choose it again.` : `${file.name} could not be read (${error?.message ?? 'unknown reason'}). Choose it again.`); }
+                if (data.length > maximumBinaryInputBytes) throw new Error(`${file.name} is larger than the ${maximumBinaryInputBytes / 1024 / 1024} MB limit.`);
+                files.push({ role: file.role, name: file.name, data });
+            }
             const onProgress = (progress) => {
                 const checked = checkedProgress(progress);
                 if (checked) host.emit('launcherProgress', { stage: 'import', importerId, ...checked });
@@ -302,6 +343,95 @@ export function createLauncherBridge({ manifest, host }) {
                 session: entry.window ?? null, savedAt: entry.savedAt ?? null, addonVersion: entry.addonVersion ?? null,
                 inputs: inputs.map(({ file }) => ({ role: file.role, name: file.name, bytes: file.bytes, ...(file.url ? { url: file.url, retrievedAt: file.retrievedAt } : {}), ...(file.source ? { derivedFrom: file.source } : {}) }))
             };
+        },
+        // ---- large files kept for the user (webFileStore.mjs) ----------------------------------------------------------
+        storedFiles: async () => {
+            needs('files.store');
+            const store = await host.files();
+            return { files: await store.list(), bytes: await store.usage() };
+        },
+        // Brings files in from the person's disk, as copies: chosen in the browser's file picker (any number, of the kinds the window names when it
+        // names them), kept as their own.
+        storeFiles: async ({ details = {}, accept = null, title = null } = {}) => {
+            needs('files.store');
+            const kinds = storedFileKinds(accept);
+            const chosen = await host.pickFiles({ title: typeof title === 'string' && title.trim() ? title.trim().slice(0, 80) : 'Files to keep', extensions: kinds.filters[0]?.extensions ?? null });
+            if (!chosen?.length) return { files: [] };
+            for (const file of chosen) kinds.check(file.name);
+            const store = await host.files();
+            const files = [];
+            for (const file of chosen) files.push(await store.putFile({ file, details }));
+            return { files };
+        },
+        // Downloads a file from a host the manifest declares, into the store, saying how far it has got.
+        downloadFile: async ({ url, name = null, server = null, checksumUrl = null, details = {}, downloadId = null, fresh = false } = {}) => {
+            needs('files.store');
+            needs('network.fetch');
+            const store = await host.files();
+            const controller = new AbortController();
+            if (typeof downloadId === 'string') downloads.set(downloadId, controller);
+            let last = 0;
+            const onProgress = ({ done, total, resumedFrom }) => {
+                const now = Date.now();
+                if (now - last < 200 && done !== total) return;
+                last = now;
+                host.emit('launcherProgress', { stage: 'download', downloadId, done, total, resumedFrom });
+            };
+            try {
+                return { file: await store.download({ url, name, server, checksumUrl, details, fresh: fresh === true, hosts, onProgress, signal: controller.signal }) };
+            } finally {
+                if (typeof downloadId === 'string') downloads.delete(downloadId);
+            }
+        },
+        // How large a file is before it is downloaded: asked of the server, at a declared host.
+        fileSize: async ({ url } = {}) => {
+            needs('files.store');
+            needs('network.fetch');
+            return { bytes: await (await host.files()).size({ url, hosts }) };
+        },
+        // Downloads that stopped part way, kept to continue (by downloading the same address again) or to give up.
+        partialDownloads: async () => {
+            needs('files.store');
+            return { partials: await (await host.files()).partials() };
+        },
+        discardPartialDownload: async ({ id } = {}) => {
+            needs('files.store');
+            await (await host.files()).discardPartial(id);
+            return {};
+        },
+        cancelDownload: ({ downloadId } = {}) => {
+            needs('files.store');
+            downloads.get(downloadId)?.abort();
+            return {};
+        },
+        describeStoredFile: async ({ id, details } = {}) => {
+            needs('files.store');
+            return { file: shown(await (await host.files()).describe(id, details)) };
+        },
+        removeStoredFile: async ({ id } = {}) => {
+            needs('files.store');
+            await (await host.files()).remove(id);
+            return {};
+        },
+        // Stored files as a binary role's files, in place of any chosen: read when the importer is next asked to.
+        useStoredFiles: async ({ importerId, role, ids } = {}) => {
+            needs('files.store');
+            needs('data.import');
+            const importer = declared(contributes.importers, 'importerId', importerId, 'importer');
+            const file = declared(importer.files, 'role', role, 'file role');
+            if (!file.binary) throw new Error('Stored files are given to a binary file role.');
+            if (!Array.isArray(ids) || !ids.length || (!file.multiple && ids.length > 1)) throw new Error('Name the stored files to use.');
+            const store = await host.files();
+            const entries = [];
+            for (const id of ids) {
+                const entry = await store.get(id);
+                if (!entry) throw new Error('A stored file named is no longer kept.');
+                entries.push(entry);
+            }
+            const pending = binaryChoice(entries.map((entry) => ({ path: entry.name, size: entry.bytes })), role);
+            dropRole(file);
+            pending.forEach((item, index) => workspace.pending.set(pendingKey(file, `${entries[index].id}-${entries[index].name}`), { ...item, name: entries[index].name, stored: entries[index].id, read: async () => new Uint8Array(await entries[index].blob.arrayBuffer()) }));
+            return { files: entries.map(shown) };
         },
         openPage: async ({ pageId }) => {
             needs('pages.open');

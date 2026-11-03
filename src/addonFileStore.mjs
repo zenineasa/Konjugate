@@ -17,33 +17,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { bodyLength, checkedDetails, connectTimeoutMilliseconds, maximumRedirects, maximumStoredFileBytes, partialLifeMilliseconds, safeName, validId } from './storedFiles.mjs';
 
-// The largest file kept: as large as an importer may be given.
-export const maximumStoredFileBytes = 1024 * 1024 * 1024;
-const maximumRedirects = 5;
-const connectTimeoutMilliseconds = 30000;
-const maximumDetailsBytes = 16 * 1024;
-// How long a download left unfinished is kept before it is removed.
-const partialLifeMilliseconds = 7 * 24 * 60 * 60 * 1000;
+export { bodyLength, maximumStoredFileBytes };
 
 const safeId = (addonId) => String(addonId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120);
 const entryId = () => randomUUID().replaceAll('-', '');
 const partialKey = (url) => createHash('sha256').update(String(url)).digest('hex').slice(0, 32);
-const validId = (id) => typeof id === 'string' && /^[0-9a-f]{32}$/.test(id);
-const safeName = (name) => String(name ?? '').replace(/[^\p{L}\p{N} .&()_=^-]+/gu, '_').trim().slice(0, 120) || 'file';
 
 // The folder an add-on's stored files live in.
 export function addonFilesDirectory(userData, addonId) {
     return join(userData, 'addonFiles', safeId(addonId));
-}
-
-// What an add-on adds to an entry, kept as it is but small: plain JSON, at most 16 KB.
-function checkedDetails(details) {
-    if (details === undefined || details === null) return {};
-    if (typeof details !== 'object' || Array.isArray(details)) throw new Error('A stored file\'s details must be an object.');
-    const text = JSON.stringify(details);
-    if (text.length > maximumDetailsBytes) throw new Error('A stored file\'s details are larger than the 16 KB they may be.');
-    return JSON.parse(text);
 }
 
 // An address the store may download from: https, a host the add-on declares, no user name or password.
@@ -51,15 +35,6 @@ function checkAddress(address, allowed) {
     if (address.protocol !== 'https:') throw new Error('Only https addresses can be downloaded.');
     if (address.username || address.password) throw new Error('An address with a user name or password cannot be downloaded.');
     if (!allowed.has(address.hostname.toLowerCase())) throw new Error(`This window may not download from ${address.hostname}. It may reach: ${[...allowed].join(', ')}.`);
-}
-
-// How many bytes a response's body will read as, when its server says. A body sent compressed (GitHub sends text so)
-// is unpacked as it is read, while its content-length counts it compressed, so then the size is not known.
-export function bodyLength(response) {
-    const encoding = (response.headers.get('content-encoding') ?? '').trim().toLowerCase();
-    if (encoding && encoding !== 'identity') return null;
-    const length = Number(response.headers.get('content-length'));
-    return Number.isFinite(length) && length > 0 ? length : null;
 }
 
 export function createFileStore({ directory, now = () => Date.now() }) {

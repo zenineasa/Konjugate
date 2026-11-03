@@ -46,13 +46,13 @@ function bridgeFor(manifest = launcherManifest(), hostOverrides = {}) {
 test('a launcher that needs more than this slice offers is turned away saying what', () => {
     assert.equal(webLauncherRefusal(launcherManifest()), null);
     assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'analysis.infer'] })), /analysis\.infer/);
-    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['files.store'] })), /files\.store/);
+    assert.match(webLauncherRefusal(launcherManifest({ requires: ['pythonCheck'] })), /pythonCheck/);
+    assert.equal(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'files.store', 'network.fetch'], network: { hosts: ['a.example.com'] }, requires: ['storedFiles', 'fetchCache', 'binaryInputs', 'multipleBinaryInputs', 'resumableDownloads'] })), null);
     assert.equal(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['a.example.com'] } })), null);
-    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['a.example.com'] }, requires: ['fetchCache'] })), /fetchCache/);
-    assert.match(webLauncherRefusal(launcherManifest({ requires: ['storedFiles'] })), /storedFiles/);
+    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['a.example.com'] }, requires: ['nodeProviderInputs'] })), /nodeProviderInputs/);
     const binary = launcherManifest();
     binary.contributes.importers[0].files[0] = { role: 'data', label: 'Map', binary: true, accept: ['pbf'] };
-    assert.match(webLauncherRefusal(binary), /binary/);
+    assert.equal(webLauncherRefusal(binary), null, 'a binary file role is read now');
 });
 
 test('a launcher installs from a file, and one needing more than the web edition gives is refused at install with the reason', async () => {
@@ -141,7 +141,7 @@ test('pages and links go only where the manifest says, and without the permissio
 
 test('what this slice cannot do answers that it is not available, and only the named methods are reachable', async () => {
     const { bridge } = bridgeFor();
-    for (const method of ['cacheInfo', 'clearCache', 'reloadFiles', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
+    for (const method of ['reloadFiles', 'infer', 'checkPython']) {
         const answer = await bridge.call(method, {});
         assert.equal(answer.ok, false);
         assert.match(answer.message, /not available in the web edition yet/);
@@ -359,6 +359,11 @@ test('the frame a fetch is made from has no origin of its own to give, takes htt
     // the host list is checked on the address asked for and on where the answer came from, before the body is read
     assert.ok(shell.indexOf('listed(address)') < shell.indexOf('await fetch('));
     assert.ok(shell.indexOf('listed(source)') < shell.indexOf('response.body.getReader()'));
+    // the same for a download in pieces, which may carry only a Range and an If-Range of the forms a continued download uses
+    assert.ok(shell.indexOf('listed(address)', shell.indexOf('async function stream')) < shell.indexOf('await fetch(', shell.indexOf('async function stream')));
+    assert.ok(shell.indexOf('listed(source)', shell.indexOf('async function stream')) < shell.indexOf('response.body.getReader()', shell.indexOf('async function stream')));
+    assert.match(shell, /bytes=\\d\{1,15\}-\$/);
+    assert.doesNotMatch(shell.slice(shell.indexOf('async function stream')), /Authorization|Cookie/);
     const runner = await readFile(new URL('../src/renderer/webShims/fetchRunner.mjs', import.meta.url), 'utf8');
     assert.match(runner, /setAttribute\('sandbox', 'allow-scripts'\)/);
     assert.doesNotMatch(runner, /allow-same-origin/);
@@ -396,4 +401,142 @@ test('a launcher keeps its session with the project it opens, or without opening
     await bare.call('runImport', { importerId: 'csv' });
     for (const [method, params] of [['keepSession', { session: {} }], ['restoreSession', {}], ['openInCanvas', { session: {} }]]) assert.match((await bare.call(method, params)).message, /not granted project\.data/, method);
     assert.deepEqual(bareCalls.opened, []);
+});
+
+// A launcher with large files: a binary file role, files kept for the user, and a host to download from.
+const filesManifest = (extra = {}) => {
+    const manifest = launcherManifest({ permissions: ['data.import', 'files.store', 'network.fetch'], network: { hosts: ['files.example.com'] }, requires: ['storedFiles', 'binaryInputs', 'multipleBinaryInputs', 'fetchCache', 'resumableDownloads'], ...extra });
+    manifest.contributes.importers[0].files.push({ role: 'map', label: 'Map', binary: true, multiple: true, accept: ['pbf'] });
+    return manifest;
+};
+async function filesHost(extra = {}) {
+    const { createWebFileStore } = await import('../src/webFileStore.mjs');
+    const { createWebFileCache } = await import('../src/webFileCache.mjs');
+    const { createMemoryVolume } = await import('../src/webVolume.mjs');
+    const { createHash } = await import('node:crypto');
+    const sha256Hex = async (input) => createHash('sha256').update(input).digest('hex');
+    const served = new Map();
+    const requests = [];
+    const transport = {
+        stream: async ({ url, method }) => {
+            requests.push({ url, method });
+            const bytes = served.get(url);
+            if (!bytes) return { status: 404, url, headers: new Map(), body: null, cancel: async () => {} };
+            return { status: 200, url, headers: new Map([['content-length', String(bytes.length)]]), cancel: async () => {}, body: method === 'HEAD' ? null : (async function* () { yield bytes; })() };
+        },
+        fetchText: async () => ''
+    };
+    const store = createWebFileStore({ volume: createMemoryVolume(), transport, sha256Hex });
+    const cache = createWebFileCache({ volume: createMemoryVolume(), sha256Hex });
+    const picked = { files: [], chosen: [] };
+    const fetched = [];
+    return { served, requests, store, cache, picked, fetched, overrides: {
+        files: async () => store, cache: async () => cache,
+        pickFiles: async () => picked.files,
+        chooseFiles: async (file) => picked.chosen.map((item) => (file.binary ? { name: item.name, size: item.bytes.length, read: async () => item.bytes } : item)),
+        fetchBytes: async (href) => { fetched.push(href); return strToU8(`fetched ${fetched.length}`); },
+        ...extra
+    } };
+}
+
+test('a launcher keeps files for the person: brought in, listed, described, used as a binary role\'s files, and removed', async () => {
+    const world = await filesHost();
+    const { bridge } = bridgeFor(filesManifest(), world.overrides);
+    world.picked.files = [Object.assign(new Blob(['pbf bytes']), { name: 'lyon.osm.pbf' }), Object.assign(new Blob(['x']), { name: 'notes.txt' })];
+    assert.match((await bridge.call('storeFiles', { accept: ['osm.pbf'] })).message, /notes\.txt was not kept: only \.osm\.pbf files/);
+    assert.deepEqual((await bridge.call('storedFiles', {})).files, [], 'Nothing was copied when one was refused.');
+    assert.match((await bridge.call('storeFiles', { accept: ['osm.pbf', 'pbf', 'a', 'b', 'c', 'd', 'e', 'f', 'g'] })).message, /up to 8 endings/);
+    world.picked.files = [world.picked.files[0]];
+    const stored = await bridge.call('storeFiles', { accept: ['osm.pbf'], details: { area: 'Lyon' } });
+    assert.deepEqual([stored.ok, stored.files.length, stored.files[0].name, stored.files[0].bytes, stored.files[0].details], [true, 1, 'lyon.osm.pbf', 9, { area: 'Lyon' }]);
+    world.picked.files = null;
+    assert.deepEqual((await bridge.call('storeFiles', {})).files, [], 'Cancelling keeps nothing.');
+    const listed = await bridge.call('storedFiles', {});
+    assert.deepEqual([listed.files.length, listed.bytes], [1, 9]);
+    const id = stored.files[0].id;
+    assert.deepEqual((await bridge.call('describeStoredFile', { id, details: { age: 2 } })).file.details, { area: 'Lyon', age: 2 });
+    assert.equal('blob' in (await bridge.call('describeStoredFile', { id, details: {} })).file, false, 'A window is never given the bytes.');
+    // used as a binary role's files: noted now, read when the importer runs
+    assert.match((await bridge.call('useStoredFiles', { importerId: 'csv', role: 'data', ids: [id] })).message, /binary file role/);
+    assert.match((await bridge.call('useStoredFiles', { importerId: 'csv', role: 'map', ids: [] })).message, /Name the stored files/);
+    assert.match((await bridge.call('useStoredFiles', { importerId: 'csv', role: 'map', ids: ['0'.repeat(32)] })).message, /no longer kept/);
+    const used = await bridge.call('useStoredFiles', { importerId: 'csv', role: 'map', ids: [id] });
+    assert.deepEqual([used.ok, used.files.map((file) => file.name)], [true, ['lyon.osm.pbf']]);
+    assert.deepEqual((await bridge.call('getManifest', {})).files.map, [{ name: 'lyon.osm.pbf', bytes: 9, sample: false, fetched: false, binary: true }]);
+    await bridge.call('useSample', { importerId: 'csv' });
+    assert.deepEqual((await bridge.call('getManifest', {})).files.map, undefined, 'Using the sample starts the inputs again.');
+    await bridge.call('useStoredFiles', { importerId: 'csv', role: 'map', ids: [id] });
+    assert.deepEqual(await bridge.call('removeStoredFile', { id }), { ok: true });
+    assert.deepEqual((await bridge.call('storedFiles', {})).files, []);
+});
+
+test('a binary file is chosen without being read, read when the importer runs only if the run asks, and handed over as bytes', async () => {
+    const world = await filesHost();
+    const given = [];
+    let reads = 0;
+    world.picked.chosen = [{ name: 'a.pbf', bytes: new Uint8Array([1, 2, 3]) }, { name: 'b.pbf', bytes: new Uint8Array([4, 5]) }];
+    world.overrides.chooseFiles = async (file) => world.picked.chosen.map((item) => ({ name: item.name, size: item.bytes.length, read: async () => { reads += 1; return item.bytes; } }));
+    const { bridge: chosen } = bridgeFor(filesManifest(), { ...world.overrides, runImporter: async ({ files }) => { given.push(files); return { ok: true, report: {}, document: { nodes: [], edges: [] }, parameterIndex: [] }; } });
+    await chosen.call('useSample', { importerId: 'csv' });
+    const answer = await chosen.call('chooseFile', { importerId: 'csv', role: 'map' });
+    assert.deepEqual([answer.chosen, answer.names, answer.bytes], [true, ['a.pbf', 'b.pbf'], 5]);
+    assert.equal(reads, 0, 'Choosing reads nothing.');
+    assert.deepEqual((await chosen.call('getManifest', {})).files.map.map((file) => file.binary), [true, true]);
+    await chosen.call('runImport', { importerId: 'csv' });
+    assert.equal(reads, 0, 'A run that does not ask for them does not read them.');
+    assert.deepEqual(given[0].map((file) => file.role), ['data']);
+    await chosen.call('runImport', { importerId: 'csv', options: { useBinaryFiles: true } });
+    assert.equal(reads, 2);
+    assert.deepEqual(given[1].filter((file) => file.role === 'map').map((file) => [file.name, [...file.data]]), [['a.pbf', [1, 2, 3]], ['b.pbf', [4, 5]]]);
+    assert.equal(given[1].every((file) => file.role !== 'map' || file.text === undefined), true);
+    // chosen together they replace the role's earlier ones
+    world.picked.chosen = [{ name: 'c.pbf', bytes: new Uint8Array([9]) }];
+    await chosen.call('chooseFile', { importerId: 'csv', role: 'map' });
+    assert.deepEqual((await chosen.call('getManifest', {})).files.map.map((file) => file.name), ['c.pbf']);
+    // too large a file, or too many together, is refused with the limit
+    world.picked.chosen = [{ name: 'huge.pbf', bytes: { length: 1024 * 1024 * 1024 + 1 } }];
+    assert.match((await chosen.call('chooseFile', { importerId: 'csv', role: 'map' })).message, /huge\.pbf is larger than the 1024 MB limit/);
+});
+
+test('a download is kept in the person\'s store with progress, can be sized and cancelled, and a fetch can use the cache', async () => {
+    const world = await filesHost();
+    const { bridge, calls } = bridgeFor(filesManifest(), world.overrides);
+    world.served.set('https://files.example.com/a.osm.pbf', strToU8('map data here'));
+    assert.equal((await bridge.call('fileSize', { url: 'https://files.example.com/a.osm.pbf' })).bytes, 13);
+    assert.equal(world.requests.at(-1).method, 'HEAD');
+    const done = await bridge.call('downloadFile', { url: 'https://files.example.com/a.osm.pbf', server: 'Example', downloadId: 'one', details: { area: 'x' } });
+    assert.deepEqual([done.ok, done.file.name, done.file.bytes, done.file.origin.kind], [true, 'a.osm.pbf', 13, 'download']);
+    assert.equal(calls.emitted.some(([channel, progress]) => channel === 'launcherProgress' && progress.stage === 'download' && progress.downloadId === 'one' && progress.done === 13), true);
+    for (const url of ['http://files.example.com/a', 'https://other.example.com/a']) assert.equal((await bridge.call('downloadFile', { url })).ok, false, url);
+    assert.equal((await bridge.call('fileSize', { url: 'https://other.example.com/a' })).ok, false);
+    assert.match((await bridge.call('downloadFile', { url: 'https://files.example.com/missing' })).message, /answered 404/);
+    assert.deepEqual((await bridge.call('partialDownloads', {})).partials, []);
+    assert.deepEqual(await bridge.call('cancelDownload', { downloadId: 'nothing' }), { ok: true });
+    assert.deepEqual(await bridge.call('discardPartialDownload', { id: 'x' }), { ok: true });
+    // the fetch cache: used within its age, refreshed on request, off by default, and listed
+    const ask = (cache, extra = {}) => bridge.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://files.example.com/q', name: 'Q', cache, ...extra });
+    const first = await ask('use');
+    assert.deepEqual([first.cached, world.fetched.length], [false, 1]);
+    const second = await ask('use');
+    assert.deepEqual([second.cached, world.fetched.length, second.retrievedAt], [true, 1, first.retrievedAt]);
+    assert.equal((await ask('off')).cached, false);
+    assert.equal(world.fetched.length, 2, 'off neither reads the cache');
+    await ask('refresh');
+    assert.equal(world.fetched.length, 3);
+    assert.equal((await ask('use')).cached, true);
+    assert.equal((await bridge.call('cacheInfo', {})).entries, 1);
+    assert.deepEqual(await bridge.call('clearCache', {}), { ok: true });
+    assert.equal((await bridge.call('cacheInfo', {})).entries, 0);
+    // the address is checked before the cache is read
+    assert.equal((await ask('use', { url: 'https://other.example.com/q' })).ok, false);
+});
+
+test('without files.store nothing is stored, listed or downloaded, and the store is never opened', async () => {
+    const { bridge } = bridgeFor(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['files.example.com'] } }), { files: async () => { throw new Error('opened'); }, cache: async () => { throw new Error('opened'); } });
+    for (const [method, params] of [['storedFiles', {}], ['storeFiles', {}], ['downloadFile', { url: 'https://files.example.com/a' }], ['fileSize', { url: 'https://files.example.com/a' }], ['partialDownloads', {}], ['discardPartialDownload', { id: 'x' }], ['cancelDownload', { downloadId: 'x' }], ['describeStoredFile', { id: 'x' }], ['removeStoredFile', { id: 'x' }], ['useStoredFiles', { importerId: 'csv', role: 'data', ids: ['x'] }]]) {
+        assert.match((await bridge.call(method, params)).message, /not granted files\.store/, method);
+    }
+    const { bridge: noFetch } = bridgeFor(launcherManifest({ permissions: ['data.import', 'files.store'] }), { files: async () => { throw new Error('opened'); } });
+    assert.match((await noFetch.call('downloadFile', { url: 'https://files.example.com/a' })).message, /not granted network\.fetch/);
+    assert.match((await noFetch.call('cacheInfo', {})).message, /not granted network\.fetch/);
 });

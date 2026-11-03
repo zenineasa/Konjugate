@@ -171,7 +171,9 @@ export async function createBrowserStorage() {
 
 const json = (bytes) => JSON.parse(strFromU8(bytes));
 
-export function createPackageStore({ storage, appVersion }) {
+// `onAddonRemoved(addonId)` is called when the last installed version of an add-on has been removed, for what it kept outside this store (a launcher's
+// stored files and fetch cache, which the page keeps in the browser's private file system).
+export function createPackageStore({ storage, appVersion, onAddonRemoved = null }) {
     const directoryOf = (packageType, packageId, version) => `${packagesRoot}/${packageType}s/${packageId}/${version}`;
 
     async function disabledKeys() {
@@ -257,7 +259,10 @@ export function createPackageStore({ storage, appVersion }) {
         if (!await exists(packageType, packageId, version)) throw new PackageArchiveError('That package version is not installed.', 'NOT_INSTALLED');
         await storage.remove(directoryOf(packageType, packageId, version));
         // An add-on's settings are kept across updates and go with its last installed version, as on the desktop.
-        if (packageType === 'addon' && !(await storage.list(`${packagesRoot}/addons/${packageId}`)).length) await storage.remove(settingsPath(packageId));
+        if (packageType === 'addon' && !(await storage.list(`${packagesRoot}/addons/${packageId}`)).length) {
+            await storage.remove(settingsPath(packageId));
+            await onAddonRemoved?.(packageId);
+        }
         await saveDisabledKeys((await disabledKeys()).filter((key) => key !== packageKey(packageType, packageId, version)));
     }
 

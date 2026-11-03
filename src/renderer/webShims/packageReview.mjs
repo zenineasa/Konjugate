@@ -95,7 +95,9 @@ export function reviewPackage({ packageManifest, contributionManifest, notes = [
         }
         // Pyodide can reach the page's own scripts, so a provider is not walled off from it as an add-on will be (stage 3 of the proposal).
         if (additions.some((item) => item.includes('Python'))) form.append(text('p', 'A Python provider runs inside this page, with the same access the page has to your data in this browser. Unlike an add-on, it is not walled off.'));
-        if (packageManifest.packageType === 'addon') form.append(text('p', 'It runs in a walled-off frame. It cannot see your models, your other packages or anything else this browser holds for this site, and it cannot reach the internet. It sees only what the permissions above give it.'));
+        if (packageManifest.packageType === 'addon') form.append(text('p', 'It runs in a walled-off frame. It cannot see your models, your other packages or anything else this browser holds for this site, and it cannot reach the internet by itself. It sees only what the permissions above give it.'));
+        const hosts = contributionManifest.network?.hosts ?? [];
+        if (permissions.includes('network.fetch') && hosts.length) form.append(text('p', `It may ask this page to fetch from ${hosts.join(', ')} and from nowhere else. Some servers do not allow a web page to read them; fetching from those fails with a message, and works in the desktop app.`));
         form.append(text('p', 'It is stored in this browser and takes effect at once. Install packages only from publishers you trust.'));
         const footer = document.createElement('footer');
         const cancel = text('button', 'Cancel');

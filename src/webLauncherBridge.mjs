@@ -4,17 +4,18 @@
 // (webAddonBridge.mjs) it is the only way out of the add-on's sandboxed frame, and it checks every request against the permissions the
 // person approved and the ids the manifest declared, as the desktop's handlers in launcherHost.mjs do; every method answers
 // { ok: true, ... } or { ok: false, message }. This first slice of launchers can bring in files, run a declared importer, open the model it
-// built in the canvas, run a plain baseline and its declared scenarios, export their results, open a declared help page and open a link on a declared host. What
-// needs more (fetching from the network, stored files, inference, kept sessions) is turned away at install, and a method
+// built in the canvas, run a plain baseline and its declared scenarios, export their results, fetch from the hosts it declares (a server that does not allow web pages
+// to read it fails with a message saying so), open a declared help page and open a link on a declared host. What
+// needs more (the download cache, stored files, inference, kept sessions) is turned away at install, and a method
 // for it answers that it is not available here.
 // No DOM and no storage in this module: the page gives it `host` callbacks.
 
-import { addressAllowed, checkedProgress, decodeText, importerInputs, maximumInputBytes, maximumOptionsBytes } from './launcherImport.mjs';
+import { addressAllowed, checkedProgress, decodeText, importerInputs, maximumFetchedTextBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
 import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
 import { runScenarioFork } from './webLauncherRuns.mjs';
 
 // Of the permissions a launcher may ask for (addonHost.mjs), the ones this slice can honour, and the optional behaviours it can offer.
-export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open']);
+export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch']);
 export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord']);
 
 const notYet = (what) => `${what} is not available in the web edition yet. It works in the desktop app.`;
@@ -31,7 +32,7 @@ export function webLauncherRefusal(manifest) {
 }
 
 const unavailableMethods = {
-    fetchText: 'Fetching from the internet', fetchFile: 'Fetching from the internet', cacheInfo: 'The download cache', clearCache: 'The download cache',
+    cacheInfo: 'The download cache', clearCache: 'The download cache',
     keepSession: 'Keeping a session with the project', restoreSession: 'Keeping a session with the project', reloadFiles: 'Reloading files',
     infer: 'Inference',
     checkPython: 'Checking Python', storedFiles: 'Stored files', storeFiles: 'Stored files', downloadFile: 'Downloads', cancelDownload: 'Downloads',
@@ -42,7 +43,7 @@ const unavailableMethods = {
 // `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null, runImporter({ importer, files, options, onProgress }) ->
 // the importer's checked result, runModel({ content, config, commands }) -> the engine's decoded result, canSendCommands (whether runModel can
 // take commands), sha256(bytes) -> hex, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
-// -> hands the person those files together, openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
+// -> hands the person those files together, fetchBytes(href, hosts) -> the bytes of an answer from a listed host (webFetch.mjs), openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
 export function createLauncherBridge({ manifest, host }) {
     const contributes = manifest.contributes ?? {};
     const permitted = new Set(manifest.permissions ?? []);
@@ -59,6 +60,7 @@ export function createLauncherBridge({ manifest, host }) {
     // A pending file is kept under its role, or under role and name for a role that accepts several files.
     const pendingKey = (file, name) => (file.multiple ? `${file.role}::${name}` : file.role);
     const dropRole = (file) => { for (const [key, item] of workspace.pending) if (item.role === file.role) workspace.pending.delete(key); };
+    const hosts = manifest.network?.hosts ?? [];
     const sampleName = (path) => path.split('/').pop();
 
     // The baseline of a run length (ensureBaseline), run by the engine: the model from its start, with its checkpoints kept to fork from.
@@ -69,12 +71,12 @@ export function createLauncherBridge({ manifest, host }) {
             const multiple = new Set((contributes.importers ?? []).flatMap((importer) => importer.files.filter((file) => file.multiple).map((file) => file.role)));
             const files = {};
             for (const file of workspace.pending.values()) {
-                const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: false };
+                const summary = { name: file.name, bytes: file.bytes, sample: file.sample, fetched: Boolean(file.url) };
                 if (multiple.has(file.role)) (files[file.role] ??= []).push(summary);
                 else files[file.role] = summary;
             }
             return {
-                addonId: manifest.addonId, name: manifest.name, version: manifest.version, network: { hosts: manifest.network?.hosts ?? [] },
+                addonId: manifest.addonId, name: manifest.name, version: manifest.version, network: { hosts },
                 importers: (contributes.importers ?? []).map(({ importerId, name, guide, files: roles }) => ({
                     importerId, name, guide: guide ?? null,
                     files: roles.map(({ role, label, required = false, description = '', accept = ['csv'], sample, multiple: several = false, binary = false }) => ({ role, label, required, description, accept, multiple: several, binary, hasSample: Boolean(sample) }))
@@ -84,6 +86,31 @@ export function createLauncherBridge({ manifest, host }) {
                 files,
                 imported: workspace.imported ? { importerId: workspace.imported.importerId, report: workspace.imported.report, entities: workspace.imported.entities } : null
             };
+        },
+        // A page of text from a listed host, for a window that needs an answer to show (a symbol search) rather than a file to read.
+        fetchText: async ({ url } = {}) => {
+            needs('network.fetch');
+            const bytes = await host.fetchBytes(addressAllowed(url, hosts), hosts);
+            if (bytes.length > maximumFetchedTextBytes) throw new Error('The answer is larger than a window may receive as text.');
+            return { text: new TextDecoder().decode(bytes) };
+        },
+        // A file from a listed host into a file role, read as a chosen file is; its address and time are kept for the run manifest. The download
+        // cache is not offered (a launcher that needs it says so in `requires` and is refused at install), so every fetch goes to the server.
+        fetchFile: async ({ importerId, role, url, name, cache = 'off' }) => {
+            needs('network.fetch');
+            needs('data.import');
+            const importer = declared(contributes.importers, 'importerId', importerId, 'importer');
+            const file = declared(importer.files, 'role', role, 'file role');
+            const fileName = safeFileName(name);
+            if (!fileName) throw new Error('Give the series a name.');
+            if (!['off', 'use', 'refresh'].includes(cache)) throw new Error('A fetch is cached with use, refresh or off.');
+            const bytes = await host.fetchBytes(addressAllowed(url, hosts), hosts);
+            const retrievedAt = new Date().toISOString();
+            if (!file.multiple) dropRole(file);
+            workspace.pending.set(pendingKey(file, fileName), { role, name: fileName, url, retrievedAt, ...decodeText(bytes), sha256: await host.sha256(bytes), bytes: bytes.length, sample: false });
+            workspace.imported = null;
+            releaseRuns();
+            return { name: fileName, bytes: bytes.length, cached: false, retrievedAt };
         },
         chooseFile: async ({ importerId, role }) => {
             needs('data.import');

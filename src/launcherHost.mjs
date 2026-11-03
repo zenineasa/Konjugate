@@ -18,7 +18,7 @@ import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './ad
 import { addonFilesDirectory, createFileStore } from './addonFileStore.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, nearestCheckpoint, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
-import { addressAllowed, checkAddress, checkedDerived, checkedImporterResult, checkedProgress, decodeText, importerInputs, maximumDerivedFiles, maximumImporterDataBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
+import { addressAllowed, checkAddress, checkedDerived, checkedImporterResult, checkedProgress, decodeText, fetchTimeoutMilliseconds, importerInputs, maximumDerivedFiles, maximumFetchBytes, maximumFetchedTextBytes, maximumImporterDataBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
 // Re-exported so what imported them from here still can.
 export { addressAllowed, checkedDerived, checkedProgress, decodeText, importerInputs, safeFileName };
 export { resultsToCsv };
@@ -61,9 +61,6 @@ export function storedFileKinds(accept) {
 // Long enough for an importer that builds a large region (routing every lane over a city's roads takes tens of seconds,
 // more on a busy machine); short enough that one that hangs is still stopped.
 const importerTimeoutMilliseconds = 120000;
-const maximumFetchBytes = 5 * 1024 * 1024;
-const maximumFetchedTextBytes = 1024 * 1024;
-const fetchTimeoutMilliseconds = 20000;
 // A launcher's session, kept with the project: its window's own state, and the input files it was built from.
 const maximumSessionWindowBytes = 2 * 1024 * 1024;
 const maximumSessionInputBytes = 64 * 1024 * 1024;

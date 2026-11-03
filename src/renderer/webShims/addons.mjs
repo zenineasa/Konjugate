@@ -9,6 +9,8 @@
 
 import { createVisualizerSession, publicToolstripContributions } from '../../addonHost.mjs';
 import { createVisualizerBridge } from '../../webAddonBridge.mjs';
+import { fetchAllowedFromPage } from '../../webFetch.mjs';
+import { fetchInFrame } from './fetchRunner.mjs';
 import { createLauncherBridge } from '../../webLauncherBridge.mjs';
 import { buildAddonDocument, launcherApiSource } from '../../webAddonDocument.mjs';
 import { runImporterInFrame } from './importerRunner.mjs';
@@ -211,6 +213,7 @@ async function openLauncher(store, entry) {
             // Plugins the model names are resolved to their source first, as every engine call from the page does.
             runModel: async ({ content, config, commands }) => runModel(engineModuleUrl, await resolvePluginReferences(content), config, commands),
             canSendCommands: canSendCommands(),
+            fetchBytes: (href, hosts) => fetchAllowedFromPage({ url: href, hosts, transport: fetchInFrame }),
             sha256: async (bytes) => toHex(await crypto.subtle.digest('SHA-256', bytes)),
             appVersion,
             encodeModel: (content) => encodeProjectContent(content),

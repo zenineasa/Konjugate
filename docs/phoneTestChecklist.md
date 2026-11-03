@@ -30,4 +30,5 @@ What only a real phone can confirm. The layout is checked in Chrome at 360 by 76
 - Extensions, Discover: the list loads with its images, an entry's detail and its install button are reachable, the review shows who signed the package, and Updates appears after the registry has a newer version of something installed.
 - A launcher add-on that imports a model: from its window, "Choose file" opens the phone's file picker (the click in the window must reach the page's picker), the import runs, and "Open in canvas" opens the model.
 - A launcher add-on that runs scenarios: after an import, a baseline and a scenario run from its window and the scenario's result differs from the baseline's from the fork on (the run happens off the page, so the phone should stay responsive while it works).
+- A launcher add-on that fetches from a declared host: a fetch from a server that allows web pages (for example a place search) returns its answer and the file imports; a fetch from one that does not shows the message saying so, and nothing else on the page breaks
 - Exporting a launcher's results downloads a zip the phone can save and open.

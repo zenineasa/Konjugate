@@ -46,7 +46,9 @@ function bridgeFor(manifest = launcherManifest(), hostOverrides = {}) {
 test('a launcher that needs more than this slice offers is turned away saying what', () => {
     assert.equal(webLauncherRefusal(launcherManifest()), null);
     assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'analysis.infer'] })), /analysis\.infer/);
-    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['network.fetch'], network: { hosts: ['a.example.com'] } })), /network\.fetch/);
+    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['files.store'] })), /files\.store/);
+    assert.equal(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['a.example.com'] } })), null);
+    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['a.example.com'] }, requires: ['fetchCache'] })), /fetchCache/);
     assert.match(webLauncherRefusal(launcherManifest({ requires: ['storedFiles'] })), /storedFiles/);
     const binary = launcherManifest();
     binary.contributes.importers[0].files[0] = { role: 'data', label: 'Map', binary: true, accept: ['pbf'] };
@@ -139,7 +141,7 @@ test('pages and links go only where the manifest says, and without the permissio
 
 test('what this slice cannot do answers that it is not available, and only the named methods are reachable', async () => {
     const { bridge } = bridgeFor();
-    for (const method of ['fetchText', 'fetchFile', 'keepSession', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
+    for (const method of ['cacheInfo', 'clearCache', 'keepSession', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
         const answer = await bridge.call(method, {});
         assert.equal(answer.ok, false);
         assert.match(answer.message, /not available in the web edition yet/);
@@ -297,4 +299,67 @@ test('opening in the canvas carries the baseline and the named scenario\'s fork 
     assert.equal(fork.forkTime, 5);
     assert.deepEqual(fork.result.samples.map((sample) => sample.time), [5, 10], 'The fork holds its own run, from the fork point.');
     assert.notEqual(fork.branchUuid, baseline.branchUuid);
+});
+
+test('a launcher fetches from the hosts it declares, into a file role or as text, and nowhere else', async () => {
+    const asked = [];
+    const manifest = launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['data.example.com'] } });
+    const { bridge } = bridgeFor(manifest, { fetchBytes: async (href, hosts) => { asked.push([href, hosts]); return strToU8('t,v\n1,2\n'); } });
+    const filed = await bridge.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://data.example.com/s?x=1', name: 'AAPL: daily' });
+    assert.deepEqual([filed.ok, filed.name, filed.bytes, filed.cached], [true, 'AAPL_ daily', 8, false]);
+    assert.match(filed.retrievedAt, /^\d{4}-/);
+    assert.deepEqual(asked[0], ['https://data.example.com/s?x=1', ['data.example.com']]);
+    const shown = (await bridge.call('getManifest', {})).files.data;
+    assert.deepEqual([shown.name, shown.fetched], ['AAPL_ daily', true]);
+    assert.deepEqual((await bridge.call('fetchText', { url: 'https://data.example.com/q' })).text, 't,v\n1,2\n');
+    for (const url of ['http://data.example.com/', 'https://evil.example.com/', 'https://u:p@data.example.com/', 'nonsense']) {
+        assert.equal((await bridge.call('fetchText', { url })).ok, false, url);
+        assert.equal((await bridge.call('fetchFile', { importerId: 'csv', role: 'data', url, name: 'x' })).ok, false, url);
+    }
+    assert.match((await bridge.call('fetchFile', { importerId: 'csv', role: 'nope', url: 'https://data.example.com/', name: 'x' })).message, /undeclared file role/);
+    assert.match((await bridge.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://data.example.com/', name: '' })).message, /Give the series a name/);
+    assert.match((await bridge.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://data.example.com/', name: 'x', cache: 'sometimes' })).message, /use, refresh or off/);
+    assert.equal(asked.length, 2, 'Nothing refused reached the network.');
+    const { bridge: bare } = bridgeFor(launcherManifest(), { fetchBytes: async () => { throw new Error('reached'); } });
+    assert.match((await bare.call('fetchText', { url: 'https://data.example.com/' })).message, /not granted network\.fetch/);
+    const { bridge: big } = bridgeFor(manifest, { fetchBytes: async () => new Uint8Array(1024 * 1024 + 1) });
+    assert.match((await big.call('fetchText', { url: 'https://data.example.com/' })).message, /larger than a window/);
+    assert.equal((await big.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://data.example.com/', name: 'big' })).ok, true, 'A file may be larger than text a window receives.');
+});
+
+test('a fetch from a page keeps to the listed hosts, the size limit and the time limit, and says when a server will not be read', async () => {
+    const { fetchAllowedFromPage } = await import('../src/webFetch.mjs');
+    const hosts = ['data.example.com'];
+    const asked = [];
+    const answering = (answer) => async (request) => { asked.push(request); return answer; };
+    const fetchWith = (answer, extra = {}) => fetchAllowedFromPage({ url: 'https://data.example.com/a', hosts, transport: answering(answer), ...extra });
+    assert.deepEqual([...await fetchWith({ status: 200, bytes: new Uint8Array([104, 105]).buffer })], [104, 105]);
+    assert.deepEqual(asked[0], { url: 'https://data.example.com/a', hosts: ['data.example.com'], maximumBytes: 5 * 1024 * 1024, timeoutMilliseconds: 20000 });
+    await assert.rejects(fetchWith({ error: 'host', host: 'evil.example.com' }), /came from evil\.example\.com, which this window may not connect to/);
+    await assert.rejects(fetchWith({ error: 'network' }), /may also not allow a web page to read it/);
+    await assert.rejects(fetchWith({ error: 'timeout' }), /did not answer within 20 seconds/);
+    await assert.rejects(fetchWith({ error: 'size' }), /larger than the size limit/);
+    await assert.rejects(fetchWith({ error: 'stopped' }), /stopped part way/);
+    await assert.rejects(fetchWith({ status: 404 }), /answered 404 \(not found/);
+    await assert.rejects(fetchWith({ status: 429 }), /too many requests/);
+    await assert.rejects(fetchWith({ status: 500 }), /answered 500\./);
+    await assert.rejects(fetchWith({ status: 200, bytes: new Uint8Array(5).buffer }, { maximumBytes: 4 }), /larger than the size limit/);
+    const before = asked.length;
+    for (const url of ['http://data.example.com/a', 'https://other.example.com/a', 'https://u:p@data.example.com/a', 'nonsense']) await assert.rejects(fetchAllowedFromPage({ url, hosts, transport: answering({ status: 200, bytes: new ArrayBuffer(0) }) }), url);
+    assert.equal(asked.length, before, 'Nothing refused was asked of the network.');
+});
+
+test('the frame a fetch is made from has no origin of its own to give, takes https only, and checks the hosts again, after any redirect', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const shell = await readFile(new URL('../src/renderer/fetchFrame.html', import.meta.url), 'utf8');
+    assert.match(shell, /Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:; form-action 'none'; base-uri 'none'"/);
+    assert.match(shell, /credentials: 'omit'/);
+    assert.match(shell, /referrerPolicy: 'no-referrer'/);
+    assert.match(shell, /event\.source !== parent/);
+    // the host list is checked on the address asked for and on where the answer came from, before the body is read
+    assert.ok(shell.indexOf('listed(address)') < shell.indexOf('await fetch('));
+    assert.ok(shell.indexOf('listed(source)') < shell.indexOf('response.body.getReader()'));
+    const runner = await readFile(new URL('../src/renderer/webShims/fetchRunner.mjs', import.meta.url), 'utf8');
+    assert.match(runner, /setAttribute\('sandbox', 'allow-scripts'\)/);
+    assert.doesNotMatch(runner, /allow-same-origin/);
 });

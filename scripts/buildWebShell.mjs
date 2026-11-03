@@ -108,6 +108,7 @@ await cp(join(srcDirectory, 'renderer', 'styles.css'), join(outputDirectory, 're
 // The empty page an add-on's sandboxed frame starts from (webShims/addons.mjs); nothing imports it, so the walk above would miss it.
 await cp(join(srcDirectory, 'renderer', 'addonFrame.html'), join(outputDirectory, 'renderer', 'addonFrame.html'));
 await cp(join(srcDirectory, 'renderer', 'importerFrame.html'), join(outputDirectory, 'renderer', 'importerFrame.html'));
+await cp(join(srcDirectory, 'renderer', 'fetchFrame.html'), join(outputDirectory, 'renderer', 'fetchFrame.html'));
 
 const packageJson = JSON.parse(await readFile(join(rootDirectory, 'package.json'), 'utf8'));
 await writeFile(join(outputDirectory, 'renderer', 'webShims', 'buildInfo.mjs'),

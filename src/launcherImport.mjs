@@ -22,6 +22,11 @@ export function decodeText(bytes) {
     }
 }
 
+// What one fetch from a listed host may take: bytes, the part of them a window may receive as text, and time.
+export const maximumFetchBytes = 5 * 1024 * 1024;
+export const maximumFetchedTextBytes = 1024 * 1024;
+export const fetchTimeoutMilliseconds = 20000;
+
 // An address the window may ask for: https, no credentials, a host the manifest lists. Throws a message a user can act on.
 export function checkAddress(address, allowed) {
     if (address.protocol !== 'https:') throw new Error('Only https addresses can be fetched.');

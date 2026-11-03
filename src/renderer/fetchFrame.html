@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+<!-- Where a launcher's fetch from the internet is made in the web edition (docs/proposals/webEditionPackages.md, stage 5). The application's
+     page may talk only to its own server, so a fetch is made from here instead: a frame shown with sandbox="allow-scripts" and no
+     allow-same-origin, so it has no origin (no cookies, no storage, no way into the page) and holds no code from any package, only the few lines
+     below. Its policy allows requests to https addresses and nothing else; which hosts a launcher may reach is the add-on's manifest, which the
+     page checks before asking and this frame checks again, on the address asked for and on the address the answer came from after any
+     redirects, before it reads a byte of the body. -->
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:; form-action 'none'; base-uri 'none'">
+<script>
+addEventListener('message', async (event) => {
+    if (event.source !== parent || typeof event.data !== 'object' || event.data === null || typeof event.data.fetch !== 'object' || event.data.fetch === null) return;
+    const { id, url, hosts, maximumBytes, timeoutMilliseconds } = event.data.fetch;
+    const reply = (body, transfer = []) => parent.postMessage({ konjugate: 'fetched', id, ...body }, '*', transfer);
+    const listed = (address) => address.protocol === 'https:' && !address.username && !address.password && Array.isArray(hosts) && hosts.includes(address.hostname.toLowerCase());
+    try {
+        let address;
+        try { address = new URL(url); } catch { return reply({ error: 'address' }); }
+        if (!listed(address)) return reply({ error: 'host', host: address.hostname });
+        let response;
+        try {
+            response = await fetch(address.href, { method: 'GET', mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', redirect: 'follow', signal: AbortSignal.timeout(timeoutMilliseconds) });
+        } catch (error) {
+            return reply({ error: error && error.name === 'TimeoutError' ? 'timeout' : 'network' });
+        }
+        let source = address;
+        try { if (response.url) source = new URL(response.url); } catch { return reply({ error: 'host', host: '' }); }
+        if (!listed(source)) { response.body && response.body.cancel().catch(() => {}); return reply({ error: 'host', host: source.hostname }); }
+        if (!response.ok) { response.body && response.body.cancel().catch(() => {}); return reply({ status: response.status }); }
+        if (Number(response.headers.get('content-length')) > maximumBytes) { response.body && response.body.cancel().catch(() => {}); return reply({ error: 'size' }); }
+        const chunks = [];
+        let total = 0;
+        if (response.body) {
+            const reader = response.body.getReader();
+            for (;;) {
+                let step;
+                try { step = await reader.read(); } catch (error) { return reply({ error: error && error.name === 'TimeoutError' ? 'timeout' : 'stopped' }); }
+                if (step.done) break;
+                total += step.value.length;
+                if (total > maximumBytes) { reader.cancel().catch(() => {}); return reply({ error: 'size' }); }
+                chunks.push(step.value);
+            }
+        }
+        const bytes = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        reply({ status: response.status, bytes: bytes.buffer }, [bytes.buffer]);
+    } catch {
+        reply({ error: 'network' });
+    }
+});
+parent.postMessage({ konjugate: 'fetch-shell' }, '*');
+</script>

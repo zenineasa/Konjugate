@@ -155,6 +155,8 @@ export function createPlaywrightWebDriver(context, initialPage) {
             parameterWaveforms: false,
             // Likewise: the `startPaused` run setting is read by the engine, so it needs a web build made after it was added.
             startPausedRuns: false,
+            // The web engine reports a fit only when it ends (webShims/engine.mjs), with no progress to show and no way to stop one part way.
+            fitProgress: false,
             // src/renderer/webShims/projectFiles.mjs's openExampleGuide() opens the raw .md file
             // directly rather than a rendered guide page -- a real, separate gap (see
             // docs/proposals/webEdition.md), not a driver limitation like the others above.

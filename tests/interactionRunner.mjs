@@ -2632,7 +2632,8 @@ export async function runInteractionTests(driver) {
 
         await openRunDialog(window);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
-        await waitFor(window, `document.querySelector('.resultMode b').textContent === 'Results'`, 'Offline run did not complete.', 15000);
+        // The label already reads "Results" before the run starts, so wait for the completed run's Extend button instead.
+        await waitFor(window, `!document.querySelector('#continueRun').hidden && document.querySelector('#continueRun').textContent === 'Extend simulation'`, 'Offline run did not complete.', 30000);
     });
 
     await run('Pose Visualizer add-on inspects a completed run with two free bodies', async () => {
@@ -2774,15 +2775,15 @@ export async function runInteractionTests(driver) {
     }, { skip: (!driver.capabilities.addons && 'the Pose Visualizer add-on has no web-edition equivalent') || addonMissing('konjugate.poseVisualizer', 'konjugate-posevisualizer') });
 
     await run('closing results and removing the free-body nodes cleans up the pose scenario', async () => {
-        await evaluate(window, `document.querySelector('#closeResults').click()`);
-        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        // The run may still be finishing, and closing is refused until it has, so keep asking until the confirmation appears.
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open || (document.querySelector('#closeResults').click(), document.querySelector('#closeResultsDialog').open)`, 'Closing results did not request confirmation.', 30000);
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
         await waitFor(window, `document.querySelector('#addButton') && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Free body'))?.click()`);
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Free body'))?.click()`);
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
-    }, { skip: (!driver.capabilities.addons && 'it cleans up the pose scenario, which the Pose Visualizer tests above set up and the web edition does not run') || addonMissing('konjugate.poseVisualizer', 'konjugate-posevisualizer') });
+    });
 
     await run('importing a node shape file also saves it into the user shape library', async () => {
         // Deliberately operates on whatever node is already on the canvas at this point in the
@@ -3800,7 +3801,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningConstraintRows [data-field="limit"]').value`), '1000000000', 'The limit comes back with the objective.');
         await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjectiveSection').hidden`), true, 'Closing the card puts it back to the measured-data goal.');
-    });
+    }, { skip: !driver.capabilities.fitProgress && 'the web engine reports a fit only when it ends, so there is no progress to wait for or stop' });
 
     await run('Results Analysis timeline seek only redraws the scatter trail once the run is completed, not while running or paused', async () => {
         const before = driver.allHandles();
@@ -3899,6 +3900,7 @@ export async function runInteractionTests(driver) {
     }, { skip: (!driver.capabilities.multiWindow && 'duplicates coverage #5/#15 already provide on the web driver; the addon-specific redraw-gating behavior itself has no web-edition equivalent') || addonMissing('konjugate.resultPlotViewer', 'konjugate-resultplotviewer') });
 
     await run('source terms expose parameters to equations and programmable bindings', async () => {
+        await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')))`, 'The "Enclosed air" label was not in the DOM.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
         await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
         await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);

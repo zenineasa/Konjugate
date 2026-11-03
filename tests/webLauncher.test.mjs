@@ -172,7 +172,7 @@ test('the importer\'s frame starts from a page whose policy lets nothing in or o
 // ---- scenarios --------------------------------------------------------------------------------------
 
 const scenarioManifest = () => launcherManifest({
-    permissions: ['data.import', 'scenario.run', 'results.export'], links: undefined,
+    permissions: ['data.import', 'scenario.run', 'results.export', 'model.open'], links: undefined,
     contributes: {
         ...launcherManifest().contributes,
         scenarios: [{ scenarioId: 'boost', name: 'Boost', description: 'Raise the gain', forkAt: 5, runTime: 10, interventions: [{ parameter: 'gain', target: 'global', value: 3 }] }]
@@ -276,4 +276,25 @@ test('results are exported as one set of files with a manifest that records what
     assert.doesNotMatch(new TextDecoder().decode(calls.saved[1].files['results.csv']), /Boost/, 'Without a scenario named, only the baseline is exported.');
     const without = bridgeFor(launcherManifest());
     assert.match((await without.bridge.call('exportResults', {})).message, /was not granted results\.export/);
+});
+
+test('opening in the canvas carries the baseline and the named scenario\'s fork in as branches', async () => {
+    const { bridge, calls } = runnerBridge();
+    await bridge.call('useSample', { importerId: 'csv' });
+    await bridge.call('runImport', { importerId: 'csv' });
+    const first = await bridge.call('openInCanvas', {});
+    assert.equal(first.ok, true, first.message);
+    assert.deepEqual(calls.opened.at(-1).branches, [], 'Before any run there is nothing to carry.');
+    await bridge.call('runScenario', { scenarioId: 'boost', signals: [] });
+    await bridge.call('openInCanvas', {});
+    const [only] = calls.opened.at(-1).branches;
+    assert.equal(calls.opened.at(-1).branches.length, 1);
+    assert.deepEqual([only.label, only.parentBranchUuid, only.forkTime], ['Baseline', null, null]);
+    await bridge.call('openInCanvas', { scenarioId: 'boost' });
+    const [baseline, fork] = calls.opened.at(-1).branches;
+    assert.equal(fork.label, 'Boost');
+    assert.equal(fork.parentBranchUuid, baseline.branchUuid);
+    assert.equal(fork.forkTime, 5);
+    assert.deepEqual(fork.result.samples.map((sample) => sample.time), [5, 10], 'The fork holds its own run, from the fork point.');
+    assert.notEqual(fork.branchUuid, baseline.branchUuid);
 });

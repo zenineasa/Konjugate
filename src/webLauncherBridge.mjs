@@ -42,7 +42,7 @@ const unavailableMethods = {
 // `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null, runImporter({ importer, files, options, onProgress }) ->
 // the importer's checked result, runModel({ content, config, commands }) -> the engine's decoded result, canSendCommands (whether runModel can
 // take commands), sha256(bytes) -> hex, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
-// -> hands the person those files together, openProject({ content, suggestedFilename, silent, addonName }), openPage(page), openLink(href), emit(channel, payload) }.
+// -> hands the person those files together, openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
 export function createLauncherBridge({ manifest, host }) {
     const contributes = manifest.contributes ?? {};
     const permitted = new Set(manifest.permissions ?? []);
@@ -191,7 +191,7 @@ export function createLauncherBridge({ manifest, host }) {
             const { forkTime, child } = await runScenarioFork({ host, document, contentText, config: baseline.config, scenario, interventions, baseline });
             const scenarioSamples = composeBranchSamples(baseline.result.samples, child.result.samples, forkTime);
             // Kept for the export, one per scenario and entity, a later run of the same replacing it.
-            if (retain) workspace.scenarios.set(`${scenarioId}|${entity ?? ''}`, { scenarioId, entity, scenario, interventions, overrides, forkTime, samples: scenarioSamples });
+            if (retain) workspace.scenarios.set(`${scenarioId}|${entity ?? ''}`, { scenarioId, entity, scenario, interventions, overrides, forkTime, samples: scenarioSamples, result: child.result, uuid: globalThis.crypto.randomUUID() });
             notify({ stage: 'done', message: 'Done' });
             return {
                 scenarioId, entity, forkTime, runTime: scenario.runTime, interventions,
@@ -229,11 +229,20 @@ export function createLauncherBridge({ manifest, host }) {
             await host.saveFiles(folder, { ...contents, 'run-manifest.json': manifestBytes });
             return { exported: true, folder: `${folder}.zip`, files: [...Object.keys(contents), 'run-manifest.json'] };
         },
-        openInCanvas: async ({ focus = true, silent = false, session } = {}) => {
+        openInCanvas: async ({ scenarioId = null, focus = true, silent = false, session } = {}) => {
             needs('model.open');
             if (!workspace.imported) throw new Error('Import your data first.');
             if (session !== undefined) throw new Error(notYet('Keeping a session with the project'));
-            await host.openProject({ content: workspace.imported.contentText, suggestedFilename: `${manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '')}.kjt`, silent, addonName: manifest.name, focus });
+            // The project the canvas would hold after these runs: the model with the baseline as its first branch and, when a scenario is named
+            // and has been run, its fork from the baseline as a second.
+            const branches = [];
+            if (workspace.baseline) {
+                branches.push({ result: workspace.baseline.result, branchUuid: workspace.baseline.uuid, parentBranchUuid: null, forkTime: null, label: 'Baseline' });
+                const key = scenarioId ? [...workspace.scenarios.keys()].filter((candidate) => candidate.startsWith(`${scenarioId}|`)).at(-1) : null;
+                const run = key ? workspace.scenarios.get(key) : null;
+                if (run) branches.push({ result: run.result, branchUuid: run.uuid, parentBranchUuid: workspace.baseline.uuid, forkTime: run.forkTime, label: run.scenario.name });
+            }
+            await host.openProject({ content: workspace.imported.contentText, suggestedFilename: `${manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '')}.kjt`, silent, addonName: manifest.name, focus, branches });
             return {};
         },
         openPage: async ({ pageId }) => {

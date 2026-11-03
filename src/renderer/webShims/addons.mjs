@@ -14,6 +14,8 @@ import { buildAddonDocument, launcherApiSource } from '../../webAddonDocument.mj
 import { runImporterInFrame } from './importerRunner.mjs';
 import { packageStore, resolvePluginReferences } from './packages.mjs';
 import { zipSync } from 'fflate';
+import { checkpointIndex, rendererResultProjection } from '../../resultSession.mjs';
+import { registerCompletedResult } from '../../webEngineLiveShim.mjs';
 import { encodeProjectContent } from '../../browserProjectCodec.mjs';
 import { canSendCommands, runModel } from '../../webLauncherEngine.mjs';
 import { version as appVersion } from './buildInfo.mjs';
@@ -214,9 +216,16 @@ async function openLauncher(store, entry) {
             encodeModel: (content) => encodeProjectContent(content),
             // The results are handed over as one zip, since a page cannot write a folder.
             saveFiles: async (name, files) => downloadBlob(`${name}.zip`, new Blob([zipSync(Object.fromEntries(Object.entries(files).map(([fileName, data]) => [`${name}/${fileName}`, data])))], { type: 'application/zip' })),
-            openProject: async (payload) => {
+            openProject: async ({ branches = [], ...payload }) => {
                 pendingListeners.forEach((listener) => listener());
                 try {
+                    // The runs go in as result sessions the page can read back, as the desktop's embedded results do.
+                    const sessions = branches.map(({ result, ...branch }) => {
+                        const sessionId = crypto.randomUUID();
+                        registerCompletedResult(sessionId, result);
+                        return { sessionId, result: rendererResultProjection(result), checkpointIndex: checkpointIndex(result), ...branch };
+                    });
+                    payload = { ...payload, embeddedResult: sessions[0] ?? null, embeddedBranches: sessions.length > 1 ? sessions : null };
                     for (const listener of openProjectListeners) await listener(payload);
                 } catch (error) {
                     abandonedListeners.forEach((listener) => listener());

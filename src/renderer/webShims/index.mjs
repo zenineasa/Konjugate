@@ -11,6 +11,7 @@ import engine from './engine.mjs';
 import projectFiles, { setPendingDroppedFile } from './projectFiles.mjs';
 import providerEditor from './providerEditor.mjs';
 import { installOffline } from './offline.mjs';
+import { version } from './buildInfo.mjs';
 import {
     addons, aiProviders, applicationInfo, componentLibrary, diagnostics, extensions,
     helpFeedback, modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
@@ -70,7 +71,7 @@ const dismissButton = banner.querySelector('button[aria-label="Dismiss"]');
 const offlineHolder = document.createElement('div');
 offlineHolder.hidden = true;
 document.body.append(offlineHolder);
-const offline = installOffline({ host: offlineHolder });
+const offline = installOffline({ host: offlineHolder, version });
 if (offline) banner.insertBefore(offline.button, dismissButton);
 dismissButton.addEventListener('click', () => {
     if (offline) offlineHolder.append(offline.button);

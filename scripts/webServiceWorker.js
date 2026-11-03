@@ -119,7 +119,8 @@ async function fetchInPieces(cache, url, size) {
 
 // Fetches every file of this build into its cache, a few at a time, skipping any a first attempt already stored. A file that cannot be
 // fetched fails the whole copy, so the cache never claims to hold a build it does not.
-async function precache() {
+// `kind` says to the page what the copy is for: 'save' (the person asked for offline use) or 'update' (a new build, fetched in the background).
+async function precache(kind = 'save') {
     const cache = await caches.open(cacheName);
     const queue = [...precachePaths];
     progress = { done: 0, total: queue.length };
@@ -132,7 +133,7 @@ async function precache() {
                 await (size ? fetchInPieces(cache, url, size) : fetchIntoCache(cache, url));
             }
             progress.done += 1;
-            await broadcast({ type: 'progress', ...progress });
+            await broadcast({ type: 'progress', kind, ...progress });
         }
     };
     await Promise.all(Array.from({ length: simultaneousDownloads }, download));
@@ -201,7 +202,7 @@ if (typeof module !== 'undefined') {
 self.addEventListener('install', (event) => {
     // With offline use on, the new build is downloaded now and the worker then waits to be told to take over. With it off there is
     // nothing stored to protect, so it takes over at once.
-    event.waitUntil(offlineEnabled().then((enabled) => (enabled ? precache() : self.skipWaiting())));
+    event.waitUntil(offlineEnabled().then((enabled) => (enabled ? precache('update') : self.skipWaiting())));
 });
 
 self.addEventListener('activate', (event) => {

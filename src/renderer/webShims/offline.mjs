@@ -31,7 +31,7 @@ async function enoughStorage(bytes) {
     }
 }
 
-export function installOffline({ host }) {
+export function installOffline({ host, version = '' }) {
     const address = document.querySelector('meta[name="konjugate-service-worker"]')?.content;
     if (!address || !('serviceWorker' in navigator) || !window.isSecureContext) return null;
 
@@ -40,6 +40,23 @@ export function installOffline({ host }) {
     button.type = 'button';
     button.className = 'offlineButton';
     host.append(button);
+
+    // The menu's two lines about the version: which build this is, and a button that looks for a newer one and says what it found.
+    const versionLine = document.createElement('button');
+    versionLine.id = 'versionInfoButton';
+    versionLine.type = 'button';
+    versionLine.disabled = true;
+    const updateCheck = document.createElement('button');
+    updateCheck.id = 'updateCheckButton';
+    updateCheck.type = 'button';
+    host.append(versionLine, updateCheck);
+    const sayMenuLabel = (element, label) => {
+        element.textContent = label;
+        element.dataset.menuLabel = label;
+        document.dispatchEvent(new Event('konjugate:menu-labels'));
+    };
+    sayMenuLabel(versionLine, `Version ${version}`);
+    sayMenuLabel(updateCheck, 'Check for updates');
 
     let status = null;
     let failed = false;
@@ -70,8 +87,13 @@ export function installOffline({ host }) {
         const message = event.data;
         if (message?.type === 'status') {
             status = message;
+            sayMenuLabel(versionLine, `Version ${version} · build ${String(message.buildId).slice(0, 8)}${message.state === 'ready' ? ' · offline copy' : ''}`);
             if (message.state === 'off' && wanted && !failed) send({ type: 'enableOffline' });
             if (message.state === 'ready') { failed = false; wanted = false; retries = 0; releaseScreen(); }
+        } else if (message?.type === 'progress' && message.kind === 'update') {
+            // A new build being fetched in the background is not the person's offline copy being saved.
+            if (navigator.serviceWorker.controller) sayMenuLabel(updateCheck, `Downloading the new version… ${message.total ? Math.floor(100 * message.done / message.total) : 0}%`);
+            return;
         } else if (message?.type === 'progress') {
             status = { ...(status ?? {}), state: 'saving', ...message };
         } else if (message?.type === 'error') {
@@ -101,11 +123,40 @@ export function installOffline({ host }) {
 
     const update = createUpdatePrompt();
     navigator.serviceWorker.register(address).then((registration) => {
-        const offer = (worker) => { if (navigator.serviceWorker.controller) update.offer(worker); };
+        const offer = (worker) => {
+            if (!navigator.serviceWorker.controller) return;
+            update.offer(worker);
+            sayMenuLabel(updateCheck, 'New version ready: tap to reload');
+        };
+        // A new worker that cannot fetch its whole build is dropped by the browser, and the old one carries on: said, not silent.
+        const watch = (installing) => {
+            installing?.addEventListener('statechange', () => {
+                if (installing.state === 'installed') offer(installing);
+                // Replaced by a still newer one is not a failure: only a worker that leaves with nothing following it is.
+                else if (installing.state === 'redundant' && !registration.installing && !registration.waiting) {
+                    console.warn('The new version could not be downloaded.');
+                    sayMenuLabel(updateCheck, 'The new version could not be downloaded: tap to try again');
+                }
+            });
+        };
         if (registration.waiting) offer(registration.waiting);
         registration.addEventListener('updatefound', () => {
-            const installing = registration.installing;
-            installing?.addEventListener('statechange', () => { if (installing.state === 'installed') offer(installing); });
+            // The first worker of all is an install, not an update.
+            if (navigator.serviceWorker.controller) sayMenuLabel(updateCheck, 'Downloading the new version…');
+            watch(registration.installing);
+        });
+        updateCheck.addEventListener('click', async () => {
+            if (registration.waiting) { update.reload(registration.waiting); return; }
+            sayMenuLabel(updateCheck, 'Checking for updates…');
+            try {
+                await registration.update();
+            } catch {
+                sayMenuLabel(updateCheck, 'Could not check: are you online? Tap to try again');
+                return;
+            }
+            if (registration.waiting) offer(registration.waiting);
+            else if (registration.installing) sayMenuLabel(updateCheck, 'Downloading the new version…');
+            else sayMenuLabel(updateCheck, 'You have the latest version: tap to check again');
         });
         // An installed app is often suspended rather than closed, and a browser checks for a newer worker only when a page loads, so
         // look again whenever the app comes back to the front.
@@ -135,10 +186,11 @@ function createUpdatePrompt() {
     let waiting = null;
     let reloading = false;
     element.querySelector('.webEditionUpdateLater').addEventListener('click', () => { element.hidden = true; });
-    element.querySelector('.webEditionUpdateReload').addEventListener('click', () => {
+    const reload = (worker) => {
         reloading = true;
-        waiting?.postMessage({ type: 'skipWaiting' });
-    });
+        worker?.postMessage({ type: 'skipWaiting' });
+    };
+    element.querySelector('.webEditionUpdateReload').addEventListener('click', () => reload(waiting));
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloading) location.reload(); });
-    return { offer(worker) { waiting = worker; element.hidden = false; } };
+    return { offer(worker) { waiting = worker; element.hidden = false; }, reload };
 }

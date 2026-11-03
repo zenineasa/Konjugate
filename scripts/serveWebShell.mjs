@@ -59,11 +59,28 @@ const server = createServer(async (request, response) => {
         const info = await stat(resolved).catch(() => null);
         const filePath = info?.isDirectory() ? join(resolved, 'index.html') : resolved;
         const body = await readFile(filePath);
-        response.writeHead(200, {
+        const headers = {
             'Content-Type': mimeTypes[extname(filePath)] ?? 'application/octet-stream',
             'Cross-Origin-Opener-Policy': 'same-origin',
-            'Cross-Origin-Embedder-Policy': 'require-corp'
-        });
+            'Cross-Origin-Embedder-Policy': 'require-corp',
+            // What a static host sends, so that a copy fetched in pieces (scripts/webServiceWorker.js) can be tested here.
+            'Accept-Ranges': 'bytes',
+            ETag: `"${body.length.toString(16)}-${Math.floor((await stat(filePath)).mtimeMs).toString(16)}"`
+        };
+        const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? '');
+        const unchanged = !request.headers['if-range'] || request.headers['if-range'] === headers.ETag;
+        if (range && unchanged && (range[1] || range[2])) {
+            const start = range[1] ? Number(range[1]) : Math.max(0, body.length - Number(range[2]));
+            const end = range[1] && range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
+            if (start > end || start >= body.length) {
+                response.writeHead(416, { 'Content-Range': `bytes */${body.length}` }).end();
+                return;
+            }
+            response.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${body.length}`, 'Content-Length': end - start + 1 });
+            response.end(body.subarray(start, end + 1));
+            return;
+        }
+        response.writeHead(200, headers);
         response.end(body);
     } catch {
         response.writeHead(404).end('Not found');

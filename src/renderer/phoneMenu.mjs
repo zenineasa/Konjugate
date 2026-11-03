@@ -21,6 +21,8 @@ export const phoneMenuEntries = [
     { id: 'providerToolchainsButton', label: 'Provider toolchains' },
     { id: 'diagnosticsButton', label: 'Diagnostics log' },
     { id: 'offlineButton', label: 'Use offline' },
+    { id: 'updateCheckButton', label: 'Check for updates', keepOpen: true },
+    { id: 'versionInfoButton', label: 'Version', keepOpen: true },
     { id: 'nodeLabelsButton', label: 'Node labels', useTitle: true, keepOpen: true, separated: true },
     { id: 'edgeLabelsButton', label: 'Relationship labels', useTitle: true, keepOpen: true },
     { id: 'welcomeButton', label: 'About Konjugate', separated: true },
@@ -71,6 +73,8 @@ function installPhoneMenu() {
             return item;
         }));
     };
+    // A line that says how a check is getting on (the update one) is read again as it changes.
+    document.addEventListener('konjugate:menu-labels', () => { if (!menu.hidden) render(); });
     trigger.addEventListener('click', () => {
         if (!menu.hidden) { close(); return; }
         render();

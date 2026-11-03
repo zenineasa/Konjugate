@@ -33,7 +33,7 @@ export function webLauncherRefusal(manifest) {
 }
 
 const unavailableMethods = {
-    reloadFiles: 'Reloading files', infer: 'Inference', checkPython: 'Checking Python'
+    infer: 'Inference', checkPython: 'Checking Python'
 };
 
 // `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null (for a binary role [{ name, size, read() -> Uint8Array }]), runImporter({ importer, files, options, onProgress }) ->
@@ -131,6 +131,28 @@ export function createLauncherBridge({ manifest, host }) {
             workspace.imported = null;
             releaseRuns();
             return { name: fileName, bytes: bytes.length, cached: Boolean(hit), retrievedAt };
+        },
+        // Fetches the files that came from a listed address again, for data that its publisher keeps up to date, and answers how many changed.
+        // A browser cannot read a file the person picked from disk a second time, so those (and the packaged samples) are left as they are and
+        // counted in `local`; a file whose address no longer answers is named in `missing`.
+        reloadFiles: async ({ importerId }) => {
+            needs('data.import');
+            declared(contributes.importers, 'importerId', importerId, 'importer');
+            let changed = 0;
+            let local = 0;
+            const missing = [];
+            for (const [key, file] of [...workspace.pending]) {
+                if (file.sample || file.binary) continue;
+                if (!file.url) { local += 1; continue; }
+                let bytes;
+                try { bytes = await host.fetchBytes(addressAllowed(file.url, hosts), hosts); } catch { missing.push(file.name); continue; }
+                const hash = await host.sha256(bytes);
+                if (hash === file.sha256) continue;
+                workspace.pending.set(key, { ...file, ...decodeText(bytes), sha256: hash, bytes: bytes.length, retrievedAt: new Date().toISOString() });
+                changed += 1;
+            }
+            if (changed) { workspace.imported = null; releaseRuns(); }
+            return { changed, missing, local };
         },
         // How much the add-on's cache holds ({ entries, bytes, oldest, newest }), and clearing it: for a window that lets the user see it and start afresh.
         cacheInfo: async () => {

@@ -141,7 +141,7 @@ test('pages and links go only where the manifest says, and without the permissio
 
 test('what this slice cannot do answers that it is not available, and only the named methods are reachable', async () => {
     const { bridge } = bridgeFor();
-    for (const method of ['reloadFiles', 'infer', 'checkPython']) {
+    for (const method of ['infer', 'checkPython']) {
         const answer = await bridge.call(method, {});
         assert.equal(answer.ok, false);
         assert.match(answer.message, /not available in the web edition yet/);
@@ -325,6 +325,21 @@ test('a launcher fetches from the hosts it declares, into a file role or as text
     const { bridge: big } = bridgeFor(manifest, { fetchBytes: async () => new Uint8Array(1024 * 1024 + 1) });
     assert.match((await big.call('fetchText', { url: 'https://data.example.com/' })).message, /larger than a window/);
     assert.equal((await big.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://data.example.com/', name: 'big' })).ok, true, 'A file may be larger than text a window receives.');
+});
+
+test('reloading fetches the files that came from a listed address again, and leaves the rest', async () => {
+    const manifest = launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['data.example.com'] } });
+    let answer = 't,v\n1,2\n';
+    const { bridge } = bridgeFor(manifest, { fetchBytes: async () => { if (answer === null) throw new Error('gone'); return strToU8(answer); } });
+    await bridge.call('fetchFile', { importerId: 'csv', role: 'data', url: 'https://data.example.com/s', name: 'S' });
+    assert.deepEqual(await bridge.call('reloadFiles', { importerId: 'csv' }), { ok: true, changed: 0, missing: [], local: 0 });
+    answer = 't,v\n1,30\n';
+    assert.equal((await bridge.call('reloadFiles', { importerId: 'csv' })).changed, 1);
+    answer = null;
+    assert.deepEqual((await bridge.call('reloadFiles', { importerId: 'csv' })).missing, ['S']);
+    assert.match((await bridge.call('reloadFiles', { importerId: 'nope' })).message, /undeclared importer/);
+    const { bridge: bare } = bridgeFor(launcherManifest({ permissions: ['network.fetch'] }));
+    assert.match((await bare.call('reloadFiles', { importerId: 'csv' })).message, /was not granted data.import/);
 });
 
 test('a fetch from a page keeps to the listed hosts, the size limit and the time limit, and says when a server will not be read', async () => {

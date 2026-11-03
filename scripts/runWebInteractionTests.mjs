@@ -72,7 +72,7 @@ try {
     // evaluate()-driven click in this suite does, on both drivers) does not count as one on a real
     // Chromium tab the way Electron's own window.open()/setWindowOpenHandler path apparently does,
     // so the companion-guide-window scenario silently failed to open anything without this flag.
-    const browser = await chromium.launch({ ...(process.env.KONJUGATE_CHROMIUM_PATH ? { executablePath: process.env.KONJUGATE_CHROMIUM_PATH } : {}), args: ['--disable-popup-blocking'] });
+    const browser = await chromium.launch({ headless: !(process.env.KONJUGATE_HEADED || process.argv.includes('--headed')), ...(process.env.KONJUGATE_CHROMIUM_PATH ? { executablePath: process.env.KONJUGATE_CHROMIUM_PATH } : {}), args: ['--disable-popup-blocking'] });
     try {
         const context = await browser.newContext({ acceptDownloads: true });
         const page = await context.newPage();

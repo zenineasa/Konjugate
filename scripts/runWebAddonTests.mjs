@@ -7,6 +7,7 @@
 //
 // Needs out/webShell (npm run build:webShell) and openssl. A local HTTPS server stands in for the data hosts: two dotted names that the
 // browser is told to resolve to this machine, as a launcher's host list takes exact dotted names and its fetches must be https.
+// --headed (or KONJUGATE_HEADED=1) shows the browser window while the tests run.
 // KONJUGATE_CHROMIUM_PATH points at a browser to use instead of Playwright's own.
 
 import assert from 'node:assert/strict';
@@ -129,6 +130,7 @@ await new Promise((done, fail) => {
 });
 const { chromium } = await import('playwright');
 const browser = await chromium.launch({
+    headless: !(process.env.KONJUGATE_HEADED || process.argv.includes('--headed')),
     ...(process.env.KONJUGATE_CHROMIUM_PATH ? { executablePath: process.env.KONJUGATE_CHROMIUM_PATH } : {}),
     args: ['--host-resolver-rules=MAP files.example.com 127.0.0.1, MAP other.example.com 127.0.0.1']
 });

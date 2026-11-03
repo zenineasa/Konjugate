@@ -39,6 +39,8 @@
         "test:interaction": "npm run build:engine && node scripts/runInteractionTests.mjs",
         "test:interaction:web": "npm run build:web:threads && npm run build:webShell:threads && node scripts/runWebInteractionTests.mjs",
         "test:interaction:web:addons": "npm run build:webShell && node scripts/runWebAddonTests.mjs",
+        "test:interaction:web:headed": "npm run build:web:threads && npm run build:webShell:threads && node scripts/runWebInteractionTests.mjs --headed",
+        "test:interaction:web:addons:headed": "npm run build:webShell && node scripts/runWebAddonTests.mjs --headed",
         "generate:example-thumbnails": "npm run build:engine && node scripts/generateExampleThumbnails.mjs",
         "generate:welcome-assets": "node scripts/generateWelcomeAssets.mjs",
         "test:all": "npm test && npm run test:interaction",

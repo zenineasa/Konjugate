@@ -2782,7 +2782,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Free body'))?.click()`);
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
-    });
+    }, { skip: (!driver.capabilities.addons && 'it cleans up the pose scenario, which the Pose Visualizer tests above set up and the web edition does not run') || addonMissing('konjugate.poseVisualizer', 'konjugate-posevisualizer') });
 
     await run('importing a node shape file also saves it into the user shape library', async () => {
         // Deliberately operates on whatever node is already on the canvas at this point in the

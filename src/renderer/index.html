@@ -10,7 +10,7 @@
          top of needing 'wasm-unsafe-eval' just to instantiate the WebAssembly module itself.
          Without both, STEP import fails outright with a CSP violation -- there is no narrower
          grant that satisfies this specific (upstream, prebuilt) library. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-R99P3T/HWhyAgXfcKO1LXdBqflZS8lIqy/ATk8AYBTc='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-IwmIp3J6ml9TVrsUHr5Z1p6wiBifhHlZqIFPhblWPHI='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self'">
     <title>Konjugate</title>
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
@@ -19,7 +19,8 @@
                 "three": "../../node_modules/three/build/three.module.js",
                 "three/addons/": "../../node_modules/three/examples/jsm/",
                 "mathlive": "../../node_modules/mathlive/mathlive.min.mjs",
-                "@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js"
+                "@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js",
+                "fflate": "../../node_modules/fflate/esm/browser.js"
             }
         }
     </script>

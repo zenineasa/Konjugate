@@ -136,9 +136,7 @@ html = html.replace(
 html = html.replace(
     '"@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js"',
     '"@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js",\n' +
-    '                "protobufjs/minimal.js": "./webShims/protobufjsMinimalShim.mjs",\n' +
-    // The package archive code (src/packageInspection.mjs) unzips with fflate; its browser build is plain ES modules.
-    '                "fflate": "../../node_modules/fflate/esm/browser.js"'
+    '                "protobufjs/minimal.js": "./webShims/protobufjsMinimalShim.mjs"'
 );
 html = html.replace(
     '<script type="module" src="renderer.mjs"></script>',

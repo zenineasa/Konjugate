@@ -45,7 +45,7 @@ function bridgeFor(manifest = launcherManifest(), hostOverrides = {}) {
 
 test('a launcher that needs more than this slice offers is turned away saying what', () => {
     assert.equal(webLauncherRefusal(launcherManifest()), null);
-    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'analysis.infer'] })), /analysis\.infer/);
+    assert.equal(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'analysis.infer'] })), null);
     assert.match(webLauncherRefusal(launcherManifest({ requires: ['pythonCheck'] })), /pythonCheck/);
     assert.equal(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'files.store', 'network.fetch'], network: { hosts: ['a.example.com'] }, requires: ['storedFiles', 'fetchCache', 'binaryInputs', 'multipleBinaryInputs', 'resumableDownloads'] })), null);
     assert.equal(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'network.fetch'], network: { hosts: ['a.example.com'] } })), null);
@@ -64,7 +64,7 @@ test('a launcher installs from a file, and one needing more than the web edition
     const packages = createPackageStore({ storage: createMemoryStorage(), appVersion: '1.3.4' });
     await packages.install(pack(launcherManifest()), '.kja');
     assert.equal((await packages.runnableAddons()).length, 1);
-    await assert.rejects(packages.install(pack(launcherManifest({ addonId: 'example.other', permissions: ['analysis.infer'], links: undefined })), '.kja'), /analysis\.infer/);
+    await assert.rejects(packages.install(pack(launcherManifest({ addonId: 'example.other', permissions: ['data.import'], requires: ['pythonCheck'], links: undefined })), '.kja'), /pythonCheck/);
     await packages.install(pack({ ...scenarioManifest(), addonId: 'example.scenarios' }), '.kja');
     assert.equal((await packages.runnableAddons()).length, 2, 'A launcher that runs scenarios installs.');
 });
@@ -141,7 +141,7 @@ test('pages and links go only where the manifest says, and without the permissio
 
 test('what this slice cannot do answers that it is not available, and only the named methods are reachable', async () => {
     const { bridge } = bridgeFor();
-    for (const method of ['infer', 'checkPython']) {
+    for (const method of ['checkPython']) {
         const answer = await bridge.call(method, {});
         assert.equal(answer.ok, false);
         assert.match(answer.message, /not available in the web edition yet/);
@@ -153,6 +153,7 @@ test('what this slice cannot do answers that it is not available, and only the n
 test('the API a launcher sees, and the worker an importer runs in, have the desktop\'s shape', () => {
     for (const name of ['getManifest', 'chooseFile', 'clearFile', 'useSample', 'runImport', 'openInCanvas', 'openPage', 'openLink', 'runScenario', 'onProgress']) assert.match(launcherApiSource, new RegExp(name));
     assert.match(launcherApiSource, /konjugateLauncher/);
+    assert.match(launcherApiSource, /infer: \['csv', 'config'\]/, 'infer takes the table and its settings, as the desktop\'s does.');
     for (const name of ['progress', 'applyOperations', 'reconcileEquationBindings', 'validateEquationLatex', 'readPackageJson']) assert.match(importerWorkerSource, new RegExp(name));
     // neither the worker source nor the frame ever reaches for the network or the page's storage
     assert.doesNotMatch(importerWorkerSource, /fetch\(|XMLHttpRequest|localStorage|indexedDB|importScripts/);
@@ -340,6 +341,22 @@ test('reloading fetches the files that came from a listed address again, and lea
     assert.match((await bridge.call('reloadFiles', { importerId: 'nope' })).message, /undeclared importer/);
     const { bridge: bare } = bridgeFor(launcherManifest({ permissions: ['network.fetch'] }));
     assert.match((await bare.call('reloadFiles', { importerId: 'csv' })).message, /was not granted data.import/);
+});
+
+test('a launcher with analysis.infer sends a table to the engine and gets the edges back, within a size limit', async () => {
+    const asked = [];
+    const infer = async (csv, config) => { asked.push([csv, config]); return { available: true, report: { edges: [{ from: 'a', to: 'b' }], selfTerms: [] } }; };
+    const { bridge } = bridgeFor(launcherManifest({ permissions: ['data.import', 'analysis.infer'] }), { infer });
+    const answer = await bridge.call('infer', { csv: 't,a,b\n0,1,2\n', config: { skeletonThreshold: 0.1 } });
+    assert.deepEqual([answer.ok, answer.edges, answer.selfTerms], [true, [{ from: 'a', to: 'b' }], []]);
+    assert.deepEqual(asked[0][1], { skeletonThreshold: 0.1 });
+    for (const csv of ['', 7, undefined]) assert.match((await bridge.call('infer', { csv })).message, /Provide the table as CSV text/);
+    assert.match((await bridge.call('infer', { csv: 'x'.repeat(4 * 1024 * 1024 + 1) })).message, /larger than the 4 MB/);
+    assert.equal(asked.length, 1);
+    const { bridge: bare } = bridgeFor(launcherManifest(), { infer });
+    assert.match((await bare.call('infer', { csv: 't,a\n0,1\n' })).message, /was not granted analysis.infer/);
+    const { bridge: down } = bridgeFor(launcherManifest({ permissions: ['data.import', 'analysis.infer'] }), { infer: async () => ({ available: false }) });
+    assert.match((await down.call('infer', { csv: 't,a\n0,1\n' })).message, /not available/);
 });
 
 test('a fetch from a page keeps to the listed hosts, the size limit and the time limit, and says when a server will not be read', async () => {

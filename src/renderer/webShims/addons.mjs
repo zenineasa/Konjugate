@@ -23,6 +23,7 @@ import { zipSync } from 'fflate';
 import { checkpointIndex, rendererResultProjection } from '../../resultSession.mjs';
 import { registerCompletedResult } from '../../webEngineLiveShim.mjs';
 import { encodeProjectContent } from '../../browserProjectCodec.mjs';
+import { inferWithWebEngine } from '../../webEngineAdapter.mjs';
 import { canSendCommands, runModel } from '../../webLauncherEngine.mjs';
 import { version as appVersion } from './buildInfo.mjs';
 
@@ -254,10 +255,12 @@ async function openLauncher(store, entry) {
             // Plugins the model names are resolved to their source first, as every engine call from the page does.
             runModel: async ({ content, config, commands }) => runModel(engineModuleUrl, await resolvePluginReferences(content), config, commands),
             canSendCommands: canSendCommands(),
+            infer: (csv, config) => inferWithWebEngine(engineModuleUrl, csv, config),
             // The renderer holds a project's add-on data (renderer.mjs, projectAddonData); the page is the project window, so these are direct calls.
             keepAddonData: (addonId, entry) => { for (const listener of keepAddonDataListeners) listener(addonId, entry); },
             requestAddonData: async (addonId) => (addonDataHandlers.length ? addonDataHandlers.at(-1)(addonId) : null) ?? null,
-            fetchBytes: (href, hosts) => fetchAllowedFromPage({ url: href, hosts, transport: fetchInFrame }),
+            // A server that will not answer a page (it may not allow one to read it) is reported to the window in the error and to the console here.
+            fetchBytes: (href, hosts) => fetchAllowedFromPage({ url: href, hosts, transport: fetchInFrame }).catch((error) => { console.warn(`[${manifest.name}] fetch of ${href} failed: ${error.message}`); throw error; }),
             sha256: async (bytes) => toHex(await crypto.subtle.digest('SHA-256', bytes)),
             appVersion,
             encodeModel: (content) => encodeProjectContent(content),

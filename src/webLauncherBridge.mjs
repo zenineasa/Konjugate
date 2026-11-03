@@ -18,8 +18,11 @@ import { attachAddonData, buildSessionEntry, sessionInputs } from './launcherSes
 import { runScenarioFork } from './webLauncherRuns.mjs';
 
 // Of the permissions a launcher may ask for (addonHost.mjs), the ones this slice can honour, and the optional behaviours it can offer.
-export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch', 'project.data', 'files.store']);
+export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch', 'project.data', 'files.store', 'analysis.infer']);
 export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord', 'projectSession', 'keepSession', 'openLink', 'fetchCache', 'binaryInputs', 'multipleBinaryInputs', 'storedFiles', 'resumableDownloads']);
+
+// The engine runs inference on the page itself, so a table is kept to a size the page can work through without seeming to hang.
+const maximumInferenceCsvBytes = 4 * 1024 * 1024;
 
 const notYet = (what) => `${what} is not available in the web edition yet. It works in the desktop app.`;
 
@@ -33,12 +36,12 @@ export function webLauncherRefusal(manifest) {
 }
 
 const unavailableMethods = {
-    infer: 'Inference', checkPython: 'Checking Python'
+    checkPython: 'Checking Python'
 };
 
 // `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null (for a binary role [{ name, size, read() -> Uint8Array }]), runImporter({ importer, files, options, onProgress }) ->
 // the importer's checked result, runModel({ content, config, commands }) -> the engine's decoded result, canSendCommands (whether runModel can
-// take commands), sha256(bytes) -> hex, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
+// take commands), sha256(bytes) -> hex, infer(csv, config) -> { available, report } from the engine, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
 // -> hands the person those files together, files() and cache() -> the add-on's store of stored files (webFileStore.mjs) and its fetch cache (webFileCache.mjs), pickFiles({ title, extensions }) -> File[] | null, keepAddonData(addonId, entry) (null removes) and requestAddonData(addonId) -> the entry the open project keeps for the add-on, or null, fetchBytes(href, hosts) -> the bytes of an answer from a listed host (webFetch.mjs), openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
 export function createLauncherBridge({ manifest, host }) {
     const contributes = manifest.contributes ?? {};
@@ -153,6 +156,16 @@ export function createLauncherBridge({ manifest, host }) {
             }
             if (changed) { workspace.imported = null; releaseRuns(); }
             return { changed, missing, local };
+        },
+        // Causal inference on a table the launcher supplies, for a launcher that builds its own model from data. The CSV is Konjugate's
+        // inference format: a numeric, regularly spaced time column, then one column per series.
+        infer: async ({ csv, config = {} }) => {
+            needs('analysis.infer');
+            if (typeof csv !== 'string' || !csv.length) throw new Error('Provide the table as CSV text.');
+            if (csv.length > maximumInferenceCsvBytes) throw new Error(`The table is larger than the ${maximumInferenceCsvBytes / 1024 / 1024} MB the web edition analyses.`);
+            const result = await host.infer(csv, config && typeof config === 'object' ? config : {});
+            if (!result?.available) throw new Error('The inference engine is not available.');
+            return { edges: result.report.edges ?? [], selfTerms: result.report.selfTerms ?? [] };
         },
         // How much the add-on's cache holds ({ entries, bytes, oldest, newest }), and clearing it: for a window that lets the user see it and start afresh.
         cacheInfo: async () => {

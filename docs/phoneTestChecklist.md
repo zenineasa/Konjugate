@@ -31,4 +31,5 @@ What only a real phone can confirm. The layout is checked in Chrome at 360 by 76
 - A launcher add-on that imports a model: from its window, "Choose file" opens the phone's file picker (the click in the window must reach the page's picker), the import runs, and "Open in canvas" opens the model.
 - A launcher add-on that runs scenarios: after an import, a baseline and a scenario run from its window and the scenario's result differs from the baseline's from the fork on (the run happens off the page, so the phone should stay responsive while it works).
 - A launcher add-on that fetches from a declared host: a fetch from a server that allows web pages (for example a place search) returns its answer and the file imports; a fetch from one that does not shows the message saying so, and nothing else on the page breaks
+- A launcher add-on that keeps a session: open its model in the canvas with a session, save the project, open it again in a fresh page and restore the session; the window's state and its input files come back
 - Exporting a launcher's results downloads a zip the phone can save and open.

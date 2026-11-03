@@ -173,6 +173,8 @@ async function openVisualizer(store, entry, contexts) {
 
 // What opening a model from a launcher asks of the project window: the renderer registered for it as it does for the desktop's.
 const openProjectListeners = [];
+const keepAddonDataListeners = [];
+const addonDataHandlers = [];
 const pendingListeners = [];
 const abandonedListeners = [];
 
@@ -213,6 +215,9 @@ async function openLauncher(store, entry) {
             // Plugins the model names are resolved to their source first, as every engine call from the page does.
             runModel: async ({ content, config, commands }) => runModel(engineModuleUrl, await resolvePluginReferences(content), config, commands),
             canSendCommands: canSendCommands(),
+            // The renderer holds a project's add-on data (renderer.mjs, projectAddonData); the page is the project window, so these are direct calls.
+            keepAddonData: (addonId, entry) => { for (const listener of keepAddonDataListeners) listener(addonId, entry); },
+            requestAddonData: async (addonId) => (addonDataHandlers.length ? addonDataHandlers.at(-1)(addonId) : null) ?? null,
             fetchBytes: (href, hosts) => fetchAllowedFromPage({ url: href, hosts, transport: fetchInFrame }),
             sha256: async (bytes) => toHex(await crypto.subtle.digest('SHA-256', bytes)),
             appVersion,
@@ -283,8 +288,8 @@ export const launcherHost = {
     onOpenProject: (listener) => { openProjectListeners.push(listener); },
     onOpenProjectPending: (listener) => { pendingListeners.push(listener); },
     onOpenProjectAbandoned: (listener) => { abandonedListeners.push(listener); },
-    onKeepAddonData: () => {},
-    onAddonDataRequest: () => {}
+    onKeepAddonData: (listener) => { keepAddonDataListeners.push(listener); },
+    onAddonDataRequest: (handler) => { addonDataHandlers.push(handler); }
 };
 
 // An add-on that is uninstalled or turned off while open is closed with it.

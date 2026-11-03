@@ -141,7 +141,7 @@ test('pages and links go only where the manifest says, and without the permissio
 
 test('what this slice cannot do answers that it is not available, and only the named methods are reachable', async () => {
     const { bridge } = bridgeFor();
-    for (const method of ['cacheInfo', 'clearCache', 'keepSession', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
+    for (const method of ['cacheInfo', 'clearCache', 'reloadFiles', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
         const answer = await bridge.call(method, {});
         assert.equal(answer.ok, false);
         assert.match(answer.message, /not available in the web edition yet/);
@@ -362,4 +362,38 @@ test('the frame a fetch is made from has no origin of its own to give, takes htt
     const runner = await readFile(new URL('../src/renderer/webShims/fetchRunner.mjs', import.meta.url), 'utf8');
     assert.match(runner, /setAttribute\('sandbox', 'allow-scripts'\)/);
     assert.doesNotMatch(runner, /allow-same-origin/);
+});
+
+test('a launcher keeps its session with the project it opens, or without opening one, and gets it back with its inputs', async () => {
+    const manifest = launcherManifest({ permissions: ['data.import', 'model.open', 'project.data'], version: '1.2.0' });
+    let kept = null;
+    const { bridge, calls } = bridgeFor(manifest, { keepAddonData: (id, entry) => { kept = { id, entry }; }, requestAddonData: async () => kept?.entry ?? null });
+    assert.match((await bridge.call('restoreSession', {})).session ?? 'none', /none/, 'nothing kept yet');
+    await bridge.call('useSample', { importerId: 'csv' });
+    await bridge.call('runImport', { importerId: 'csv' });
+    // with the project it opens: the entry is attached to the model's text, beside any entry already there
+    assert.deepEqual(await bridge.call('openInCanvas', { session: { picked: ['a'] } }), { ok: true });
+    const attached = JSON.parse(calls.opened.at(-1).content).addonData['example.toolbox'];
+    assert.deepEqual([attached.version, attached.addonVersion, attached.window, attached.inputs.map((input) => [input.role, input.name, input.sample])], [1, '1.2.0', { picked: ['a'] }, [['data', 'sample.csv', true]]]);
+    assert.equal(JSON.parse(calls.opened.at(-1).content).addonData['example.toolbox'].inputs[0].sha256, 'hash8');
+    // without opening anything
+    assert.deepEqual(await bridge.call('keepSession', { session: { sites: [1, 2] } }), { ok: true });
+    assert.equal(kept.id, 'example.toolbox');
+    assert.deepEqual(kept.entry.window, { sites: [1, 2] });
+    // restored into a fresh bridge: the inputs are pending again, flagged restored, and the window gets its state back
+    const { bridge: later } = bridgeFor(manifest, { requestAddonData: async () => ({ ...kept.entry, inputs: kept.entry.inputs.map(({ sha256: dropped, ...input }) => input) }) });
+    const restored = await later.call('restoreSession', {});
+    assert.deepEqual([restored.ok, restored.session, restored.inputs], [true, { sites: [1, 2] }, [{ role: 'data', name: 'sample.csv', bytes: 8 }]]);
+    assert.deepEqual((await later.call('getManifest', {})).files.data, { name: 'sample.csv', bytes: 8, sample: true, fetched: false });
+    assert.equal((await later.call('runImport', { importerId: 'csv' })).imported, true, 'The restored inputs run the importer as before.');
+    // an entry this host does not know, or that is too large, is not taken or kept
+    const { bridge: odd } = bridgeFor(manifest, { requestAddonData: async () => ({ version: 2, inputs: [] }) });
+    assert.deepEqual(await odd.call('restoreSession', {}), { ok: true, session: null });
+    assert.match((await bridge.call('keepSession', { session: { big: 'x'.repeat(3 * 1024 * 1024) } })).message, /larger than the host keeps/);
+    // without the permission nothing is kept, restored or attached
+    const { bridge: bare, calls: bareCalls } = bridgeFor(launcherManifest({ permissions: ['data.import', 'model.open'] }), { keepAddonData: () => { throw new Error('kept'); }, requestAddonData: async () => { throw new Error('asked'); } });
+    await bare.call('useSample', { importerId: 'csv' });
+    await bare.call('runImport', { importerId: 'csv' });
+    for (const [method, params] of [['keepSession', { session: {} }], ['restoreSession', {}], ['openInCanvas', { session: {} }]]) assert.match((await bare.call(method, params)).message, /not granted project\.data/, method);
+    assert.deepEqual(bareCalls.opened, []);
 });

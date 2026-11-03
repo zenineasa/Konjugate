@@ -71,7 +71,7 @@ const launcherMethods = ['getManifest', 'chooseFile', 'clearFile', 'fetchText', 
 export const launcherApiSource = frameApi(`    const methods = ${JSON.stringify('LAUNCHER_METHODS')};
     const api = {};
     // Positional arguments, named as the desktop's preload names them.
-    const shapes = { chooseFile: ['importerId', 'role'], clearFile: ['importerId', 'role', 'name'], useSample: ['importerId'], runImport: ['importerId', 'options'], openPage: ['pageId'], openLink: ['url'], fetchText: ['url'], reloadFiles: ['importerId'] };
+    const shapes = { chooseFile: ['importerId', 'role'], clearFile: ['importerId', 'role', 'name'], useSample: ['importerId'], runImport: ['importerId', 'options'], openPage: ['pageId'], openLink: ['url'], fetchText: ['url'], keepSession: ['session'], reloadFiles: ['importerId'] };
     // These take a scenario id and then an options object, spread beside it; runBaseline takes only the options.
     const withScenario = new Set(['openInCanvas', 'runScenario', 'exportResults']);
     for (const name of methods) api[name] = (...args) => call(name, name === 'fetchFile' ? { importerId: args[0], role: args[1], url: args[2], name: args[3], cache: (args[4] || {}).cache } : withScenario.has(name) ? { scenarioId: args[0] ?? null, ...(args[1] || {}) } : name === 'runBaseline' ? { ...(args[0] || {}) } : Object.fromEntries((shapes[name] || []).map((key, index) => [key, args[index]])));

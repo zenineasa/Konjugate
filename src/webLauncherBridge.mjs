@@ -4,7 +4,7 @@
 // (webAddonBridge.mjs) it is the only way out of the add-on's sandboxed frame, and it checks every request against the permissions the
 // person approved and the ids the manifest declared, as the desktop's handlers in launcherHost.mjs do; every method answers
 // { ok: true, ... } or { ok: false, message }. This first slice of launchers can bring in files, run a declared importer, open the model it
-// built in the canvas, run a plain baseline and its declared scenarios, export their results, fetch from the hosts it declares (a server that does not allow web pages
+// built in the canvas, run a plain baseline and its declared scenarios, export their results, keep its session with the project it opens, fetch from the hosts it declares (a server that does not allow web pages
 // to read it fails with a message saying so), open a declared help page and open a link on a declared host. What
 // needs more (the download cache, stored files, inference, kept sessions) is turned away at install, and a method
 // for it answers that it is not available here.
@@ -12,11 +12,12 @@
 
 import { addressAllowed, checkedProgress, decodeText, importerInputs, maximumFetchedTextBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
 import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
+import { attachAddonData, buildSessionEntry, sessionInputs } from './launcherSession.mjs';
 import { runScenarioFork } from './webLauncherRuns.mjs';
 
 // Of the permissions a launcher may ask for (addonHost.mjs), the ones this slice can honour, and the optional behaviours it can offer.
-export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch']);
-export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord']);
+export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open', 'network.fetch', 'project.data']);
+export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord', 'projectSession', 'keepSession', 'openLink']);
 
 const notYet = (what) => `${what} is not available in the web edition yet. It works in the desktop app.`;
 
@@ -33,7 +34,7 @@ export function webLauncherRefusal(manifest) {
 
 const unavailableMethods = {
     cacheInfo: 'The download cache', clearCache: 'The download cache',
-    keepSession: 'Keeping a session with the project', restoreSession: 'Keeping a session with the project', reloadFiles: 'Reloading files',
+    reloadFiles: 'Reloading files',
     infer: 'Inference',
     checkPython: 'Checking Python', storedFiles: 'Stored files', storeFiles: 'Stored files', downloadFile: 'Downloads', cancelDownload: 'Downloads',
     partialDownloads: 'Downloads', discardPartialDownload: 'Downloads', fileSize: 'Downloads', describeStoredFile: 'Stored files',
@@ -43,7 +44,7 @@ const unavailableMethods = {
 // `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null, runImporter({ importer, files, options, onProgress }) ->
 // the importer's checked result, runModel({ content, config, commands }) -> the engine's decoded result, canSendCommands (whether runModel can
 // take commands), sha256(bytes) -> hex, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
-// -> hands the person those files together, fetchBytes(href, hosts) -> the bytes of an answer from a listed host (webFetch.mjs), openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
+// -> hands the person those files together, keepAddonData(addonId, entry) (null removes) and requestAddonData(addonId) -> the entry the open project keeps for the add-on, or null, fetchBytes(href, hosts) -> the bytes of an answer from a listed host (webFetch.mjs), openProject({ content, suggestedFilename, silent, addonName, focus, branches: [{ result, branchUuid, parentBranchUuid, forkTime, label }] }), openPage(page), openLink(href), emit(channel, payload) }.
 export function createLauncherBridge({ manifest, host }) {
     const contributes = manifest.contributes ?? {};
     const permitted = new Set(manifest.permissions ?? []);
@@ -65,6 +66,9 @@ export function createLauncherBridge({ manifest, host }) {
 
     // The baseline of a run length (ensureBaseline), run by the engine: the model from its start, with its checkpoints kept to fork from.
     const baselineOf = (runTime) => ensureBaseline(workspace, runTime, notify, async (contentText, config) => ({ result: await host.runModel({ content: contentText, config, commands: [] }) }));
+
+    // What the launcher keeps with a project: its window's state and the input files the model was built from (launcherSession.mjs).
+    const sessionEntry = (session) => { needs('project.data'); return buildSessionEntry({ addon: manifest, window: session, inputs: [...workspace.pending.values()] }); };
 
     const handlers = {
         getManifest: () => {
@@ -259,7 +263,6 @@ export function createLauncherBridge({ manifest, host }) {
         openInCanvas: async ({ scenarioId = null, focus = true, silent = false, session } = {}) => {
             needs('model.open');
             if (!workspace.imported) throw new Error('Import your data first.');
-            if (session !== undefined) throw new Error(notYet('Keeping a session with the project'));
             // The project the canvas would hold after these runs: the model with the baseline as its first branch and, when a scenario is named
             // and has been run, its fork from the baseline as a second.
             const branches = [];
@@ -269,8 +272,36 @@ export function createLauncherBridge({ manifest, host }) {
                 const run = key ? workspace.scenarios.get(key) : null;
                 if (run) branches.push({ result: run.result, branchUuid: run.uuid, parentBranchUuid: workspace.baseline.uuid, forkTime: run.forkTime, label: run.scenario.name });
             }
-            await host.openProject({ content: workspace.imported.contentText, suggestedFilename: `${manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '')}.kjt`, silent, addonName: manifest.name, focus, branches });
+            // A launcher with project.data may keep its session with the project it opens: saved with it, restored from it.
+            const content = session === undefined ? workspace.imported.contentText : attachAddonData(workspace.imported.contentText, manifest.addonId, sessionEntry(session));
+            await host.openProject({ content, suggestedFilename: `${manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '')}.kjt`, silent, addonName: manifest.name, focus, branches });
             return {};
+        },
+        // Keeps the window's session with the open project without opening a model (with `requires: ["keepSession"]`): work in the window before
+        // anything is built is then saved with the project, and restored.
+        keepSession: ({ session } = {}) => {
+            host.keepAddonData(manifest.addonId, sessionEntry(session));
+            return {};
+        },
+        // Restores the session this launcher kept with the open project: its input files become the pending files again (so its importer can
+        // run as before, offline), and the window gets back the state it saved.
+        restoreSession: async () => {
+            needs('project.data');
+            const saved = await host.requestAddonData(manifest.addonId);
+            // The web's SHA-256 is asynchronous, so an input saved without its hash gets it before the shared code reads the entry.
+            const entry = saved?.version === 1 && Array.isArray(saved.inputs)
+                ? { ...saved, inputs: await Promise.all(saved.inputs.map(async (input) => (input?.sha256 || typeof input?.text !== 'string' ? input : { ...input, sha256: await host.sha256(new TextEncoder().encode(input.text)) }))) }
+                : saved;
+            const inputs = sessionInputs(entry, contributes.importers);
+            if (!inputs) return { session: null };
+            workspace.pending.clear();
+            for (const { key, file } of inputs) workspace.pending.set(key, file);
+            workspace.imported = null;
+            releaseRuns();
+            return {
+                session: entry.window ?? null, savedAt: entry.savedAt ?? null, addonVersion: entry.addonVersion ?? null,
+                inputs: inputs.map(({ file }) => ({ role: file.role, name: file.name, bytes: file.bytes, ...(file.url ? { url: file.url, retrievedAt: file.retrievedAt } : {}), ...(file.source ? { derivedFrom: file.source } : {}) }))
+            };
         },
         openPage: async ({ pageId }) => {
             needs('pages.open');

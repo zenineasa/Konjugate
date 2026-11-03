@@ -18,6 +18,7 @@ import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './ad
 import { addonFilesDirectory, createFileStore } from './addonFileStore.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, nearestCheckpoint, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
+import { attachAddonData, buildSessionEntry, sessionInputs as sessionInputsWith } from './launcherSession.mjs';
 import { addressAllowed, checkAddress, checkedDerived, checkedImporterResult, checkedProgress, decodeText, fetchTimeoutMilliseconds, importerInputs, maximumDerivedFiles, maximumFetchBytes, maximumFetchedTextBytes, maximumImporterDataBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
 // Re-exported so what imported them from here still can.
 export { addressAllowed, checkedDerived, checkedProgress, decodeText, importerInputs, safeFileName };
@@ -62,8 +63,6 @@ export function storedFileKinds(accept) {
 // more on a busy machine); short enough that one that hangs is still stopped.
 const importerTimeoutMilliseconds = 120000;
 // A launcher's session, kept with the project: its window's own state, and the input files it was built from.
-const maximumSessionWindowBytes = 2 * 1024 * 1024;
-const maximumSessionInputBytes = 64 * 1024 * 1024;
 const addonDataRequestMilliseconds = 5000;
 const maximumRedirects = 3;
 
@@ -157,45 +156,8 @@ export function unreadableFile(name, error) {
 
 
 
-// ---- sessions kept with the project ------------------------------------------------------------------
-
-// What a launcher keeps with the project it opens in the canvas (docs/projectSchema.md, `addonData`): the window's
-// own state, as the window gave it, and the input files the model was built from, so the session can be restored
-// on any machine without fetching or choosing anything again. Throws a message a user can act on.
-export function buildSessionEntry({ addon, window, inputs, savedAt = new Date().toISOString() }) {
-    const windowText = JSON.stringify(window ?? null);
-    if (windowText.length > maximumSessionWindowBytes) throw new Error('The window\'s session is larger than the host keeps.');
-    // A binary input is not kept: what was derived from it is.
-    const kept = inputs.filter((input) => !input.binary).map(({ role, name, text, encoding, url, retrievedAt, sha256: hash, bytes, sample, source }) => ({
-        role, name, text, encoding: encoding ?? 'utf-8', sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}), ...(sample ? { sample: true } : {}),
-        // A derived file says what it was read from (the binary file's name).
-        ...(source ? { source } : {})
-    }));
-    if (kept.reduce((total, input) => total + (input.text?.length ?? 0), 0) > maximumSessionInputBytes) {
-        throw new Error(`The data this session was built from is larger than the ${maximumSessionInputBytes / 1024 / 1024} MB a project keeps.`);
-    }
-    return { version: 1, addonVersion: addon.version, savedAt, window: JSON.parse(windowText), inputs: kept };
-}
-
-// The project text with one launcher's entry in its addonData, leaving any other launcher's entry as it was.
-export function attachAddonData(contentText, addonId, entry) {
-    const document = JSON.parse(contentText);
-    document.addonData = { ...(document.addonData ?? {}), [addonId]: entry };
-    return JSON.stringify(document);
-}
-
-// The input files of a saved session that this launcher still declares, ready to be pending files again.
-export function sessionInputs(entry, importers) {
-    if (entry?.version !== 1 || !Array.isArray(entry.inputs)) return null;
-    const roles = new Set((importers ?? []).flatMap((importer) => importer.files.map((file) => file.role)));
-    const multiple = new Set((importers ?? []).flatMap((importer) => importer.files.filter((file) => file.multiple).map((file) => file.role)));
-    return entry.inputs
-        .filter((input) => roles.has(input.role) && typeof input.text === 'string' && typeof input.name === 'string')
-        .map((input) => ({ key: multiple.has(input.role) ? `${input.role}::${input.name}` : input.role, file: {
-            role: input.role, name: input.name, text: input.text, encoding: input.encoding ?? 'utf-8', sha256: input.sha256 ?? sha256(input.text),
-            bytes: input.bytes ?? Buffer.byteLength(input.text), sample: Boolean(input.sample), ...(input.url ? { url: input.url, retrievedAt: input.retrievedAt } : {}), ...(typeof input.source === 'string' ? { source: input.source } : {}), restored: true
-        } }));
-}
+export { attachAddonData, buildSessionEntry };
+export const sessionInputs = (entry, importers) => sessionInputsWith(entry, importers, sha256);
 
 // ---- scenarios --------------------------------------------------------------------------------------
 

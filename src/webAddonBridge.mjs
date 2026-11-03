@@ -6,15 +6,15 @@
 // handlers in src/main.mjs). A call without its permission is answered as the desktop answers it and does nothing else. The module
 // holds no DOM and no storage, so the rules are the same under test as in the browser.
 
-import { publicVisualizerContext, readSignalSeries, validateAddonManifest } from './addonHost.mjs';
+import { buildVisualizerDataEntry, publicVisualizerContext, readSignalSeries, validateAddonManifest, visualizerDataFromEntry } from './addonHost.mjs';
 import { webLauncherRefusal } from './webLauncherBridge.mjs';
 import { describeIntervention, parameterChangeEntries } from './parameterHistory.mjs';
 
-// Of the permissions a result visualizer may ask for (addonHost.mjs), the ones the web edition can honour. The rest need a run that is
-// still going, or the project's own data, which the web edition does not give an add-on yet; a visualizer asking for one is turned away
-// at install, saying which.
-export const webVisualizerPermissions = new Set(['results.read', 'timeline.read', 'timeline.seek', 'selection.read', 'results.export', 'settings.store']);
-export const webVisualizerFeatures = new Set(['addonSettings']);
+// Of the permissions a result visualizer may ask for (addonHost.mjs), the ones the web edition can honour: all of them. A run that is still going
+// reaches the visualizer as the page's own live updates do (see runUpdate), and the project's data is the project window's, which on the web is
+// the page itself.
+export const webVisualizerPermissions = new Set(['results.read', 'timeline.read', 'timeline.seek', 'selection.read', 'results.live.read', 'simulation.status.read', 'simulation.pacing.read', 'simulation.pacing.control', 'results.export', 'project.data', 'settings.store']);
+export const webVisualizerFeatures = new Set(['addonSettings', 'projectData']);
 
 export const maximumSettingsBytes = 256 * 1024;
 export const maximumCsvBytes = 64 * 1024 * 1024;
@@ -39,8 +39,10 @@ export function webAddonRefusal(contributionManifest) {
 const fileNameOf = (name) => String(name ?? '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').slice(0, 120) || 'results.csv';
 
 // One open visualizer. `session` is createVisualizerSession's result; `settings` is { get(addonId), set(addonId, value) };
-// `saveCsv(fileName, text)` hands the person a file; `requestSeek(time)` moves the page's timeline.
-export function createVisualizerBridge({ manifest, session, settings, saveCsv, requestSeek }) {
+// `saveCsv(fileName, text)` hands the person a file; `requestSeek(time)` moves the page's timeline; `projectData` is { get(addonId) -> the entry the
+// open project keeps for the add-on or null, set(addonId, entry | null) } (the project window's, which on the web is the page); `setPacing(jobId, pacing)`
+// changes the pace of the run in progress and answers the pacing it took.
+export function createVisualizerBridge({ manifest, session, settings, saveCsv, requestSeek, projectData = null, setPacing = null }) {
     const state = { session };
     const permitted = new Set(manifest.permissions ?? []);
     const need = (permission, what) => {
@@ -73,8 +75,11 @@ export function createVisualizerBridge({ manifest, session, settings, saveCsv, r
             requestSeek(state.session.time);
             return undefined;
         },
-        requestPacing: () => {
-            throw new Error('The visualizer does not have permission to control pacing.');
+        requestPacing: async ({ pacing } = {}) => {
+            if (!permitted.has('simulation.pacing.control')) throw new Error('The visualizer does not have permission to control pacing.');
+            const { session: current } = state;
+            if (!setPacing || !current.engineJobId || !['running', 'paused'].includes(current.run.lifecycle)) throw new Error('The simulation is no longer running.');
+            return setPacing(current.engineJobId, pacing);
         },
         exportCsv: async ({ suggestedFilename, csv } = {}) => {
             if (!permitted.has('results.export')) throw new Error('The visualizer does not have permission to export results.');
@@ -85,8 +90,17 @@ export function createVisualizerBridge({ manifest, session, settings, saveCsv, r
             await saveCsv(fileName, csv);
             return { path: null, fileName };
         },
-        getProjectData: () => need('project.data'),
-        setProjectData: () => need('project.data'),
+        // A visualizer with project.data keeps its own data with the project (docs/projectSchema.md, `addonData`), held by the page, so it is saved and
+        // opened with that project.
+        getProjectData: async () => {
+            need('project.data');
+            return visualizerDataFromEntry(await projectData?.get(manifest.addonId)) ?? { data: null, savedAt: null, addonVersion: null };
+        },
+        setProjectData: async ({ data } = {}) => {
+            need('project.data');
+            projectData?.set(manifest.addonId, data === null || data === undefined ? null : buildVisualizerDataEntry({ addon: manifest, data }));
+            return {};
+        },
         getSettings: async () => {
             need('settings.store');
             return settings.get(manifest.addonId);
@@ -119,6 +133,28 @@ export function createVisualizerBridge({ manifest, session, settings, saveCsv, r
                 return permitted.has('selection.read') ? { channel: 'selectionChange', payload: state.session.selectedNodeId } : null;
             }
             return null;
+        },
+        // A run that is still going has a newer result (or has just finished): the bridge's session follows it, as the desktop's does
+        // (updateVisualizerResult in main.mjs), and the frame is told what its permissions let it hear: { channel, payload } for each.
+        runUpdate(result) {
+            const { session: current } = state;
+            const samples = result.samples ?? current.samples;
+            current.samples = samples;
+            const last = samples.at(-1)?.time;
+            current.run = {
+                ...current.run,
+                sampleCount: samples.length,
+                lifecycle: result.lifecycle ?? 'completed',
+                simulationTime: Number(result.simulationTime ?? last ?? current.run.simulationTime),
+                availableResultTime: Number(result.availableResultTime ?? last ?? current.run.availableResultTime),
+                pacing: structuredClone(result.pacing ?? current.run.pacing)
+            };
+            if (Array.isArray(result.interventions)) current.interventions = structuredClone(result.interventions);
+            const events = [];
+            if (permitted.has('results.live.read')) events.push({ channel: 'samplesAvailable', payload: { sampleCount: current.run.sampleCount, availableResultTime: current.run.availableResultTime } });
+            if (permitted.has('simulation.status.read')) events.push({ channel: 'runStatusChange', payload: structuredClone(current.run) });
+            if (permitted.has('simulation.pacing.read')) events.push({ channel: 'pacingChange', payload: structuredClone(current.run.pacing) });
+            return events;
         },
         // A new result session for the same visualizer (the person ran again and opened it again).
         replaceSession(next) {

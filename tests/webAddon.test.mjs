@@ -44,9 +44,9 @@ function bridgeFor(permissions, extra = {}) {
 
 test('a visualizer that needs nothing the web lacks is accepted, and what it cannot have is turned away saying why', () => {
     assert.equal(webAddonRefusal(visualizerManifest()), null);
-    assert.match(webAddonRefusal(visualizerManifest({ permissions: ['results.read', 'simulation.pacing.control'] })), /simulation\.pacing\.control/);
-    assert.match(webAddonRefusal(visualizerManifest({ permissions: ['project.data'], requires: ['projectData'] })), /project\.data/);
-    assert.match(webAddonRefusal(visualizerManifest({ requires: ['projectData'] })), /projectData/);
+    // everything a visualizer may ask for is given: a run still going, its pace, and the project's data
+    assert.equal(webAddonRefusal(visualizerManifest({ permissions: ['results.read', 'results.live.read', 'simulation.status.read', 'simulation.pacing.read', 'simulation.pacing.control', 'project.data'], requires: ['projectData', 'addonSettings'] })), null);
+    assert.match(webAddonRefusal(visualizerManifest({ requires: ['somethingNewer'] })), /somethingNewer/);
     assert.match(webAddonRefusal({ kind: 'somethingElse' }), /neither a result visualizer nor a launcher/);
     assert.match(webAddonRefusal(visualizerManifest({ entry: '../x.html' })), /entry/);
 });
@@ -63,7 +63,8 @@ test('an add-on installs from a file, lists as a visualizer, can be disabled, an
     assert.deepEqual(await packages.getAddonSettings('example.viewer'), { theme: 'dark' });
     await packages.uninstall('addon', 'example.viewer', '1.1.0');
     assert.equal(await packages.getAddonSettings('example.viewer'), null);
-    await assert.rejects(packages.install(viewerPackage(visualizerManifest({ permissions: ['project.data'] })), '.kja'), /project\.data/);
+    await assert.rejects(packages.install(viewerPackage(visualizerManifest({ requires: ['somethingNewer'] })), '.kja'), /somethingNewer/);
+    await packages.install(viewerPackage(visualizerManifest({ addonId: 'example.keeper', permissions: ['project.data'], requires: ['projectData'] })), '.kja');
 });
 
 test('every read answers as the desktop does, and with no results.read gives nothing away', async () => {
@@ -177,4 +178,65 @@ test('the frame is sandboxed with scripts alone and starts from a page whose pol
     assert.doesNotMatch(policy, /connect-src|frame-src|worker-src|child-src|object-src|https?:|\*/);
     assert.match(policy, /form-action 'none'/);
     assert.match(policy, /img-src data:;/);
+});
+
+test('a visualizer with project.data keeps its data with the project, and gets back only its own', async () => {
+    const kept = new Map([['other.addon', { version: 1, data: { secret: true } }]]);
+    const { bridge } = bridgeFor(['results.read', 'project.data'], { projectData: { get: async (id) => kept.get(id) ?? null, set: (id, entry) => { entry === null ? kept.delete(id) : kept.set(id, entry); } } });
+    assert.deepEqual(await bridge.call('getProjectData'), { data: null, savedAt: null, addonVersion: null });
+    assert.deepEqual(await bridge.call('setProjectData', { data: { zoom: 3, picks: ['a'] } }), {});
+    const entry = kept.get('example.viewer');
+    assert.deepEqual([entry.version, entry.addonVersion, entry.data], [1, '1.0.0', { zoom: 3, picks: ['a'] }]);
+    const back = await bridge.call('getProjectData');
+    assert.deepEqual([back.data, back.addonVersion], [{ zoom: 3, picks: ['a'] }, '1.0.0']);
+    assert.deepEqual([...kept.keys()].sort(), ['example.viewer', 'other.addon'], 'Another add-on\'s entry is left as it was.');
+    await bridge.call('setProjectData', { data: null });
+    assert.equal(kept.has('example.viewer'), false, 'null removes the entry');
+    await assert.rejects(bridge.call('setProjectData', { data: { big: 'x'.repeat(1024 * 1024 + 1) } }), /at most 1 MB/);
+    kept.set('example.viewer', { version: 2, data: 1 });
+    assert.deepEqual(await bridge.call('getProjectData'), { data: null, savedAt: null, addonVersion: null }, 'An entry of a version this host does not know is left unread.');
+});
+
+test('a run that is still going reaches the visualizer as its permissions allow, and the session follows it', async () => {
+    const live = (lifecycle, samples, extra = {}) => ({ lifecycle, samples, simulationTime: samples.at(-1).time, availableResultTime: samples.at(-1).time, pacing: { mode: 'limitedRatio', simulationSecondsPerWallSecond: 2 }, ...extra });
+    const grown = [0, 1, 2, 3, 4, 5, 6].map((time) => ({ time, states: [{ stateId: 'tank.level', value: time }] }));
+    const { bridge } = bridgeFor(['results.read', 'results.live.read', 'simulation.status.read', 'simulation.pacing.read']);
+    const events = bridge.runUpdate(live('running', grown));
+    assert.deepEqual(events.map((event) => event.channel), ['samplesAvailable', 'runStatusChange', 'pacingChange']);
+    assert.deepEqual(events[0].payload, { sampleCount: 7, availableResultTime: 6 });
+    assert.deepEqual([events[1].payload.lifecycle, events[1].payload.sampleCount, events[1].payload.simulationTime], ['running', 7, 6]);
+    assert.deepEqual(events[2].payload, { mode: 'limitedRatio', simulationSecondsPerWallSecond: 2 });
+    assert.equal((await bridge.call('getContext')).run.sampleCount, 7);
+    const [series] = await bridge.call('readSeries', { signalIds: ['tank.level'] });
+    assert.equal(series.points?.length ?? series.samples?.length ?? series.values?.length, 7, 'Reads see the newer samples.');
+    // finished: a result without the live fields is taken as complete
+    const done = bridge.runUpdate({ samples: grown, interventions: [{ kind: 'step' }] });
+    assert.equal(done[1].payload.lifecycle, 'completed');
+    assert.equal(bridge.session.interventions.length, 1);
+    // each event only with its own permission
+    assert.deepEqual(bridgeFor(['results.read', 'simulation.pacing.read']).bridge.runUpdate(live('running', grown)).map((event) => event.channel), ['pacingChange']);
+    assert.deepEqual(bridgeFor(['results.read']).bridge.runUpdate(live('running', grown)), []);
+});
+
+test('pacing is changed only with simulation.pacing.control, only for the run in progress, and the page decides what it took', async () => {
+    const asked = [];
+    const setPacing = async (jobId, pacing) => { asked.push([jobId, pacing]); return { ...pacing, normalized: true }; };
+    const running = (bridge) => bridge.runUpdate({ lifecycle: 'running', samples: [{ time: 0, states: [] }], simulationTime: 0, availableResultTime: 0 });
+    const { bridge } = bridgeFor(['results.read', 'simulation.pacing.control'], { setPacing });
+    await assert.rejects(bridge.call('requestPacing', { pacing: { mode: 'fastest' } }), /no longer running/, 'a finished run has nothing to pace');
+    running(bridge);
+    assert.deepEqual(await bridge.call('requestPacing', { pacing: { mode: 'realTime' } }), { mode: 'realTime', normalized: true });
+    assert.deepEqual(asked, [['j1', { mode: 'realTime' }]]);
+    const { bridge: without } = bridgeFor(['results.read', 'simulation.pacing.read'], { setPacing });
+    running(without);
+    await assert.rejects(without.call('requestPacing', { pacing: { mode: 'fastest' } }), /does not have permission to control pacing/);
+    assert.equal(asked.length, 1, 'Nothing was passed on without the permission.');
+    // a seek is held back while the run is going, as on the desktop
+    const { bridge: seeking, seeks } = bridgeFor(['results.read', 'timeline.seek']);
+    running(seeking);
+    await seeking.call('seek', { time: 0 });
+    assert.deepEqual(seeks, []);
+    seeking.runUpdate({ lifecycle: 'completed', samples: [{ time: 0, states: [] }, { time: 1, states: [] }] });
+    await seeking.call('seek', { time: 1 });
+    assert.deepEqual(seeks, [1]);
 });

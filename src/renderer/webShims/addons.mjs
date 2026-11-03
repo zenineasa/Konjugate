@@ -14,6 +14,7 @@ import { fetchInFrame, streamInFrame } from './fetchRunner.mjs';
 import { openOpfsVolume, removeOpfsAddonData } from './opfsVolume.mjs';
 import { createWebFileCache } from '../../webFileCache.mjs';
 import { createWebFileStore } from '../../webFileStore.mjs';
+import { onWebEngineComplete, onWebEngineUpdate, setWebEngineLivePacing } from '../../webEngineLiveShim.mjs';
 import { createLauncherBridge } from '../../webLauncherBridge.mjs';
 import { buildAddonDocument, launcherApiSource } from '../../webAddonDocument.mjs';
 import { runImporterInFrame } from './importerRunner.mjs';
@@ -165,7 +166,13 @@ async function openVisualizer(store, entry, contexts) {
         manifest, session,
         settings: { get: (id) => store.getAddonSettings(id), set: (id, value) => store.setAddonSettings(id, value) },
         saveCsv: async (fileName, text) => downloadCsv(fileName, text),
-        requestSeek: (time) => seekHandlers.forEach((handler) => handler(time))
+        requestSeek: (time) => seekHandlers.forEach((handler) => handler(time)),
+        // The project's add-on data is the renderer's (renderer.mjs, projectAddonData), reached through the hooks it registers.
+        projectData: {
+            get: async (id) => (addonDataHandlers.length ? addonDataHandlers.at(-1)(id) : null) ?? null,
+            set: (id, entry) => { for (const listener of keepAddonDataListeners) listener(id, entry); }
+        },
+        setPacing: (jobId, pacing) => setWebEngineLivePacing(jobId, pacing)
     });
     panel.querySelector('[data-title]').textContent = manifest.name;
     panel.querySelector('[data-hint]').textContent = `${session.projectName} · results`;
@@ -174,6 +181,14 @@ async function openVisualizer(store, entry, contexts) {
     current = { ...startFrame(panel, { label: manifest.name, bridge, build: () => buildAddonDocument({ entry: manifest.entry, readFile: (path) => store.readFile(entry, path) }) }), addonId: manifest.addonId, kind: 'resultVisualizer' };
 }
 
+// A run that is still going (or has just finished) reaches an open visualizer of that run, which hears what its permissions let it hear.
+const forwardRunUpdate = ({ jobId, result }) => {
+    if (current?.kind !== 'resultVisualizer' || current.bridge.session.engineJobId !== jobId) return;
+    for (const event of current.bridge.runUpdate(result)) sendToFrame({ konjugate: 'event', ...event });
+};
+onWebEngineUpdate(forwardRunUpdate);
+onWebEngineComplete(forwardRunUpdate);
+
 // What opening a model from a launcher asks of the project window: the renderer registered for it as it does for the desktop's.
 const openProjectListeners = [];
 const keepAddonDataListeners = [];
@@ -181,7 +196,6 @@ const addonDataHandlers = [];
 const pendingListeners = [];
 const abandonedListeners = [];
 
-// A file chosen by the person, as bytes: [{ name, bytes }], or null if none is chosen. Called inside the click that asked for it.
 // The files the person picks in the browser's own file picker, or null if they cancel.
 function pickFileObjects({ label, extensions, multiple }) {
     return new Promise((resolve) => {

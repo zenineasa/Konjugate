@@ -24,3 +24,9 @@ What only a real phone can confirm. The layout is checked in Chrome at 360 by 76
 - Offline: with "Use offline" tapped, lock the screen for a minute during the download, then unlock: the copy carries on from where it stopped. Then switch to flight mode, close the app, reopen it, and run a model.
 - A phone with a notch or rounded corners on its side: nothing the person needs is under the cut-out.
 - A model of about a hundred nodes: panning and the labels stay responsive.
+- Extensions: install a `.kjp` plugin from a file (the phone's own file picker), see the review, install, and find its components in the component library and its example in Examples; reload, and confirm it is still installed.
+- A project that pins a plugin provider: open it with the plugin missing (the dialog names it), install the plugin from the dialog, run the model, and confirm it completes.
+- A result visualizer: install a `.kja` from the phone's file picker, run a model, open the add-on from the end of the menu: it comes up as a sheet above the results bar, ends at the right-hand rail, and scrubbing the timeline updates it; in landscape it is a side sheet and the menu scrolls to reach it.
+- Extensions, Discover: the list loads with its images, an entry's detail and its install button are reachable, the review shows who signed the package, and Updates appears after the registry has a newer version of something installed.
+- A launcher add-on that imports a model: from its window, "Choose file" opens the phone's file picker (the click in the window must reach the page's picker), the import runs, and "Open in canvas" opens the model.
+- A launcher add-on that runs scenarios: after an import, a baseline and a scenario run from its window and the scenario's result differs from the baseline's from the fork on (the run happens off the page, so the phone should stay responsive while it works).

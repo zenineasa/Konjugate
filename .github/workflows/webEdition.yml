@@ -56,6 +56,9 @@ jobs:
             - run: npm run build:webShell
               env:
                   GOATCOUNTER_CODE: ${{ vars.GOATCOUNTER_CODE }}
+                  # Mirrors each registry entry's newest usable release onto the site, for Discover, installs and update checks (stage 4 of
+                  # docs/proposals/webEditionPackages.md). A release that cannot be fetched is left out with a warning; it does not fail the build.
+                  KONJUGATE_MIRROR_PACKAGES: '1'
             - name: Upload the built shell for inspection
               uses: actions/upload-artifact@v4
               with:

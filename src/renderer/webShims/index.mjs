@@ -13,7 +13,7 @@ import providerEditor from './providerEditor.mjs';
 import { installOffline } from './offline.mjs';
 import { version } from './buildInfo.mjs';
 import {
-    addons, aiProviders, applicationInfo, componentLibrary, diagnostics, extensions,
+    addons, aiProviders, launcherHost, applicationInfo, componentLibrary, diagnostics, extensions,
     helpFeedback, modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
 } from './misc.mjs';
 
@@ -32,6 +32,7 @@ window.providerToolchains = providerToolchains;
 window.modelClipboard = modelClipboard;
 window.aiProviders = aiProviders;
 window.addons = addons;
+window.launcherHost = launcherHost;
 window.tour = tour;
 
 // Drag-drop project load: reuses openProject()'s real flow (its confirmDiscard() check included)
@@ -61,7 +62,7 @@ banner.className = 'webEditionBanner';
 banner.innerHTML = '<span><span class="webEditionBannerFull">This is a free, lightweight trial of Konjugate running in your browser. </span>' +
     '<span class="webEditionBannerShort">Free browser trial. </span>' +
     '<span class="webEditionBannerDetail">Run here is batch-only (no live progress or mid-run control), and programmable C++ providers, ' +
-    "FMU import/export, add-ons, and AI-assisted authoring aren't available yet. </span>" +
+    "FMU import/export, launcher add-ons, and AI-assisted authoring aren't available yet. </span>" +
     '<span class="webEditionBannerFull">For the full experience, </span><a href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" ' +
     'rel="noopener">download the free desktop app</a><span class="webEditionBannerFull">.</span></span>' +
     '<button type="button" aria-label="Dismiss">×</button>';

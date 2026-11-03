@@ -1,6 +1,7 @@
 # Technical Proposals
 
 * [Web Edition](webEdition.md) - WebAssembly and web-worker architecture for running Konjugate in the browser
+* [Web Edition Packages](webEditionPackages.md) - Installing and running add-ons and plugins in the web edition: storage, a sandbox for third-party code, a mirrored registry, and a staged plan
 * [Numerical Stability Diagnostics](numericalStabilityDiagnostics.md) - Runtime stability monitoring, divergence detection, and convergence checks
 * [Causal Inference Input Replay](causalInferenceInputReplay.md) - Replaying external time series inputs through candidate relationships
 * [Causal Inference Interaction Terms](causalInferenceInteractionTerms.md) - Multi-variable interaction term discovery

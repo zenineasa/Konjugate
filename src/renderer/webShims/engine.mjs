@@ -4,6 +4,7 @@
 // one-shot operations (unchanged) with webEngineLiveShim.mjs's batch-run-as-live-job surface,
 // assembled into the exact method set src/preload.mjs exposes on the desktop.
 
+import { resolvePluginReferences } from './packages.mjs';
 import {
     fitWithWebEngine, getWebEngineCapabilities, checkSubstepConvergenceWithWebEngine,
     inferWithWebEngine, runWithWebEngine, validateWithWebEngine
@@ -22,17 +23,18 @@ const engineModuleUrl = new URL('../../engine/konjugateEngine.js', import.meta.u
 
 export default {
     capabilities: () => getWebEngineCapabilities(engineModuleUrl),
-    validate: (content) => validateWithWebEngine(engineModuleUrl, content),
+    // Each call that takes a model has the plugin providers it names resolved to their source first, as the desktop does before the engine.
+    validate: async (content) => validateWithWebEngine(engineModuleUrl, await resolvePluginReferences(content)),
     infer: (csv, config) => inferWithWebEngine(engineModuleUrl, csv, config),
-    fit: (content, csv, config) => fitWithWebEngine(engineModuleUrl, content, csv, config),
+    fit: async (content, csv, config) => fitWithWebEngine(engineModuleUrl, await resolvePluginReferences(content), csv, config),
     // The web engine reports a fit only when it ends: there is no progress to show and nothing to stop part way.
     onFitProgress: () => {},
     stopFit: async () => false,
     checkObjective: async () => ({ available: false }),
     discardFit: async () => false,
     checkSubstepConvergence: () => checkSubstepConvergenceWithWebEngine(),
-    run: (content, configuration) => runWithWebEngine(engineModuleUrl, content, configuration),
-    start: (content, configuration) => startWebEngineLiveRun(engineModuleUrl, content, configuration),
+    run: async (content, configuration) => runWithWebEngine(engineModuleUrl, await resolvePluginReferences(content), configuration),
+    start: async (content, configuration) => startWebEngineLiveRun(engineModuleUrl, await resolvePluginReferences(content), configuration),
     setPacing: (jobId, pacing) => setWebEngineLivePacing(jobId, pacing),
     setExecutionState: (jobId, executionState) => setWebEngineLiveExecutionState(jobId, executionState),
     setParameterValue: (jobId, parameterId, value) => setWebEngineLiveParameterValue(jobId, parameterId, value),

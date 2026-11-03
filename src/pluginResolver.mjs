@@ -3,17 +3,9 @@
 import { access, readFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { packageKey } from './packageArchive.mjs';
+import { PluginResolutionError, pluginIdPattern, pluginVersionPattern, resolveReferencesInDocument } from './pluginReferences.mjs';
 
-export class PluginResolutionError extends Error {
-    constructor(message, code = 'PLUGIN_RESOLUTION_FAILED') {
-        super(message);
-        this.name = 'PluginResolutionError';
-        this.code = code;
-    }
-}
-
-const pluginIdPattern = /^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/;
-const pluginVersionPattern = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
+export { PluginResolutionError };
 
 function safeRelativePath(value, field) {
     if (typeof value !== 'string' || !value || value.startsWith('/') || value.includes('\\') || value.split('/').some((segment) => segment === '..' || segment === '.')) {
@@ -69,16 +61,5 @@ async function resolvePluginSource(implementation, pluginDirectory, disabledPlug
 }
 
 export async function resolveInstalledPlugins(content, { pluginDirectory, disabledPluginKeys = [], incompatiblePluginKeys = {} } = {}) {
-    const document = typeof content === 'string' ? JSON.parse(content) : structuredClone(content);
-    let changed = false;
-    const resolveImplementation = async (implementation) => {
-        if (implementation?.kind !== 'plugin') return implementation;
-        changed = true;
-        return resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys, incompatiblePluginKeys);
-    };
-    for (const node of document.nodes ?? []) {
-        for (const term of node.sourceTerms ?? []) term.implementation = await resolveImplementation(term.implementation);
-    }
-    for (const edge of document.edges ?? []) edge.implementation = await resolveImplementation(edge.implementation);
-    return changed ? JSON.stringify(document) : (typeof content === 'string' ? content : JSON.stringify(document));
+    return resolveReferencesInDocument(content, (implementation) => resolvePluginSource(implementation, pluginDirectory, disabledPluginKeys, incompatiblePluginKeys));
 }

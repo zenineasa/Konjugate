@@ -416,6 +416,19 @@ void assessNodeStabilityHandlesANodeThatIsNotFirstInTheDocument() {
     require(*assessment->requiredSubsteps == 2, "requiredSubsteps should match the hand-computed bound.");
 }
 
+// A state nothing contributes to has a rate of exactly zero: it is left out of the Jacobian, and counted as the zero
+// eigenvalue it is (an amplification of exactly 1), so a node of such states alone is stable, as its zero Jacobian
+// would have it; and beside one that is not, the assessment is as it was.
+void assessNodeStabilityCountsAStateNothingContributesToAsAZero() {
+    const auto plan = konjugate::compileExecutionPlan(relaxationTowardSourceProject(30));
+    const auto source = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.1);
+    require(source.has_value(), "A node whose state nothing changes is still assessed.");
+    require(source->stable && source->maxAmplificationFactor == 1, "Its one zero amplifies by exactly 1.");
+    const auto target = konjugate::assessNodeStability(plan.nodes.at(1), plan.initialStates, 0.1);
+    require(target.has_value() && !target->stable && std::abs(target->maxAmplificationFactor - 2) < 1e-4,
+        "The relaxation's own state, |1 - 0.1 x 30| = 2, is assessed as before.");
+}
+
 void assessNodeStabilityComputesRequiredSubsteps() {
     // Same fixture as assessNodeStabilityFlagsAnObviouslyUnstableDecay: a real eigenvalue of -21.
     // stepSizeBound = -2*(-21)/21^2 = 2/21 ≈ 0.095238 -> ceil(0.1 / 0.095238) = ceil(1.05) = 2.
@@ -466,6 +479,7 @@ void assessNodeStabilityFlagsUnconditionalInstability() {
 int main() {
     try {
         assessNodeStabilityFlagsAnObviouslyUnstableDecay();
+        assessNodeStabilityCountsAStateNothingContributesToAsAZero();
         assessNodeStabilityAcceptsTheSameDecayOnceSubsteppedEnough();
         assessNodeStabilityComputesAStiffnessRatio();
         assessNodeStabilityIgnoresAConservedQuantityWhenJudgingStiffness();

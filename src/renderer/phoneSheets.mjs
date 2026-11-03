@@ -8,7 +8,7 @@ import { isPhoneLayout } from './phoneLayout.mjs';
 
 const sheetIds = [
     'componentLibraryPanel', 'controlHistoryPanel', 'validationPanel', 'liveParameterPanel', 'forkParameterPanel', 'branchesPanel',
-    'parametersPanel', 'diagnosticsPanel', 'assistantPanel', 'addPalette'
+    'parametersPanel', 'diagnosticsPanel', 'assistantPanel', 'addPalette', 'addonPanel'
 ];
 
 const isOpen = (element) => !element.hidden && !element.classList.contains('hidden');

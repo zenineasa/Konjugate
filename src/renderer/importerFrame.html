@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+<!-- The page a launcher's importer runs from in the web edition (docs/proposals/webEditionPackages.md, stage 5). Like addonFrame.html it is
+     shown with sandbox="allow-scripts" and no allow-same-origin, so it has no origin and no way into the page, and its policy lets nothing in
+     from outside: the only addition is that scripts and workers may come from blob: URLs, which is how the importer's own source and the
+     worker that runs it are made here. It carries messages between the page and the worker and does nothing else. -->
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; form-action 'none'; base-uri 'none'">
+<script>
+let worker = null;
+addEventListener('message', (event) => {
+    if (event.source !== parent || typeof event.data !== 'object' || event.data === null) return;
+    const message = event.data;
+    if (message.start && !worker) {
+        worker = new Worker(URL.createObjectURL(new Blob([message.start.workerSource], { type: 'text/javascript' })));
+        worker.onmessage = (answer) => parent.postMessage({ importer: answer.data }, '*');
+        worker.onerror = (error) => parent.postMessage({ importer: { ok: false, message: error.message || 'The importer stopped.' } }, '*');
+        worker.postMessage({ run: message.start.run }, message.start.transfer || []);
+    } else if (message.helperResult && worker) {
+        worker.postMessage({ helperResult: message.helperResult });
+    }
+});
+parent.postMessage({ konjugate: 'importer-shell' }, '*');
+</script>

@@ -19,6 +19,7 @@ export const phoneMenuEntries = [
     { id: 'parameterTuningButton', label: 'Parameter tuning' },
     { id: 'parametersButton', label: 'Parameters' },
     { id: 'providerToolchainsButton', label: 'Provider toolchains' },
+    { id: 'extensionsButton', label: 'Extensions' },
     { id: 'diagnosticsButton', label: 'Diagnostics log' },
     { id: 'offlineButton', label: 'Use offline' },
     { id: 'updateCheckButton', label: 'Check for updates', keepOpen: true },
@@ -42,6 +43,14 @@ export function visiblePhoneMenuEntries(lookup, entries = phoneMenuEntries) {
     });
 }
 
+// The add-on buttons of the rail, which the phone layout hides: listed after the fixed entries, each pressing its own button. An add-on
+// has no id of its own in the list above, so these are read from the page as the rail built them.
+function addonMenuEntries(root) {
+    return [...root.querySelectorAll('#addonRailButtons button[id]')].map((button, index) => ({
+        id: button.id, label: button.querySelector('.railToolLabel')?.textContent || button.dataset.tooltip || 'Add-on', separated: index === 0
+    }));
+}
+
 function installPhoneMenu() {
     const trigger = document.getElementById('phoneMenuButton');
     if (!trigger) return;
@@ -57,7 +66,7 @@ function installPhoneMenu() {
         trigger.setAttribute('aria-expanded', 'false');
     };
     const render = () => {
-        menu.replaceChildren(...visiblePhoneMenuEntries((id) => document.getElementById(id)).map((entry) => {
+        menu.replaceChildren(...visiblePhoneMenuEntries((id) => document.getElementById(id), [...phoneMenuEntries, ...addonMenuEntries(document)]).map((entry) => {
             const item = document.createElement('button');
             item.type = 'button';
             item.setAttribute('role', 'menuitem');

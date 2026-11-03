@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+<!-- The empty page an add-on's frame starts from in the web edition (docs/proposals/webEditionPackages.md, stage 3). The page that
+     shows it gives the frame sandbox="allow-scripts" and no allow-same-origin, so the frame has an opaque origin: no storage, no
+     cookies, no reach into the page. The policy below lets nothing in from outside, so whatever the add-on's document is, it can
+     fetch, load and open nothing; its own scripts and styles are placed in the document it is given (src/webAddonDocument.mjs).
+     The policy belongs to this page and stays when the document is replaced. -->
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'">
+<script>
+addEventListener('message', (event) => {
+    if (event.source !== parent || typeof event.data !== 'object' || event.data === null || typeof event.data.document !== 'string') return;
+    document.open();
+    document.write(event.data.document);
+    document.close();
+}, { once: true });
+parent.postMessage({ konjugate: 'shell' }, '*');
+</script>

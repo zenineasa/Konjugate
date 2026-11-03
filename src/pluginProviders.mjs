@@ -10,6 +10,8 @@ export function pluginProviderChoices(entries = []) {
         if (entry.packageType !== 'plugin' || entry.enabled === false) continue;
         for (const contribution of entry.manifest?.contributes ?? []) {
             if (!contribution.providerId || (contribution.kind && contribution.kind !== 'provider')) continue;
+            // An entry that says which runtimes can run here (the web edition's) offers only those.
+            if (entry.runnableRuntimes && !entry.runnableRuntimes.includes(contribution.runtime)) continue;
             const reference = { pluginId: entry.packageId, pluginVersion: entry.version, providerId: contribution.providerId };
             choices.push({
                 value: pluginProviderValue(reference),

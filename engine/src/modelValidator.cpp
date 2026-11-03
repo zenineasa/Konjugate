@@ -355,7 +355,9 @@ void validateAlgebraicRelationship(ValidationResult& result, const boost::proper
         const auto mathJson = definition.get_child_optional("mathJson");
         if (!mathJson) errors.push_back("Its expression is missing.");
         else validateMathJson(*mathJson, symbols, errors);
-        if (!std::regex_match(symbol, std::regex("^[A-Za-z][A-Za-z0-9_]*$")) || !symbols.insert(symbol).second) {
+        // Compiled once: a model with contact has tens of thousands of definitions.
+        static const std::regex definitionSymbol("^[A-Za-z][A-Za-z0-9_]*$");
+        if (!std::regex_match(symbol, definitionSymbol) || !symbols.insert(symbol).second) {
             errors.push_back("A definition needs a name of its own (letters and digits).");
         }
         if (!errors.empty()) add(result, "relationshipDefinitionInvalid", "error", "Definition \"" + symbol + "\": " + errors.front(), "edge", id, "equation");

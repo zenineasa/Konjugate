@@ -56,11 +56,20 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
             if (task.outputStateIndex == node.stateIndexes[index]) algebraicLocalIndices.insert(index);
         }
     }
+    // A differential state nothing contributes to has a rate of exactly zero whatever the others are: its row of the
+    // Jacobian is nothing, so it adds an eigenvalue of zero (an amplification of exactly 1) and leaves the others as
+    // the rest of the Jacobian has them. It is left out of the Jacobian, which a node holding many such states (a
+    // robot's rows' settings, hundreds) would otherwise make cubically costly, and its zero is counted below.
+    std::set<std::size_t> writtenLocalIndices;
+    for (const auto& task : node.contributions) writtenLocalIndices.insert(task.outputStateIndex);
     std::vector<std::size_t> differentialLocalIndices;
+    std::size_t idleStateCount = 0;
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
-        if (!algebraicLocalIndices.contains(index)) differentialLocalIndices.push_back(index);
+        if (algebraicLocalIndices.contains(index)) continue;
+        if (writtenLocalIndices.contains(index)) differentialLocalIndices.push_back(index);
+        else idleStateCount += 1;
     }
-    if (differentialLocalIndices.empty()) return std::nullopt;
+    if (differentialLocalIndices.empty() && idleStateCount == 0) return std::nullopt;
 
     StateValues localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
@@ -101,11 +110,14 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
     // attribution step), but EigenSolver's own decomposition cost is dominated by stateCount cubed
     // regardless -- requesting eigenvectors too adds negligible cost on top for the small per-node
     // matrices this function ever sees, so there is no reason to conditionally re-decompose later.
-    const Eigen::EigenSolver<Eigen::MatrixXd> solver(jacobian, /*computeEigenvectors=*/true);
     NodeStabilityAssessment assessment;
     assessment.nodeId = node.nodeId;
     assessment.substeps = node.substeps;
     assessment.nodeStepSize = nodeStepSize;
+    // The idle states' zeros: |1 + h·0| = 1.
+    if (idleStateCount) assessment.maxAmplificationFactor = 1;
+    if (differentialLocalIndices.empty()) return assessment;
+    const Eigen::EigenSolver<Eigen::MatrixXd> solver(jacobian, /*computeEigenvectors=*/true);
 
     // A conserved total (a quantity passed round among a node's states) or a running sum has a rate
     // of exactly zero, but the finite-difference Jacobian gives it round-off of either sign, about

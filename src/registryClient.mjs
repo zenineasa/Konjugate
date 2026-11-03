@@ -118,7 +118,7 @@ export async function installFromRegistryEntry(entry, { namespaces, directory, o
 // The download may be a zip container holding the entry's .kja and .kjp files, or (for a single-package entry) the package
 // archive itself. Matched by each candidate file's own declared identity, not by file name -- file names carry a version
 // number the registry entry doesn't (and shouldn't have to) know in advance. Returns a Map of packageId -> archive bytes.
-function matchDeclaredPackages(entry, archiveBytes, zipEntries) {
+export function matchDeclaredPackages(entry, archiveBytes, zipEntries) {
     let candidates = Object.entries(zipEntries).filter(([name]) => name.endsWith('.kja') || name.endsWith('.kjp'));
     if (!candidates.length && entry.packages.length === 1) {
         // The download may be a direct .kja or .kjp package archive rather than a multi-package zip container
@@ -153,7 +153,7 @@ async function downloadBytes(url, fetchImpl) {
     return new Uint8Array(await response.arrayBuffer());
 }
 
-async function fetchEntryArchive(entry, { fetchImpl, appVersion, release, factsCache, includePrereleases }) {
+export async function fetchEntryArchive(entry, { fetchImpl, appVersion, release, factsCache, includePrereleases }) {
     const plain = async () => ({ archiveBytes: await downloadBytes(entry.downloadUrl, fetchImpl), heldBack: null });
     if (!appVersion) {
         if (release) throw new RegistryClientError('Choosing a release needs the Konjugate version to check it against.', 'NO_APP_VERSION');

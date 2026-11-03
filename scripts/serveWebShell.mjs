@@ -9,7 +9,7 @@
 // default build, but required for SharedArrayBuffer to exist at all (phase 6's threadPool/
 // partitioned execution backends) -- GitHub Pages cannot send these, which is exactly why phase
 // 6's own hosting note recommends a COOP/COEP-capable host over a service-worker shim for that
-// variant specifically. This script is a local stand-in either way, not a deployment.
+// variant specifically. This script is a local stand-in either way, not a deployment. Set KONJUGATE_NO_ISOLATION=1 to leave the headers off.
 
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -61,8 +61,8 @@ const server = createServer(async (request, response) => {
         const body = await readFile(filePath);
         const headers = {
             'Content-Type': mimeTypes[extname(filePath)] ?? 'application/octet-stream',
-            'Cross-Origin-Opener-Policy': 'same-origin',
-            'Cross-Origin-Embedder-Policy': 'require-corp',
+            // KONJUGATE_NO_ISOLATION=1 leaves them off, as GitHub Pages does, to test the page that is not cross-origin isolated.
+            ...(process.env.KONJUGATE_NO_ISOLATION ? {} : { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }),
             // What a static host sends, so that a copy fetched in pieces (scripts/webServiceWorker.js) can be tested here.
             'Accept-Ranges': 'bytes',
             ETag: `"${body.length.toString(16)}-${Math.floor((await stat(filePath)).mtimeMs).toString(16)}"`

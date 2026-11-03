@@ -11,6 +11,7 @@
 // (exportFmu, mergeFmus) are honestly unavailable, matching webEdition.md's existing stance.
 
 import { decodeResultFile } from '../../engineProtocol.mjs';
+import { pluginExampleBytes, pluginExampleEntries, pluginExampleGuideUrl } from './packages.mjs';
 import { BrowserProjectFileError, decodeProjectContent, encodeProjectContent, inspectProjectContent } from '../../browserProjectCodec.mjs';
 import { rendererResultProjection } from '../../resultSession.mjs';
 import { registerCompletedResult } from '../../webEngineLiveShim.mjs';
@@ -138,7 +139,7 @@ async function save(path, content, suggestedFilename, password, resultBranches) 
     return { path: null, fileName, encrypted: Boolean(password), includesResults: false };
 }
 
-async function listExamples() {
+async function bundledExamples() {
     const manifestUrl = new URL('../../examples/webManifest.json', import.meta.url);
     const response = await fetch(manifestUrl);
     if (!response.ok) return [];
@@ -149,7 +150,16 @@ async function listExamples() {
     }));
 }
 
+// The bundled examples, then those installed plugins add (a plugin's example whose id a bundled one has is left out).
+async function listExamples() {
+    const bundled = await bundledExamples();
+    return [...bundled, ...await pluginExampleEntries(new Set(bundled.map((example) => example.id)))];
+}
+
 async function loadExample(id) {
+    const bundledIds = new Set((await bundledExamples()).map((example) => example.id));
+    const pluginBytes = await pluginExampleBytes(id, bundledIds);
+    if (pluginBytes) return { ...await fileFromBytes(pluginBytes, id), suggestedFilename: id };
     const response = await fetch(new URL(`../../examples/${id}`, import.meta.url));
     if (!response.ok) throw new Error('That example is not available.');
     const file = await fileFromBytes(new Uint8Array(await response.arrayBuffer()), id);
@@ -157,6 +167,9 @@ async function loadExample(id) {
 }
 
 async function openExampleGuide(id) {
+    const bundledIds = new Set((await bundledExamples()).map((example) => example.id));
+    const pluginGuide = await pluginExampleGuideUrl(id, bundledIds);
+    if (pluginGuide) { window.open(pluginGuide, '_blank'); return; }
     window.open(new URL(`../../examples/${id.replace(/\.kjt$/, '.md')}`, import.meta.url), '_blank');
 }
 

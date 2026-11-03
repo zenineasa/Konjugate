@@ -17,8 +17,12 @@ import { encodeProjectFile } from './projectFile.mjs';
 import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './addonCache.mjs';
 import { addonFilesDirectory, createFileStore } from './addonFileStore.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
+import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, nearestCheckpoint, resolveInterventions } from './launcherRuns.mjs';
+import { addressAllowed, checkAddress, checkedDerived, checkedImporterResult, checkedProgress, decodeText, importerInputs, maximumDerivedFiles, maximumImporterDataBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
+// Re-exported so what imported them from here still can.
+export { addressAllowed, checkedDerived, checkedProgress, decodeText, importerInputs, safeFileName };
+export { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions };
 
-const maximumInputBytes = 10 * 1024 * 1024;
 // A binary input (a file role declared `binary`): one large file the importer reads as bytes and turns into text
 // files of its other roles. It is read from disk when the importer runs and is never kept in memory or in a session.
 export const maximumBinaryInputBytes = 1024 * 1024 * 1024;
@@ -53,18 +57,10 @@ export function storedFileKinds(accept) {
         }
     };
 }
-const maximumDerivedFiles = 64;
 // Long enough for an importer that builds a large region (routing every lane over a city's roads takes tens of seconds,
 // more on a busy machine); short enough that one that hangs is still stopped.
 const importerTimeoutMilliseconds = 120000;
-const maximumImporterDataBytes = 8 * 1024 * 1024;
-const maximumOptionsBytes = 2 * 1024 * 1024;
 const maximumFetchBytes = 5 * 1024 * 1024;
-const maximumSuppliedSamples = 5000;
-// A run length the window chooses is limited by engine steps, not by time: models count time in whatever
-// unit suits them (days, or seconds with a per-day conversion), so a cap in time units would be either
-// too tight for one or too loose for another.
-const maximumRunSteps = 500000;
 const maximumFetchedTextBytes = 1024 * 1024;
 const fetchTimeoutMilliseconds = 20000;
 // A launcher's session, kept with the project: its window's own state, and the input files it was built from.
@@ -75,18 +71,6 @@ const maximumRedirects = 3;
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
-// Text as a spreadsheet may have saved it: UTF-8 (with or without a byte-order mark), UTF-16 with a mark, or,
-// failing a strict UTF-8 read, Windows-1252, which is what Excel writes for "CSV" on Windows. The name of the
-// encoding used is returned so the importer can tell the user when it was not UTF-8.
-export function decodeText(bytes) {
-    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), encoding: 'utf-16le' };
-    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), encoding: 'utf-16be' };
-    try {
-        return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'utf-8' };
-    } catch {
-        return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows-1252' };
-    }
-}
 
 // ---- fetching ---------------------------------------------------------------------------------------------
 
@@ -120,32 +104,10 @@ export async function fetchAllowed({ url, hosts, fetchImpl = globalThis.fetch, u
     throw new Error('Too many redirects.');
 }
 
-// An address the window may ask for: https, no credentials, a host the manifest lists. Throws a message a user can act on.
-function checkAddress(address, allowed) {
-    if (address.protocol !== 'https:') throw new Error('Only https addresses can be fetched.');
-    if (address.username || address.password) throw new Error('An address with a user name or password cannot be fetched.');
-    if (!allowed.has(address.hostname.toLowerCase())) throw new Error(`This window may not connect to ${address.hostname}. It may reach: ${[...allowed].join(', ')}.`);
-}
-export function addressAllowed(url, hosts) {
-    let address;
-    try { address = new URL(url); } catch { throw new Error('That is not a web address.'); }
-    checkAddress(address, new Set(hosts.map((host) => host.toLowerCase())));
-    return address.href;
-}
 
-// A name safe to show and to key a file by: no path separators or control characters.
-export const safeFileName = (name) => String(name ?? '').replace(/[^\p{L}\p{N} .&()_=^-]+/gu, '_').trim().slice(0, 60);
 
 // ---- importers --------------------------------------------------------------------------------------
 
-// What an importer says of its progress, made safe to show: `done` of `total` (numbers, done within 0 and total) and
-// a short message. Null when it says nothing usable.
-export function checkedProgress(progress) {
-    const total = Number(progress?.total);
-    const done = Number(progress?.done);
-    if (!(total > 0) || !Number.isFinite(done)) return null;
-    return { done: Math.min(total, Math.max(0, done)), total, message: typeof progress.message === 'string' ? progress.message.slice(0, 200) : '' };
-}
 
 // Runs a declared importer over the given files ([{ role, name, text }]) in a worker thread with a time
 // limit, and checks the shape of what comes back before anyone uses it.
@@ -175,18 +137,11 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
             clearTimeout(timer);
             worker.terminate();
             if (!message.ok) return reject(new Error(`The importer failed: ${message.message}`));
-            const { result } = message;
-            if (typeof result?.ok !== 'boolean' || !result.report) return reject(new Error('The importer returned an unexpected result.'));
-            // A successful importer returns a model, or only `data` when it is a first step that needs the window to do more
-            // (for example run an analysis) before the model can be built.
-            if (result.ok && result.data === undefined && (!Array.isArray(result.document?.nodes) || !Array.isArray(result.document?.edges))) return reject(new Error('The importer reported success without a model.'));
-            if (result.data !== undefined && JSON.stringify(result.data).length > maximumImporterDataBytes) return reject(new Error('The importer returned more data than a window may receive.'));
             try {
-                if (result.derived !== undefined) result.derived = checkedDerived(importer, result.derived);
+                resolvePromise(checkedImporterResult(importer, message.result));
             } catch (error) {
-                return reject(error);
+                reject(error);
             }
-            resolvePromise(result);
         });
         worker.once('error', (error) => { clearTimeout(timer); reject(new Error(`The importer failed: ${error.message}`)); });
     });
@@ -202,33 +157,7 @@ export function unreadableFile(name, error) {
     return `${name} could not be read (${error?.code ?? error?.message ?? 'unknown reason'}). Choose it again.`;
 }
 
-// The inputs an importer is given for a run: those of its roles, and binary files only when the run asks for them
-// (`options.useBinaryFiles`). A binary file is read from disk for each run it is given to, and may be a gigabyte: the
-// steps that do not read it (most of them) do not wait for it or hold it.
-export function importerInputs(pending, roles, options = {}) {
-    return [...pending].filter((file) => roles.has(file.role) && (!file.binary || options?.useBinaryFiles === true));
-}
 
-// The text files an importer derived from what it was given (`derived: [{ role, name, text }]`), checked: each is of
-// a role the importer declares that is not binary, and no larger than a chosen file may be. They take the place of
-// the files of their roles, and of the binary files they were read from. Throws a message naming what is wrong.
-export function checkedDerived(importer, derived) {
-    if (!Array.isArray(derived) || derived.length > maximumDerivedFiles) throw new Error(`An importer may derive up to ${maximumDerivedFiles} files.`);
-    const roles = new Map(importer.files.map((file) => [file.role, file]));
-    const names = new Set();
-    return derived.map((item) => {
-        const file = roles.get(item?.role);
-        if (!file || file.binary) throw new Error('An importer may derive files only of its own roles that are not binary.');
-        if (typeof item.text !== 'string') throw new Error('A derived file must be text.');
-        if (Buffer.byteLength(item.text) > maximumInputBytes) throw new Error(`A derived file is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
-        const name = safeFileName(item.name);
-        if (!name) throw new Error('A derived file needs a name.');
-        const key = `${file.role}::${name}`;
-        if (names.has(key) || (!file.multiple && [...names].some((other) => other.startsWith(`${file.role}::`)))) throw new Error('An importer derived two files where one is taken.');
-        names.add(key);
-        return { role: file.role, name, text: item.text, ...(typeof item.source === 'string' ? { source: item.source.slice(0, 200) } : {}) };
-    });
-}
 
 // ---- sessions kept with the project ------------------------------------------------------------------
 
@@ -272,136 +201,6 @@ export function sessionInputs(entry, importers) {
 
 // ---- scenarios --------------------------------------------------------------------------------------
 
-// A fork time the window asks for (with the scenarioForkTime feature): from the start of the run up to, but not
-// including, its end. The fork itself lands on the nearest kept checkpoint, one per output interval. Returns the
-// fork time; throws a message a user can act on.
-export function checkForkTime(forkAt, runTime) {
-    if (!(Number.isFinite(forkAt) && forkAt >= 0 && forkAt < runTime)) {
-        throw new Error(`The scenario must start at or after 0 and before the end of the run (${runTime}).`);
-    }
-    return forkAt;
-}
-
-// A run length the window asks for: after the scenario's fork, and at most maximumRunSteps of the model's own
-// global step. Returns the run length; throws a message a user can act on.
-export function checkRunLength(runTime, forkAt, globalTimeStep) {
-    const step = Number.isFinite(globalTimeStep) && globalTimeStep > 0 ? globalTimeStep : 1;
-    const maximum = maximumRunSteps * step;
-    if (!(Number.isFinite(runTime) && runTime > forkAt && runTime <= maximum)) {
-        throw new Error(`The run length must be more than ${forkAt} and at most ${maximum} (${maximumRunSteps.toLocaleString('en')} steps of ${step}).`);
-    }
-    return runTime;
-}
-
-// Turns a declared scenario into concrete parameter changes. A parameter is found by its `key` in the
-// importer's parameter index: `chosen` targets the entry belonging to the entity the user picked, `all`
-// every entry with that key, `global` the single entity-less entry. Throws a message a user can act on.
-export function resolveInterventions(scenario, parameterIndex, chosenEntity, supplied = null) {
-    const resolved = [];
-    for (const intervention of scenario.interventions) {
-        const entries = parameterIndex.filter((entry) => entry.key === intervention.parameter);
-        if (intervention.target === 'supplied') {
-            // The window's data for this parameter: its own entry under byParameter (with the suppliedPerParameter feature),
-            // or else the data shared by every supplied intervention.
-            const source = supplied?.byParameter?.[intervention.parameter] ?? supplied;
-            const entities = source?.entities ?? [];
-            if (!entities.length) throw new Error(`The scenario "${scenario.name}" needs the window to supply data${supplied?.byParameter ? ` for "${intervention.parameter}"` : ''}.`);
-            for (const entity of entities) {
-                const entry = entries.find((candidate) => candidate.entity === entity);
-                if (!entry) throw new Error(`The scenario "${scenario.name}" changes "${intervention.parameter}", which this model does not have for ${entity}.`);
-                if (!entry.live) throw new Error(`"${entry.name}" cannot be changed during a run.`);
-                const clamp = (value) => Math.min(Math.max(value, entry.minimum ?? -Infinity), entry.maximum ?? Infinity);
-                // A value outside the parameter's range is held to it, and the change says so, so the window can tell its
-                // user rather than run something other than what it supplied without a word.
-                const clamped = (values) => {
-                    const count = values.filter((value) => value !== clamp(value)).length;
-                    return count ? { clamped: { count, of: values.length, minimum: entry.minimum ?? null, maximum: entry.maximum ?? null } } : {};
-                };
-                if (intervention.samples) {
-                    const samples = source.samples?.[entity];
-                    if (!Array.isArray(samples) || samples.length < 2 || samples.length > maximumSuppliedSamples || !samples.every((pair) => Array.isArray(pair) && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))) {
-                        throw new Error(`The data supplied for ${entity} must be at least two, and at most ${maximumSuppliedSamples}, pairs of time and value.`);
-                    }
-                    resolved.push({
-                        sharedParameterId: entry.sharedParameterId, name: entry.name, parameter: intervention.parameter, entity,
-                        samples: samples.map(([time, value]) => ({ time, value: clamp(value) })), at: 0, duration: 0, baseValue: entry.value ?? 0,
-                        ...clamped(samples.map(([, value]) => value))
-                    });
-                } else {
-                    resolved.push({ sharedParameterId: entry.sharedParameterId, name: entry.name, parameter: intervention.parameter, entity, value: clamp(intervention.value), at: intervention.at ?? 0, duration: intervention.duration ?? 0, baseValue: entry.value ?? 0, ...clamped([intervention.value]) });
-                }
-            }
-            continue;
-        }
-        const matching = intervention.target === 'global' ? entries.filter((entry) => entry.scope === 'global')
-            : intervention.target === 'all' ? entries.filter((entry) => entry.entity !== undefined)
-                : entries.filter((entry) => entry.entity === chosenEntity);
-        if (!matching.length) {
-            throw new Error(intervention.target === 'chosen' && !chosenEntity
-                ? `The scenario "${scenario.name}" needs you to choose one first.`
-                : `The scenario "${scenario.name}" changes "${intervention.parameter}", which this model does not have.`);
-        }
-        for (const entry of matching) {
-            if (!entry.live) throw new Error(`"${entry.name}" cannot be changed during a run.`);
-            const value = Number.isFinite(intervention.value) ? intervention.value : intervention.fractionOfMaximum * entry.maximum;
-            resolved.push({
-                sharedParameterId: entry.sharedParameterId, name: entry.name, parameter: intervention.parameter,
-                entity: entry.entity ?? null, value: Math.min(Math.max(value, entry.minimum ?? -Infinity), entry.maximum ?? Infinity),
-                at: intervention.at ?? 0, duration: intervention.duration ?? 0, baseValue: entry.value ?? 0
-            });
-        }
-    }
-    return resolved;
-}
-
-// Adjusts the interventions a scenario declares with values the window supplies, for parameters the importer has declared live.
-// `overrides` is { parameterKey: { entityName | '*': { value, at?, duration? } | null } }: '*' names the one entity-less (global)
-// entry, an entry replaces the declared change for that entity or adds one, and null removes it. With no overrides nothing changes,
-// so a scenario that is run as declared is run exactly as it always was. Values outside a parameter's declared range are still held
-// to it, as a backstop; the window is expected to check them first and say so.
-export function applyOverrides(resolved, parameterIndex, overrides) {
-    if (!overrides || !Object.keys(overrides).length) return resolved;
-    const result = [...resolved];
-    for (const [parameter, byEntity] of Object.entries(overrides)) {
-        if (!byEntity || typeof byEntity !== 'object') throw new Error(`The changes for "${parameter}" must name the entities they apply to.`);
-        for (const [entityName, change] of Object.entries(byEntity)) {
-            const entry = parameterIndex.find((candidate) => candidate.key === parameter && (entityName === '*' ? candidate.scope === 'global' : candidate.entity === entityName));
-            if (!entry) throw new Error(`This model has no "${parameter}" for ${entityName === '*' ? 'the whole model' : entityName}.`);
-            if (!entry.live) throw new Error(`"${entry.name}" cannot be changed during a run.`);
-            const at = result.findIndex((candidate) => candidate.sharedParameterId === entry.sharedParameterId);
-            if (change === null) { if (at >= 0) result.splice(at, 1); continue; }
-            const { value, at: delay = 0, duration = 0 } = change ?? {};
-            if (![value, delay, duration].every(Number.isFinite) || delay < 0 || duration < 0) throw new Error(`The change to ${entry.name} needs a finite value, and a start and duration of zero or more.`);
-            const replacement = {
-                sharedParameterId: entry.sharedParameterId, name: entry.name, parameter, entity: entry.entity ?? null,
-                value: Math.min(Math.max(value, entry.minimum ?? -Infinity), entry.maximum ?? Infinity), at: delay, duration, baseValue: entry.value ?? 0
-            };
-            if (at >= 0) result[at] = replacement; else result.push(replacement);
-        }
-    }
-    return result;
-}
-
-// Samples of the forked branch as one continuous history: the parent's samples before the fork, then
-// the child's from the fork on (the child's first sample is the fork point itself).
-export function composeBranchSamples(parentSamples, childSamples, forkTime) {
-    return [...parentSamples.filter((sample) => sample.time < forkTime - 1e-9), ...childSamples];
-}
-
-// { nodeName: { stateSymbol: [[time, value], ...] } } for the requested symbols, from a list of samples.
-export function extractSeries(samples, document, symbols, maximumPoints = 400) {
-    const stride = Math.max(1, Math.ceil(samples.length / maximumPoints));
-    const picked = samples.filter((_sample, index) => index % stride === 0 || index === samples.length - 1);
-    const series = {};
-    for (const node of document.nodes) {
-        for (const state of node.states) {
-            if (!symbols.includes(state.symbol)) continue;
-            series[node.name] ??= {};
-            series[node.name][state.symbol] = picked.map((sample) => [sample.time, sample.states.find((item) => item.stateId === state.id)?.value ?? null]);
-        }
-    }
-    return series;
-}
 
 const csvField = (value) => (/[",\n\r]/.test(String(value)) ? `"${String(value).replaceAll('"', '""')}"` : String(value));
 
@@ -453,50 +252,13 @@ async function runToCompletion(content, config, engineOptions, prepare) {
     return { result, resultPath: execution.resultPath, cleanup: execution.cleanup };
 }
 
-// One baseline per run length, kept in the launcher's workspace. Runs that ask for it at the same time share one engine
-// run, and a run that needs a different length waits for the one in progress. Changing the length replaces the
-// baseline, so a batch of runs must all use the same length. `run(contentText, config)` runs the model to the end and
-// answers { result, resultPath, cleanup } (the host's is the engine; a test's may be anything).
-export async function ensureBaseline(workspace, runTime, notify, run) {
-    for (;;) {
-        if (workspace.baseline?.runTime === runTime) return workspace.baseline;
-        const pending = workspace.baselinePending;
-        if (!pending) break;
-        if (pending.runTime === runTime) return pending.promise;
-        await pending.promise.catch(() => {});
-    }
-    if (workspace.baseline) await Promise.all([workspace.baseline.cleanup?.()].filter(Boolean));
-    workspace.baseline = null;
-    const { document, contentText } = workspace.imported;
-    const configuration = document.runConfigurations[0];
-    const config = { name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval };
-    notify({ stage: 'baseline', message: 'Running the baseline…' });
-    const entry = { runTime, promise: null };
-    entry.promise = (async () => {
-        const result = await run(contentText, config);
-        workspace.baseline = { runTime, config, uuid: randomUUID(), ...result };
-        return workspace.baseline;
-    })().finally(() => { if (workspace.baselinePending === entry) workspace.baselinePending = null; });
-    workspace.baselinePending = entry;
-    return entry.promise;
-}
-
-// The run length of a plain run (runBaseline): the one the window asks for, or else the model's own (its first run
-// configuration's target time), checked as a scenario's is. Throws a message a user can act on.
-export function baselineRunTime(runTime, document) {
-    const configuration = document.runConfigurations?.[0];
-    const length = runTime ?? configuration?.targetTime;
-    if (length === undefined || length === null) throw new Error('Say how long to run: the model has no run length of its own.');
-    return checkRunLength(length, 0, configuration?.globalTimeStep);
-}
 
 // Runs the model once as a baseline (cached by the caller) and once forked from it at the scenario's
 // time with its interventions applied: the same fork the canvas makes, headless. The child is started
 // paused so every change is in place before its first step (the engine drains queued control commands
 // before integrating step 0), exactly as the canvas orders it.
 export async function runScenarioBranches({ content, config, scenario, interventions, baseline, engineOptions }) {
-    const checkpoint = baseline.result.checkpoints.reduce((closest, candidate) =>
-        Math.abs(candidate.time - scenario.forkAt) < Math.abs(closest.time - scenario.forkAt) ? candidate : closest);
+    const checkpoint = nearestCheckpoint(baseline.result.checkpoints, scenario.forkAt);
     // `startPaused` holds the child before its first step, which a pause command sent after the start cannot promise: a fast run
     // can be over before the command is read, and its changes would then be lost. The command stays for an engine that does not
     // know the setting.

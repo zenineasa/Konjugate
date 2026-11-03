@@ -36,6 +36,7 @@ import {
     moved,
     newDefinitionSymbol,
     nextFreeOutput,
+    renameDefinition,
     severalFromSingle,
     singleFromSeveral
 } from '../relationshipEquations.mjs';
@@ -57,6 +58,7 @@ import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, ins
 import { stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterAbovePhone, declutterLabels } from './labelDeclutter.mjs';
 import { isPhoneLayout } from './phoneLayout.mjs';
+import { offerMissingPlugins } from './missingPlugins.mjs';
 import './phoneMenu.mjs';
 import './phoneSheets.mjs';
 import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle, stabilityGroupWhen } from '../stabilityFindingGroups.mjs';
@@ -535,6 +537,8 @@ let pendingGeometryFileName = '';
 let currentValidation = { valid: false, issues: [], executableModel: null };
 let validationRevision = 0;
 let engineValidationTimer = null;
+// What is installed changing (web edition) can change whether the model validates: it may name a plugin that has just arrived or gone.
+window.addEventListener('konjugate:packages-changed', () => { scheduleEngineValidation(); initializeAddonRailContributions(); });
 let equationEditSession = null;
 let providerEditTarget = null;
 let selectedSourceTermNodeId = null;
@@ -3151,18 +3155,8 @@ function moveSeveralRow(definition, kind, index, offset) {
 function renameSeveralDefinition(definition, index, symbol) {
     const previous = definition.equationModel.definitions[index]?.symbol;
     if (!previous || symbol === previous) return;
-    const spelled = (name) => latexForBinding({ symbol: name });
-    const pattern = new RegExp(spelled(previous).replace(/[\\{}]/g, '\\$&') + (previous.length === 1 ? '(?![A-Za-z0-9])' : ''), 'g');
     changeEdgeModel(definition, (snapshot) => {
-        const equations = snapshot.equationModel;
-        equations.definitions[index].symbol = symbol;
-        const rename = (item) => {
-            if (typeof item.latex !== 'string') return;
-            const latex = item.latex.replace(pattern, spelled(symbol));
-            if (latex !== item.latex) { item.latex = latex; delete item.mathJson; }
-        };
-        equations.definitions.slice(index + 1).forEach(rename);
-        equations.outputs.forEach(rename);
+        renameDefinition(snapshot.equationModel, index, symbol);
         compileSeveral(snapshot);
     });
 }
@@ -6753,6 +6747,7 @@ async function initializeAddonRailContributions() {
             button.className = 'toolButton addonTool railTool';
             button.ariaLabel = contribution.tooltip;
             button.dataset.tooltip = contribution.tooltip;
+            button.id = `addonTool:${contribution.addonId}:${contribution.commandId}`;
             button.dataset.addonId = contribution.addonId;
             button.dataset.commandId = contribution.commandId;
             const symbol = document.createElement('span');
@@ -7440,6 +7435,8 @@ async function loadProjectDocument(document, {
         activateResult(rootResult);
         selectSuggestedPlaybackRate();
     }
+    // The web edition says at once which plugins this project needs and cannot find, instead of leaving a run to fail.
+    offerMissingPlugins(document).catch((error) => console.warn(`Could not check the project's plugins: ${error.message}`));
 }
 
 function replaceModelContents(document) {
@@ -11345,6 +11342,9 @@ function extensionsPackageKey(entry) {
     return `${entry.packageType}:${entry.packageId}:${entry.version}`;
 }
 
+// An installed package is in effect at once in the web edition; the desktop loads it at the next start.
+const restartToActivate = document.documentElement.hasAttribute('data-web-edition') ? 'It is ready to use now.' : 'Restart Konjugate to activate it.';
+
 function showExtensionsNotice(message, type = null) {
     const notice = $('#extensionsRestartNotice');
     notice.textContent = message;
@@ -11961,7 +11961,7 @@ $('#extensionsInstall').addEventListener('click', async () => {
         renderExtensionsDetail();
         showExtensionsNotice(installed.packageType === 'fmu'
             ? `Installed ${installed.packageId} ${installed.version}. It's ready to reference from a node's implementation immediately -- no restart needed.`
-            : `Installed ${installed.packageId} ${installed.version}. Restart Konjugate to activate it.`);
+            : `Installed ${installed.packageId} ${installed.version}. ${restartToActivate}`);
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`);
     }
@@ -11983,7 +11983,7 @@ $('#extensionsDiscoverInstall').addEventListener('click', async () => {
         const hasInvalid = results.some((r) => r.verification?.status === 'invalid');
         const heldBack = heldBackSentence(results);
         showExtensionsNotice(
-            `Installed ${summary}.${heldBack ? ` ${heldBack}` : ''} Restart Konjugate to activate it.`,
+            `Installed ${summary}.${heldBack ? ` ${heldBack}` : ''} ${restartToActivate}`,
             hasInvalid || heldBack ? 'warning' : null
         );
     } catch (error) {
@@ -12038,7 +12038,7 @@ $('#extensionsUpdate').addEventListener('click', async () => {
         }
         const summary = results.map((result) => `${result.packageId} ${result.version}`).join(', ');
         const heldBack = heldBackSentence(results);
-        showExtensionsNotice(`Updated ${summary}.${heldBack ? ` ${heldBack}` : ''} Restart Konjugate to activate it.`);
+        showExtensionsNotice(`Updated ${summary}.${heldBack ? ` ${heldBack}` : ''} ${restartToActivate}`);
     } catch (error) {
         button.disabled = false;
         button.textContent = 'Update';
@@ -12067,7 +12067,7 @@ $('#extensionsInstallCompatible').addEventListener('click', async () => {
         renderExtensionsDetail();
         const summary = results.map((result) => `${result.packageId} ${result.version}`).join(', ');
         const heldBack = heldBackSentence(results);
-        showExtensionsNotice(`Installed ${summary}.${heldBack ? ` ${heldBack}` : ''} Restart Konjugate to activate it.`, heldBack ? 'warning' : null);
+        showExtensionsNotice(`Installed ${summary}.${heldBack ? ` ${heldBack}` : ''} ${restartToActivate}`, heldBack ? 'warning' : null);
     } catch (error) {
         button.disabled = false;
         button.textContent = 'Install compatible version';
@@ -12112,7 +12112,7 @@ $('#extensionsUninstall').addEventListener('click', async () => {
         if (updateInfoFor(entry.packageId)) ensurePackageUpdates().then(() => { renderExtensionsResults(); renderExtensionsDetail(); }).catch(() => {});
         showExtensionsNotice(entry.packageType === 'fmu'
             ? `Uninstalled ${entry.packageId} ${entry.version}. Any node still referencing it will fail to run until it is reinstalled or the reference is removed.`
-            : `Uninstalled ${entry.packageId} ${entry.version}. Restart Konjugate if it was active.`);
+            : `Uninstalled ${entry.packageId} ${entry.version}.${restartToActivate.startsWith('Restart') ? ' Restart Konjugate if it was active.' : ''}`);
     } catch (error) {
         showExtensionsNotice(`Uninstall failed: ${error.message}`);
     }

@@ -14,6 +14,7 @@
 // providerEditor.mjs.
 
 import { threads, version } from './buildInfo.mjs';
+import { pluginComponentTemplates } from './packages.mjs';
 import { isPhoneLayout, onPhoneLayoutChange } from '../phoneLayout.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName } from '../../shapeLibraryCatalog.mjs';
 import { validateComponentTemplate } from '../../componentTemplate.mjs';
@@ -220,7 +221,9 @@ const userComponentLibrary = createUserLibraryStore({
 export const componentLibrary = {
     list: async () => {
         const [bundled, user] = await Promise.all([bundledComponentTemplates(), readUserTemplates()]);
-        return [...bundled.map((template) => ({ ...template, source: 'bundled' })), ...user.map((template) => ({ ...template, source: 'user' }))];
+        const own = [...bundled.map((template) => ({ ...template, source: 'bundled' })), ...user.map((template) => ({ ...template, source: 'user' }))];
+        // What installed plugins add, after the rest, as on the desktop; one whose id is already taken is skipped there.
+        return [...own, ...await pluginComponentTemplates(new Set(own.map((template) => template.id)))];
     },
     saveUser: async (template) => ({ ...await userComponentLibrary.save(template), source: 'user' }),
     updateUser: async (id, changes) => ({ ...await userComponentLibrary.update(id, changes), source: 'user' }),
@@ -228,20 +231,8 @@ export const componentLibrary = {
     removeUser: (id) => userComponentLibrary.remove(id)
 };
 
-export const extensions = {
-    list: async () => [],
-    install: async () => ({ available: false }),
-    uninstall: async () => ({ available: false }),
-    setEnabled: async () => ({ available: false }),
-    // No FMU is ever installed in the web edition.
-    fmuPorts: async () => ({ error: 'FMUs run in the desktop app only.' }),
-    // Called unconditionally at renderer startup (restart-pending badge, update-count badge), so
-    // they need no-op stand-ins here -- nothing is ever installed in the web edition to restart for
-    // or update.
-    restartPending: async () => false,
-    onRestartPendingChange: () => {},
-    checkUpdates: async () => []
-};
+// Installed packages: webShims/packages.mjs.
+export { extensions } from './packages.mjs';
 
 // providerEditor lives in its own file (providerEditor.mjs) -- it needs a real <dialog>, unlike
 // everything else here.
@@ -288,10 +279,4 @@ export const aiProviders = {
     onProgress: () => {}
 };
 
-export const addons = {
-    listToolstripContributions: async () => [],
-    invokeCommand: async () => ({ available: false }),
-    publishEvent: () => {},
-    closeContext: () => {},
-    onRequest: () => {}
-};
+export { addons, launcherHost } from './addons.mjs';

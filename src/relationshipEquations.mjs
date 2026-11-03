@@ -6,7 +6,7 @@
 // and works out its MathJSON, and keeps in `bindings` only the states, parameters and time the equations read, so a
 // relationship a toolbox wrote stays as it was until the user edits it. Pure functions of their arguments.
 
-import { mathJsonToLatex, reconcileEquationBindings, validateEquationLatex } from './equationModel.mjs';
+import { latexForBinding, mathJsonToLatex, reconcileEquationBindings, validateEquationLatex } from './equationModel.mjs';
 
 export const definitionSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
 
@@ -166,3 +166,22 @@ export function moved(list, index, offset) {
     return next;
 }
 
+
+// Renames definition `index` to `symbol` (changing `equationModel` in place), and every later definition and equation
+// that reads it to read the new name: each such item's LaTeX rewritten (its own, or written from its MathJSON where a
+// toolbox gave only that), its MathJSON dropped so the LaTeX counts. Items that do not read it are left as they were.
+export function renameDefinition(equationModel, index, symbol) {
+    const previous = equationModel.definitions[index]?.symbol;
+    if (!previous || symbol === previous) return;
+    const spelled = (name) => latexForBinding({ symbol: name });
+    const pattern = new RegExp(spelled(previous).replace(/[\\{}]/g, '\\$&') + (previous.length === 1 ? '(?![A-Za-z0-9])' : ''), 'g');
+    equationModel.definitions[index].symbol = symbol;
+    const rename = (item) => {
+        const current = equationLatex(item);
+        if (!current) return;
+        const latex = current.replace(pattern, spelled(symbol));
+        if (latex !== current) { item.latex = latex; delete item.mathJson; }
+    };
+    equationModel.definitions.slice(index + 1).forEach(rename);
+    equationModel.outputs.forEach(rename);
+}

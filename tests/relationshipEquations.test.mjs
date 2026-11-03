@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     checkSeveralEquations, compileSeveralEquations, equationCandidates, equationLatex, moved, newDefinitionSymbol, nextFreeOutput,
-    severalFromSingle, singleFromSeveral
+    renameDefinition, severalFromSingle, singleFromSeveral
 } from '../src/relationshipEquations.mjs';
 
 const parent = { id: 1, states: [{ id: 2, symbol: 'x' }, { id: 3, symbol: 'speed' }] };
@@ -84,4 +84,28 @@ test('new rows take a free name and a free state; rows move one place at a time'
     assert.deepEqual(moved(['a', 'b', 'c'], 2, -1), ['a', 'c', 'b']);
     const list = ['a', 'b'];
     assert.equal(moved(list, 0, -1), list);
+});
+
+test('renaming a definition renames it where later items read it, those a toolbox gave as MathJSON alone too', () => {
+    const equationModel = {
+        bindings: [{ symbol: 'sourceX', kind: 'state', role: 'source', nodeId: 1, stateId: 2 }],
+        definitions: [
+            { symbol: 'twice', mathJson: ['Multiply', 2, 'sourceX'] },
+            { symbol: 'more', mathJson: ['Add', 'twice', 1] },
+            { symbol: 'other', latex: String.raw`\mathrm{sourceX}+1` }
+        ],
+        outputs: [{ role: 'target', stateId: 6, mathJson: ['Multiply', 'twice', 'more'], setsValue: true }]
+    };
+    renameDefinition(equationModel, 0, 'double');
+    assert.equal(equationModel.definitions[0].symbol, 'double');
+    // Each reader is LaTeX now, reading the new name, its MathJSON gone; an item that does not read it is as it was.
+    assert.equal(equationModel.definitions[1].mathJson, undefined);
+    assert.match(equationModel.definitions[1].latex, /double/);
+    assert.doesNotMatch(equationModel.definitions[1].latex, /twice/);
+    assert.deepEqual(equationModel.definitions[2], { symbol: 'other', latex: String.raw`\mathrm{sourceX}+1` });
+    assert.match(equationModel.outputs[0].latex, /double/);
+    const candidates = equationCandidates(equationModel, parent, child, parameters);
+    const compiled = compileSeveralEquations(equationModel, candidates, parent, child);
+    assert.deepEqual(compiled.definitions[1].mathJson, ['Add', 'double', 1]);
+    assert.deepEqual(compiled.outputs[0].mathJson, ['Multiply', 'double', 'more']);
 });

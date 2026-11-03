@@ -17,6 +17,8 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promi
 import { dirname, join, relative } from 'node:path';
 import { pathExists, rootDirectory } from './developmentEnvironment.mjs';
 import { staleEngineSource } from './engineFreshness.mjs';
+import { loadNamespaceRegistry } from '../src/packageArchive.mjs';
+import { buildRegistryMirror } from '../src/webRegistryMirror.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName } from '../src/exampleCatalog.mjs';
 import { componentTemplateHasCppProgram, validateComponentTemplate } from '../src/componentTemplate.mjs';
 import { stripFrontmatter } from '../src/exampleGuide/markdown.mjs';
@@ -88,6 +90,24 @@ for (const absolutePath of visitedModules) {
 // import statement) is never missed by the graph walk above.
 await cp(join(srcDirectory, 'renderer', 'webShims'), join(outputDirectory, 'renderer', 'webShims'), { recursive: true });
 await cp(join(srcDirectory, 'renderer', 'styles.css'), join(outputDirectory, 'renderer', 'styles.css'));
+// The registry as this site carries it, for Discover and installing from it (docs/proposals/webEditionPackages.md, stage 4). Packages are
+// downloaded from their releases only when KONJUGATE_MIRROR_PACKAGES=1 (the release workflow); a local build writes the entries and
+// images alone and needs no network.
+{
+    const registry = await loadNamespaceRegistry(join(rootDirectory, 'registry'));
+    const { files, problems } = await buildRegistryMirror({
+        registry, appVersion: JSON.parse(await readFile(join(rootDirectory, 'package.json'), 'utf8')).version, mirrorPackages: process.env.KONJUGATE_MIRROR_PACKAGES === '1',
+        readAsset: (path) => readFile(join(rootDirectory, 'registry', path)).then((bytes) => new Uint8Array(bytes), () => null)
+    });
+    for (const [path, bytes] of files) {
+        await mkdir(dirname(join(outputDirectory, path)), { recursive: true });
+        await writeFile(join(outputDirectory, path), bytes);
+    }
+    for (const problem of problems) console.warn(`Registry mirror: ${problem}`);
+}
+// The empty page an add-on's sandboxed frame starts from (webShims/addons.mjs); nothing imports it, so the walk above would miss it.
+await cp(join(srcDirectory, 'renderer', 'addonFrame.html'), join(outputDirectory, 'renderer', 'addonFrame.html'));
+await cp(join(srcDirectory, 'renderer', 'importerFrame.html'), join(outputDirectory, 'renderer', 'importerFrame.html'));
 
 const packageJson = JSON.parse(await readFile(join(rootDirectory, 'package.json'), 'utf8'));
 await writeFile(join(outputDirectory, 'renderer', 'webShims', 'buildInfo.mjs'),
@@ -115,7 +135,9 @@ html = html.replace(
 html = html.replace(
     '"@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js"',
     '"@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js",\n' +
-    '                "protobufjs/minimal.js": "./webShims/protobufjsMinimalShim.mjs"'
+    '                "protobufjs/minimal.js": "./webShims/protobufjsMinimalShim.mjs",\n' +
+    // The package archive code (src/packageInspection.mjs) unzips with fflate; its browser build is plain ES modules.
+    '                "fflate": "../../node_modules/fflate/esm/browser.js"'
 );
 html = html.replace(
     '<script type="module" src="renderer.mjs"></script>',
@@ -275,7 +297,7 @@ await cp(join(rootDirectory, 'engine', 'include', 'konjugate', 'providerSharedMe
 
 const vendoredPackages = [
     'three', 'mathlive', join('@cortex-js', 'compute-engine'), 'occt-import-js', 'plotly.js-dist-min', 'protobufjs', 'pyodide', 'scrypt-js',
-    join('@wasmer', 'sdk')
+    join('@wasmer', 'sdk'), 'fflate'
 ];
 for (const packageName of vendoredPackages) {
     await cp(join(rootDirectory, 'node_modules', packageName), join(outputDirectory, 'node_modules', packageName), { recursive: true });
@@ -284,7 +306,8 @@ for (const packageName of vendoredPackages) {
 // The service worker (scripts/webServiceWorker.js): a copy of the whole build, named for a hash of its files, kept only if a person asks
 // to work offline. Left out of that copy are the packages that few sessions touch -- the Python runtime, the C++ toolchain and the STEP
 // importer (about 35 MB); the worker keeps those when they are first used.
-const notPrecached = [/^node_modules\/(pyodide|@wasmer|occt-import-js)\//, /(^|\/)\.DS_Store$/];
+// registry/ is the package mirror (src/webRegistryMirror.mjs): read when Discover is opened, kept like any file used after the copy was made.
+const notPrecached = [/^registry\//, /^node_modules\/(pyodide|@wasmer|occt-import-js)\//, /(^|\/)\.DS_Store$/];
 
 // Files this large are copied a piece at a time, so a dropped connection costs one piece and not the whole file.
 const largeFileBytes = 8 * 1024 * 1024;

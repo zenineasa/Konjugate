@@ -183,3 +183,45 @@ export function baselineRunTime(runTime, document) {
 export function nearestCheckpoint(checkpoints, forkAt) {
     return checkpoints.reduce((closest, candidate) => (Math.abs(candidate.time - forkAt) < Math.abs(closest.time - forkAt) ? candidate : closest));
 }
+
+const csvField = (value) => (/[",\n\r]/.test(String(value)) ? `"${String(value).replaceAll('"', '""')}"` : String(value));
+
+// Long-format results, one row per branch, time, node and state: easy to pivot in a spreadsheet.
+export function resultsToCsv(branches, document) {
+    const lines = ['branch,time,node,state,unit,value'];
+    for (const branch of branches) {
+        for (const sample of branch.samples) {
+            const values = new Map(sample.states.map((item) => [item.stateId, item.value]));
+            for (const node of document.nodes) {
+                for (const state of node.states) {
+                    if (!values.has(state.id)) continue;
+                    lines.push([branch.label, sample.time, node.name, state.name, state.unit ?? '', values.get(state.id)].map(csvField).join(','));
+                }
+            }
+        }
+    }
+    return `${lines.join('\n')}\n`;
+}
+
+// The record that lets a result be reproduced and explained: what produced it, from which inputs, with
+// what changes. Plain JSON, so it can be attached to a report and compared between runs.
+export function runManifest({ modelSha256, appVersion, addon, importerId, importerOptions = null, overrides = null, inputs, document, config, scenario, chosenEntity, interventions, files }) {
+    return {
+        manifestVersion: 1,
+        createdAt: new Date().toISOString(),
+        konjugate: { version: appVersion },
+        package: { addonId: addon.addonId, name: addon.name, version: addon.version, importerId },
+        // What the window asked for beyond the declared scenario: the options the importer was given, and the changes made to the
+        // scenario's interventions. Absent when nothing was changed, so a run as declared records exactly what it always did.
+        ...(importerOptions && Object.keys(importerOptions).length ? { importerOptions } : {}),
+        ...(overrides && Object.keys(overrides).length ? { overrides } : {}),
+        inputs: inputs.map(({ role, name, sha256: hash, bytes, url, retrievedAt }) => ({ role, name, sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}) })),
+        model: { sha256: modelSha256, nodes: document.nodes.length, edges: document.edges.length },
+        runConfiguration: config,
+        scenario: scenario ? {
+            scenarioId: scenario.scenarioId, name: scenario.name, description: scenario.description, forkAt: scenario.forkAt,
+            chosenEntity: chosenEntity ?? null, interventions
+        } : null,
+        files
+    };
+}

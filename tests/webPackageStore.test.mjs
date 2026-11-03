@@ -75,7 +75,7 @@ test('a plugin none of whose parts can run here is refused at install, with the 
     const cppOnly = pluginPackage({ contributes: [{ providerId: 'example.q', apiVersion: 1, runtime: 'cpp', entry: 'q.cpp' }], files: { 'q.cpp': strToU8('int x;') } });
     await assert.rejects(packages.install(cppOnly, '.kjp'), (error) => error instanceof PackageArchiveError && error.code === 'UNSUPPORTED_IN_WEB' && /C\+\+/.test(error.message));
     assert.deepEqual(await packages.list(), []);
-    assert.match(webPackageRefusal({ packageType: 'addon' }, { kind: 'launcher', addonId: 'example.l', name: 'L', version: '1.0.0', apiVersion: 1, entry: 'i.html', permissions: ['results.export'], contributes: { toolstrip: [{ commandId: 'open', label: 'L', tooltip: 'L', when: 'always' }] } }), /results\.export/);
+    assert.match(webPackageRefusal({ packageType: 'addon' }, { kind: 'launcher', addonId: 'example.l', name: 'L', version: '1.0.0', apiVersion: 1, entry: 'i.html', permissions: ['analysis.infer'], contributes: { toolstrip: [{ commandId: 'open', label: 'L', tooltip: 'L', when: 'always' }] } }), /analysis\.infer/);
     assert.equal(webPackageRefusal({ packageType: 'plugin' }, { contributes: [{ kind: 'example' }] }), null);
     assert.equal(webPackageRefusal({ packageType: 'plugin' }, { contributes: [{ providerId: 'p', runtime: 'python' }] }), null);
 });

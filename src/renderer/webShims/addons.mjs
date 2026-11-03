@@ -13,7 +13,10 @@ import { createLauncherBridge } from '../../webLauncherBridge.mjs';
 import { buildAddonDocument, launcherApiSource } from '../../webAddonDocument.mjs';
 import { runImporterInFrame } from './importerRunner.mjs';
 import { packageStore, resolvePluginReferences } from './packages.mjs';
+import { zipSync } from 'fflate';
+import { encodeProjectContent } from '../../browserProjectCodec.mjs';
 import { canSendCommands, runModel } from '../../webLauncherEngine.mjs';
+import { version as appVersion } from './buildInfo.mjs';
 
 const readyTimeoutMilliseconds = 10_000;
 const frameAddress = new URL('../addonFrame.html', import.meta.url).href;
@@ -23,9 +26,15 @@ let current = null;
 let page = null;
 const seekHandlers = [];
 
+const toHex = (buffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
 function downloadCsv(fileName, text) {
+    downloadBlob(fileName, new Blob([text], { type: 'text/csv' }));
+}
+
+function downloadBlob(fileName, blob) {
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+    link.href = URL.createObjectURL(blob);
     link.download = fileName;
     document.body.append(link);
     link.click();
@@ -200,6 +209,11 @@ async function openLauncher(store, entry) {
             // Plugins the model names are resolved to their source first, as every engine call from the page does.
             runModel: async ({ content, config, commands }) => runModel(engineModuleUrl, await resolvePluginReferences(content), config, commands),
             canSendCommands: canSendCommands(),
+            sha256: async (bytes) => toHex(await crypto.subtle.digest('SHA-256', bytes)),
+            appVersion,
+            encodeModel: (content) => encodeProjectContent(content),
+            // The results are handed over as one zip, since a page cannot write a folder.
+            saveFiles: async (name, files) => downloadBlob(`${name}.zip`, new Blob([zipSync(Object.fromEntries(Object.entries(files).map(([fileName, data]) => [`${name}/${fileName}`, data])))], { type: 'application/zip' })),
             openProject: async (payload) => {
                 pendingListeners.forEach((listener) => listener());
                 try {

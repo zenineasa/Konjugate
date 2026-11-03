@@ -17,10 +17,11 @@ import { encodeProjectFile } from './projectFile.mjs';
 import { addonCacheDirectory, createAddonCache, maximumAgeDaysLimit } from './addonCache.mjs';
 import { addonFilesDirectory, createFileStore } from './addonFileStore.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
-import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, nearestCheckpoint, resolveInterventions } from './launcherRuns.mjs';
+import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, nearestCheckpoint, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
 import { addressAllowed, checkAddress, checkedDerived, checkedImporterResult, checkedProgress, decodeText, importerInputs, maximumDerivedFiles, maximumImporterDataBytes, maximumInputBytes, maximumOptionsBytes, safeFileName } from './launcherImport.mjs';
 // Re-exported so what imported them from here still can.
 export { addressAllowed, checkedDerived, checkedProgress, decodeText, importerInputs, safeFileName };
+export { resultsToCsv };
 export { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions };
 
 // A binary input (a file role declared `binary`): one large file the importer reads as bytes and turns into text
@@ -202,47 +203,8 @@ export function sessionInputs(entry, importers) {
 // ---- scenarios --------------------------------------------------------------------------------------
 
 
-const csvField = (value) => (/[",\n\r]/.test(String(value)) ? `"${String(value).replaceAll('"', '""')}"` : String(value));
-
-// Long-format results, one row per branch, time, node and state: easy to pivot in a spreadsheet.
-export function resultsToCsv(branches, document) {
-    const lines = ['branch,time,node,state,unit,value'];
-    for (const branch of branches) {
-        for (const sample of branch.samples) {
-            const values = new Map(sample.states.map((item) => [item.stateId, item.value]));
-            for (const node of document.nodes) {
-                for (const state of node.states) {
-                    if (!values.has(state.id)) continue;
-                    lines.push([branch.label, sample.time, node.name, state.name, state.unit ?? '', values.get(state.id)].map(csvField).join(','));
-                }
-            }
-        }
-    }
-    return `${lines.join('\n')}\n`;
-}
-
-// The record that lets a result be reproduced and explained: what produced it, from which inputs, with
-// what changes. Plain JSON, so it can be attached to a report and compared between runs.
-export function buildRunManifest({ appVersion, addon, importerId, importerOptions = null, overrides = null, inputs, contentText, document, config, scenario, chosenEntity, interventions, files }) {
-    return {
-        manifestVersion: 1,
-        createdAt: new Date().toISOString(),
-        konjugate: { version: appVersion },
-        package: { addonId: addon.addonId, name: addon.name, version: addon.version, importerId },
-        // What the window asked for beyond the declared scenario: the options the importer was given, and the changes made to the
-        // scenario's interventions. Absent when nothing was changed, so a run as declared records exactly what it always did.
-        ...(importerOptions && Object.keys(importerOptions).length ? { importerOptions } : {}),
-        ...(overrides && Object.keys(overrides).length ? { overrides } : {}),
-        inputs: inputs.map(({ role, name, sha256: hash, bytes, url, retrievedAt }) => ({ role, name, sha256: hash, bytes, ...(url ? { url, retrievedAt } : {}) })),
-        model: { sha256: sha256(contentText), nodes: document.nodes.length, edges: document.edges.length },
-        runConfiguration: config,
-        scenario: scenario ? {
-            scenarioId: scenario.scenarioId, name: scenario.name, description: scenario.description, forkAt: scenario.forkAt,
-            chosenEntity: chosenEntity ?? null, interventions
-        } : null,
-        files
-    };
-}
+// The record that lets a result be reproduced and explained (runManifest, launcherRuns.mjs), with the model's hash taken here.
+export const buildRunManifest = (details) => runManifest({ ...details, modelSha256: sha256(details.contentText) });
 
 async function runToCompletion(content, config, engineOptions, prepare) {
     const execution = await startEngineRun(content, config, engineOptions, { retainResult: true });

@@ -21,7 +21,7 @@ const launcherManifest = (overrides = {}) => ({
 });
 
 function bridgeFor(manifest = launcherManifest(), hostOverrides = {}) {
-    const calls = { opened: [], pages: [], links: [], emitted: [], importer: [] };
+    const calls = { opened: [], pages: [], links: [], emitted: [], importer: [], saved: [] };
     const host = {
         readPackageFile: async (path) => (path === 'sample.csv' ? strToU8('a,b\n1,2\n') : null),
         chooseFiles: async () => [{ name: 'mine.csv', bytes: strToU8('x,y\n3,4\n') }],
@@ -34,6 +34,10 @@ function bridgeFor(manifest = launcherManifest(), hostOverrides = {}) {
         openPage: async (page) => calls.pages.push(page),
         openLink: async (href) => { calls.links.push(href); return true; },
         emit: (channel, payload) => calls.emitted.push([channel, payload]),
+        sha256: async (bytes) => `hash${bytes.length}`,
+        appVersion: '1.3.4',
+        encodeModel: async (content) => new TextEncoder().encode(`kjt:${content.length}`),
+        saveFiles: async (name, files) => calls.saved.push({ name, files }),
         ...hostOverrides
     };
     return { bridge: createLauncherBridge({ manifest, host }), calls };
@@ -41,7 +45,7 @@ function bridgeFor(manifest = launcherManifest(), hostOverrides = {}) {
 
 test('a launcher that needs more than this slice offers is turned away saying what', () => {
     assert.equal(webLauncherRefusal(launcherManifest()), null);
-    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'results.export'] })), /results\.export/);
+    assert.match(webLauncherRefusal(launcherManifest({ permissions: ['data.import', 'analysis.infer'] })), /analysis\.infer/);
     assert.match(webLauncherRefusal(launcherManifest({ permissions: ['network.fetch'], network: { hosts: ['a.example.com'] } })), /network\.fetch/);
     assert.match(webLauncherRefusal(launcherManifest({ requires: ['storedFiles'] })), /storedFiles/);
     const binary = launcherManifest();
@@ -58,7 +62,7 @@ test('a launcher installs from a file, and one needing more than the web edition
     const packages = createPackageStore({ storage: createMemoryStorage(), appVersion: '1.3.4' });
     await packages.install(pack(launcherManifest()), '.kja');
     assert.equal((await packages.runnableAddons()).length, 1);
-    await assert.rejects(packages.install(pack(launcherManifest({ addonId: 'example.other', permissions: ['results.export'], links: undefined })), '.kja'), /results\.export/);
+    await assert.rejects(packages.install(pack(launcherManifest({ addonId: 'example.other', permissions: ['analysis.infer'], links: undefined })), '.kja'), /analysis\.infer/);
     await packages.install(pack({ ...scenarioManifest(), addonId: 'example.scenarios' }), '.kja');
     assert.equal((await packages.runnableAddons()).length, 2, 'A launcher that runs scenarios installs.');
 });
@@ -135,7 +139,7 @@ test('pages and links go only where the manifest says, and without the permissio
 
 test('what this slice cannot do answers that it is not available, and only the named methods are reachable', async () => {
     const { bridge } = bridgeFor();
-    for (const method of ['fetchText', 'fetchFile', 'exportResults', 'keepSession', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
+    for (const method of ['fetchText', 'fetchFile', 'keepSession', 'storeFiles', 'downloadFile', 'infer', 'checkPython']) {
         const answer = await bridge.call(method, {});
         assert.equal(answer.ok, false);
         assert.match(answer.message, /not available in the web edition yet/);
@@ -168,7 +172,7 @@ test('the importer\'s frame starts from a page whose policy lets nothing in or o
 // ---- scenarios --------------------------------------------------------------------------------------
 
 const scenarioManifest = () => launcherManifest({
-    permissions: ['data.import', 'scenario.run'], links: undefined,
+    permissions: ['data.import', 'scenario.run', 'results.export'], links: undefined,
     contributes: {
         ...launcherManifest().contributes,
         scenarios: [{ scenarioId: 'boost', name: 'Boost', description: 'Raise the gain', forkAt: 5, runTime: 10, interventions: [{ parameter: 'gain', target: 'global', value: 3 }] }]
@@ -242,4 +246,34 @@ test('importing again drops the baseline, and a launcher without scenario.run ca
     const plain = bridgeFor(launcherManifest());
     assert.match((await plain.bridge.call('runScenario', { scenarioId: 'boost' })).message, /was not granted scenario\.run/);
     assert.match((await plain.bridge.call('runBaseline', {})).message, /was not granted scenario\.run/);
+});
+
+test('results are exported as one set of files with a manifest that records what produced them', async () => {
+    const { bridge, calls } = runnerBridge();
+    assert.match((await bridge.call('exportResults', {})).message, /Import your data first/);
+    await bridge.call('useSample', { importerId: 'csv' });
+    await bridge.call('runImport', { importerId: 'csv', options: { depth: 2 } });
+    assert.match((await bridge.call('exportResults', {})).message, /Run a scenario first/);
+    await bridge.call('runScenario', { scenarioId: 'boost', signals: [] });
+    const answer = await bridge.call('exportResults', { scenarioId: 'boost', summaryCsv: 'a,b\n1,2\n' });
+    assert.equal(answer.ok, true, answer.message);
+    assert.deepEqual(answer.files, ['results.csv', 'summary.csv', 'model.kjt', 'run-manifest.json']);
+    assert.match(answer.folder, /^ExampleToolbox-.*\.zip$/);
+    const [{ name, files }] = calls.saved;
+    assert.match(name, /^ExampleToolbox-/);
+    const csv = new TextDecoder().decode(files['results.csv']);
+    assert.match(csv, /^branch,time,node,state,unit,value\nBaseline,0,Room,Level,,0\n/);
+    assert.match(csv, /Boost,10,Room,Level,,20\n$/);
+    const manifest = JSON.parse(new TextDecoder().decode(files['run-manifest.json']));
+    assert.equal(manifest.konjugate.version, '1.3.4');
+    assert.equal(manifest.scenario.scenarioId, 'boost');
+    assert.deepEqual(manifest.importerOptions, { depth: 2 });
+    assert.equal(manifest.inputs[0].sha256, 'hash8', 'The input file is recorded by its hash.');
+    assert.equal(manifest.files['results.csv'].sha256, `hash${files['results.csv'].length}`);
+    assert.ok(!('run-manifest.json' in manifest.files));
+    const plain = await bridge.call('exportResults', {});
+    assert.equal(plain.ok, true);
+    assert.doesNotMatch(new TextDecoder().decode(calls.saved[1].files['results.csv']), /Boost/, 'Without a scenario named, only the baseline is exported.');
+    const without = bridgeFor(launcherManifest());
+    assert.match((await without.bridge.call('exportResults', {})).message, /was not granted results\.export/);
 });

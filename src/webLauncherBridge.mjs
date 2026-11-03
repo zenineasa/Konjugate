@@ -4,18 +4,18 @@
 // (webAddonBridge.mjs) it is the only way out of the add-on's sandboxed frame, and it checks every request against the permissions the
 // person approved and the ids the manifest declared, as the desktop's handlers in launcherHost.mjs do; every method answers
 // { ok: true, ... } or { ok: false, message }. This first slice of launchers can bring in files, run a declared importer, open the model it
-// built in the canvas, run a plain baseline and its declared scenarios, open a declared help page and open a link on a declared host. What
-// needs more (fetching from the network, stored files, inference, kept sessions, exporting results) is turned away at install, and a method
+// built in the canvas, run a plain baseline and its declared scenarios, export their results, open a declared help page and open a link on a declared host. What
+// needs more (fetching from the network, stored files, inference, kept sessions) is turned away at install, and a method
 // for it answers that it is not available here.
 // No DOM and no storage in this module: the page gives it `host` callbacks.
 
 import { addressAllowed, checkedProgress, decodeText, importerInputs, maximumInputBytes, maximumOptionsBytes } from './launcherImport.mjs';
-import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions } from './launcherRuns.mjs';
+import { applyOverrides, baselineRunTime, checkForkTime, checkRunLength, composeBranchSamples, ensureBaseline, extractSeries, resolveInterventions, resultsToCsv, runManifest } from './launcherRuns.mjs';
 import { runScenarioFork } from './webLauncherRuns.mjs';
 
 // Of the permissions a launcher may ask for (addonHost.mjs), the ones this slice can honour, and the optional behaviours it can offer.
-export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'model.open', 'pages.open', 'links.open']);
-export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend']);
+export const webLauncherPermissions = new Set(['data.import', 'scenario.run', 'results.export', 'model.open', 'pages.open', 'links.open']);
+export const webLauncherFeatures = new Set(['importProgress', 'scenarioOverrides', 'scenarioForkTime', 'baselineRun', 'suppliedPerParameter', 'parameterSchedules', 'scenarioEveryBackend', 'runRecord']);
 
 const notYet = (what) => `${what} is not available in the web edition yet. It works in the desktop app.`;
 
@@ -33,7 +33,7 @@ export function webLauncherRefusal(manifest) {
 const unavailableMethods = {
     fetchText: 'Fetching from the internet', fetchFile: 'Fetching from the internet', cacheInfo: 'The download cache', clearCache: 'The download cache',
     keepSession: 'Keeping a session with the project', restoreSession: 'Keeping a session with the project', reloadFiles: 'Reloading files',
-    infer: 'Inference', exportResults: 'Exporting results',
+    infer: 'Inference',
     checkPython: 'Checking Python', storedFiles: 'Stored files', storeFiles: 'Stored files', downloadFile: 'Downloads', cancelDownload: 'Downloads',
     partialDownloads: 'Downloads', discardPartialDownload: 'Downloads', fileSize: 'Downloads', describeStoredFile: 'Stored files',
     removeStoredFile: 'Stored files', useStoredFiles: 'Stored files'
@@ -41,7 +41,8 @@ const unavailableMethods = {
 
 // `host`: { readPackageFile(path) -> Uint8Array | null, chooseFiles(file) -> [{ name, bytes }] | null, runImporter({ importer, files, options, onProgress }) ->
 // the importer's checked result, runModel({ content, config, commands }) -> the engine's decoded result, canSendCommands (whether runModel can
-// take commands), openProject({ content, suggestedFilename, silent, addonName }), openPage(page), openLink(href), emit(channel, payload) }.
+// take commands), sha256(bytes) -> hex, appVersion, encodeModel(content) -> the model as project-file bytes, saveFiles(name, { fileName: text | bytes })
+// -> hands the person those files together, openProject({ content, suggestedFilename, silent, addonName }), openPage(page), openLink(href), emit(channel, payload) }.
 export function createLauncherBridge({ manifest, host }) {
     const contributes = manifest.contributes ?? {};
     const permitted = new Set(manifest.permissions ?? []);
@@ -51,9 +52,9 @@ export function createLauncherBridge({ manifest, host }) {
         if (!item) throw new Error(`The launcher named an undeclared ${description}.`);
         return item;
     };
-    const workspace = { pending: new Map(), imported: null, baseline: null, baselinePending: null };
+    const workspace = { pending: new Map(), imported: null, baseline: null, baselinePending: null, scenarios: new Map() };
     // What was run belongs to the model it was run from: a new import, or the files changing, drops it.
-    const releaseRuns = () => { workspace.baseline = null; workspace.baselinePending = null; };
+    const releaseRuns = () => { workspace.baseline = null; workspace.baselinePending = null; workspace.scenarios.clear(); };
     const notify = (progress) => host.emit('launcherProgress', progress);
     // A pending file is kept under its role, or under role and name for a role that accepts several files.
     const pendingKey = (file, name) => (file.multiple ? `${file.role}::${name}` : file.role);
@@ -93,7 +94,7 @@ export function createLauncherBridge({ manifest, host }) {
             const taken = file.multiple ? chosen : chosen.slice(0, 1);
             for (const item of taken) if (item.bytes.length > maximumInputBytes) throw new Error(`${item.name} is larger than the ${maximumInputBytes / 1024 / 1024} MB limit.`);
             if (!file.multiple) dropRole(file);
-            for (const item of taken) workspace.pending.set(pendingKey(file, item.name), { role, name: item.name, ...decodeText(item.bytes), bytes: item.bytes.length, sample: false });
+            for (const item of taken) workspace.pending.set(pendingKey(file, item.name), { role, name: item.name, ...decodeText(item.bytes), sha256: await host.sha256(item.bytes), bytes: item.bytes.length, sample: false });
             workspace.imported = null;
             releaseRuns();
             return { chosen: true, name: taken[0].name, names: taken.map((item) => item.name), bytes: taken[0].bytes.length };
@@ -116,7 +117,7 @@ export function createLauncherBridge({ manifest, host }) {
                 for (const sample of [file.sample].flat()) {
                     const bytes = await host.readPackageFile(sample);
                     if (!bytes) throw new Error(`The sample ${sample} is not in the package.`);
-                    workspace.pending.set(pendingKey(file, sampleName(sample)), { role: file.role, name: sampleName(sample), ...decodeText(bytes), bytes: bytes.length, sample: true });
+                    workspace.pending.set(pendingKey(file, sampleName(sample)), { role: file.role, name: sampleName(sample), ...decodeText(bytes), sha256: await host.sha256(bytes), bytes: bytes.length, sample: true });
                 }
             }
             workspace.imported = null;
@@ -142,7 +143,8 @@ export function createLauncherBridge({ manifest, host }) {
                 for (const role of new Set(result.derived.map((item) => item.role))) dropRole({ role });
                 for (const item of result.derived) {
                     const file = importer.files.find((candidate) => candidate.role === item.role);
-                    workspace.pending.set(pendingKey(file, item.name), { role: item.role, name: item.name, text: item.text, encoding: 'utf-8', bytes: new TextEncoder().encode(item.text).length, sample: false, ...(item.source ? { source: item.source } : {}) });
+                    const derivedBytes = new TextEncoder().encode(item.text);
+                    workspace.pending.set(pendingKey(file, item.name), { role: item.role, name: item.name, text: item.text, encoding: 'utf-8', sha256: await host.sha256(derivedBytes), bytes: derivedBytes.length, sample: false, ...(item.source ? { source: item.source } : {}) });
                 }
                 workspace.imported = null;
                 releaseRuns();
@@ -157,7 +159,7 @@ export function createLauncherBridge({ manifest, host }) {
             }
             const entities = [...new Set((result.parameterIndex ?? []).map((entry) => entry.entity).filter(Boolean))];
             releaseRuns();
-            workspace.imported = { importerId, document: result.document, contentText: JSON.stringify(result.document), parameterIndex: result.parameterIndex ?? [], report: result.report, entities };
+            workspace.imported = { importerId, options: options ?? {}, document: result.document, contentText: JSON.stringify(result.document), parameterIndex: result.parameterIndex ?? [], report: result.report, entities };
             return { imported: true, report: result.report, entities, data: result.data };
         },
         // A plain run of the imported model, as Run is in the canvas: the model run once from its start, its series answered as a scenario's
@@ -170,7 +172,7 @@ export function createLauncherBridge({ manifest, host }) {
             notify({ stage: 'done', message: 'Done' });
             return { runTime: length, branches: [{ id: 'baseline', label: 'Baseline', series: extractSeries(baseline.result.samples, workspace.imported.document, signals) }] };
         },
-        runScenario: async ({ scenarioId, entity = null, signals = [], runTime = null, forkAt = null, supplied = null, overrides = null } = {}) => {
+        runScenario: async ({ scenarioId, entity = null, signals = [], runTime = null, forkAt = null, supplied = null, overrides = null, retain = true } = {}) => {
             needs('scenario.run');
             const declaredScenario = declared(contributes.scenarios, 'scenarioId', scenarioId, 'scenario');
             if (!workspace.imported) throw new Error('Import your data first.');
@@ -188,6 +190,8 @@ export function createLauncherBridge({ manifest, host }) {
             notify({ stage: 'scenario', message: `Running “${scenario.name}”…` });
             const { forkTime, child } = await runScenarioFork({ host, document, contentText, config: baseline.config, scenario, interventions, baseline });
             const scenarioSamples = composeBranchSamples(baseline.result.samples, child.result.samples, forkTime);
+            // Kept for the export, one per scenario and entity, a later run of the same replacing it.
+            if (retain) workspace.scenarios.set(`${scenarioId}|${entity ?? ''}`, { scenarioId, entity, scenario, interventions, overrides, forkTime, samples: scenarioSamples });
             notify({ stage: 'done', message: 'Done' });
             return {
                 scenarioId, entity, forkTime, runTime: scenario.runTime, interventions,
@@ -196,6 +200,34 @@ export function createLauncherBridge({ manifest, host }) {
                     { id: 'scenario', label: scenario.name, series: extractSeries(scenarioSamples, document, signals) }
                 ]
             };
+        },
+        // The results as one zip of files, handed to the person (the desktop writes a folder): the long-format results, the window's summary,
+        // the imported model, and the run manifest that records what produced them, with the hash and size of each of the others.
+        exportResults: async ({ scenarioId = null, summaryCsv = '' } = {}) => {
+            needs('results.export');
+            if (!workspace.imported) throw new Error('Import your data first.');
+            if (!workspace.baseline) throw new Error('Run a scenario first, so there is something to export.');
+            const key = scenarioId ? [...workspace.scenarios.keys()].filter((candidate) => candidate.startsWith(`${scenarioId}|`)).at(-1) ?? null : null;
+            const run = key ? workspace.scenarios.get(key) : null;
+            const { document, contentText } = workspace.imported;
+            const branches = [{ label: 'Baseline', samples: workspace.baseline.result.samples }];
+            if (run) branches.push({ label: run.scenario.name, samples: run.samples });
+            const encoder = new TextEncoder();
+            const contents = { 'results.csv': encoder.encode(resultsToCsv(branches, document)) };
+            if (summaryCsv) contents['summary.csv'] = encoder.encode(String(summaryCsv).slice(0, 200000));
+            // The model alone: the baseline and scenario branches are not carried into it here.
+            contents['model.kjt'] = await host.encodeModel(contentText);
+            const files = {};
+            for (const [name, bytes] of Object.entries(contents)) files[name] = { sha256: await host.sha256(bytes), bytes: bytes.length };
+            const manifestBytes = encoder.encode(`${JSON.stringify(runManifest({
+                modelSha256: await host.sha256(encoder.encode(contentText)), appVersion: host.appVersion, addon: manifest, importerId: workspace.imported.importerId,
+                importerOptions: workspace.imported.options, overrides: run?.overrides ?? null, inputs: [...workspace.pending.values()], document,
+                config: workspace.baseline.config, scenario: run?.scenario ?? null, chosenEntity: run?.entity ?? null, interventions: run?.interventions ?? [], files
+            }), null, 2)}\n`);
+            const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19);
+            const folder = `${manifest.name.replaceAll(/[^A-Za-z0-9]+/g, '') || 'results'}-${stamp}`;
+            await host.saveFiles(folder, { ...contents, 'run-manifest.json': manifestBytes });
+            return { exported: true, folder: `${folder}.zip`, files: [...Object.keys(contents), 'run-manifest.json'] };
         },
         openInCanvas: async ({ focus = true, silent = false, session } = {}) => {
             needs('model.open');

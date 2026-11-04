@@ -3,7 +3,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { release as osRelease, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -30,6 +30,7 @@ import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries, checkpointIndex } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
+import { createGpuCrashWatch, softwareRenderingArgument, softwareRenderingRelaunch, softwareRenderingSwitches } from './softwareRendering.mjs';
 import { installSource } from './updateCheck.mjs';
 import { createUpdateCoordinator } from './updateCoordinator.mjs';
 import { createUpdateSkipStore } from './updateSkipStore.mjs';
@@ -126,8 +127,35 @@ console.warn = (...args) => {
 process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
 process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
-app.commandLine.appendSwitch('enable-gpu-rasterization');
+// On a Linux machine whose GPU Chromium cannot use (a virtual machine's, typically), the GPU process keeps crashing and
+// WebGL never starts, so the app restarts once in software rendering and remembers it here. Deleting this file goes back
+// to the GPU.
+const softwareRenderingMarker = join(app.getPath('userData'), 'softwareRendering');
+const softwareRendering = process.platform === 'linux' && (process.argv.includes(softwareRenderingArgument) || existsSync(softwareRenderingMarker));
+if (softwareRendering) {
+    for (const [name, value] of softwareRenderingSwitches) app.commandLine.appendSwitch(name, value);
+} else {
+    app.commandLine.appendSwitch('ignore-gpu-blocklist');
+    app.commandLine.appendSwitch('enable-gpu-rasterization');
+}
+if (process.platform === 'linux' && !softwareRendering && !isCliMode) {
+    const gpuCrashes = createGpuCrashWatch();
+    let relaunching = false;
+    app.on('child-process-gone', (_event, details) => {
+        if (details.type !== 'GPU' || details.reason === 'clean-exit' || relaunching) return;
+        if (!gpuCrashes.record(Date.now())) return;
+        relaunching = true;
+        console.warn(`The GPU process keeps failing (${details.reason}); restarting with software rendering. Delete ${softwareRenderingMarker} to try the GPU again.`);
+        try {
+            mkdirSync(dirname(softwareRenderingMarker), { recursive: true });
+            writeFileSync(softwareRenderingMarker, 'The GPU process kept crashing here, so the app renders in software.\n');
+        } catch (error) {
+            console.warn('Could not remember software rendering:', error);
+        }
+        app.relaunch(softwareRenderingRelaunch({ argv: process.argv, appImagePath: process.env.APPIMAGE }));
+        app.exit(0);
+    });
+}
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 // Konjugate's own icon, used by every window (the project window and each auxiliary and add-on window) so none

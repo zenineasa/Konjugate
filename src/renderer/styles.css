@@ -608,7 +608,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantPanel.collapsed > header { border-bottom: 0; }
 .assistantPanel.collapsed > header strong { font-size: 10px; }
 .assistantPanel.collapsed > header small { display: block; }
-.assistantPromptForm { display: grid; gap: 8px; padding: 13px; border-bottom: 1px solid #263742; }
+.assistantPromptForm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 13px; border-bottom: 1px solid #263742; }
 .assistantPromptForm label { color: #718690; font-size: 8px; font-weight: 650; }
 .assistantPromptForm textarea { width: 100%; min-height: 76px; resize: vertical; padding: 9px 10px; color: #c9d7dc; background: #09151d; border: 1px solid #30434e; border-radius: 5px; outline: none; font: inherit; font-size: 9px; line-height: 1.5; }
 .assistantPromptForm textarea:focus { border-color: #4c8e8a; box-shadow: 0 0 0 2px rgb(66 201 188 / 8%); }
@@ -1805,8 +1805,19 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* The list above the detail, as the Examples window's: the two columns of the desktop's rule are more than a phone is wide. */
     .extensionsDialog .examplesExplorerBody { grid-template-columns: minmax(0, 1fr); }
     .webProviderEditorDialog { width: calc(100% - 16px); }
-    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning) { width: calc(100% - 20px); bottom: calc(var(--math-keyboard-inset, 0px) + 10px + var(--sheet-floor, 0px)); }
-    .assistantPanel { width: calc(100% - 20px); height: calc(100% - var(--title-height) - var(--tools-height) - 24px); }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning, .builderCard) { width: calc(100% - 20px); bottom: calc(var(--math-keyboard-inset, 0px) + 10px + var(--sheet-floor, 0px)); }
+    /* A card placed by script (a position from where the person last put it, or from the button that opened it) has no use for that here:
+       on a phone it is docked, so the inline left and top are overridden. */
+    .contextCard.builderCard { left: 10px !important; top: auto !important; max-height: calc(100% - var(--title-height) - var(--tools-height) - 20px); }
+    .assistantPanel { left: 10px !important; top: calc(var(--title-height) + var(--tools-height) + 10px) !important; width: calc(100% - 20px); height: calc(100% - var(--title-height) - var(--tools-height) - 24px); }
+    .contextCard.diagnosticsPanel { inset: auto 0 var(--sheet-floor, 0px) 0 !important; width: auto !important; max-height: calc(62% - var(--sheet-floor, 0px)); }
+    /* The two cards over the results bar take the width they have, not 285 or 310 pixels pinned to a corner. */
+    :is(.executionSummaryCard, .stabilityFindingsCard) { right: 10px; left: 10px; width: auto; max-height: calc(100% - 190px); overflow-y: auto; }
+    /* Four tabs do not fit side by side in a narrow card: they sit closer, and scroll along if they still do not. */
+    .cardTabs { overflow-x: auto; scrollbar-width: none; }
+    .cardTabs button { flex: 1 0 auto; padding: 0 7px; }
+    /* The trial notice sits where a docked card begins, so it steps aside while one is open. */
+    body:has(#canvas > :is(.contextCard.editorCard, .builderCard, .assistantPanel):not(.hidden):not([hidden])) .webEditionBanner { display: none; }
     .examplesExplorerBody { grid-template-columns: 1fr; }
     .examplesExplorerResults { height: 300px; }
     .examplesExplorerDetail { height: auto; min-height: 120px; }
@@ -1936,8 +1947,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     [data-web-edition] .webEditionBanner { right: calc(var(--dock-width) + 8px); }
     .tourFloating { right: calc(var(--dock-width) + 12px) !important; }
     /* The cards that cover the canvas leave the rail in sight. */
-    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning) { right: calc(var(--dock-width) + 8px); width: calc(100% - var(--dock-width) - 16px); }
-    .assistantPanel { width: calc(100% - var(--dock-width) - 16px); }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning, .builderCard) { right: calc(var(--dock-width) + 8px); width: calc(100% - var(--dock-width) - 16px); }
+    .contextCard.builderCard { left: 8px !important; }
+    .assistantPanel { left: 8px !important; width: calc(100% - var(--dock-width) - 16px); }
+    .contextCard.diagnosticsPanel { right: var(--dock-width) !important; }
+    :is(.executionSummaryCard, .stabilityFindingsCard) { right: 8px; left: 8px; }
     /* The sheets from the bottom edge stop at the rail, so Run and the rest stay in reach. */
     :is(.liveParameterPanel, .componentLibraryPanel, .validationPanel, .diagnosticsPanel, .resultTransport, .resultTransport.liveMode) { right: var(--dock-width); }
     .resultTransport, .resultTransport.liveMode { border-radius: 16px 0 0 0; }
@@ -1964,7 +1978,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
         inset: auto 8px 8px auto !important; width: min(340px, 60%) !important; max-height: calc(100% - var(--tools-height) - 16px); border: 1px solid #3a4d58; border-radius: 12px;
     }
     :is(#nodeContextMenu, #edgeContextMenu, #waypointContextMenu, #addPalette)::before { display: none; }
-    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning) { width: min(440px, calc(100% - 20px)); }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning, .builderCard) { width: min(440px, calc(100% - 20px)); }
+    .contextCard.builderCard { left: auto !important; right: 10px; }
+    .assistantPanel { left: auto !important; right: 10px; top: calc(var(--tools-height) + 10px) !important; width: min(420px, calc(100% - 20px)); height: calc(100% - var(--tools-height) - 20px); }
+    .contextCard.diagnosticsPanel { inset: var(--tools-height) 0 var(--sheet-floor, 0px) auto !important; width: min(50%, 400px) !important; }
+    :is(.executionSummaryCard, .stabilityFindingsCard) { left: auto; right: 10px; width: min(320px, calc(100% - 20px)); max-height: calc(100% - 120px); }
     [data-web-edition] .webEditionBanner { right: auto; left: 8px; width: min(520px, calc(100% - 16px)); }
     .tourFloating { left: auto !important; width: min(420px, calc(100% - 24px)); }
     .resultTransport, .resultTransport.liveMode { right: 8px; bottom: 6px; left: 8px; padding: 8px 12px 10px; }

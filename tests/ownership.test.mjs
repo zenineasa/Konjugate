@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    exportNoticeLines, expandCopyright, fmiAttributes, hasUserDetails, isSomeoneElses, legacyAutomaticCopyright, licenseText,
+    exportNoticeLines, expandCopyright, fmiAttributes, hasUserDetails, isSomeoneElses, legacyAutomaticCopyright, licenseChoices, licenseText,
     makeOwnershipMine, normalizeOwnership, normalizeOwnershipDefaults, seedOwnership, stampOwnership, suggestsEncryption
 } from '../src/ownership.mjs';
 
@@ -60,6 +60,12 @@ test('defaults start empty and seed a new project only with what was set', () =>
     assert.deepEqual(normalizeOwnershipDefaults(undefined), {});
     assert.equal(seedOwnership({}), null);
     assert.deepEqual(seedOwnership({ owner: 'Acme', license: { id: 'MIT' }, revision: '9', firstSavedAt: '2026-01-01T00:00:00Z' }), { owner: 'Acme', license: { id: 'MIT' } });
+});
+
+test('the picker offers 0BSD, which is kept as a known license', () => {
+    assert.ok(licenseChoices.some((choice) => choice.id === '0BSD'));
+    assert.deepEqual(normalizeOwnership({ license: { id: '0BSD', text: 'ignored' } }).license, { id: '0BSD' });
+    assert.equal(licenseText({ id: '0BSD' }), '0BSD');
 });
 
 test('another owner is kept, and "make this my own" keeps where the work came from', () => {

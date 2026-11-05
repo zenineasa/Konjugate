@@ -19,6 +19,7 @@ export const licenseChoices = Object.freeze([
     { id: 'CC-BY-4.0', label: 'CC-BY-4.0' },
     { id: 'CC-BY-SA-4.0', label: 'CC-BY-SA-4.0' },
     { id: 'CC0-1.0', label: 'CC0-1.0' },
+    { id: '0BSD', label: '0BSD (no conditions)' },
     { id: 'custom', label: 'Custom' }
 ]);
 const licenseIds = new Set(licenseChoices.map((choice) => choice.id));

@@ -1,6 +1,15 @@
 {
     "format": "konjugate",
     "version": 1,
+    "ownership": {
+        "title": "PI-controlled tank",
+        "owner": "Zenin Easa Panthakkalakath",
+        "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+        "license": {
+            "id": "0BSD"
+        },
+        "contact": "info@konjugate.com"
+    },
     "name": "PI-controlled tank",
     "nodes": [
         {

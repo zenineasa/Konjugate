@@ -269,6 +269,6 @@ Ideas, discussions and contributions are welcome. Contributions require signing 
 
 ## License
 
-This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE) for details.
+This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE) for details. The example projects it ships (the `.kjt` files in `examples/`, with their guides) are released under the 0BSD license instead (the Zero-Clause BSD license, with no conditions at all), so you may use, change and share them for any purpose; see [examples/LICENSE](examples/LICENSE).
 
 Copyright © 2026 Zenin Easa Panthakkalakath

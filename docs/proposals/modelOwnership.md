@@ -57,7 +57,7 @@ A new optional top-level object, additive within schema version 1, omitted entir
 
 - `owner`: a person or organisation, free text.
 - `copyright`: the notice text. A `{year}` token is replaced with the current year when the project is saved, and stored already expanded, so a reader never sees the token.
-- `license`: `{ id }` holds an SPDX identifier for a known license, with the extra choices *All rights reserved* and *Custom*. A custom license is `{ text }` and/or `{ url }`. The picker offers all rights reserved, MIT, Apache-2.0, MPL-2.0, CC-BY-4.0, CC-BY-SA-4.0, CC0-1.0 and custom.
+- `license`: `{ id }` holds an SPDX identifier for a known license, with the extra choices *All rights reserved* and *Custom*. A custom license is `{ text }` and/or `{ url }`. The picker offers all rights reserved, MIT, Apache-2.0, MPL-2.0, CC-BY-4.0, CC-BY-SA-4.0, CC0-1.0, 0BSD (labelled "0BSD (no conditions)", a permissive license with no attribution requirement and no patent clause, which some company legal teams accept where they do not accept CC0) and custom.
 - `contact`: an email address or URL, for whoever needs permission or the password.
 - `confidential`: boolean, default `false`. It marks the model as one the owner does not want sent to third parties, and drives the assistant behaviour below. It is a flag for Konjugate's own behaviour, not a legal term.
 - `derivedFrom`: free text naming the work this one is based on, so attribution requirements such as CC-BY survive remixing.
@@ -137,6 +137,7 @@ The core statement of [Privacy.md](../../Privacy.md), that the developer collect
 - **New projects.** A new window's project is seeded from the defaults once, when they have loaded; a project that is opened is never seeded, and a file with no block stays without one until it is saved, when it gets only the save times.
 - **Confidential and the assistant.** The block cannot reach the assistant because it is never part of the serialised model the assistant summarises, which a test pins. The confidential warning is a confirmation shown once per opened project in a window, for a hosted configuration only.
 - **The header notice.** It is written only to an encrypted file and shown in the unlock prompt. It is not covered by the encryption's authentication tag, so a notice can be altered without the password; it is a label.
+- **The shipped examples.** Each carries the block, written by `scripts/stampExampleOwnership.mjs` from one definition in `scripts/exampleOwnership.mjs` (which the tank-calibration generator also uses): the owner and copyright of the project, the title of its guide, `info@konjugate.com` as the contact, and the 0BSD license, with the license text in `examples/LICENSE` so that people may use, change and share them for any purpose. The save times are fixed at the time they were stamped, so the files are reproducible and a copy saved from an example reports when the example first existed. Opening one shows an owner other than the person's defaults, so a save keeps the attribution and "Make this my own" records where the work came from. The provider sources in `examples/providers/` stay under the project license.
 - **Revision.** It is set by the user alone, as decided; `lastSavedAt` says when a file was last written.
 
 ## Open points

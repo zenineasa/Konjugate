@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { decodeResultFile } from '../src/engineProtocol.mjs';
 import { encodeProjectFile } from '../src/projectFile.mjs';
 import { gaussianFrom, mulberry32 } from '../tests/fixtures/thermalSystemCsv.mjs';
+import { exampleOwnership } from './exampleOwnership.mjs';
 
 const root = join(import.meta.dirname, '..');
 const executable = process.argv[2] ?? join(root, 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
@@ -43,7 +44,7 @@ export function tankProject({ capacitance, heatLoss, tuned }) {
     });
     const state = (id, name, symbol, initialValue, unit) => ({ id, name, symbol, initialValue, unit });
     return {
-        format: 'konjugate', version: 1, copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath', metadata: { units: 'SI' },
+        format: 'konjugate', version: 1, ownership: exampleOwnership('Tank Calibration'), metadata: { units: 'SI' },
         sharedParameters: [{
             id: 20, name: 'Water thermal capacitance', symbol: 'waterThermalCapacitance', value: capacitance, unit: 'J/K', mode: 'constant',
             ...(tuned ? { tuning: capacitanceBounds } : {})

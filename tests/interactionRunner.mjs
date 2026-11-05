@@ -303,6 +303,21 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'Thermal example did not load.');
         assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'thermalManagement');
         await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open`, 'Examples explorer did not close after loading the example.');
+
+        // The example says whose work it is and on what terms; it names an owner other than the person's defaults, so a save would keep it.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open for the example.');
+        const shown = await evaluate(window, `Object.fromEntries([...document.querySelectorAll('#ownershipFieldsHost [name]')].filter((control) => control.type !== 'checkbox').map((control) => [control.name, control.value]))`);
+        assert.equal(shown.title, 'Battery Thermal Management');
+        assert.equal(shown.owner, 'Zenin Easa Panthakkalakath');
+        assert.equal(shown.license, '0BSD');
+        assert.equal(shown.contact, 'info@konjugate.com');
+        assert.match(shown.copyright, /^Copyright © 2026 Zenin Easa Panthakkalakath$/);
+        assert.equal(await isRenderedVisible(window, '#ownershipSomeoneElses'), true);
+        assert.match(await evaluate(window, `document.querySelector('#ownershipSaveTimes').textContent`), /First saved .*last saved .*with Konjugate/);
+        await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('.windowTitle i')).visibility`), 'visible', 'An example opens as an unsaved copy, and reading its details must not change that.');
     });
 
     await run('example selection opens its companion guide', async () => {
@@ -755,7 +770,6 @@ export async function runInteractionTests(driver) {
         // Defaults first, since a project that is already open keeps whatever it started with.
         await evaluate(window, `document.querySelector('#ownershipButton').click()`);
         await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open.');
-        assert.equal(await evaluate(window, `document.querySelector('#ownershipMakeMine').hidden`), true);
         await evaluate(window, `document.querySelector('#ownershipDefaultsOpen').click()`);
         await waitFor(window, `document.querySelector('#ownershipDefaultsDialog').open && !document.querySelector('#ownershipDialog').open`, 'The defaults dialog did not replace Project properties.');
         assert.equal(await evaluate(window, `document.querySelectorAll('#ownershipDefaultsFieldsHost [name]').length`), 7);
@@ -890,7 +904,7 @@ export async function runInteractionTests(driver) {
         assert.equal(first.ownership.license.id, 'MIT');
         assert.equal(first.ownership.copyright, `Copyright © ${new Date().getUTCFullYear()} Project Owner`);
         assert.match(first.ownership.firstSavedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
-        assert.equal(first.ownership.lastSavedAt, first.ownership.firstSavedAt);
+        assert.ok(first.ownership.lastSavedAt >= first.ownership.firstSavedAt);
         assert.ok(first.ownership.savedWith);
         assert.equal(first.copyright, undefined, 'the application must no longer write its own copyright notice into a project');
 

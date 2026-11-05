@@ -18,6 +18,8 @@
 // container already stores -- Web Crypto appends the tag to its own ciphertext output/input,
 // where Node's API keeps it separate, so encode/decode here split and rejoin it at that boundary.
 
+import { normalizePublicNotice } from './ownership.mjs';
+
 const magic = new TextEncoder().encode('KJTF');
 const version = 1;
 const gzipFlag = 1;
@@ -74,7 +76,7 @@ async function deriveScryptKey(password, kdf) {
     return crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
-export async function encodeProjectContent(content, { result = null, password = null, scryptCost = 2 ** 17 } = {}) {
+export async function encodeProjectContent(content, { result = null, password = null, scryptCost = 2 ** 17, publicNotice = null } = {}) {
     const compressedStream = new Blob([new TextEncoder().encode(content)]).stream().pipeThrough(new CompressionStream('gzip'));
     const compressed = new Uint8Array(await new Response(compressedStream).arrayBuffer());
     const resultBytes = result ? (result instanceof Uint8Array ? result : new Uint8Array(result)) : new Uint8Array(0);
@@ -97,6 +99,9 @@ export async function encodeProjectContent(content, { result = null, password = 
         payload = encrypted.subarray(0, encrypted.length - 16);
         metadata.kdf = kdf;
         metadata.cipher = { name: 'aes-256-gcm', iv: bytesToBase64(iv), tag: bytesToBase64(encrypted.subarray(encrypted.length - 16)) };
+        // The owner's notice, shown without the password (docs/proposals/modelOwnership.md); only ever on an encrypted file.
+        const notice = normalizePublicNotice(publicNotice);
+        if (notice) metadata.publicNotice = notice;
     }
 
     const header = new TextEncoder().encode(JSON.stringify(metadata));
@@ -117,7 +122,17 @@ export function inspectProjectContent(bytes) {
     if (bytes[4] !== version) {
         throw new BrowserProjectFileError(`Konjugate project version ${bytes[4]} is not supported.`, 'UNSUPPORTED_VERSION');
     }
-    return { format: 'kjt', encrypted: Boolean(bytes[5] & encryptedFlag), version };
+    const encrypted = Boolean(bytes[5] & encryptedFlag);
+    let publicNotice = null;
+    if (encrypted) {
+        try {
+            const headerLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(6, false);
+            if (headerLength <= 64 * 1024 && fixedHeaderLength + headerLength <= bytes.length) {
+                publicNotice = normalizePublicNotice(JSON.parse(new TextDecoder().decode(bytes.subarray(fixedHeaderLength, fixedHeaderLength + headerLength))).publicNotice);
+            }
+        } catch { /* a damaged header is reported when the file is decoded */ }
+    }
+    return { format: 'kjt', encrypted, version, ...(publicNotice ? { publicNotice } : {}) };
 }
 
 export async function decodeProjectContent(bytes, { password = null } = {}) {

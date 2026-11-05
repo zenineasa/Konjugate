@@ -14,6 +14,8 @@ import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveSummaries } from '../objectiveText.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
+import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
+import { editOwnershipDefaults, editProjectProperties, editSaveOwnership } from './ownershipEditor.mjs';
 import { constraintRows, objectivePayload, objectiveVocabulary, runSettingsError } from './tuningObjective.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
@@ -428,7 +430,6 @@ const modelCodecContext = {
 const emptyProjectDocument = {
     format: 'konjugate',
     version: 1,
-    copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
     metadata: { units: 'SI' },
     runConfigurations: [],
     sharedParameters: [],
@@ -446,6 +447,16 @@ let projectAddonData = {};
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
+// Who made the project, its copyright notice, license and contact, and when it was first and last saved (src/ownership.mjs,
+// docs/proposals/modelOwnership.md): kept beside the model the same way, and counted as unsaved work when it is edited. A project
+// that is opened keeps what its file says; only a new one starts from the person's defaults (ownershipSettled says which it is).
+let projectOwnership = null;
+let ownershipSettled = false;
+// What the file the project was last saved to as a copy holds, when that is not the project's own details (a copy saved with other
+// details, or stripped of them): { path, block } with block null for none. Saving again to that same file writes the same kind of copy,
+// so a plain Save never puts back what the copy was saved without; the project keeps its own details for the next Save As.
+let savedCopyOwnership = null;
+let ownershipDefaultsCache = {};
 // A launcher's session kept with the project since it was last saved or opened (see onKeepAddonData).
 let addonDataUnsaved = false;
 const addonDataOf = (document) => (document?.addonData && typeof document.addonData === 'object' && !Array.isArray(document.addonData) ? document.addonData : {});
@@ -6441,6 +6452,7 @@ async function exportGeneratedProgram(kind, parallelism) {
     try {
         const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
         document_.exportDefaultTargetTime = runLaunchSettings.targetTime;
+        if (hasUserDetails(projectOwnership)) document_.ownership = projectOwnership;
         const source = generateStandaloneProgram(document_, kind, { parallelism });
         const extension = kind === 'cpp' ? 'cpp' : 'py';
         const outcome = await window.projectFiles.exportGeneratedProgram(`${filenameStem(currentProjectFilename)}.${extension}`, source, kind);
@@ -6456,6 +6468,7 @@ async function exportFmu() {
     try {
         const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
         const modelName = filenameStem(currentProjectFilename);
+        if (hasUserDetails(projectOwnership)) document_.ownership = projectOwnership;
         // Unlike exportGeneratedProgram, the document itself (not a pre-rendered source string) is
         // sent over IPC: generateFmuPackage runs in the main process, since it needs to spawn the
         // engine binary to actually compile the model into a shared library (see src/fmiExport.mjs).
@@ -7115,6 +7128,55 @@ $('#providerToolchainsDialog').addEventListener('submit', async (event) => {
     }
 });
 
+// Project properties (docs/proposals/modelOwnership.md): the owner, copyright, license and contact kept inside the project file. A new
+// project starts from the defaults the person set for new projects; one that was opened keeps what its file says.
+async function refreshOwnershipDefaults() {
+    try {
+        ownershipDefaultsCache = await window.ownershipDefaults.get();
+    } catch (error) {
+        console.error(error);
+    }
+    return ownershipDefaultsCache;
+}
+
+refreshOwnershipDefaults().then((defaults) => {
+    if (ownershipSettled) return;
+    projectOwnership = seedOwnership(defaults);
+    ownershipSettled = true;
+});
+
+async function editOwnershipDefaultsFlow() {
+    const defaults = await editOwnershipDefaults({ defaults: await refreshOwnershipDefaults() });
+    if (!defaults) return;
+    try {
+        ownershipDefaultsCache = await window.ownershipDefaults.set(defaults);
+        $('#statusText').textContent = 'Defaults for new projects saved';
+    } catch (error) {
+        console.error(error);
+        $('#statusText').textContent = `Defaults not saved · ${error.message}`;
+    }
+}
+
+async function editProjectPropertiesFlow() {
+    const defaults = await refreshOwnershipDefaults();
+    const result = await editProjectProperties({ block: projectOwnership, someoneElses: isSomeoneElses(projectOwnership, defaults) });
+    if (!result) return;
+    if (result.defaults) {
+        await editOwnershipDefaultsFlow();
+        return editProjectPropertiesFlow();
+    }
+    const next = result.makeMine ? makeOwnershipMine(projectOwnership, defaults) : result.block;
+    if (JSON.stringify(next ?? null) === JSON.stringify(projectOwnership ?? null)) return;
+    projectOwnership = next;
+    // Editing the project's own details is a choice to have them in the file it is saved to, whatever an earlier copy was saved with.
+    savedCopyOwnership = null;
+    addonDataUnsaved = true;
+    updateHistoryControls();
+    if (result.makeMine) return editProjectPropertiesFlow();
+}
+
+$('#ownershipButton').addEventListener('click', () => { editProjectPropertiesFlow(); });
+
 function syncContextualOverlays() {
     const bundles = activeRelationshipBundles();
     const activeKeys = new Set(bundles.map((bundle) => bundle.key));
@@ -7280,7 +7342,6 @@ function serializeProjectDocument() {
     return {
         format: 'konjugate',
         version: 1,
-        copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
         metadata: { units: model.metadata.units },
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
@@ -7401,6 +7462,10 @@ async function loadProjectDocument(document, {
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
+    projectOwnership = normalizeOwnership(document?.ownership, document?.copyright);
+    ownershipSettled = true;
+    savedCopyOwnership = null;
+    confidentialHostedAssistantConfirmed = false;
     addonDataUnsaved = false;
     clearRenderedModel();
     model.metadata = nextModel.metadata;
@@ -9613,8 +9678,23 @@ window.aiProviders.onProgress((progress) => {
     renderAssistantProgress();
 });
 
+// A model marked confidential (docs/proposals/modelOwnership.md) is not sent to a hosted provider without asking first: once for each
+// project opened in this window. A local model never leaves the computer, so it is never asked about. Asking does not block: the person
+// may be the owner, and may choose to send it.
+let confidentialHostedAssistantConfirmed = false;
+function confirmConfidentialHostedAssistant() {
+    if (projectOwnership?.confidential !== true || confidentialHostedAssistantConfirmed) return true;
+    const configuration = activeConfigurationRecord();
+    const provider = assistantConfigurationCatalog.providers.find((item) => item.id === configuration?.provider);
+    if (!provider || provider.locality === 'local') return true;
+    const confirmed = window.confirm(`This project is marked confidential. Your request and a description of the model (its names, parameters and equations) will be sent to ${provider.name}, an online provider that handles it under its own terms.\n\nSend it anyway?`);
+    if (confirmed) confidentialHostedAssistantConfirmed = true;
+    return confirmed;
+}
+
 async function requestAssistantProposal() {
     if (activeResult) return { valid: false, error: 'Close simulation results before preparing model changes.' };
+    if (!confirmConfidentialHostedAssistant()) return { valid: false, cancelled: true };
     assistantGenerationController?.abort();
     const controller = new AbortController();
     assistantGenerationController = controller;
@@ -10834,7 +10914,7 @@ async function loadOpenedProjectFile(file) {
         password = await requestProjectPassword({
             error: passwordError,
             title: `Unlock ${file.fileName}`,
-            hint: `Enter the password for ${file.fileName}.`
+            hint: file.publicNotice ? `Enter the password for ${file.fileName}. Its owner's notice: ${file.publicNotice}` : `Enter the password for ${file.fileName}.`
         });
         if (password === null) return;
         try {
@@ -11019,7 +11099,24 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         const contentChoice = hasEmbeddableResult ? await requestSaveContentChoice() : 'model';
         if (!contentChoice) return false;
         const includeResults = contentChoice === 'modelAndResults';
-        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}) }, null, 4)}\n`;
+        // The ownership block as written by this save: the times of this save and the Konjugate version in it. A new file, or a copy under
+        // another name, first offers the details for this copy alone (nothing is asked of someone who has set none).
+        const stampOptions = { now: new Date(), version: runningVersion };
+        const savedOwnership = stampOwnership(projectOwnership, stampOptions);
+        let fileOwnership = savedOwnership;
+        // The kind of copy this save writes, to be remembered for the file if it differs from the project's own details.
+        let copyOwnership;
+        const rewritesCopy = !saveAs && currentProjectPath !== null && savedCopyOwnership?.path === currentProjectPath;
+        if (rewritesCopy) {
+            fileOwnership = savedCopyOwnership.block ? stampOwnership(savedCopyOwnership.block, stampOptions) : null;
+            copyOwnership = fileOwnership;
+        } else if ((saveAs || !currentProjectPath) && hasUserDetails(savedOwnership)) {
+            const choice = await editSaveOwnership({ block: savedOwnership, encrypted: Boolean(password) });
+            if (!choice) return false;
+            fileOwnership = choice.strip ? null : stampOwnership(choice.block, stampOptions);
+            if (JSON.stringify(fileOwnership) !== JSON.stringify(savedOwnership)) copyOwnership = fileOwnership;
+        }
+        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
         const activeBranchRecord = branches.get(activeBranchUuid);
@@ -11046,6 +11143,8 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         updateDocumentTitle();
         updateEncryptionControls();
         activeResultPersistedInProject = result.includesResults;
+        projectOwnership = savedOwnership;
+        savedCopyOwnership = copyOwnership === undefined ? null : { path: result.path, block: copyOwnership };
         addonDataUnsaved = false;
         documentController.markSaved();
         $('#statusText').textContent = `${result.encrypted ? 'Encrypted project' : 'Project'} saved${result.includesResults ? ' with simulation results' : ' · model only'}`;

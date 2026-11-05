@@ -29,5 +29,6 @@ For encrypted files, gzip is applied before encryption. The header additionally 
 
 - `kdf`: scrypt with a 16-byte Base64 salt, cost 2^14 through 2^18, block size 8, parallelization 1 through 4, and a 32-byte derived key.
 - `cipher`: AES-256-GCM with a 12-byte Base64 IV and 16-byte Base64 authentication tag.
+- `publicNotice`: optional, at most 300 characters of text the owner chose to show before the file is unlocked (for example who to ask for the password). It is the only part of the project's ownership details kept outside the encrypted payload, it is never written to an unencrypted file, and being in the header it is not covered by the authentication tag, so it is a notice and not a guarantee. See [Project document schema](projectSchema.md).
 
 `.kjt` is the only supported project-file format. Readers reject every other extension and any `.kjt` file without a valid versioned `KJTF` container.

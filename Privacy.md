@@ -2,7 +2,7 @@
 
 # Konjugate Privacy Policy
 
-Effective date: 5 October 2026
+Effective date: 5 November 2026
 
 Konjugate is an open-source desktop application for building engineering simulations and digital twins, developed by Zenin Easa Panthakkalakath. This policy describes what the application does with your data. In short: Konjugate has no accounts, no analytics and no telemetry, and the developer does not receive any of your data.
 
@@ -13,6 +13,8 @@ Nothing. Konjugate does not ask you to sign in, does not send usage statistics, 
 ## What stays on your computer
 
 Your projects (`.kjt` files), simulation results, installed add-ons and plugins, application settings, and your AI assistant configuration are stored on your own computer, either where you choose to save them or in Konjugate's per-user application data folder. If you configure a hosted AI provider (see below), its API key is stored encrypted using your operating system's credential protection and is only ever sent to that provider. Nothing in this section is transmitted anywhere by Konjugate itself.
+
+Project properties. A project can record who made it and on what terms: an owner, a copyright notice, a license, a contact and a short title and description, which you type in the Project properties window, and, if you set them, defaults for new projects in the same place. These details are stored inside the `.kjt` file (and your defaults in Konjugate's per-user application data folder, or in the browser's own storage in the web edition), and nowhere else. They travel with the file whenever you share, attach, upload or export it, so enter only what you are happy for its recipients to read. Konjugate never fills them in from your operating system account, your computer's name or any service you are signed in to, and has no accounts. The only values Konjugate writes into a project by itself are the time of its first save, the time of its last save (both read from your computer's clock) and the Konjugate version, which reveal when the file was worked on and are stored in the file like the rest. If you save a project encrypted you can also choose a short notice to show without the password, for example who to ask for it: that text, and only that text, is stored unencrypted in the file's header. These details are a notice for the people who receive the file; they do not stop anyone from copying or changing it, and encrypting the file is what keeps it private. Konjugate's own license does not apply to, and gives the developer no rights in, the models you create: they belong to you.
 
 Simulations run locally. If you write an inline C++ or Python provider, your code is compiled or run on your own machine with the compiler or interpreter you have installed; it is not sent anywhere.
 
@@ -26,16 +28,20 @@ Konjugate makes a small number of network requests to third-party services. None
 
 ## The web edition
 
-The desktop application above has no analytics. The web edition at `web.konjugate.com` counts page views with GoatCounter (`goatcounter.com`), an open-source counter that sets no cookies and stores nothing in your browser. Each visit sends GoatCounter the page address, the referring site, your browser and screen size, and a country derived from your IP address; your IP address is not stored, and nothing is used to follow you across visits or across other sites. Your projects never leave your browser. If your browser sends Do Not Track, or you block `gc.zgo.at`, no count is made.
+The desktop application above has no analytics. The web edition at `web.konjugate.com` counts page views with GoatCounter (`goatcounter.com`), an open-source counter that sets no cookies and stores nothing in your browser. Each visit sends GoatCounter the page address, the referring site, your browser and screen size, and a country derived from your IP address; your IP address is not stored, and nothing is used to follow you across visits or across other sites. Your projects never leave your browser, and neither do the Project properties defaults you set, which the web edition keeps in your browser's own storage; the visit counter does not see them. If your browser sends Do Not Track, or you block `gc.zgo.at`, no count is made.
 
 ## The AI assistant (optional, off until you configure it)
 
 The model assistant only runs if you set up a model configuration yourself. It can use:
 
 - **A local model (such as Ollama) on your own machine.** Requests go to a local address (by default `http://127.0.0.1:11434`) and do not leave your computer.
-- **A hosted provider that you choose and supply your own API key for:** currently OpenAI, Google Gemini, NVIDIA NIM or Hugging Face. When you submit a request, Konjugate sends that provider the text of your request, your recent conversation history with the assistant (the last five exchanges), and a structured description of the model you are editing, which can include node and edge names, parameters, and equations. That provider receives and processes this data under its own terms and privacy policy, not this one. Do not use a hosted provider with a model that contains information you are not permitted to share with it.
+- **A hosted provider that you choose and supply your own API key for:** currently OpenAI, Google Gemini, NVIDIA NIM or Hugging Face. When you submit a request, Konjugate sends that provider the text of your request, your recent conversation history with the assistant (the last five exchanges), and a structured description of the model you are editing, which can include node and edge names, parameters, and equations. That provider receives and processes this data under its own terms and privacy policy, not this one. The details recorded in Project properties (owner, copyright, license, contact and save times) are not part of that description and are never sent. If you mark a project confidential, Konjugate asks before sending it to a hosted provider, once for each project you open, and sends nothing if you decline; a local model is not asked about, since nothing leaves your computer. Do not use a hosted provider with a model that contains information you are not permitted to share with it.
 
 If you never configure the assistant, none of this happens.
+
+## Exports
+
+When you export simulation code or an FMU, the owner, copyright notice, license and contact from Project properties are written into the file you create (as comments at the top of the generated code, and as the author, copyright and license of the FMU), so that the people you give it to can see them. Nothing else about the project's details is added, and a project that names none produces no such lines. Exporting writes the file where you choose and sends it nowhere.
 
 ## Children
 

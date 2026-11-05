@@ -1996,3 +1996,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 @media (pointer: coarse) {
     .webglSurface, .css2dContainer { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 }
+
+/* Project properties, the defaults for new projects and the save-time override (docs/proposals/modelOwnership.md). */
+.passwordDialog.ownershipDialog { width: 420px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.ownershipDialog .ownershipSaveTimes { margin: 12px 0 0; }
+.ownershipDialog .ownershipSaveTimes:empty { display: none; }
+.ownershipDialog .assistantConfigurationStatus[hidden] { display: none; }

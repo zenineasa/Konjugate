@@ -3,6 +3,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, scrypt as deriveKey } from 'node:crypto';
 import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
+import { normalizePublicNotice } from './ownership.mjs';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -67,8 +68,11 @@ async function keyFromPassword(password, kdf) {
 
 export function inspectProjectFile(buffer) {
     const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
-    const { flags } = parseHeader(bytes);
-    return { format: 'kjt', encrypted: Boolean(flags & encryptedFlag), version };
+    const { flags, metadata } = parseHeader(bytes);
+    const encrypted = Boolean(flags & encryptedFlag);
+    // The owner's notice for an encrypted file, written in its header so it can be read before the password is given (docs/proposals/modelOwnership.md).
+    const publicNotice = encrypted ? normalizePublicNotice(metadata?.publicNotice) : null;
+    return { format: 'kjt', encrypted, version, ...(publicNotice ? { publicNotice } : {}) };
 }
 
 // resultBranches (an array of {buffer, branchUuid, parentBranchUuid, forkTime, label}) saves an
@@ -83,7 +87,7 @@ export function inspectProjectFile(buffer) {
 // or corrupting data -- deliberately not mirrored into a redundant legacy single-result section,
 // which would double the file's size on every multi-branch save just to support opening a
 // multi-branch file in a build that predates the concept entirely.
-export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null, resultBranches = null } = {}) {
+export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null, resultBranches = null, publicNotice = null } = {}) {
     const compressed = await gzipAsync(Buffer.from(content, 'utf8'), { level: 9 });
     const branches = (resultBranches ?? (result ? [{ buffer: result }] : []))
         .map((branch) => ({ ...branch, buffer: Buffer.isBuffer(branch.buffer) ? branch.buffer : Buffer.from(branch.buffer) }));
@@ -109,6 +113,9 @@ export async function encodeProjectFile(content, { password = null, scryptCost =
         payload = Buffer.concat([cipher.update(payload), cipher.final()]);
         metadata.kdf = kdf;
         metadata.cipher = { name: 'aes-256-gcm', iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') };
+        // Only text the owner chose to show without the password, and only on an encrypted file: on any other the header is readable anyway.
+        const notice = normalizePublicNotice(publicNotice);
+        if (notice) metadata.publicNotice = notice;
         key.fill(0);
     }
 

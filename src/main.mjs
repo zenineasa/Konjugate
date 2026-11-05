@@ -58,6 +58,8 @@ import { describeIntervention, parameterChangeEntries } from './parameterHistory
 import { registerLauncherHandlers } from './launcherHost.mjs';
 import { addonCacheDirectory } from './addonCache.mjs';
 import { createAddonSettingsStore } from './addonSettingsStore.mjs';
+import { createOwnershipDefaultsStore } from './ownershipDefaultsStore.mjs';
+import { publicNoticeOf, stampProjectContent } from './ownership.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from './shapeLibraryCatalog.mjs';
 
@@ -920,7 +922,7 @@ async function readProjectFilePayload(path) {
     const inspection = inspectProjectFile(bytes);
     if (inspection.encrypted) {
         pendingEncryptedPaths.add(path);
-        return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
+        return { path, fileName: basename(path), encrypted: true, requiresPassword: true, ...(inspection.publicNotice ? { publicNotice: inspection.publicNotice } : {}) };
     }
     return { path, fileName: basename(path), encrypted: false, ...await decodeProjectForRenderer(bytes) };
 }
@@ -2029,7 +2031,7 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         if (!stored) continue;
         resolvedBranches.push({ buffer: await readFile(stored.path), ...branchMetadata });
     }
-    const bytes = await encodeProjectFile(content, { password, resultBranches: resolvedBranches.length ? resolvedBranches : null });
+    const bytes = await encodeProjectFile(content, { password, resultBranches: resolvedBranches.length ? resolvedBranches : null, publicNotice: publicNoticeOf(content) });
     const verification = await decodeProjectBundle(bytes, { password });
     if (verification.content !== content || Boolean(verification.result) !== Boolean(resolvedBranches.length)) {
         throw new Error('The saved project could not be verified.');
@@ -2409,6 +2411,18 @@ ipcMain.on('clipboardWriteBuffer', (event, { format, buffer }) => {
     event.returnValue = true;
 });
 
+// The defaults for the ownership block of new projects (docs/proposals/modelOwnership.md): kept for the user in their own data folder.
+let ownershipDefaultsInstance = null;
+const ownershipDefaults = () => (ownershipDefaultsInstance ??= createOwnershipDefaultsStore({ userData: app.getPath('userData') }));
+ipcMain.handle('ownershipDefaultsGet', async (event) => {
+    requireProjectWindow(event, 'Only a project window can read the ownership defaults.');
+    return ownershipDefaults().get();
+});
+ipcMain.handle('ownershipDefaultsSet', async (event, defaults) => {
+    requireProjectWindow(event, 'Only a project window can change the ownership defaults.');
+    return ownershipDefaults().set(defaults);
+});
+
 const requireToolchainWindow = (event) => requireProjectWindow(event, 'Only a project window can access toolchain settings.');
 
 ipcMain.handle('providerToolchainGet', async (event, kind) => {
@@ -2705,7 +2719,7 @@ async function runCliMode() {
     try {
         if (flags['output-kjt']) {
             const resultBytes = await readFile(execution.resultPath);
-            await atomicWriteFile(flags['output-kjt'], await encodeProjectFile(bundle.content, { result: resultBytes }));
+            await atomicWriteFile(flags['output-kjt'], await encodeProjectFile(stampProjectContent(bundle.content, { version: app.getVersion() }), { result: resultBytes }));
             console.log(`Wrote ${flags['output-kjt']}`);
         }
         if (flags['output-csv']) {

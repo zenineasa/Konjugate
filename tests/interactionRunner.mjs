@@ -256,9 +256,10 @@ export async function runInteractionTests(driver) {
     const addonMissing = (addonId, repository) => !installedAddons.has(addonId) && `needs the ${addonId} add-on -- build ../${repository} (npm run build) or set KONJUGATE_INTERACTION_ADDONS`;
     let passedCount = 0;
     let skippedCount = 0;
-    const only = process.env.KONJUGATE_INTERACTION_ONLY;
+    // One substring of a test's name, or several separated by "||" to run those tests in the order they appear.
+    const only = process.env.KONJUGATE_INTERACTION_ONLY?.split('||').filter(Boolean);
     const run = async (name, task, { skip } = {}) => {
-        if (only && !name.includes(only)) return;
+        if (only?.length && !only.some((fragment) => name.includes(fragment))) return;
         if (skip) {
             console.log(`○ ${name} (skipped: ${skip})`);
             skippedCount += 1;
@@ -741,6 +742,232 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#providerToolchainsSave').click()`);
         await waitFor(window, `!document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not close after resetting.');
     }, { skip: !driver.capabilities.providerExecutionModeSelector && 'sharedMemoryWorker/inProcess execution-mode selection has no web-edition equivalent' });
+
+    await run('project properties edit the ownership details, and the defaults for new projects are kept', async () => {
+        const setField = (host, name, value) => evaluate(window, `(() => {
+            const control = document.querySelector('${host} [name="${name}"]');
+            control.value = ${JSON.stringify(value)};
+            control.dispatchEvent(new Event('input', { bubbles: true }));
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipButton') !== null`), true);
+
+        // Defaults first, since a project that is already open keeps whatever it started with.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipMakeMine').hidden`), true);
+        await evaluate(window, `document.querySelector('#ownershipDefaultsOpen').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDefaultsDialog').open && !document.querySelector('#ownershipDialog').open`, 'The defaults dialog did not replace Project properties.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#ownershipDefaultsFieldsHost [name]').length`), 7);
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipDefaultsFieldsHost [name="title"]') === null`), true);
+        await setField('#ownershipDefaultsFieldsHost', 'owner', 'Acme Thermal Ltd');
+        await setField('#ownershipDefaultsFieldsHost', 'license', 'custom');
+        assert.equal(await isRenderedVisible(window, '#ownershipDefaultsFieldsHost label[data-license="custom"]'), true);
+        await setField('#ownershipDefaultsFieldsHost', 'licenseText', 'Internal use only');
+        await setField('#ownershipDefaultsFieldsHost', 'license', 'MIT');
+        assert.equal(await isRenderedVisible(window, '#ownershipDefaultsFieldsHost label[data-license="custom"]'), false);
+        await evaluate(window, `document.querySelector('#ownershipDefaultsSave').click()`);
+        // Saving the defaults returns to Project properties, showing this project's own, still-empty, details.
+        await waitFor(window, `document.querySelector('#ownershipDialog').open && !document.querySelector('#ownershipDefaultsDialog').open`, 'Project properties did not come back after the defaults were saved.');
+        await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
+
+        // The details of this project: edited, kept, and counted as unsaved work.
+        const unsavedShown = `getComputedStyle(document.querySelector('.windowTitle i')).visibility === 'visible'`;
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not reopen.');
+        await setField('#ownershipFieldsHost', 'owner', 'Example Owner');
+        await setField('#ownershipFieldsHost', 'copyright', 'Copyright © {year} Example Owner');
+        await setField('#ownershipFieldsHost', 'license', 'CC-BY-4.0');
+        await setField('#ownershipFieldsHost', 'contact', 'models@example.com');
+        await setField('#ownershipFieldsHost', 'revision', '2.1');
+        await evaluate(window, `document.querySelector('#ownershipSave').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close after Done.');
+        assert.equal(await evaluate(window, unsavedShown), true);
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not reopen after Done.');
+        const kept = await evaluate(window, `Object.fromEntries([...document.querySelectorAll('#ownershipFieldsHost [name]')].filter((control) => control.type !== 'checkbox').map((control) => [control.name, control.value]))`);
+        assert.equal(kept.owner, 'Example Owner');
+        assert.equal(kept.copyright, 'Copyright © {year} Example Owner');
+        assert.equal(kept.license, 'CC-BY-4.0');
+        assert.equal(kept.contact, 'models@example.com');
+        assert.equal(kept.revision, '2.1');
+        // This project names a different owner from the defaults, so the dialog says a save keeps it and offers to take it over.
+        assert.equal(await isRenderedVisible(window, '#ownershipSomeoneElses'), true);
+        assert.equal(await isRenderedVisible(window, '#ownershipMakeMine'), true);
+        await evaluate(window, `document.querySelector('#ownershipMakeMine').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open && document.querySelector('#ownershipFieldsHost [name="owner"]').value === 'Acme Thermal Ltd'`, 'Make this my own did not apply the defaults.');
+        assert.match(await evaluate(window, `document.querySelector('#ownershipFieldsHost [name="derivedFrom"]').value`), /by Example Owner, license CC-BY-4\.0/);
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipFieldsHost [name="license"]').value`), 'MIT');
+        await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close at the end.');
+
+        // Leave nothing behind for later tests: the defaults are kept in the user's data, shared by every window.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open to clear the defaults.');
+        await evaluate(window, `document.querySelector('#ownershipDefaultsOpen').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDefaultsDialog').open`, 'The defaults dialog did not open to clear them.');
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipDefaultsFieldsHost [name="owner"]').value`), 'Acme Thermal Ltd');
+        await setField('#ownershipDefaultsFieldsHost', 'owner', '');
+        await setField('#ownershipDefaultsFieldsHost', 'license', '');
+        await evaluate(window, `document.querySelector('#ownershipDefaultsSave').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not come back after clearing the defaults.');
+        await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close after clearing the defaults.');
+    });
+
+    await run('saving a new project offers its ownership details for that copy alone', async () => {
+        const setField = (host, name, value) => evaluate(window, `(() => {
+            const control = document.querySelector('${host} [name="${name}"]');
+            control.value = ${JSON.stringify(value)};
+            control.dispatchEvent(new Event('input', { bubbles: true }));
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open.');
+        await setField('#ownershipFieldsHost', 'owner', 'Save Test Owner');
+        await setField('#ownershipFieldsHost', 'license', 'all-rights-reserved');
+        await evaluate(window, `document.querySelector('#ownershipSave').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
+
+        // A first save of a project that names an owner asks about this copy before the file is chosen. Cancelling saves nothing.
+        await evaluate(window, `document.querySelector('#saveButton').click()`);
+        await waitFor(window, `document.querySelector('#saveOwnershipDialog').open`, 'The save dialog did not offer the ownership details.');
+        assert.equal(await evaluate(window, `document.querySelector('#saveOwnershipFieldsHost [name="owner"]').value`), 'Save Test Owner');
+        assert.equal(await evaluate(window, `document.querySelector('#saveOwnershipFieldsHost [name="title"]') === null`), true);
+        // All rights reserved and not encrypted: it says that only encrypting keeps the file private.
+        assert.equal(await isRenderedVisible(window, '#saveOwnershipEncryptionNote'), true);
+        await evaluate(window, `(() => { const strip = document.querySelector('#saveOwnershipStrip'); strip.checked = true; strip.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await isRenderedVisible(window, '#saveOwnershipFieldsHost'), false);
+        assert.equal(await isRenderedVisible(window, '#saveOwnershipEncryptionNote'), false);
+        await evaluate(window, `document.querySelector('#saveOwnershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#saveOwnershipDialog').open`, 'The save dialog did not close on Cancel.');
+
+        // What was typed for the copy never reaches the project: its own details are as they were, and it is still unsaved.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not reopen.');
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipFieldsHost [name="owner"]').value`), 'Save Test Owner');
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipFieldsHost [name="license"]').value`), 'all-rights-reserved');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('.windowTitle i')).visibility`), 'visible');
+        await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close at the end.');
+    });
+
+    await run('a project saved as a copy with other ownership details keeps writing that copy, and keeps its own details', async () => {
+        const readSaved = async (path) => JSON.parse(await decodeProjectFile(await readFile(path)));
+        const pressSave = (shift) => evaluate(window, `document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, ctrlKey: true, shiftKey: ${shift}, bubbles: true, cancelable: true }))`);
+        const waitForSavedChange = async (path, before) => {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                const saved = await readSaved(path).catch(() => null);
+                if (saved && JSON.stringify(saved.ownership ?? null) !== JSON.stringify(before ?? null)) return saved;
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            throw new Error('The saved file did not change.');
+        };
+        const setField = (host, name, value) => evaluate(window, `(() => {
+            const control = document.querySelector('${host} [name="${name}"]');
+            control.value = ${JSON.stringify(value)};
+            control.dispatchEvent(new Event('input', { bubbles: true }));
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+
+        // The project's own details, then a first save of a copy that changes the owner.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open.');
+        await setField('#ownershipFieldsHost', 'owner', 'Project Owner');
+        await setField('#ownershipFieldsHost', 'copyright', 'Copyright © {year} Project Owner');
+        await setField('#ownershipFieldsHost', 'license', 'MIT');
+        await evaluate(window, `document.querySelector('#ownershipSave').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
+        const { path, bytes } = await driver.captureExport(async () => {
+            await evaluate(window, `document.querySelector('#saveButton').click()`);
+            await waitFor(window, `document.querySelector('#saveOwnershipDialog').open`, 'The save dialog did not offer the ownership details.');
+            await setField('#saveOwnershipFieldsHost', 'owner', 'Copy Owner');
+            await evaluate(window, `document.querySelector('#saveOwnershipContinue').click()`);
+        }, { extension: 'kjt' });
+        const first = JSON.parse(await decodeProjectFile(bytes));
+        assert.equal(first.ownership.owner, 'Copy Owner');
+        assert.equal(first.ownership.license.id, 'MIT');
+        assert.equal(first.ownership.copyright, `Copyright © ${new Date().getUTCFullYear()} Project Owner`);
+        assert.match(first.ownership.firstSavedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+        assert.equal(first.ownership.lastSavedAt, first.ownership.firstSavedAt);
+        assert.ok(first.ownership.savedWith);
+        assert.equal(first.copyright, undefined, 'the application must no longer write its own copyright notice into a project');
+
+        // The project itself still has its own owner.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not reopen.');
+        assert.equal(await evaluate(window, `document.querySelector('#ownershipFieldsHost [name="owner"]').value`), 'Project Owner');
+        await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
+
+        // A plain Save to that file writes the same copy, not the project's own owner, and keeps the first save time.
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await pressSave(false);
+        const second = await waitForSavedChange(path, first.ownership);
+        assert.equal(second.ownership.owner, 'Copy Owner');
+        assert.equal(second.ownership.firstSavedAt, first.ownership.firstSavedAt);
+        assert.notEqual(second.ownership.lastSavedAt, first.ownership.lastSavedAt);
+
+        // Save As, stripped: the file has no ownership block, and a plain Save to it still has none.
+        const { path: strippedPath, bytes: strippedBytes } = await driver.captureExport(async () => {
+            await pressSave(true);
+            await waitFor(window, `document.querySelector('#saveOwnershipDialog').open`, 'Save As did not offer the ownership details.');
+            await evaluate(window, `(() => { const strip = document.querySelector('#saveOwnershipStrip'); strip.checked = true; strip.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await evaluate(window, `document.querySelector('#saveOwnershipContinue').click()`);
+        }, { extension: 'kjt' });
+        assert.equal(JSON.parse(await decodeProjectFile(strippedBytes)).ownership, undefined);
+        const strippedBefore = await readFile(strippedPath);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await pressSave(false);
+        for (let attempt = 0; attempt < 100 && (await readFile(strippedPath)).equals(strippedBefore); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal((await readSaved(strippedPath)).ownership, undefined);
+
+        // Editing the project's own details means they go into the file it is saved to from then on.
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open to edit.');
+        await setField('#ownershipFieldsHost', 'owner', 'Edited Owner');
+        await evaluate(window, `document.querySelector('#ownershipSave').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close after the edit.');
+        await pressSave(false);
+        const edited = await waitForSavedChange(strippedPath, null);
+        assert.equal(edited.ownership.owner, 'Edited Owner');
+    }, { skip: !driver.capabilities.osFileOpen && 'the native save dialog is a desktop-only way to choose where a project goes' });
+
+    await run('exports carry the project\'s owner, copyright and license into the generated code and the FMU description', async () => {
+        const setField = (host, name, value) => evaluate(window, `(() => {
+            const control = document.querySelector('${host} [name="${name}"]');
+            control.value = ${JSON.stringify(value)};
+            control.dispatchEvent(new Event('input', { bubbles: true }));
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await evaluate(window, `document.querySelector('#ownershipButton').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open.');
+        await setField('#ownershipFieldsHost', 'owner', 'Export Owner');
+        await setField('#ownershipFieldsHost', 'copyright', 'Copyright © {year} Export Owner');
+        await setField('#ownershipFieldsHost', 'license', 'Apache-2.0');
+        await evaluate(window, `document.querySelector('#ownershipSave').click()`);
+        await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
+        const year = new Date().getUTCFullYear();
+
+        const exportWith = async (format, extension, maxAttempts) => {
+            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
+            await evaluate(window, `(() => { const format = document.querySelector('#exportCodeFormat'); format.value = '${format}'; format.dispatchEvent(new Event('change')); })()`);
+            const { bytes } = await driver.captureExport(async () => {
+                await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+                await waitFor(window, `!document.querySelector('#exportCodeDialog').open`, 'Export dialog should close after the export is written.', 60000);
+            }, { extension, maxAttempts });
+            return bytes;
+        };
+
+        const source = (await exportWith('source', 'cpp', 100)).toString('utf8');
+        assert.match(source, new RegExp(`^// Generated by Konjugate[^\\n]*\\n// Copyright © ${year} Export Owner\\n// License: Apache-2\\.0\\n`));
+
+        const entries = unzipSync(await exportWith('fmu', 'fmu', 400));
+        const xml = Buffer.from(entries['modelDescription.xml']).toString('utf8');
+        assert.match(xml, new RegExp(`author="Export Owner" copyright="Copyright © ${year} Export Owner" license="Apache-2\\.0" generationTool="Konjugate"`));
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
 
     // Shared across the three run() calls the "Run..."/"Results Analysis..."/"closing results..."
     // scenarios below split into (see docs/proposals/webEdition.md and this file's own driver

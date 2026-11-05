@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync, unzipSync } from 'fflate';
 import { generateFmiModel } from './fmiCodeGen.mjs';
+import { fmiAttributes } from './ownership.mjs';
 import { cppProviderSdkPath, resolveEnginePath, runEngine } from './engineAdapter.mjs';
 
 function escapeXml(text) {
@@ -63,10 +64,12 @@ function deterministicGuid(modelIdentifier, source) {
     return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
-function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture }) {
+export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership = null }) {
     const rollback = supportsStateCapture ? 'true' : 'false';
+    // The project's author, copyright and license (docs/proposals/modelOwnership.md), as the attributes FMI has for exactly these.
+    const rights = Object.entries(fmiAttributes(ownership)).map(([name, value]) => ` ${name}="${escapeXml(value.replace(/[\r\n]+/g, ' '))}"`).join('');
     return `<?xml version="1.0" encoding="UTF-8"?>
-<fmiModelDescription fmiVersion="2.0" modelName="${escapeXml(modelName)}" guid="${guid}" generationTool="Konjugate">
+<fmiModelDescription fmiVersion="2.0" modelName="${escapeXml(modelName)}" guid="${guid}"${rights} generationTool="Konjugate">
     <CoSimulation modelIdentifier="${escapeXml(modelIdentifier)}" canHandleVariableCommunicationStepSize="true"
         canGetAndSetFMUstate="${rollback}" canSerializeFMUstate="${rollback}" providesDirectionalDerivative="false"/>
     <ModelVariables>
@@ -106,7 +109,7 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
 
         const libraryBytes = new Uint8Array(await readFile(artifactPath));
         const xml = modelDescriptionXml({
-            modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture
+            modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership
         });
         const archive = zipSync({
             'modelDescription.xml': new TextEncoder().encode(xml),

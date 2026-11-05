@@ -14,7 +14,7 @@ import { installOffline } from './offline.mjs';
 import { version } from './buildInfo.mjs';
 import {
     addons, aiProviders, launcherHost, applicationInfo, componentLibrary, diagnostics, extensions,
-    helpFeedback, modelClipboard, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
+    helpFeedback, modelClipboard, ownershipDefaults, providerToolchains, shapeLibrary, tour, uiZoom, windowControls
 } from './misc.mjs';
 
 window.engine = engine;
@@ -29,6 +29,7 @@ window.shapeLibrary = shapeLibrary;
 window.componentLibrary = componentLibrary;
 window.providerEditor = providerEditor;
 window.providerToolchains = providerToolchains;
+window.ownershipDefaults = ownershipDefaults;
 window.modelClipboard = modelClipboard;
 window.aiProviders = aiProviders;
 window.addons = addons;

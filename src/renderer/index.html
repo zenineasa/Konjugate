@@ -55,6 +55,9 @@
                 <button id="exportCsvButton" type="button" aria-label="Export results as CSV" data-tooltip="Export results as CSV" disabled>
                     <img class="documentActionIcon" src="../../assets/exportCsv.svg" alt="">
                 </button>
+                <button id="ownershipButton" type="button" aria-label="Project properties" data-tooltip="Project properties: owner, copyright and license" aria-haspopup="dialog">
+                    <svg class="documentActionIcon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 7.2v3.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/><circle cx="8" cy="5.2" r=".8" fill="currentColor"/></svg>
+                </button>
                 <button id="exportCodeButton" type="button" aria-label="Export simulation code" data-tooltip="Export simulation code" aria-haspopup="dialog">
                     <img class="documentActionIcon" src="../../assets/exportCode.svg" alt="">
                 </button>
@@ -143,6 +146,59 @@
             <label class="saveContentOption"><input name="saveContent" type="radio" value="model"><span><b>Model only</b><small>Save the editable model without simulation data.</small></span></label>
             <label class="saveContentOption"><input name="saveContent" type="radio" value="modelAndResults" checked><span><b>Model and results</b><small>Include the current playback data and restart checkpoint.</small></span></label>
             <footer><button id="saveContentCancel" type="button">Cancel</button><button id="saveContentContinue" class="doneButton" type="submit">Continue</button></footer>
+        </form>
+    </dialog>
+
+    <!-- The ownership fields (docs/proposals/modelOwnership.md), copied into each dialog that edits them: Project properties, the defaults for new
+         projects, and the save-time override. Fields are found by name inside their dialog, so the same markup can be used three times. -->
+    <template id="ownershipFields">
+        <label><span>Title</span><input name="title" autocomplete="off" maxlength="500" placeholder="Optional: a name for the whole project"></label>
+        <label><span>Description</span><textarea name="description" rows="3" maxlength="4000" placeholder="Optional: what this model represents"></textarea></label>
+        <label><span>Owner</span><input name="owner" autocomplete="off" maxlength="500" placeholder="A person or organisation"></label>
+        <label><span>Copyright notice</span><input name="copyright" autocomplete="off" maxlength="500" placeholder="Copyright © {year} Your name"></label>
+        <label><span>License</span><select name="license"></select></label>
+        <label data-license="custom" hidden><span>License terms</span><textarea name="licenseText" rows="2" maxlength="4000" placeholder="The terms, in your own words"></textarea></label>
+        <label data-license="custom" hidden><span>License address</span><input name="licenseUrl" autocomplete="off" maxlength="500" placeholder="https://"></label>
+        <label><span>Contact</span><input name="contact" autocomplete="off" maxlength="500" placeholder="An email address or web address"></label>
+        <label class="runModeSwitch ownershipConfidential"><span><b>Confidential</b><small>Asks before this model is used with a hosted AI assistant. It does not stop anyone from copying the file; encrypting does.</small></span><input name="confidential" type="checkbox"></label>
+        <label><span>Based on</span><input name="derivedFrom" autocomplete="off" maxlength="4000" placeholder="Optional: the work this one comes from, and its license"></label>
+        <label><span>Revision</span><input name="revision" autocomplete="off" maxlength="60" placeholder="Optional: for example 2.1"></label>
+        <label><span>Notice shown on an encrypted file</span><input name="publicNotice" autocomplete="off" maxlength="300" placeholder="Optional: for example Contact models@example.com for the password"></label>
+    </template>
+
+    <dialog id="ownershipDialog" class="passwordDialog ownershipDialog" aria-labelledby="ownershipTitle">
+        <form method="dialog">
+            <span class="contextKicker">Project properties</span>
+            <strong id="ownershipTitle">Owner, copyright and license</strong>
+            <p>Saved inside this project file. It is a notice for people who receive the file, not a lock: anyone with the file can change it. To keep a model private, save it encrypted.</p>
+            <p id="ownershipSomeoneElses" class="assistantConfigurationStatus warning" hidden>This project names a different owner from your defaults. Saving keeps what it says.</p>
+            <div id="ownershipFieldsHost"></div>
+            <p id="ownershipSaveTimes" class="ownershipSaveTimes"></p>
+            <div class="passwordError" id="ownershipError" role="alert"></div>
+            <footer><button id="ownershipDefaultsOpen" class="footerLeftButton" type="button">Defaults for new projects…</button><button id="ownershipMakeMine" type="button" hidden>Make this my own</button><button id="ownershipCancel" type="button">Cancel</button><button id="ownershipSave" class="doneButton" type="submit">Done</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="ownershipDefaultsDialog" class="passwordDialog ownershipDialog" aria-labelledby="ownershipDefaultsTitle">
+        <form method="dialog">
+            <span class="contextKicker">Preferences</span>
+            <strong id="ownershipDefaultsTitle">Defaults for new projects</strong>
+            <p>New projects start with these details. Projects you have already saved are not changed. They stay on this computer; Konjugate never fills them in from your account or computer.</p>
+            <div id="ownershipDefaultsFieldsHost"></div>
+            <div class="passwordError" id="ownershipDefaultsError" role="alert"></div>
+            <footer><button id="ownershipDefaultsCancel" type="button">Cancel</button><button id="ownershipDefaultsSave" class="doneButton" type="submit">Save defaults</button></footer>
+        </form>
+    </dialog>
+
+    <dialog id="saveOwnershipDialog" class="passwordDialog ownershipDialog" aria-labelledby="saveOwnershipTitle">
+        <form method="dialog">
+            <span class="contextKicker">Save a copy</span>
+            <strong id="saveOwnershipTitle">Details for this copy</strong>
+            <p>Changes here apply to the saved file only, not to the open project.</p>
+            <label class="saveContentOption"><input id="saveOwnershipStrip" type="checkbox"><span><b>Strip ownership details from this copy</b><small>Leaves out the owner, copyright, license, contact and save times.</small></span></label>
+            <div id="saveOwnershipFieldsHost"></div>
+            <p id="saveOwnershipEncryptionNote" class="assistantConfigurationStatus warning" hidden>This copy is marked as reserved or confidential but is not encrypted. These details are only a notice; encrypting the file is what keeps it private.</p>
+            <footer><button id="saveOwnershipCancel" type="button">Cancel</button><button id="saveOwnershipContinue" class="doneButton" type="submit">Save</button></footer>
         </form>
     </dialog>
 

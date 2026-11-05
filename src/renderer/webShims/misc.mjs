@@ -21,6 +21,7 @@ import { validateComponentTemplate } from '../../componentTemplate.mjs';
 import { createUserLibraryStore } from '../../userLibraryStore.mjs';
 import { bugReportUrl, formatBugReportEmail } from '../../bugReport.mjs';
 import { welcomeLinks } from '../../welcomeModel.mjs';
+import { normalizeOwnershipDefaults } from '../../ownership.mjs';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -83,6 +84,30 @@ export const tour = {
 export const applicationInfo = {
     get: async () => ({ version }),
     openWelcome: async () => { tourStarters.forEach((start) => start()); }
+};
+
+// The defaults for the ownership block of new projects (docs/proposals/modelOwnership.md). In the browser they are kept in its own storage and
+// never leave it; storage that is blocked reads as no defaults and changes last only until the page is closed.
+const ownershipDefaultsKey = 'konjugate.ownershipDefaults';
+let ownershipDefaultsInMemory = {};
+export const ownershipDefaults = {
+    get: async () => {
+        try {
+            const text = window.localStorage.getItem(ownershipDefaultsKey);
+            return text ? normalizeOwnershipDefaults(JSON.parse(text)) : {};
+        } catch {
+            return ownershipDefaultsInMemory;
+        }
+    },
+    set: async (defaults) => {
+        const kept = normalizeOwnershipDefaults(defaults);
+        ownershipDefaultsInMemory = kept;
+        try {
+            if (Object.keys(kept).length) window.localStorage.setItem(ownershipDefaultsKey, JSON.stringify(kept));
+            else window.localStorage.removeItem(ownershipDefaultsKey);
+        } catch { /* storage blocked: the defaults hold for this page only */ }
+        return kept;
+    }
 };
 
 // Help & feedback (src/bugReport.mjs). The web edition reports its browser, not an installer or Electron, and opens GitHub in a new tab.

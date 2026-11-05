@@ -12,6 +12,7 @@
 
 import { decodeResultFile } from '../../engineProtocol.mjs';
 import { pluginExampleBytes, pluginExampleEntries, pluginExampleGuideUrl } from './packages.mjs';
+import { publicNoticeOf } from '../../ownership.mjs';
 import { BrowserProjectFileError, decodeProjectContent, encodeProjectContent, inspectProjectContent } from '../../browserProjectCodec.mjs';
 import { rendererResultProjection } from '../../resultSession.mjs';
 import { registerCompletedResult } from '../../webEngineLiveShim.mjs';
@@ -47,10 +48,11 @@ const fileHandles = new Map(); // synthetic path id -> FileSystemFileHandle, so 
 const pendingEncryptedFiles = new Map();
 
 async function fileFromBytes(bytes, fileName, handle = null, password = null) {
-    if (!password && inspectProjectContent(bytes).encrypted) {
+    const inspection = inspectProjectContent(bytes);
+    if (!password && inspection.encrypted) {
         const path = String(++handleCounter);
         pendingEncryptedFiles.set(path, { bytes, fileName, handle });
-        return { path, fileName, encrypted: true, requiresPassword: true };
+        return { path, fileName, encrypted: true, requiresPassword: true, ...(inspection.publicNotice ? { publicNotice: inspection.publicNotice } : {}) };
     }
     const decoded = await decodeProjectContent(bytes, { password });
     const path = handle ? String(++handleCounter) : null;
@@ -113,7 +115,7 @@ async function save(path, content, suggestedFilename, password, resultBranches) 
         throw new Error("Saving simulation results with the project isn't supported in the web edition yet " +
             '-- export results as CSV separately, or save the model only.');
     }
-    const bytes = await encodeProjectContent(content, { password });
+    const bytes = await encodeProjectContent(content, { password, publicNotice: publicNoticeOf(content) });
     if (isFsaSupported()) {
         let handle = path ? fileHandles.get(path) : null;
         if (!handle) {

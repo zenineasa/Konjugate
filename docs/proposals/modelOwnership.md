@@ -3,15 +3,15 @@ type: Proposal
 title: Model ownership and license metadata
 description: Owner, copyright, license and contact details saved inside a .kjt project, with per-user defaults, a per-save override, export mapping, and the privacy policy changes they need.
 tags: [proposals, kjt, metadata, license, privacy]
-status: draft
-implementation: none
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Model ownership and license metadata
 
-**Status: proposed, nothing built.** This records the design agreed so far so it can be built in the order given under "Staged plan".
+**Status: built.** Every stage of the plan below is implemented on the desktop and in the web edition; "As built" lists where the implementation departs from, or settles, the text that follows.
 
 ## Problem
 
@@ -127,6 +127,17 @@ The core statement of [Privacy.md](../../Privacy.md), that the developer collect
 5. **Assistant.** Exclusion from the description sent to a provider, and the confidential warning, with the matching policy text.
 6. **Exports.** FMU `modelDescription` attributes and the code-export header.
 7. **Public notice.** The optional cleartext header notice for encrypted files, last because it is the only part that puts anything outside the encrypted payload.
+
+## As built
+
+- **Where it is.** `src/ownership.mjs` holds the block's rules (cleaning, the year token, the save times, defaults, "make this my own", the export lines); `src/renderer/ownershipEditor.mjs` and the three dialogs in `index.html` edit it; `src/ownershipDefaultsStore.mjs` keeps the defaults in the user's data folder on the desktop, and the web shim keeps them in the browser's storage. The title bar's Project properties button (and the phone menu's entry) opens the first dialog, which links to the defaults.
+- **The automatic stamp is gone.** The application used to write `copyright: "Copyright © 2026 Zenin Easa Panthakkalakath"` into every project it saved, a notice no user had written. It no longer does, and a file carrying exactly that string is not read as a claim. A different legacy `copyright` value is read as the notice, and a save writes only `ownership`.
+- **When the save dialog appears.** The per-save override is offered on the first save of a project and on Save As, and only when the project names something a person wrote (a project with just save times is not asked about). A plain Save to an existing file does not interrupt, so the encryption nudge appears only in that dialog. What is typed there applies to that file only; the open project keeps its own details, though it takes the new save times. Because a Save As makes the new file the one being edited, the window remembers that this file is a copy with other details (or none) and a later plain Save to it writes the same kind of copy, so it never puts back what the copy was saved without. The project's own details are used again for the next Save As to another file, and editing them in Project properties ends the special treatment, since that is a choice to have them in the file.
+- **Stripping.** "Strip ownership details from this copy" removes the whole block from the copy, the save times and version included.
+- **New projects.** A new window's project is seeded from the defaults once, when they have loaded; a project that is opened is never seeded, and a file with no block stays without one until it is saved, when it gets only the save times.
+- **Confidential and the assistant.** The block cannot reach the assistant because it is never part of the serialised model the assistant summarises, which a test pins. The confidential warning is a confirmation shown once per opened project in a window, for a hosted configuration only.
+- **The header notice.** It is written only to an encrypted file and shown in the unlock prompt. It is not covered by the encryption's authentication tag, so a notice can be altered without the password; it is a label.
+- **Revision.** It is set by the user alone, as decided; `lastSavedAt` says when a file was last written.
 
 ## Open points
 

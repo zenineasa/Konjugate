@@ -160,6 +160,12 @@ contextBridge.exposeInMainWorld('providerEditor', {
     reportApplied: (result) => ipcRenderer.send('providerEditorApplyResult', result)
 });
 
+// The defaults for the ownership block of new projects (docs/proposals/modelOwnership.md), kept in the user's own data folder.
+contextBridge.exposeInMainWorld('ownershipDefaults', {
+    get: () => ipcRenderer.invoke('ownershipDefaultsGet'),
+    set: (defaults) => ipcRenderer.invoke('ownershipDefaultsSet', defaults)
+});
+
 contextBridge.exposeInMainWorld('providerToolchains', {
     get: (kind) => ipcRenderer.invoke('providerToolchainGet', kind),
     set: (kind, path) => ipcRenderer.invoke('providerToolchainSet', { kind, path }),

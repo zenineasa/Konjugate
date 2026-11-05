@@ -12,6 +12,7 @@ export const phoneMenuEntries = [
     { id: 'saveEncryptedButton', label: 'Save encrypted…' },
     { id: 'exportCsvButton', label: 'Export results as CSV' },
     { id: 'exportCodeButton', label: 'Export simulation code' },
+    { id: 'ownershipButton', label: 'Project properties' },
     { id: 'exampleButton', label: 'Examples', separated: true },
     { id: 'exampleGuideButton', label: 'About this example' },
     { id: 'assistantButton', label: 'Model assistant', separated: true },

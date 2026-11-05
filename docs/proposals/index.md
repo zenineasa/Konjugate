@@ -17,4 +17,5 @@
 * [Tuning Editors and Programs](tuningEditorsAndPrograms.md) - The tuning objective in the shared equation editor, objectives written as C++ or Python programs, and the shared classes behind both
 * [Package Compatibility](packageCompatibility.md) - Minimum Konjugate version for packages, and installing the newest release the running app can use
 * [Toolbox Mechanisms and Design Optimisation](toolboxMechanismsAndDesignOptimisation.md) - Toolbox-owned regions of a model rebuilt by merging, providers that solve a group of nodes and edges together, and optimisation towards a design objective with constraints
+* [Model Ownership](modelOwnership.md) - Owner, copyright, license and contact details saved inside a project, with per-user defaults, a per-save override, export mapping and the privacy policy changes they need
 * [Embedded Assistant Model](embeddedAssistantModel.md) - A small open model fine-tuned for the assistant and shipped inside the app through llama.cpp, with the decisions so far, the evidence from the evaluation harness, and the gates it must pass

@@ -3,7 +3,7 @@
 // On a phone the title bar has no room for its file actions and panel buttons, so styles.css hides them below
 // the phone layout's breakpoint (phoneLayout.mjs) and this menu lists them instead. Each entry presses the real button, so a menu item always does
 // exactly what its button does, and a button that appears or disappears elsewhere in the page needs no change here.
-import { isPhoneLayout, onPhoneLayoutChange } from './phoneLayout.mjs';
+import { onPhoneLayoutChange } from './phoneLayout.mjs';
 export { phoneMaxWidth } from './phoneLayout.mjs';
 
 export const phoneMenuEntries = [
@@ -99,24 +99,6 @@ function installPhoneMenu() {
     onPhoneLayoutChange((phone) => { if (!phone) close(); });
 }
 
-// The selection tools (select, several, rectangle, move, rotate, scale) are one button on a phone, showing the tool in use: pressing it
-// opens the others beneath the strip, and choosing one, or pressing anywhere else, puts them away again.
-function installToolFlyout() {
-    const group = document.querySelector('.toolGroup[aria-label="Selection tools"]');
-    if (!group) return;
-    const visible = (button) => button.classList.contains('active') || button.getAttribute('aria-pressed') === 'true';
-    group.addEventListener('click', (event) => {
-        const button = event.target.closest('button');
-        if (!button || !isPhoneLayout()) return;
-        // Capturing, so that which tools were on show is read before the tool's own handler changes which they are.
-        if (group.classList.contains('open')) group.classList.remove('open');
-        else if (visible(button)) group.classList.add('open');
-    }, true);
-    document.addEventListener('pointerdown', (event) => { if (!group.contains(event.target)) group.classList.remove('open'); });
-    onPhoneLayoutChange((phone) => { if (!phone) group.classList.remove('open'); });
-}
-
 if (typeof document !== 'undefined') {
     installPhoneMenu();
-    installToolFlyout();
 }

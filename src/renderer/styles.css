@@ -1902,16 +1902,12 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     #runButton { min-width: 0; margin-left: 0; padding: 0 9px; }
     /* A blur behind the strip would make it, and not the screen, what the floating groups below are placed against. */
     .toolstrip { background: rgb(9 18 24 / 97%); backdrop-filter: none; -webkit-backdrop-filter: none; }
-    .toolGroup[aria-label="Selection tools"]:not(.open) > :not(.active, [aria-pressed="true"]) { display: none; }
-    .toolGroup[aria-label="Selection tools"]:not(.open)::after { padding: 0 4px 0 1px; color: #7d929d; font-size: 9px; content: '▾'; }
-    .toolGroup[aria-label="Selection tools"].open, .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
+    .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
         position: fixed; z-index: 41; top: calc(var(--title-height) + var(--tools-height) + 6px); left: 50%; translate: -50% 0;
         padding: 4px; background: rgb(14 25 34 / 98%); border-color: #3a4d58; border-radius: 10px; box-shadow: 0 10px 26px rgb(0 0 0 / 50%);
     }
-    .toolGroup[aria-label="Selection tools"].open { top: calc(var(--title-height) + var(--tools-height) + 52px); z-index: 42; }
     /* The sheets are in the canvas, which is a layer under the strip and what floats from it, so while one is up these are put away. */
     body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .toolGroup[aria-label="Selection actions"],
-    body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .toolGroup[aria-label="Selection tools"].open { display: none; }
     /* Not over an editor, which covers the canvas and has its own Delete. */
     .toolGroup[aria-label="Selection actions"]:not(:has(> button:not(:disabled))),
     body:has(#canvas > :is(.nodeEditor, .edgeEditor, .edgeBuilder):not(.hidden)) .toolGroup[aria-label="Selection actions"] { display: none; }
@@ -1934,16 +1930,14 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     }
     .toolstripLeft { flex-direction: column; width: 100%; gap: 8px; }
     .toolstripLeft .toolGroup { flex-direction: column; gap: 2px; }
-    .toolGroup[aria-label="Selection tools"]:not(.open)::after { padding: 0; line-height: .6; }
     .toolstrip .toolSpacer { flex: 1 1 auto; min-height: 0; }
     .toolstrip .simulationReadout { padding: 6px 5px; }
     #runButton { position: static; width: 30px; height: 30px; padding: 0; justify-content: center; font-size: 0; }
     #runButton span { font-size: 14px; }
     /* What opens beside the rail goes to its left, as columns. */
-    .toolGroup[aria-label="Selection tools"].open, .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
+    .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
         top: calc(var(--title-height) + 8px); right: calc(var(--dock-width) + 6px); left: auto; translate: none; flex-direction: column;
     }
-    .toolGroup[aria-label="Selection tools"].open { top: calc(var(--title-height) + 8px); right: calc(var(--dock-width) + 48px); }
     [data-web-edition] .webEditionBanner { right: calc(var(--dock-width) + 8px); }
     .tourFloating { right: calc(var(--dock-width) + 12px) !important; }
     /* The cards that cover the canvas leave the rail in sight. */

@@ -47,6 +47,9 @@ A new optional top-level object, additive within schema version 1, omitted entir
     "confidential": false,
     "derivedFrom": "Based on Heat Exchanger Example by Konjugate contributors, MPL-2.0",
     "revision": "2.1",
+    "firstSavedAt": "2026-11-05T09:14:02Z",
+    "lastSavedAt": "2026-11-12T16:40:31Z",
+    "savedWith": "1.4.0",
     "title": "Plant cooling loop",
     "description": "Cooling loop for line 3, validated against 2026 site data."
 }
@@ -61,7 +64,13 @@ A new optional top-level object, additive within schema version 1, omitted entir
 - `revision`: a user-chosen revision string, separate from the file format `version`.
 - `title`, `description`: the project as a whole, parallel to node and edge `description`.
 
-Konjugate also writes `createdAt`, `modifiedAt` and `savedWith` (the Konjugate version) on save. These carry no personal information and help someone who receives the file.
+Konjugate also maintains three fields itself, which the user cannot edit:
+
+- `firstSavedAt`: the system clock's time at the project's first save. It is written once and never changed by later saves. A project opened from a file keeps the value it arrived with, including after "Make this my own", because it records when this file first existed. A file with no `firstSavedAt` (saved before this feature) gets one at its next save, which is the best the file can say.
+- `lastSavedAt`: the system clock's time at every save, replaced each time. A save to a new file with "Save as" updates it and leaves `firstSavedAt` alone.
+- `savedWith`: the Konjugate version that made the save.
+
+Both times are ISO 8601 in UTC, to the second. They come from the computer's clock and are not verified, so they are as much a notice as the rest of the block. They carry no personal information, but they do reveal when someone worked, which the privacy policy changes below mention. `revision` is never changed automatically: it is set by the user alone, which keeps files that live in version control free of a changing value on every save, and `lastSavedAt` is the field that tells you when a file was last written.
 
 The legacy top-level `copyright` string stays readable: when `ownership.copyright` is absent, the old value is shown in its place, and a save writes only the new block. The engine never receives the block, in the same way as `addonData`, and the host strips it before validation and execution. Because this is an additive field, readers that do not know about it preserve or ignore it, per the unknown-fields rule.
 
@@ -77,7 +86,7 @@ There are three layers, and each is explicit:
 
 **Someone else's model.** Opening a file whose owner differs from your defaults keeps the original block and shows it in Project properties. Saving never replaces another owner's details with yours. An explicit "Make this my own" action replaces the block with your defaults and fills `derivedFrom` from the old owner, license and title so attribution is not lost silently.
 
-**No autofill.** Konjugate never derives any of these values from the operating system account name, the machine name, git configuration or a signed-in service, and there are none of the latter. Only what the user typed is stored.
+**No autofill.** Konjugate never derives the owner, copyright, license or contact from the operating system account name, the machine name, git configuration or a signed-in service, and there are none of the latter. Only what the user typed is stored there. The save times and the Konjugate version are the only automatic values.
 
 **Encryption nudge.** When the license is *All rights reserved* or `confidential` is set and the user saves without encryption, the Save dialog mentions that encrypting is what actually protects the file. It does not block the save.
 
@@ -93,7 +102,7 @@ The AI assistant sends a hosted provider "a structured description of the model"
 - **FMU export** writes `author`, `copyright` and `license` into `modelDescription.xml` from `owner`, `copyright` and the license identifier (or its custom text), since FMI has attributes for exactly these.
 - **Standalone code export** adds a comment header with the copyright notice and license identifier to each generated source file.
 - **Result CSV export** is unchanged. A CSV is plain data and a header line would break tools that read it; the embedded `.kjt` result keeps the metadata with the model.
-- **Embedded results.** A `.kjt` saved with results carries the block like any other save. `--output-kjt` from the command line preserves the input project's block unchanged.
+- **Embedded results.** A `.kjt` saved with results carries the block like any other save. `--output-kjt` from the command line preserves the input project's block, updating only `lastSavedAt` and `savedWith`, as it is a save like any other.
 
 The "Strip ownership details" option applies to exports as well: a stripped copy has nothing to map.
 
@@ -102,7 +111,7 @@ The "Strip ownership details" option applies to exports as well: a stripped copy
 The core statement of [Privacy.md](../../Privacy.md), that the developer collects nothing, remains true: all of this is local. The policy still needs these changes, shipped together with the preferences defaults and the assistant exclusion:
 
 1. **Where it lives.** "What stays on your computer" names the default ownership settings, and says that a `.kjt` can contain an owner, copyright, license and contact that the user typed, which travel with the file whenever it is shared, exported or attached to an email.
-2. **No autofill.** It states that Konjugate never fills these from the user's account or computer.
+2. **No autofill, and what is automatic.** It states that Konjugate never fills the owner, copyright, license or contact from the user's account or computer. The only values it writes by itself are the first-saved and last-saved times from the computer's clock and the Konjugate version, which are stored in the file like the rest and go nowhere else.
 3. **Assistant.** The assistant section states that the ownership block is not sent to a hosted provider, and that a model marked confidential shows a warning first.
 4. **Web edition.** It states that the defaults are kept in the browser's storage and are not sent anywhere, and that the page counter does not see them.
 5. **Exports.** It notes that FMU and code exports copy the owner, copyright and license into the files produced.
@@ -121,6 +130,5 @@ The core statement of [Privacy.md](../../Privacy.md), that the developer collect
 
 ## Open points
 
-- Whether `revision` should increment automatically on save, or stay purely user-set. The proposal assumes user-set to avoid noisy diffs in files kept in version control.
 - Whether a signed authorship claim (reusing the package signature machinery) is worth building later. It is deliberately not part of this proposal, since decision 1 says the metadata is a notice.
 - Whether library components and subsystems pasted in from another project should carry their own attribution automatically. Decision 3 leaves this out for now.

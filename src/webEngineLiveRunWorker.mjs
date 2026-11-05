@@ -43,6 +43,7 @@ import { decodeResultFile, FramedEngineEventDecoder } from './engineProtocol.mjs
 import { encodeProjectContent } from './browserProjectCodec.mjs';
 import { ensureCppProvidersReady, ensurePythonProvidersReady } from './webEngineAdapter.mjs';
 import { drainStdinBytes } from './webEngineStdinBuffer.mjs';
+import { startEngineModule } from './webEngineLoad.mjs';
 
 self.onmessage = async (startEvent) => {
     const { engineModuleUrl, content, configuration, stdinRing } = startEvent.data;
@@ -57,10 +58,10 @@ self.onmessage = async (startEvent) => {
     let Module;
     try {
         const stdoutBuffer = [];
-        Module = await import(engineModuleUrl).then((moduleExports) => moduleExports.default({
+        Module = await startEngineModule(engineModuleUrl, {
             print: (text) => stdoutBuffer.push(text),
             printErr: (text) => console.error('[Engine stderr]', text)
-        }));
+        });
         Module.FS.mkdir('/live');
         await ensurePythonProvidersReady(Module, content);
         await ensureCppProvidersReady(Module, content);

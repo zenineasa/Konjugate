@@ -220,6 +220,8 @@ await cp(join(rootDirectory, 'assets', 'ForReadme', 'konjugateAppScreenshot.png'
 await mkdir(join(outputDirectory, 'engine'), { recursive: true });
 await cp(join(engineWebDirectory, 'konjugateEngine.js'), join(outputDirectory, 'engine', 'konjugateEngine.js'));
 await cp(join(engineWebDirectory, 'konjugateEngine.wasm'), join(outputDirectory, 'engine', 'konjugateEngine.wasm'));
+// The file's size, so the page can tell a download that came down short (src/webEngineLoad.mjs).
+await writeFile(join(outputDirectory, 'engine', 'konjugateEngine.json'), JSON.stringify({ wasmBytes: (await stat(join(engineWebDirectory, 'konjugateEngine.wasm'))).size }));
 
 // Assets referenced directly by index.html's body (toolbar icons), plus the shape and component
 // libraries webShims/misc.mjs fetches from.

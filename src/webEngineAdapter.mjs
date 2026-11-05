@@ -38,6 +38,7 @@
 // broke the whole module, including run()/capabilities(), even when validate() was never called.
 import { decodeResultFile } from './engineProtocol.mjs';
 import { encodeProjectContent } from './browserProjectCodec.mjs';
+import { startEngineModule } from './webEngineLoad.mjs';
 
 // Python providers (docs/proposals/webEdition.md, phase 4) need a Pyodide interpreter loaded and
 // wired up as Module.evaluatePythonProviderBridge before callMain(['run'/'fit', ...]) runs -- see
@@ -115,10 +116,12 @@ let stdoutBuffer = [];
 // ~49MB .wasm every time, which is real, avoidable cost.
 async function loadModule(engineModuleUrl) {
     if (!modulePromise) {
-        modulePromise = import(engineModuleUrl).then((moduleExports) => moduleExports.default({
+        modulePromise = startEngineModule(engineModuleUrl, {
             print: (text) => stdoutBuffer.push(text),
             printErr: () => {}
-        }));
+        });
+        // A failed start must not be remembered, or every later call would fail with it.
+        modulePromise.catch(() => { modulePromise = null; });
     }
     return modulePromise;
 }

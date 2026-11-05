@@ -197,7 +197,7 @@ const server = await startServer();
 const report = [];
 let exitCode = 0;
 try {
-    const browser = await chromium.launch({ args: ['--disable-popup-blocking', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    const browser = await chromium.launch({ ...(process.env.KONJUGATE_CHROMIUM_PATH ? { executablePath: process.env.KONJUGATE_CHROMIUM_PATH } : {}), args: ['--disable-popup-blocking', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     for (const [width, height] of sizes) {
         const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, isMobile: true, hasTouch: true, acceptDownloads: true });
         for (const screen of screens) {

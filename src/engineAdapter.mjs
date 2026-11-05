@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
 import { scheduleModeNumbers, waveformProblem } from './parameterSchedule.mjs';
+import { fitArguments } from './fitArguments.mjs';
 import { decodeFittingProgressEvent, decodeFittingReport, decodeInferenceReport, decodeValidationReport, FramedMessageReader } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
 import { resolveInstalledFmus } from './fmiResolver.mjs';
@@ -209,15 +210,9 @@ export async function fitWithEngine(content, csvContent, config, options) {
         const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
         await writeFile(csvPath, csvContent ?? '', 'utf8');
-        const args = ['fit', inputPath, csvPath, '--report', reportPath, '--progress-stream', '--stop-file', stopPath];
-        if (config?.objective) {
-            const objectivePath = join(directory, 'objective.json');
-            await writeFile(objectivePath, JSON.stringify(config.objective), 'utf8');
-            args.push('--objective-file', objectivePath);
-        }
-        if (config?.backend !== undefined) args.push('--backend', config.backend);
-        if (config?.maxIterations !== undefined) args.push('--max-iterations', String(config.maxIterations));
-        if (config?.maxSeconds > 0) args.push('--max-seconds', String(config.maxSeconds));
+        const objectivePath = join(directory, 'objective.json');
+        if (config?.objective) await writeFile(objectivePath, JSON.stringify(config.objective), 'utf8');
+        const args = fitArguments({ inputPath, csvPath, reportPath, objectivePath, stopPath, progress: true }, config);
         options.onStart?.({ requestStop: () => writeFile(stopPath, '') });
         const execution = await runEngineWithFramedOutput(executable, args, options.signal, (message) => options.onProgress?.(decodeFittingProgressEvent(message)));
         if (execution.code !== 0 && execution.code !== 1) {

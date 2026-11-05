@@ -3977,6 +3977,17 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
         await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not reopen.');
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningObjectiveSection').hidden`), true, 'The objective editor belongs to the objective goal only.');
+        // Measured data chosen first is still there after the goal changes, and the other way round.
+        await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(csvLines.join('\n'))})`);
+        await waitFor(window, `!document.querySelector('#parameterTuningMappingSection').hidden`, 'The measured data did not map to a state.', 5000);
+        await evaluate(window, `document.querySelector('#parameterTuningGoalObjective').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuningMeasuredPicker').hidden`, 'The measured data chosen before the goal changed was dropped.', 5000);
+        assert.ok((await evaluate(window, `window.__debugParameterTuning.vocabulary().measured.length`)) >= 1, 'Its columns should be names the objective can use.');
+        await evaluate(window, `document.querySelector('#parameterTuningGoalData').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuningMappingSection').hidden`, 'The measured data was dropped on the way back to fitting it.', 5000);
+        await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
+        await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not reopen.');
         await evaluate(window, `document.querySelector('#parameterTuningGoalObjective').click()`);
         await waitFor(window, `!document.querySelector('#parameterTuningObjectiveSection').hidden && !document.querySelector('#runParameterTuning').hidden`, 'Choosing the objective goal did not show its editor.', 5000);
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningGoalObjective').getAttribute('aria-pressed')`), 'true');
@@ -3993,7 +4004,9 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `(() => { const box = [...document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]')].find((candidate) => !candidate.checked && !candidate.disabled); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         }
         assert.equal(await evaluate(window, `document.querySelectorAll('#parameterTuningParameterRows input[data-field="tune"]:checked').length`), 2);
-        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), false);
+        // Something to tune is not enough for an objective: Run waits for one that reads.
+        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), true);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningTuneHint').textContent`), /Write an objective/);
         // The objective is written in the equation editor an edge uses: a summary button opens an empty summary, a state button fills it.
         const stateName = await evaluate(window, `window.__debugParameterTuning.vocabulary().states.find((state) => state.label.includes(${JSON.stringify(targetState.name)})).name`);
         const setLatex = (selector, latex) => evaluate(window, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(latex)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -4003,12 +4016,21 @@ export async function runInteractionTests(driver) {
         assert.ok(objectiveLatex.includes('lim') && objectiveLatex.includes(stateName), `The buttons should have written a final value of the state: ${objectiveLatex}`);
         await waitFor(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent === 'Valid objective'`, 'A final value of a state should read as a valid objective.', 10000);
 
-        // A name that stands for something that changes over the run is refused as it is written, with the engine's reason, and again if run.
+        // A name that stands for something that changes over the run is refused as it is written, with the engine's reason, and Run stays
+        // off until the objective reads: it cannot be started on something the engine would refuse.
         await setLatex('#parameterTuningMathField', `\\mathrm{${stateName}}`);
         await waitFor(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent.includes('needs a summary')`, 'A bare state should be explained as it is written.', 15000);
-        await evaluate(window, `(() => { document.querySelector('#parameterTuningRunTime').value = '10'; document.querySelector('#parameterTuningTimeStep').value = '1'; document.querySelector('#runParameterTuning').click(); })()`);
-        await waitFor(window, `document.querySelector('#parameterTuningObjectiveStatus').textContent.includes('needs a summary')`, 'A bare state should be refused when run.', 30000);
-        await waitFor(window, `!document.querySelector('#runParameterTuning').disabled`, 'The card did not recover from a refused objective.', 10000);
+        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), true, 'Run must stay off for an objective the engine refuses.');
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningTuneHint').textContent`), /cannot be run yet/);
+        // The same for a name the model does not have, which used to leave Run on and wait for a fit that never started.
+        await setLatex('#parameterTuningMathField', `\\mathrm{noSuchName}`);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent`), /Unknown symbol/);
+        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), true, 'Run must stay off for a name the model does not have.');
+        await evaluate(window, `document.querySelector('#parameterTuningMathField').value = ''; document.querySelector('#parameterTuningMathField').dispatchEvent(new Event('input', { bubbles: true }))`);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningTuneHint').textContent`), /Write an objective/);
+        await setLatex('#parameterTuningMathField', objectiveLatex);
+        assert.equal(await evaluate(window, `document.querySelector('#runParameterTuning').disabled`), false, 'A good objective turns Run back on.');
+        await evaluate(window, `(() => { document.querySelector('#parameterTuningRunTime').value = '10'; document.querySelector('#parameterTuningTimeStep').value = '1'; })()`);
 
         // A limit is the same editor: half-filled is explained, filled in is kept to (a huge bound here, so that it holds).
         await evaluate(window, `document.querySelector('#addParameterTuningConstraint').click()`);

@@ -8586,6 +8586,7 @@ const parameterTuningObjective = new ObjectiveEditor({
     modeButtons: $$('[data-objective-equation-mode]'), modeKey: 'objectiveEquationMode',
     canEdit: () => !parameterTuningRun,
     checkWithEngine: checkParameterTuningText,
+    onVerdict: () => refreshParameterTuningRunnable(),
     onInput: () => parameterTuningObjective.diagnose(),
     onModeChange: (mode) => { parameterTuningLimits.forEach((limit) => limit.editor.setMode(mode)); return false; }
 });
@@ -8632,7 +8633,7 @@ function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = 
     $('#parameterTuningConstraintRows').append(row);
     const editor = new LimitEditor({
         mathField, source, diagnostics, canEdit: () => !parameterTuningRun, checkWithEngine: checkParameterTuningText,
-        onInput: () => editor.diagnose()
+        onVerdict: () => refreshParameterTuningRunnable(), onInput: () => editor.diagnose()
     });
     editor.setNames(parameterTuningState?.vocabulary?.variables.map((variable) => variable.name) ?? []);
     editor.setMode(parameterTuningObjective.mode);
@@ -8642,6 +8643,7 @@ function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = 
     remove.addEventListener('click', () => {
         parameterTuningLimits.splice(parameterTuningLimits.indexOf(entry), 1);
         row.remove();
+        refreshParameterTuningRunnable();
     });
     if (latex) {
         editor.load(latex);
@@ -8699,15 +8701,20 @@ function startParameterTuningObjective() {
     refreshParameterTuningRunnable();
 }
 
-$('#parameterTuningGoalData').addEventListener('click', () => {
-    if (parameterTuningRun || parameterTuningGoal === 'data') return;
+// Changing the goal starts the card over, but the measured data the person chose stays: it is read again for the new goal (matched to
+// states for a fit, offered as columns for an objective), so the order of choosing the goal and the data does not matter.
+function switchParameterTuningGoal(goal) {
+    if (parameterTuningRun || parameterTuningGoal === goal) return;
+    const kept = parameterTuningState?.csvContent ? { content: parameterTuningState.csvContent, fileName: parameterTuningState.csvFileName } : null;
     resetParameterTuning();
-});
-$('#parameterTuningGoalObjective').addEventListener('click', () => {
-    if (parameterTuningRun || parameterTuningGoal === 'objective') return;
-    resetParameterTuning();
-    startParameterTuningObjective();
-});
+    if (goal === 'objective') startParameterTuningObjective();
+    if (!kept) return;
+    if (goal === 'objective') loadParameterTuningMeasuredColumns(kept.content);
+    else loadParameterTuningCsv(kept.content);
+    if (parameterTuningState) parameterTuningState.csvFileName = kept.fileName;
+}
+$('#parameterTuningGoalData').addEventListener('click', () => switchParameterTuningGoal('data'));
+$('#parameterTuningGoalObjective').addEventListener('click', () => switchParameterTuningGoal('objective'));
 
 // Puts the card back as it was last run in this project: the limits and optimiser, and for an objective its expression and run settings.
 // The measured file itself is not kept (a project is not the place for a large CSV), only its name, so the card says which to choose again.
@@ -8790,13 +8797,23 @@ function syncParameterTuningTunables() {
         }
 }
 
+// Run is available when there is something to tune and, for an objective, an objective that can be run: the line under it says what is
+// wrong, and a limit that is written but cannot be read counts the same. A limit left empty is ignored.
+function parameterTuningNotReady() {
+    if (!parameterTuningState) return '';
+    if (!parameterTuningState.tunableParameters.length) return 'Tick Tune on at least one parameter to run.';
+    if (parameterTuningState.goal !== 'objective') return '';
+    if (!parameterTuningObjective.valid) return parameterTuningObjective.latex.trim() ? 'The objective cannot be run yet: the line under it says why.' : 'Write an objective to run.';
+    if (parameterTuningLimits.some((limit) => limit.editor.latex.trim() && !limit.editor.valid)) return 'A limit cannot be read yet: the line under it says why.';
+    return '';
+}
+
 function refreshParameterTuningRunnable() {
     const run = $('#runParameterTuning');
-    const ready = Boolean(parameterTuningState) && parameterTuningState.tunableParameters.length > 0;
+    const reason = parameterTuningNotReady();
     run.hidden = !parameterTuningState;
-    run.disabled = !ready || Boolean(parameterTuningRun);
-    const hint = $('#parameterTuningTuneHint');
-    hint.textContent = parameterTuningState && !ready ? 'Tick Tune on at least one parameter to run.' : '';
+    run.disabled = Boolean(reason) || Boolean(parameterTuningRun);
+    $('#parameterTuningTuneHint').textContent = reason;
 }
 
 function renderParameterTuningParameters() {
@@ -9277,7 +9294,7 @@ $('#runParameterTuning').addEventListener('click', async () => {
             parameterTuningRun = null;
             setParameterTuningRunning(false);
         }
-        button.disabled = false;
+        refreshParameterTuningRunnable();
     }
 });
 
@@ -9388,7 +9405,6 @@ $('#cancelParameterTuning').addEventListener('click', () => {
         parameterTuningRun = null;
         window.engine.discardFit?.();
         setParameterTuningRunning(false);
-        $('#runParameterTuning').disabled = false;
     }
     resetParameterTuning();
     $('#parameterTuning').classList.add('hidden');

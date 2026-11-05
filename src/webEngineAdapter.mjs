@@ -37,6 +37,7 @@
 // testing this exact failure mode in a real Chromium renderer: a static top-level import here
 // broke the whole module, including run()/capabilities(), even when validate() was never called.
 import { decodeResultFile } from './engineProtocol.mjs';
+import { fitArguments } from './fitArguments.mjs';
 import { encodeProjectContent } from './browserProjectCodec.mjs';
 import { startEngineModule } from './webEngineLoad.mjs';
 
@@ -246,15 +247,14 @@ export async function fitWithWebEngine(engineModuleUrl, content, csvContent, con
             const csvPath = `${directory}/measured.csv`;
             const reportPath = `${directory}/fitting.bin`;
             Module.FS.writeFile(inputPath, await encodeProjectContent(content));
-            Module.FS.writeFile(csvPath, csvContent);
-            return { inputPath, csvPath, reportPath };
+            Module.FS.writeFile(csvPath, csvContent ?? '');
+            // An objective goes in a file the engine reads, exactly as the desktop engine is given it; without it the fit would be
+            // against the CSV alone, which is not what was asked.
+            const objectivePath = `${directory}/objective.json`;
+            if (config?.objective) Module.FS.writeFile(objectivePath, JSON.stringify(config.objective));
+            return { inputPath, csvPath, reportPath, objectivePath };
         },
-        argv: ({ inputPath, csvPath, reportPath }) => {
-            const args = ['fit', inputPath, csvPath, '--report', reportPath];
-            if (config?.backend !== undefined) args.push('--backend', config.backend);
-            if (config?.maxIterations !== undefined) args.push('--max-iterations', String(config.maxIterations));
-            return args;
-        },
+        argv: (paths) => fitArguments(paths, config),
         readOutput: async (Module, { reportPath }) => {
             const { decodeFittingReport } = await import('./reportProtocol.mjs');
             return decodeFittingReport(Module.FS.readFile(reportPath));

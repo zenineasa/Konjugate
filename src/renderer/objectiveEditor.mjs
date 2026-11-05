@@ -16,10 +16,20 @@ export class ObjectiveEditor extends EquationEditor {
     #latest = 0;
 
     // checkWithEngine(text) -> Promise<{ available, valid, message }>, or null for no second opinion; `delay` is how long typing must pause.
-    constructor({ checkWithEngine = null, delay = 300, ...options }) {
+    // onVerdict(editor) is told whenever the line under the formula changes, so an owner can keep Run disabled while the formula is not
+    // one it could run; `valid` is what the line last said (false until something has been written that reads).
+    constructor({ checkWithEngine = null, delay = 300, onVerdict = null, ...options }) {
         super(options);
         this.checkWithEngine = checkWithEngine;
         this.delay = delay;
+        this.onVerdict = onVerdict;
+        this.valid = false;
+    }
+
+    showVerdict(valid, message) {
+        this.valid = valid;
+        super.showVerdict(valid, message);
+        this.onVerdict?.(this);
     }
 
     get validMessage() {

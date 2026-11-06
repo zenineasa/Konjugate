@@ -13,6 +13,7 @@
 // through or the twin was stopped, 'error' with the reason it stopped. A detached sandbox is reached through the same host.
 
 import { readDataLog } from './dataLog.mjs';
+import { LoggerCsvReader, readLoggerCsv } from './loggerCsv.mjs';
 import { followDataLog } from './dataLogFollower.mjs';
 import { DataLogWriter } from './dataLogWriter.mjs';
 import { followMqtt } from './mqttSource.mjs';
@@ -32,8 +33,9 @@ export function cycleEvent(cycle, stats) {
 }
 
 // Plays a finished log's observations as if they were arriving: those whose time has come, every tick.
-export function playRecording(content, speed, { onHeader, onObservations, onEnd, tickMilliseconds = 50, now = () => performance.now() }) {
-    const { header, observations } = readDataLog(content);
+// `logger`: the settings for reading another logger's file (src/loggerCsv.mjs), when it is not a Konjugate data log.
+export function playRecording(content, speed, { onHeader, onObservations, onEnd, tickMilliseconds = 50, now = () => performance.now(), logger = null }) {
+    const { header, observations } = logger ? readLoggerCsv(content, logger) : readDataLog(content);
     onHeader(header);
     const ordered = [...observations].sort((a, b) => a.time - b.time);
     if (!ordered.length) {
@@ -98,10 +100,10 @@ export class LiveTwin {
             }
         };
         if (source.kind === 'file') {
-            this.#source = followDataLog(source.path, { onHeader, onObservations, onError: (error) => this.#fail(error) });
+            this.#source = followDataLog(source.path, { onHeader, onObservations, onError: (error) => this.#fail(error), ...(source.logger ? { reader: new LoggerCsvReader(source.logger) } : {}) });
         } else if (source.kind === 'recording') {
             this.#source = playRecording(source.content, source.speed ?? Infinity, {
-                onHeader, onObservations,
+                onHeader, onObservations, logger: source.logger ?? null,
                 onEnd: () => {
                     this.#session?.idle().then(() => { if (!this.#stopped) this.#onEvent({ type: 'ended', stats: this.#session.stats(), reason: 'played' }); })
                         .catch((error) => this.#fail(error));

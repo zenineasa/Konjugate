@@ -15,8 +15,8 @@
 import { open } from 'node:fs/promises';
 import { DataLogReader } from './dataLog.mjs';
 
-export function followDataLog(path, { onHeader = () => {}, onObservations = () => {}, onError = () => {}, pollMilliseconds = 20 } = {}) {
-    const reader = new DataLogReader();
+// `reader` reads another format the same way (push, end, header): a LoggerCsvReader for a lab logger's own CSV (src/loggerCsv.mjs).
+export function followDataLog(path, { onHeader = () => {}, onObservations = () => {}, onError = () => {}, pollMilliseconds = 20, reader = new DataLogReader() } = {}) {
     let handle = null;
     let offset = 0;
     let headerSeen = false;

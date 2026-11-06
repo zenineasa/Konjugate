@@ -2042,3 +2042,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningProgramBinding { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto; gap: 4px; align-items: center; padding: 3px 0; }
 .parameterTuningProgramBinding input, .parameterTuningProgramBinding select { min-width: 0; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
 .parameterTuningProgramSource { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 6px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 4px; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+
+.loggerColumn { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid #243640; font-size: 9px; }
+.loggerColumn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b8c7ce; }
+.loggerColumn > span small { display: block; color: #7d929c; }
+.loggerColumn select, .loggerColumnDetails input { min-width: 0; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.loggerColumnDetails { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.loggerColumnDetails[hidden] { display: none; }
+.loggerColumnDetails [data-field="values"] { grid-column: 1 / -1; }

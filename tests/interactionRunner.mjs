@@ -8,6 +8,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
 import { createServer } from 'node:net';
+import { spawnSync } from 'node:child_process';
 import { Aedes } from 'aedes';
 import mqtt from 'mqtt';
 import { readDataLog } from '../src/dataLog.mjs';
@@ -4733,6 +4734,90 @@ export async function runInteractionTests(driver) {
         const setup = await evaluate(opened, `window.__debugParameterTuning.setup()`);
         assert.equal(setup.objective.program.language, 'python', 'The program is kept with the project, to run again.');
         assert.deepEqual(setup.objective.program.bindings, [{ key: 'simulated', kind: 'state', id: 2 }, { key: 'measured', kind: 'measured', column: 'tankTemperature' }]);
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('the invented lab trial in the card: another logger\'s file read, calibrated on a stretch, checked on another, run live', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-lab-'));
+        const logPath = join(directory, 'vessel.csv');
+        const made = spawnSync('python3', [join(process.cwd(), 'examples', 'dataSources', 'labVessel.py'), logPath, '--speed', '1e9'], { encoding: 'utf8' });
+        assert.equal(made.status, 0, made.stderr);
+        const text = await readFile(logPath, 'utf8');
+        const projectPath = join(directory, 'vessel.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'labVessel.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 4`, 'The vessel model did not load.');
+        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+        await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
+        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(text)}, 'vessel.csv')`);
+        await waitFor(opened, `!document.querySelector('#parameterTuningLoggerSection').hidden`, 'Another logger\'s file was not offered to describe.');
+        assert.match(await evaluate(opened, `document.querySelector('#parameterTuningStatus').textContent`), /not a Konjugate data log, but another logger's table/);
+        assert.equal(await evaluate(opened, `document.querySelector('#loggerDelimiter').value`), ';');
+        assert.equal(await evaluate(opened, `document.querySelector('#loggerDecimal').value`), ',');
+        assert.equal(await evaluate(opened, `document.querySelector('#loggerTimeFormat').value`), 'DD.MM.YYYY HH:mm:ss');
+        const column = (name) => `#loggerColumns .loggerColumn[data-column="${name}"]`;
+        assert.equal(await evaluate(opened, `document.querySelector('${column('Datum')} select').value`), 'time', 'The date and time columns are guessed.');
+        assert.equal(await evaluate(opened, `document.querySelector('${column('Uhrzeit')} select').value`), 'time');
+        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await set('#loggerTimeZone', 'Europe/Berlin');
+        const describe = async (name, use, fields) => {
+            await set(`${column(name)} select`, use);
+            for (const [field, value] of Object.entries(fields)) await set(`${column(name)} input[data-field="${field}"]`, value);
+        };
+        await describe('TC1 (°C)', 'output', { name: 'waterTemperature', unit: 'K', offset: '273.15' });
+        await describe('Heizung (%)', 'input', { name: 'heaterPower', unit: 'W', scale: '30' });
+        await describe('Ventil', 'input', { name: 'inflowRate', unit: 'kg/s', values: 'OPEN=0.015, CLOSED=0' });
+        await describe('Raum (°C)', 'input', { name: 'roomTemperature', unit: 'K', offset: '273.15' });
+        await evaluate(opened, `document.querySelector('#loggerRead').click()`);
+        await waitFor(opened, `/^Read: /.test(document.querySelector('#loggerStatus').textContent)`, 'The logger\'s file was not read.');
+        const told = await evaluate(opened, `document.querySelector('#loggerStatus').textContent`);
+        assert.match(told, /failed readings? left out/);
+        assert.match(told, /header written again once \(a restart\?\) skipped/);
+        assert.match(told, /1 gap in the readings/);
+        assert.match(told, /the clocks changed once and the times were kept in order/);
+        const target = (signal) => `document.querySelector('.parameterTuningReplayRow[data-signal="${signal}"] select').value`;
+        assert.equal(await evaluate(opened, target('waterTemperature')), '2');
+        assert.equal(await evaluate(opened, target('heaterPower')), '40');
+
+        // The first guesses, replayed on the first three and a half hours: out of step.
+        await set('#parameterTuningReplayTimeStep', '5');
+        await set('#parameterTuningReplayTo', '3.5');
+        await evaluate(opened, `document.querySelector('#runParameterTuningReplay').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.replay() !== null`, 'The first guesses were not replayed.', 30000);
+        assert.ok((await evaluate(opened, `window.__debugParameterTuning.replay()`))[0].stretches.length > 0, 'The first guesses go out of step.');
+
+        // Calibrated on that stretch, and applied.
+        await set('#replayCalibrateTo', '3.5');
+        await evaluate(opened, `document.querySelector('#replayCalibrateRun').click()`);
+        await waitFor(opened, `!document.querySelector('#replayCalibrateApply').hidden`, 'The calibration did not finish.', 120000);
+        await evaluate(opened, `document.querySelector('#replayCalibrateApply').click()`);
+        await waitFor(opened, `/Calibrated values applied/.test(document.querySelector('#replayCalibrateStatus').textContent)`, 'The calibrated values were not applied.', 30000);
+        const shared = (await evaluate(opened, `window.__debugProject.serialize()`)).sharedParameters;
+        const capacitance = shared.find((parameter) => parameter.id === 43).value;
+        const heatLoss = shared.find((parameter) => parameter.id === 44).value;
+        assert.ok(Math.abs(capacitance / 501600 - 1) < 0.03, `Calibrated capacitance ${capacitance}.`);
+        assert.ok(Math.abs(heatLoss / 15 - 1) < 0.15, `Calibrated heat loss ${heatLoss}.`);
+        assert.equal(await evaluate(opened, `document.querySelector('#undoButton').disabled`), false, 'Applying is one undoable step.');
+
+        // Checked on the next stretch, which it was not calibrated on.
+        await set('#parameterTuningReplayFrom', '3.5');
+        await set('#parameterTuningReplayTo', '5');
+        await evaluate(opened, `document.querySelector('#runParameterTuningReplay').click()`);
+        await waitFor(opened, `(window.__debugParameterTuning.replay()?.[0]?.sentence ?? '').includes('for the whole')`, 'The calibrated model did not stay in step on the stretch it was not calibrated on.', 30000);
+
+        // The whole log as a live twin, as fast as it can go: every move, and the heater's scaling found by the end.
+        await set('#liveTwinSpeed', 'Infinity');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The live twin did not play the logger\'s file through.', 120000);
+        const live = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
+        assert.equal(live.cycles, 43);
+        assert.equal(live.last.trend.direction, 'above', 'By the end the model runs warmer than the vessel: the heater has scaled up.');
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /predicting above the measurements/);
+        assert.equal((await evaluate(opened, `window.__debugParameterTuning.setup()`)).replay.logger.time.zone, 'Europe/Berlin', 'How the logger\'s file is read is kept with the project.');
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });

@@ -1069,6 +1069,19 @@
                     <div id="parameterTuningMqttStatus" class="equationDiagnostics" role="status"></div>
                 </details>
             </section>
+            <section id="parameterTuningLoggerSection" hidden>
+                <h3>Reading another logger's file</h3>
+                <p class="builderHint">Say once how to read it: which column holds the time and how it is written, the time zone it was written in (the clocks changing is taken care of), and for each column you want, whether it is an input or measured, its name as the model calls it, its unit, and how to turn the logger's numbers or words into the model's (a scale and an offset: °C to K is an offset of 273.15; a percentage of a 3 kW heater to watts is a scale of 30). The settings are kept with the project.</p>
+                <div class="liveTwinFields">
+                    <label class="editorField"><span>Cells separated by</span><select id="loggerDelimiter"><option value=";">Semicolons</option><option value=",">Commas</option><option value="tab">Tabs</option></select></label>
+                    <label class="editorField"><span>Decimal mark</span><select id="loggerDecimal"><option value=",">Comma</option><option value=".">Point</option></select></label>
+                    <label class="editorField"><span>Time written as</span><input id="loggerTimeFormat" type="text" spellcheck="false" placeholder="DD.MM.YYYY HH:mm:ss"></label>
+                    <label class="editorField"><span>Time zone</span><input id="loggerTimeZone" type="text" spellcheck="false" placeholder="Europe/Berlin, UTC or +01:00"></label>
+                </div>
+                <div id="loggerColumns"></div>
+                <div class="liveTwinActions"><button id="loggerRead" type="button" class="doneButton">Read the file</button></div>
+                <div id="loggerStatus" class="equationDiagnostics" role="status"></div>
+            </section>
             <section id="parameterTuningObjectiveSection" hidden>
                 <label class="editorField"><span>Goal</span><select id="parameterTuningDirection"><option value="minimise">Minimise</option><option value="maximise">Maximise</option></select></label>
                 <div id="parameterTuningObjectiveKind" class="parameterTuningGoal" role="group" aria-label="How the objective is written">
@@ -1116,10 +1129,26 @@
                 <p class="builderHint">Each input drives the shared parameter it is mapped to, held between readings. Each measured signal is compared with the state it is mapped to; the model then runs on its own for the whole recording, and a reading agrees when the model is within the tolerance of it.</p>
                 <div id="parameterTuningReplayRows"></div>
                 <label class="editorField"><span>Time step (s)</span><input id="parameterTuningReplayTimeStep" type="number" min="0" step="any"></label>
+                <div class="liveTwinFields">
+                    <label class="editorField"><span>From (hours into the log)</span><input id="parameterTuningReplayFrom" type="number" min="0" step="any" placeholder="the start"></label>
+                    <label class="editorField"><span>To (hours)</span><input id="parameterTuningReplayTo" type="number" min="0" step="any" placeholder="the end"></label>
+                </div>
                 <label class="parameterTuningLogToggle"><input id="parameterTuningReplayAnchor" type="checkbox" checked><span>Start each measured state at its first reading</span></label>
                 <div id="parameterTuningReplayStatus" class="equationDiagnostics" role="status"></div>
                 <div id="parameterTuningReplayResults" class="parameterTuningReplayResults" role="status"></div>
                 <div id="parameterTuningReplayPlot" class="parameterTuningComparisonPlot" role="img" aria-label="Measured signals against the replayed model, and how far apart they are" hidden></div>
+                <div id="replayCalibrate" class="liveTwin">
+                    <h3>Calibrate on a stretch</h3>
+                    <p class="builderHint">Fit the model's tunable parameters so that, driven by what the log says was done, it matches what was measured over a stretch you choose. Choose one without long gaps, and keep a later stretch to replay the result on before you apply it.</p>
+                    <div class="liveTwinFields">
+                        <label class="editorField"><span>From (hours)</span><input id="replayCalibrateFrom" type="number" min="0" step="any" placeholder="the start"></label>
+                        <label class="editorField"><span>To (hours)</span><input id="replayCalibrateTo" type="number" min="0" step="any" placeholder="the end"></label>
+                        <label class="editorField"><span>Step (s)</span><input id="replayCalibrateStep" type="number" min="0" step="any" value="30"></label>
+                    </div>
+                    <div class="liveTwinActions"><button id="replayCalibrateRun" type="button">Calibrate</button><button id="replayCalibrateApply" type="button" class="doneButton" hidden>Apply calibrated values</button></div>
+                    <div id="replayCalibrateStatus" class="equationDiagnostics" role="status"></div>
+                    <div id="replayCalibrateRows" class="parameterTuningBestValues"></div>
+                </div>
                 <div id="liveTwin" class="liveTwin">
                     <h3>As a live twin</h3>
                     <p class="builderHint">Keeps the model in step with the log as it arrives. At every move it goes back to the start of the window, sets each measured state to its reading, runs the window on what was really done, and forecasts what comes after it. The jump at each move is how far the model had drifted.</p>

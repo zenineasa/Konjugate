@@ -76,12 +76,22 @@ export function suggestedReplayTimeStep(document, observations, mapping) {
 
 // The run to make: the model with its mapped parameters following the log and its mapped states starting at their first good reading,
 // how long to run and at what step, and the readings each output is to be compared with.
-export function replayPlan(document, log, mapping, { timeStep, anchor = true }) {
+// `from` and `to` (log seconds) replay a stretch of the log: the run starts at `from`, with each input at the last reading it had
+// by then and each measured state at its first reading from then on.
+export function replayPlan(document, log, mapping, { timeStep, anchor = true, from = null, to = null }) {
     if (!(timeStep > 0)) throw new ReplayError('The time step must be a positive number of seconds.');
     const inputs = mapping.filter((entry) => entry.role === 'input' && entry.parameterId !== null);
     const outputs = mapping.filter((entry) => entry.role === 'output' && entry.stateId !== null);
     if (!outputs.length) throw new ReplayError('Map at least one measured signal to a state, so there is something to compare.');
-    const readings = new Map([...inputs, ...outputs].map((entry) => [entry.signal, latestReadings(log.observations, entry.signal)]));
+    const within = (list, role) => {
+        if (from === null && to === null) return list;
+        const upper = to ?? Infinity;
+        const kept = list.filter((reading) => reading.time >= (from ?? -Infinity) && reading.time <= upper);
+        // An input holds its last reading: the one before the stretch starts is where it stands at the start.
+        const held = role === 'input' && from !== null ? list.filter((reading) => reading.time < from && reading.quality !== 'bad').at(-1) : null;
+        return held && !kept.some((reading) => reading.time === from) ? [{ ...held, time: from }, ...kept] : kept;
+    };
+    const readings = new Map([...inputs, ...outputs].map((entry) => [entry.signal, within(latestReadings(log.observations, entry.signal), entry.role)]));
     let start = Infinity;
     let end = -Infinity;
     for (const list of readings.values()) {
@@ -89,7 +99,9 @@ export function replayPlan(document, log, mapping, { timeStep, anchor = true }) 
         start = Math.min(start, list[0].time);
         end = Math.max(end, list.at(-1).time);
     }
-    if (!Number.isFinite(start)) throw new ReplayError('The mapped signals have no readings yet.');
+    if (!Number.isFinite(start)) throw new ReplayError(from === null ? 'The mapped signals have no readings yet.' : 'The mapped signals have no readings in that stretch.');
+    if (from !== null) start = from;
+    if (to !== null) end = Math.min(end, to);
     if (!(end > start)) throw new ReplayError('The log covers no time yet: it needs readings at two different times.');
 
     const run = structuredClone(document);

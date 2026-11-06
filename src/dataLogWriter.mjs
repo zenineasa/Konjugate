@@ -9,10 +9,42 @@ import { open } from 'node:fs/promises';
 
 const number = (value) => String(Number(value.toPrecision(12)));
 
+// The description and headings of a log with these signals.
+function headingLines({ source = '', epoch, signals }) {
+    return [
+        '# konjugate data log: 1',
+        ...(source ? [`# source: ${source.replace(/[\r\n]/g, ' ')}`] : []),
+        `# time: seconds since ${epoch === null || epoch === undefined ? 'start' : new Date(epoch).toISOString()}`,
+        `# inputs: ${signals.filter((signal) => signal.role === 'input').map((signal) => signal.name).join(', ')}`,
+        `# outputs: ${signals.filter((signal) => signal.role === 'output').map((signal) => signal.name).join(', ')}`,
+        ['time', ...signals.map((signal) => `${signal.name} [${signal.unit ?? ''}]`), ...signals.map((signal) => `${signal.name} quality`)].join(',')
+    ];
+}
+
+// One row per time, in the order the times first appear.
+function rowLines(signals, observations) {
+    const byTime = new Map();
+    for (const observation of observations) {
+        if (!byTime.has(observation.time)) byTime.set(observation.time, new Map());
+        byTime.get(observation.time).set(observation.signal, observation);
+    }
+    return [...byTime].map(([time, readings]) => [
+        number(time),
+        ...signals.map((signal) => (readings.has(signal.name) ? number(readings.get(signal.name).value) : '')),
+        ...signals.map((signal) => { const quality = readings.get(signal.name)?.quality; return quality && quality !== 'good' ? quality : ''; })
+    ].join(','));
+}
+
+// A whole log, header and observations, as the text of a Konjugate data log: to keep what another logger's file said in
+// Konjugate's own form, or to check it with scripts/checkDataLog.mjs.
+export function formatDataLog({ header, observations }) {
+    const ordered = [...observations].sort((a, b) => a.time - b.time);
+    return `${[...headingLines(header), ...rowLines(header.signals, ordered)].join('\n')}\n`;
+}
+
 export class DataLogWriter {
     #handle;
     #signals;
-    #qualityFor;
     #queue = Promise.resolve();
 
     // signals: [{ name, unit, role }] with role 'input' or 'output'; epoch: the wall-clock time (ms) row times count from.
@@ -20,32 +52,14 @@ export class DataLogWriter {
         const writer = new DataLogWriter();
         writer.#handle = await open(path, 'wx');
         writer.#signals = signals;
-        writer.#qualityFor = signals.map((signal) => signal.name);
-        const lines = [
-            '# konjugate data log: 1',
-            ...(source ? [`# source: ${source.replace(/[\r\n]/g, ' ')}`] : []),
-            `# time: seconds since ${new Date(epoch).toISOString()}`,
-            `# inputs: ${signals.filter((signal) => signal.role === 'input').map((signal) => signal.name).join(', ')}`,
-            `# outputs: ${signals.filter((signal) => signal.role === 'output').map((signal) => signal.name).join(', ')}`,
-            ['time', ...signals.map((signal) => `${signal.name} [${signal.unit ?? ''}]`), ...writer.#qualityFor.map((name) => `${name} quality`)].join(',')
-        ];
-        await writer.#handle.appendFile(`${lines.join('\n')}\n`);
+        await writer.#handle.appendFile(`${headingLines({ source, epoch, signals }).join('\n')}\n`);
         return writer;
     }
 
     // Appends observations ({ time, signal, value, quality }), one row per time, in the order given; writes are queued, so rows
     // land in the order they were handed over.
     append(observations) {
-        const byTime = new Map();
-        for (const observation of observations) {
-            if (!byTime.has(observation.time)) byTime.set(observation.time, new Map());
-            byTime.get(observation.time).set(observation.signal, observation);
-        }
-        const text = [...byTime].map(([time, readings]) => [
-            number(time),
-            ...this.#signals.map((signal) => (readings.has(signal.name) ? number(readings.get(signal.name).value) : '')),
-            ...this.#qualityFor.map((name) => { const quality = readings.get(name)?.quality; return quality && quality !== 'good' ? quality : ''; })
-        ].join(',')).join('\n');
+        const text = rowLines(this.#signals, observations).join('\n');
         if (!text) return this.#queue;
         this.#queue = this.#queue.then(() => this.#handle.appendFile(`${text}\n`));
         return this.#queue;

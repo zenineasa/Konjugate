@@ -257,10 +257,20 @@ export class WindowSession {
         // second, a model whose every jump is a steady few thousandths (its own step error, with noise-free data) would be called
         // drifting.
         const tolerance = this.tolerances[signal];
-        const leaning = Math.abs(line.mean) > 2 * spread / Math.sqrt(recent.length) && !(tolerance > 0 && Math.abs(line.mean) < tolerance / 10);
-        const direction = !leaning ? 'none' : line.mean > 0 ? 'above' : 'below';
+        const floor = tolerance > 0 ? tolerance / 10 : 0;
+        // The jumps' scatter is measured about their trend line, not about their mean: when the jumps are growing, the growth is the
+        // drift, and counting it as scatter would hide the very thing being looked for.
+        const threshold = Math.max(2 * line.residual / Math.sqrt(recent.length), floor);
+        // Once a lean is called it stays called until the jumps' mean falls below half of what called it, or changes side: one jump
+        // that happens to land near zero (a thermostat that was off for that stride, say) must not make the call flicker.
+        const side = line.mean > 0 ? 'above' : 'below';
+        const previous = cycles.at(-2)?.trend;
+        const holding = previous?.direction === side && previous.threshold > 0 && Math.abs(line.mean) > previous.threshold / 2;
+        const leaning = Math.abs(line.mean) > threshold || holding;
+        const direction = !leaning ? 'none' : side;
         const alarm = this.alertAt !== null && tolerance > 0 && Math.abs(line.mean) > this.alertAt * tolerance;
-        return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm };
+        // The threshold kept is the one that called the lean, so holding it is judged against what called it.
+        return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm, threshold: holding && !(Math.abs(line.mean) > threshold) ? previous.threshold : threshold };
     }
 
     // After the engine died: a new one is given the state the last cycle restored, the inputs it ran on, and run up to the anchor

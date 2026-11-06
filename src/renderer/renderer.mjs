@@ -86,6 +86,8 @@ import { applyAssistantProposal as buildAssistantProposal, summarizeDocumentForA
 import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from '../instabilityFingerprint.mjs';
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import { looksLikeDataLog, readDataLog } from '../dataLog.mjs';
+import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
+import { fitPlanFromLog } from '../dataLogFit.mjs';
 import { draftScenario, modelFingerprint, normalizeScenarios, withScenario } from '../scenarios.mjs';
 import { objectiveTemplate, objectiveTemplateIds, programBindingsProblem } from '../objectiveTemplates.mjs';
 import { compareReplay, defaultTolerance, guessReplayMapping, latestReadings, replayPlan, replaySentence, replayTargets, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
@@ -9021,8 +9023,10 @@ $('#parameterTuningFile').addEventListener('change', async () => {
     await loadParameterTuningCsv(await file.text(), file.name);
     if (parameterTuningState) parameterTuningState.csvFileName = file.name;
     // A log chosen from disk can also be followed while a logger is still writing it.
+    const path = window.engine.liveTwin?.pathForFile?.(file) ?? null;
+    if (loggerFile) loggerFile.path = path;
     if (parameterTuningReplay) {
-        parameterTuningReplay.path = window.engine.liveTwin?.pathForFile?.(file) ?? null;
+        parameterTuningReplay.path = path;
         refreshLiveTwinControls();
     }
 });
@@ -9031,6 +9035,11 @@ $('#parameterTuningFile').addEventListener('change', async () => {
 // measured signals are compared with states, and the card says how long the model stayed in step. The rules live in dataLogReplay.mjs;
 // this draws them. A replay changes nothing in the model: it runs a copy. `parameterTuningReplay` is declared beside the card's other state.
 function resetParameterTuningReplay() {
+    $('#parameterTuningLoggerSection').hidden = true;
+    $('#replayCalibrateRows').replaceChildren();
+    $('#replayCalibrateStatus').textContent = '';
+    $('#replayCalibrateApply').hidden = true;
+    replayCalibration = null;
     if (liveTwinState) {
         stopLiveTwin().catch(() => {});
         liveTwinState = null;
@@ -9049,6 +9058,10 @@ function resetParameterTuningReplay() {
 
 function loadParameterTuningReplay(content, fileName, note = '') {
     const status = $('#parameterTuningStatus');
+    if (!looksLikeDataLog(content)) {
+        describeLoggerFile(content, fileName);
+        return;
+    }
     let log;
     try {
         log = readDataLog(content);
@@ -9091,8 +9104,9 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
         + (inputs.length && !targets.parameters.length ? ' The model has no shared parameters, so its inputs cannot follow the log: make a parameter shared to drive it from a recording.' : '');
     renderParameterTuningReplayRows();
     $('#parameterTuningReplaySection').hidden = false;
-    // A broker's readings are followed, not replayed: there is nothing recorded yet to replay.
+    // A broker's readings are followed, not replayed: there is nothing recorded yet to replay, or to calibrate on.
     $('#runParameterTuningReplay').hidden = source?.kind === 'mqtt';
+    $('#replayCalibrate').hidden = source?.kind === 'mqtt';
     refreshParameterTuningReplayRunnable();
     refreshLiveTwinControls();
     renderLiveTwinScenarios();
@@ -9185,8 +9199,10 @@ async function runParameterTuningReplay() {
     clearParameterTuningReplayOutcome();
     let plan;
     try {
+        const hours = (selector) => { const text = $(selector).value.trim(); return text === '' ? null : Number(text) * 3600; };
         plan = replayPlan(serializeProjectDocument(), replay.log, replay.mapping, {
-            timeStep: Number($('#parameterTuningReplayTimeStep').value), anchor: $('#parameterTuningReplayAnchor').checked
+            timeStep: Number($('#parameterTuningReplayTimeStep').value), anchor: $('#parameterTuningReplayAnchor').checked,
+            from: hours('#parameterTuningReplayFrom'), to: hours('#parameterTuningReplayTo')
         });
     } catch (error) {
         status.textContent = error.message;
@@ -9257,6 +9273,7 @@ function rememberReplaySetup() {
         goal: 'replay', backend: $('#parameterTuningBackend').value || undefined,
         replay: {
             logFileName: replay.fileName, timeStep: Number($('#parameterTuningReplayTimeStep').value), anchor: $('#parameterTuningReplayAnchor').checked,
+            ...(replay.source?.kind === 'logger' ? { logger: replay.source.settings } : {}),
             mapping: replay.mapping.map((entry) => ({ signal: entry.signal, role: entry.role, target: entry.role === 'input' ? entry.parameterId : entry.stateId })),
             tolerances: Object.fromEntries(replay.tolerances),
             live: { window: Number($('#liveTwinWindow').value), stride: Number($('#liveTwinStride').value), horizon: Number($('#liveTwinHorizon').value), speed: $('#liveTwinSpeed').value }
@@ -9343,9 +9360,10 @@ async function startLiveTwin() {
         timeStep: Number($('#parameterTuningReplayTimeStep').value),
         tolerances: Object.fromEntries(replay.tolerances)
     };
+    const logger = replay.source?.kind === 'logger' ? replay.source.settings : undefined;
     const source = replay.source?.kind === 'mqtt' ? { kind: 'mqtt', url: replay.source.url, signals: replay.source.signals }
-        : speedChoice === 'follow' ? { kind: 'file', path: replay.path }
-            : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice) };
+        : speedChoice === 'follow' ? { kind: 'file', path: replay.path, logger }
+            : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice), logger };
     clearLiveTwinView();
     liveTwinState = { running: true, cycles: [], measured: new Map(outputs.map((entry) => [entry.signal, new Map()])), outputs, settings, sandbox: null, lastDrawAt: 0, drawTimer: null, ended: null };
     rememberReplaySetup();
@@ -9674,6 +9692,202 @@ function renderLiveTwinScenarios() {
         return row;
     }));
 }
+
+// Reading another logger's file (src/loggerCsv.mjs): the card offers what the file seems to be, the person says once how to read
+// it, and the settings are kept with the project's replay setup, so the same logger's next file is read the same way.
+let loggerFile = null;
+
+function describeLoggerFile(content, fileName) {
+    const status = $('#loggerStatus');
+    let described;
+    try {
+        described = describeLoggerCsv(content);
+    } catch (error) {
+        $('#parameterTuningStatus').className = 'equationDiagnostics';
+        $('#parameterTuningStatus').textContent = `${fileName || 'The file'} is neither a Konjugate data log nor a table Konjugate can read: ${error.message}`;
+        return;
+    }
+    loggerFile = { content, fileName, described };
+    const saved = projectTuningSetup?.goal === 'replay' ? projectTuningSetup.replay?.logger : null;
+    $('#loggerDelimiter').value = saved?.delimiter ?? described.delimiter;
+    $('#loggerDecimal').value = saved?.decimal ?? described.decimal;
+    $('#loggerTimeFormat').value = saved?.time?.format ?? described.time?.format ?? '';
+    $('#loggerTimeZone').value = saved?.time?.zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    $('#loggerColumns').replaceChildren(...described.columns.map((column) => {
+        const kept = saved?.signals?.find((signal) => signal.column === column.name);
+        const isTime = saved ? saved.time?.columns?.includes(column.name) : described.time?.columns?.includes(column.name);
+        const row = document.createElement('div');
+        row.className = 'loggerColumn';
+        row.dataset.column = column.name;
+        const label = document.createElement('span');
+        label.textContent = column.name;
+        const sample = document.createElement('small');
+        sample.textContent = column.texts.length ? column.texts.join(', ') : column.samples.join(', ');
+        label.append(sample);
+        const use = document.createElement('select');
+        use.dataset.field = 'use';
+        use.setAttribute('aria-label', `What ${column.name} is`);
+        use.append(new Option('Not used', ''), new Option('Time', 'time'), new Option('Input (what was done)', 'input'), new Option('Measured', 'output'));
+        use.value = isTime ? 'time' : kept?.role ?? '';
+        const field = (name, placeholder, value, width = '') => {
+            const input = document.createElement('input');
+            input.dataset.field = name;
+            input.placeholder = placeholder;
+            input.value = value ?? '';
+            input.setAttribute('aria-label', `${placeholder} for ${column.name}`);
+            if (width) input.style.width = width;
+            return input;
+        };
+        const unitGuess = /\(([^)]*)\)|\[([^\]]*)\]/.exec(column.name);
+        const name = field('name', 'signal name', kept?.name ?? suggestSymbol(column.name.replace(/[([].*$/, '').trim() || column.name));
+        const unit = field('unit', 'unit', kept?.unit ?? (unitGuess?.[1] ?? unitGuess?.[2] ?? ''));
+        const scale = field('scale', '× scale', kept?.scale ?? '');
+        const offset = field('offset', '+ offset', kept?.offset ?? '');
+        const values = field('values', column.texts.length ? column.texts.map((text) => `${text}=…`).join(', ') : 'word=value, …',
+            kept?.values ? Object.entries(kept.values).map(([word, value]) => `${word}=${value}`).join(', ') : '');
+        values.hidden = !column.texts.length;
+        const details = document.createElement('div');
+        details.className = 'loggerColumnDetails';
+        details.append(name, unit, scale, offset, values);
+        const refresh = () => { details.hidden = !(use.value === 'input' || use.value === 'output'); };
+        use.addEventListener('change', refresh);
+        refresh();
+        row.append(label, use, details);
+        return row;
+    }));
+    $('#parameterTuningLoggerSection').hidden = false;
+    $('#parameterTuningStatus').className = 'equationDiagnostics';
+    $('#parameterTuningStatus').textContent = `${fileName || 'This file'} is not a Konjugate data log, but another logger's table. Say below how to read it${saved ? ' (filled in as it was read last time)' : ''}.`;
+    status.textContent = '';
+}
+
+// The settings as the person has filled them in, or a sentence saying what is missing.
+function loggerSettingsFromCard() {
+    const timeColumns = [];
+    const signals = [];
+    for (const row of $$('#loggerColumns .loggerColumn')) {
+        const use = $('[data-field="use"]', row).value;
+        if (use === 'time') timeColumns.push(row.dataset.column);
+        if (use !== 'input' && use !== 'output') continue;
+        const number = (field) => { const text = $(`[data-field="${field}"]`, row).value.trim().replace(',', '.'); return text === '' ? undefined : Number(text); };
+        const values = Object.fromEntries($('[data-field="values"]', row).value.split(',').map((pair) => pair.split('=').map((part) => part.trim())).filter(([word, value]) => word && value !== undefined && value !== '' && Number.isFinite(Number(value.replace(',', '.')))).map(([word, value]) => [word, Number(value.replace(',', '.'))]));
+        const signal = { column: row.dataset.column, name: $('[data-field="name"]', row).value.trim(), role: use, unit: $('[data-field="unit"]', row).value.trim() };
+        if (number('scale') !== undefined) signal.scale = number('scale');
+        if (number('offset') !== undefined) signal.offset = number('offset');
+        if (Object.keys(values).length) signal.values = values;
+        signals.push(signal);
+    }
+    if (!timeColumns.length) return { error: 'Choose the column (or the date and time columns) that hold the time.' };
+    if (!signals.length) return { error: 'Choose at least one column to read as an input or a measured signal.' };
+    return {
+        settings: {
+            delimiter: $('#loggerDelimiter').value === 'tab' ? '\t' : $('#loggerDelimiter').value, decimal: $('#loggerDecimal').value,
+            time: { columns: timeColumns, format: $('#loggerTimeFormat').value.trim(), zone: $('#loggerTimeZone').value.trim() || 'UTC' },
+            signals, source: loggerFile?.fileName ?? ''
+        }
+    };
+}
+
+function readLoggerFile() {
+    const status = $('#loggerStatus');
+    if (!loggerFile) return;
+    const { settings, error } = loggerSettingsFromCard();
+    status.className = 'equationDiagnostics';
+    if (error) {
+        status.textContent = error;
+        return;
+    }
+    let log;
+    try {
+        log = readLoggerCsv(loggerFile.content, settings);
+    } catch (problem) {
+        status.textContent = problem.message;
+        return;
+    }
+    const { notes } = log;
+    const told = [
+        `${notes.rows} rows read`,
+        notes.missing ? `${notes.missing} failed reading${notes.missing === 1 ? '' : 's'} left out` : '',
+        notes.repeatedHeaders ? `the header written again ${notes.repeatedHeaders === 1 ? 'once' : `${notes.repeatedHeaders} times`} (a restart?) skipped` : '',
+        notes.gaps.length ? `${notes.gaps.length} gap${notes.gaps.length === 1 ? '' : 's'} in the readings (${notes.gaps.map((gap) => `${formatDuration(gap.from)} to ${formatDuration(gap.to)}`).join(', ')})` : '',
+        notes.clockChanges ? `the clocks changed ${notes.clockChanges === 1 ? 'once' : `${notes.clockChanges} times`} and the times were kept in order` : '',
+        notes.skippedClockGap ? `${notes.skippedClockGap} reading${notes.skippedClockGap === 1 ? '' : 's'} at a time the clocks skipped left out` : ''
+    ].filter(Boolean);
+    const fileName = loggerFile.fileName;
+    const content = loggerFile.content;
+    const path = parameterTuningReplay?.path ?? loggerFile.path ?? null;
+    resetParameterTuningReplay();
+    openParameterTuningReplay(log, { content, fileName, source: { kind: 'logger', settings } });
+    if (parameterTuningReplay) parameterTuningReplay.path = path;
+    loggerFile = { content, fileName, described: loggerFile.described, path };
+    $('#parameterTuningLoggerSection').hidden = false;
+    status.className = 'equationDiagnostics valid';
+    status.textContent = `Read: ${told.join('; ')}.`;
+    refreshLiveTwinControls();
+}
+$('#loggerRead').addEventListener('click', () => readLoggerFile());
+
+// Calibrating on a stretch of the log (src/dataLogFit.mjs): the model driven by the log's inputs, its tunable parameters fitted to
+// the log's measurements over the stretch, and the result offered to apply, as one undoable step.
+let replayCalibration = null;
+
+async function calibrateOnStretch() {
+    const replay = parameterTuningReplay;
+    const status = $('#replayCalibrateStatus');
+    if (!replay || replay.source?.kind === 'mqtt') return;
+    const hours = (selector) => { const text = $(selector).value.trim(); return text === '' ? null : Number(text) * 3600; };
+    const tunable = findTunableParametersInModel();
+    status.className = 'equationDiagnostics';
+    if (!tunable.length) {
+        status.textContent = 'Mark the parameters to calibrate as Tunable (with bounds) first, in their editors or under Parameters to tune.';
+        return;
+    }
+    let plan;
+    try {
+        plan = fitPlanFromLog(serializeProjectDocument(), replay.log, replay.mapping, { from: hours('#replayCalibrateFrom'), to: hours('#replayCalibrateTo'), timeStep: Number($('#replayCalibrateStep').value) });
+    } catch (error) {
+        status.textContent = error.message;
+        return;
+    }
+    $('#replayCalibrateRun').disabled = true;
+    $('#replayCalibrateApply').hidden = true;
+    $('#replayCalibrateRows').replaceChildren();
+    status.textContent = `Calibrating on ${formatDuration(plan.steps * Number($('#replayCalibrateStep').value))} of the log, against ${plan.outputs.join(', ')}…`;
+    try {
+        const result = await window.engine.fit(JSON.stringify(plan.document), plan.csv, { backend: $('#parameterTuningBackend').value || 'nlopt-bobyqa', maxIterations: 400 });
+        if (!result.available) throw new Error('The native fitting engine is unavailable.');
+        replayCalibration = { report: result.report, tunable };
+        const label = (parameterId) => { const parameter = tunable.find((entry) => entry.parameterId === parameterId); return parameter ? `${parameter.edgeName ?? parameter.ownerName} · ${parameter.name}` : `Parameter ${parameterId}`; };
+        $('#replayCalibrateRows').replaceChildren(...result.report.finalParameters.map((entry) => {
+            const row = document.createElement('div');
+            const before = tunable.find((parameter) => parameter.parameterId === entry.parameterId)?.value;
+            row.textContent = `${label(entry.parameterId)}: ${before} → ${entry.value === null ? 'not finite' : Number(entry.value).toPrecision(6)}`;
+            return row;
+        }));
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `${parameterTuningEndText(result.report)} Replay a later stretch to check it before you apply it.`;
+        $('#replayCalibrateApply').hidden = false;
+    } catch (error) {
+        status.textContent = `The calibration could not run: ${error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?ENGINE_FAILURE: /, '')}`;
+    } finally {
+        $('#replayCalibrateRun').disabled = false;
+    }
+}
+
+async function applyCalibration() {
+    if (!replayCalibration) return;
+    const outcome = await applyFittedValues(replayCalibration.report.finalParameters.map((entry) => ({ parameterId: entry.parameterId, value: entry.value })));
+    const status = $('#replayCalibrateStatus');
+    status.className = outcome.applied ? 'equationDiagnostics valid' : 'equationDiagnostics';
+    status.textContent = outcome.applied ? 'Calibrated values applied (Undo takes them back). Replay or run the live twin again to see the model as it is now.' : outcome.message;
+    if (outcome.applied) {
+        $('#replayCalibrateApply').hidden = true;
+        replayCalibration = null;
+        if (parameterTuningReplay) parameterTuningReplay.targets = replayTargets(serializeProjectDocument());
+    }
+}
+$('#replayCalibrateRun').addEventListener('click', () => calibrateOnStretch());
+$('#replayCalibrateApply').addEventListener('click', () => applyCalibration());
 
 // An objective written as a program (docs/proposals/tuningEditorsAndPrograms.md, "An objective that is a program"): the language,
 // its source, and the keys it reads, each bound to a state, a tuned parameter or a measured column. `language` is null while the
@@ -10197,6 +10411,42 @@ async function renderParameterTuningObjectiveOutcome(run, objective) {
     }
 }
 
+// Applies fitted values to the model as one undoable step, after the engine has validated the result: what a tuning's review and a
+// calibration against a log both end with. Resolves to { applied, message }.
+async function applyFittedValues(values) {
+    const baseDocument = serializeProjectDocument();
+    const current = findTunableParametersInModel();
+    const operations = values.filter((entry) => entry.value !== null && Number.isFinite(entry.value))
+        .filter((entry) => current.some((parameter) => parameter.parameterId === entry.parameterId && parameter.value !== entry.value))
+        .map((entry) => ({ kind: 'updateParameter', parameterRef: entry.parameterId, value: entry.value }));
+    if (!operations.length) return { applied: false, message: 'The fitted values already match the model.' };
+    let prepared;
+    try {
+        prepared = buildAssistantProposal(baseDocument, { proposalVersion: 1, operations });
+    } catch (error) {
+        return { applied: false, message: error.message };
+    }
+    const validation = await window.engine.validate(JSON.stringify(prepared.document));
+    if (validation.cancelled) return { applied: false, message: '' };
+    if (!validation.available || !validation.report.valid) {
+        return {
+            applied: false,
+            message: validation.available
+                ? (validation.report.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.message).join(' ') || 'The native validator rejected these fitted values.')
+                : 'The native validation engine is unavailable.'
+        };
+    }
+    const before = baseDocument;
+    const after = prepared.document;
+    try {
+        replaceModelContents(after);
+    } catch (error) {
+        return { applied: false, message: `Could not apply the fitted parameters: ${error.message}` };
+    }
+    recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
+    return { applied: true, message: '' };
+}
+
 async function commitParameterTuning() {
     if (!parameterTuningState?.report) return;
     const status = $('#parameterTuningReviewStatus');
@@ -10205,44 +10455,14 @@ async function commitParameterTuning() {
         status.textContent = 'Select at least one fitted value to apply.';
         return;
     }
-    const baseDocument = serializeProjectDocument();
-    const operations = acceptedRows.map((checkbox) => {
+    const outcome = await applyFittedValues(acceptedRows.map((checkbox) => {
         const parameterId = Number(checkbox.dataset.parameterId);
-        const fitted = parameterTuningState.report.finalParameters.find((entry) => entry.parameterId === parameterId);
-        return { kind: 'updateParameter', parameterRef: parameterId, value: fitted.value };
-    }).filter((operation) => {
-        const current = parameterTuningState.tunableParameters.find((parameter) => parameter.parameterId === operation.parameterRef);
-        return current && current.value !== operation.value;
-    });
-    if (!operations.length) {
-        status.textContent = 'The selected fitted values already match the model.';
+        return { parameterId, value: parameterTuningState.report.finalParameters.find((entry) => entry.parameterId === parameterId).value };
+    }));
+    if (!outcome.applied) {
+        status.textContent = outcome.message;
         return;
     }
-    let prepared;
-    try {
-        prepared = buildAssistantProposal(baseDocument, { proposalVersion: 1, operations });
-    } catch (error) {
-        status.textContent = error.message;
-        return;
-    }
-    const validation = await window.engine.validate(JSON.stringify(prepared.document));
-    if (validation.cancelled) return;
-    if (!validation.available || !validation.report.valid) {
-        status.textContent = validation.available
-            ? (validation.report.issues.filter((issue) => issue.severity === 'error').map((issue) => issue.message).join(' ')
-                || 'The native validator rejected these fitted values.')
-            : 'The native validation engine is unavailable.';
-        return;
-    }
-    const before = baseDocument;
-    const after = prepared.document;
-    try {
-        replaceModelContents(after);
-    } catch (error) {
-        status.textContent = `Could not apply the fitted parameters: ${error.message}`;
-        return;
-    }
-    recordHistory({ undo: () => replaceModelContents(before), redo: () => replaceModelContents(after) });
     resetParameterTuning();
     $('#parameterTuning').classList.add('hidden');
     $('#statusText').textContent = 'Fitted parameters applied. Use Save As to keep this as a new project -- the original is untouched until you do.';

@@ -149,7 +149,10 @@ test('an objective is checked as one: summaries are allowed, and the engine text
     const { editor, diagnostics } = makeObjective();
     assert.equal(editor.diagnose([], '\\max\\left(\\mathrm{tank}\\right)+k').valid, true);
     assert.equal(editor.text, 'k + max(tank)', 'the parser puts a sum in its own order');
-    assert.equal(diagnostics.textContent, 'Valid objective');
+    assert.equal(diagnostics.textContent, 'Valid objective: k, plus the highest tank reached in the run', 'it says what it computes');
+    editor.setNames(['tank', 'k'], new Map([['tank', 'Water tank · Temperature']]));
+    editor.diagnose([], '\\max\\left(\\mathrm{tank}\\right)');
+    assert.equal(diagnostics.textContent, 'Valid objective: the highest Water tank · Temperature reached in the run', 'names are called as their chips are');
     assert.equal(editor.diagnose([], 'k+').valid, false);
     assert.equal(editor.text, null, 'nothing to run while it does not read');
     assert.ok(!diagnostics.classList.contains('valid'));
@@ -159,7 +162,7 @@ test('a limit is the same editor with its own wording', () => {
     const { editor, diagnostics } = makeObjective({}, LimitEditor);
     assert.ok(editor instanceof ObjectiveEditor);
     editor.diagnose([], '\\max\\left(\\mathrm{tank}\\right)');
-    assert.equal(diagnostics.textContent, 'Valid limit');
+    assert.equal(diagnostics.textContent, 'Valid limit: the highest tank reached in the run');
 });
 
 test('the engine is asked once the formula reads, and its answer replaces the line, unless it is stale', async () => {
@@ -170,7 +173,7 @@ test('the engine is asked once the formula reads, and its answer replaces the li
     editor.diagnose([], 'k');
     await wait();
     assert.deepEqual(asked, ['k'], 'typing again cancels the check of what was typed before');
-    assert.equal(diagnostics.textContent, 'Valid objective', 'the engine had no complaint about k');
+    assert.equal(diagnostics.textContent, 'Valid objective: k', 'the engine had no complaint about k');
     reply = { available: true, valid: false, message: 'The engine says no.' };
     editor.diagnose([], '\\mathrm{tank}');
     await wait();
@@ -178,7 +181,7 @@ test('the engine is asked once the formula reads, and its answer replaces the li
     reply = { available: false };
     editor.diagnose([], 'k');
     await wait();
-    assert.equal(diagnostics.textContent, 'Valid objective', 'with no engine to ask, the formula is taken as read');
+    assert.equal(diagnostics.textContent, 'Valid objective: k', 'with no engine to ask, the formula is taken as read');
     editor.diagnose([], 'k+');
     assert.equal(asked.length, 3, 'a formula that does not read is not sent to the engine');
 });

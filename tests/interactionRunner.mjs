@@ -4027,7 +4027,8 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `[...document.querySelectorAll('#parameterTuningStateChips button')].find((button) => button.textContent.includes(${JSON.stringify(targetState.name)})).click()`);
         const objectiveLatex = await evaluate(window, `document.querySelector('#parameterTuningMathField').value`);
         assert.ok(objectiveLatex.includes('lim') && objectiveLatex.includes(stateName), `The buttons should have written a final value of the state: ${objectiveLatex}`);
-        await waitFor(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent === 'Valid objective'`, 'A final value of a state should read as a valid objective.', 10000);
+        await waitFor(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent.startsWith('Valid objective: ')`, 'A final value of a state should read as a valid objective.', 10000);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent`), new RegExp(`^Valid objective: .*${targetState.name}.* at the end of the run$`), 'The line says what the objective computes, with the state called as its chip is.');
 
         // A name that stands for something that changes over the run is refused as it is written, with the engine's reason, and Run stays
         // off until the objective reads: it cannot be started on something the engine would refuse.

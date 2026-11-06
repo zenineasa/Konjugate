@@ -11,7 +11,9 @@ import { latexToObjectiveText, objectiveNameLatex } from '../objectiveText.mjs';
 
 export class ObjectiveEditor extends EquationEditor {
     #names = [];
+    #labels = new Map();
     #text = null;
+    #sentence = null;
     #pending = null;
     #latest = 0;
 
@@ -32,7 +34,12 @@ export class ObjectiveEditor extends EquationEditor {
         this.onVerdict?.(this);
     }
 
+    // What the formula computes, in words, after what it is: "Valid objective: the highest Water tank · Temperature reached in the run".
     get validMessage() {
+        return this.#sentence ? `${this.kindLabel}: ${this.#sentence}` : this.kindLabel;
+    }
+
+    get kindLabel() {
         return 'Valid objective';
     }
 
@@ -41,13 +48,16 @@ export class ObjectiveEditor extends EquationEditor {
         return this.#text;
     }
 
-    setNames(names) {
+    // `labels`: a Map from a name to how people call it ("Water tank · Temperature"), for the sentence under the formula.
+    setNames(names, labels = new Map()) {
         this.#names = names;
+        this.#labels = labels;
     }
 
     validate(latex) {
-        const result = latexToObjectiveText(latex, this.#names);
+        const result = latexToObjectiveText(latex, this.#names, this.#labels);
         this.#text = result.valid ? result.text : null;
+        this.#sentence = result.valid ? result.sentence : null;
         return result;
     }
 
@@ -91,7 +101,7 @@ export class ObjectiveEditor extends EquationEditor {
 
 // A limit is written the same way: a number from the run to keep at most, or at least, some value.
 export class LimitEditor extends ObjectiveEditor {
-    get validMessage() {
+    get kindLabel() {
         return 'Valid limit';
     }
 }

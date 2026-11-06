@@ -1738,7 +1738,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningBounds label { display: flex; align-items: center; gap: 4px; color: #7d929c; }
 .parameterTuningBounds input { width: 84px; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
 .parameterTuningBounds .parameterTuningError { flex-basis: 100%; color: #e08a7d; }
-.parameterTuningConstraints { margin: 9px 0; }
+/* The objective's choices side by side above its formula, as an edge builder's are, and the kind as a compact toggle. */
+.parameterTuningObjectiveChoice { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 0 10px; align-items: end; }
+.parameterTuningObjectiveChoice .parameterTuningGoal { margin: 0; }
+.parameterTuningObjectiveChoice .parameterTuningGoal button { height: 29px; }
 .parameterTuningConstraints h3 button { padding: 0 6px; color: #7dbab5; background: transparent; border: 0; font-size: 12px; }
 .parameterTuningConstraintRow { margin-bottom: 8px; padding: 6px; background: #111f28; border: 1px solid #243640; border-radius: 4px; }
 .parameterTuningConstraintRow .parameterTuningConstraintBound { display: flex; gap: 6px; align-items: center; margin-top: 5px; }

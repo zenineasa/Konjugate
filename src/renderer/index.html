@@ -1092,12 +1092,15 @@
                 <div class="liveTwinActions"><button id="loggerRead" type="button" class="doneButton">Read the file</button></div>
                 <div id="loggerStatus" class="equationDiagnostics" role="status"></div>
             </section>
-            <section id="parameterTuningObjectiveSection" hidden>
-                <label class="editorField"><span>Goal</span><select id="parameterTuningDirection"><option value="minimise">Minimise</option><option value="maximise">Maximise</option></select></label>
-                <div id="parameterTuningObjectiveKind" class="parameterTuningGoal" role="group" aria-label="How the objective is written">
-                    <button type="button" data-objective-kind="expression" aria-pressed="true">Expression</button>
-                    <button type="button" data-objective-kind="cpp" aria-pressed="false">C++ program</button>
-                    <button type="button" data-objective-kind="python" aria-pressed="false">Python program</button>
+            <div id="parameterTuningObjectiveSection" hidden>
+            <section>
+                <div class="parameterTuningObjectiveChoice">
+                    <label class="editorField"><span>Goal</span><select id="parameterTuningDirection"><option value="minimise">Minimise</option><option value="maximise">Maximise</option></select></label>
+                    <div class="editorField"><span>Written as</span><div id="parameterTuningObjectiveKind" class="parameterTuningGoal" role="group" aria-label="How the objective is written">
+                        <button type="button" data-objective-kind="expression" aria-pressed="true">Expression</button>
+                        <button type="button" data-objective-kind="cpp" aria-pressed="false">C++</button>
+                        <button type="button" data-objective-kind="python" aria-pressed="false">Python</button>
+                    </div></div>
                 </div>
                 <div id="parameterTuningProgramPart" hidden>
                     <h3>Objective program</h3>
@@ -1120,15 +1123,22 @@
                 <div class="referencePicker"><span>States</span><div id="parameterTuningStateChips"></div></div>
                 <div class="referencePicker"><span>Parameters</span><div id="parameterTuningParameterChips"></div></div>
                 <div id="parameterTuningMeasuredPicker" class="referencePicker" hidden><span>Measured data</span><div id="parameterTuningMeasuredChips"></div></div>
-                <div class="parameterTuningConstraints">
-                    <h3>Limits <button id="addParameterTuningConstraint" type="button" title="Add a limit">＋</button></h3>
-                    <p class="builderHint">Keep a number from the run within a bound. Breaking one is penalised, so the search settles inside it when it can.</p>
-                    <div id="parameterTuningConstraintRows"></div>
+            </section>
+            <section class="parameterTuningConstraints">
+                <h3>Limits <button id="addParameterTuningConstraint" type="button" title="Add a limit">＋</button></h3>
+                <p class="builderHint">Keep a number from the run within a bound. Breaking one is penalised, so the search settles inside it when it can.</p>
+                <div id="parameterTuningConstraintRows"></div>
+            </section>
+            <section>
+                <h3>Each trial</h3>
+                <p class="builderHint">Every set of values the search tries is one simulation of this length.</p>
+                <div class="liveTwinFields">
+                    <label class="editorField"><span>Runs for (s)</span><input id="parameterTuningRunTime" type="number" min="0" step="any" value="1" aria-label="Each simulation runs for (s)"></label>
+                    <label class="editorField"><span>Time step (s)</span><input id="parameterTuningTimeStep" type="number" min="0" step="any" value="1"></label>
                 </div>
-                <label class="editorField"><span>Each simulation runs for (s)</span><input id="parameterTuningRunTime" type="number" min="0" step="any" value="1"></label>
-                <label class="editorField"><span>Time step (s)</span><input id="parameterTuningTimeStep" type="number" min="0" step="any" value="1"></label>
                 <div id="parameterTuningObjectiveStatus" class="equationDiagnostics" role="status"></div>
             </section>
+            </div>
             <section id="parameterTuningMappingSection" hidden>
                 <h3>Column mapping</h3>
                 <p class="builderHint">Each column is matched to an existing state by exact name -- read-only for now; rename a CSV column or a state's symbol/name to change a match.</p>
@@ -1218,8 +1228,10 @@
                 <div id="parameterTuningParameterRows"></div>
                 <div id="parameterTuningTuneHint" class="equationDiagnostics" role="status"></div>
                 <label class="editorField"><span>Optimizer</span><select id="parameterTuningBackend"></select></label>
-                <label class="editorField"><span>Simulations (at most)</span><input id="parameterTuningMaxSimulations" type="number" min="1" step="1" value="200"></label>
-                <label class="editorField"><span>Time limit (minutes, optional)</span><input id="parameterTuningMaxMinutes" type="number" min="0" step="any" placeholder="No limit"></label>
+                <div class="liveTwinFields">
+                    <label class="editorField"><span>Simulations (at most)</span><input id="parameterTuningMaxSimulations" type="number" min="1" step="1" value="200"></label>
+                    <label class="editorField"><span>Time limit (minutes)</span><input id="parameterTuningMaxMinutes" type="number" min="0" step="any" placeholder="No limit" aria-label="Time limit (minutes, optional)"></label>
+                </div>
             </section>
             <section id="parameterTuningProgressSection" hidden>
                 <h3 id="parameterTuningProgressTitle">Fitting…</h3>

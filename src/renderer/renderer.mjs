@@ -8688,7 +8688,7 @@ function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = 
         mathField, source, diagnostics, canEdit: () => !parameterTuningRun, checkWithEngine: checkParameterTuningText,
         onVerdict: () => refreshParameterTuningRunnable(), onInput: () => editor.diagnose()
     });
-    editor.setNames(parameterTuningState?.vocabulary?.variables.map((variable) => variable.name) ?? []);
+    editor.setNames(parameterTuningState?.vocabulary?.variables.map((variable) => variable.name) ?? [], objectiveNameLabels(parameterTuningState?.vocabulary));
     editor.setMode(parameterTuningObjective.mode);
     for (const field of [mathField, source]) field.addEventListener('focusin', () => { parameterTuningEditor = editor; });
     const entry = { row, editor, relationSelect, limitInput };
@@ -8735,8 +8735,19 @@ function refreshParameterTuningObjectiveButtons() {
     if (parameterTuningProgram.language) renderParameterTuningProgramBindings();
     $('#parameterTuningMeasuredPicker').hidden = !vocabulary.measured.length;
     const names = vocabulary.variables.map((variable) => variable.name);
-    parameterTuningObjective.setNames(names);
-    parameterTuningLimits.forEach((limit) => limit.editor.setNames(names));
+    const labels = objectiveNameLabels(vocabulary);
+    parameterTuningObjective.setNames(names, labels);
+    parameterTuningLimits.forEach((limit) => limit.editor.setNames(names, labels));
+}
+
+// How the sentence under an objective calls each name: as its chip does.
+function objectiveNameLabels(vocabulary) {
+    if (!vocabulary) return new Map();
+    return new Map([
+        ...vocabulary.states.map((state) => [state.name, state.label]),
+        ...vocabulary.parameters.map((parameter) => [parameter.name, parameter.label]),
+        ...vocabulary.measured.map((column) => [column.name, `measured ${column.label}`])
+    ]);
 }
 
 function startParameterTuningObjective() {
@@ -8748,7 +8759,8 @@ function startParameterTuningObjective() {
     $('#parameterTuningRunTime').value = String(runLaunchSettings.targetTime);
     $('#parameterTuningTimeStep').value = String(configuration?.globalTimeStep ?? 1);
     parameterTuningObjective.load('');
-    parameterTuningObjective.showVerdict(false, '');
+    // As an edge builder does: the line under an empty formula says what is wanted, before anything is typed.
+    parameterTuningObjective.showVerdict(false, 'Enter an objective: one number from the run, using the buttons below.');
     setParameterTuningObjectiveKind('expression');
     $('#parameterTuningProgramSource').value = '';
     parameterTuningProgram.bindings = [];

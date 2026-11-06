@@ -15,6 +15,8 @@
 * [Guided Tour](guidedTour.md) - An optional, skippable first-model tour for the desktop and web editions, offered on first launch and from the Welcome window
 * [Parameter Tuning Objectives](parameterTuningObjectives.md) - Tuning against a user-written objective (minimise or maximise) as well as measured data, and progress, estimates and stop-and-keep-best while a tuning runs
 * [Tuning Editors and Programs](tuningEditorsAndPrograms.md) - The tuning objective in the shared equation editor, objectives written as C++ or Python programs, and the shared classes behind both
+* [Digital Twin Connections](digitalTwinConnections.md) - How a running model reads the data a lab already records: Konjugate as a client of the lab's files, broker or server, the engine work that comes first, detaching into a sandbox, and proving it on a real recording
+* [Prediction-Actual Comparison Window](predictionActualWindow.md) - A moving window in which a running model is reset to the measurements each time it moves, drift is watched through the size of those resets, and the speed budget keeps the model ahead of the data
 * [Package Compatibility](packageCompatibility.md) - Minimum Konjugate version for packages, and installing the newest release the running app can use
 * [Toolbox Mechanisms and Design Optimisation](toolboxMechanismsAndDesignOptimisation.md) - Toolbox-owned regions of a model rebuilt by merging, providers that solve a group of nodes and edges together, and optimisation towards a design objective with constraints
 * [Model Ownership](modelOwnership.md) - Owner, copyright, license and contact details saved inside a project, with per-user defaults, a per-save override, export mapping and the privacy policy changes they need

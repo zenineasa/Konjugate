@@ -67,7 +67,8 @@ export async function listenToBroker(url, { seconds = 3, filter = '#', options =
 // Follows topics as signals. signals: [{ topic, name, role, unit }]. onHeader(header) is called once, at once; onObservations
 // with each batch of readings (gathered for `batchMilliseconds`, so a burst becomes one batch); onError if the connection fails.
 export function followMqtt(url, { signals, options = {}, onHeader = () => {}, onObservations = () => {}, onError = () => {}, batchMilliseconds = 20, now = () => Date.now(), connect = mqtt.connectAsync }) {
-    const epoch = now();
+    // On a whole second, so readings stamped on whole seconds come out as exact times, not 60.0000000000018.
+    const epoch = Math.floor(now() / 1000) * 1000;
     const byTopic = new Map(signals.map((signal) => [signal.topic, signal]));
     const header = Object.freeze({
         version: 1, source: url, epoch,
@@ -80,7 +81,9 @@ export function followMqtt(url, { signals, options = {}, onHeader = () => {}, on
     const flush = () => {
         timer = null;
         if (!pending.length) return;
-        const batch = pending;
+        // Put in time order: a source can deliver several signals' readings together, grouped by signal rather than by time (an
+        // OPC UA server's notifications are), and what follows (a move, a recording) needs them in the order they were measured.
+        const batch = pending.sort((a, b) => a.time - b.time);
         pending = [];
         onObservations(batch, now());
     };

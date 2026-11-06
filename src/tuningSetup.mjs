@@ -60,6 +60,10 @@ function normalizeReplaySetup(raw) {
         .map((entry) => ({ signal: entry.signal, role: entry.role, target: Number.isSafeInteger(entry.target) && entry.target > 0 ? entry.target : null }));
     replay.tolerances = Object.fromEntries(Object.entries(raw.tolerances && typeof raw.tolerances === 'object' ? raw.tolerances : {})
         .filter(([, value]) => finitePositive(value)).map(([signal, value]) => [signal, Number(value)]));
+    // How the live twin brings each measured state back in step: a gain from 0 (watch only) to 1 (reset to the reading).
+    const corrections = Object.entries(raw.corrections && typeof raw.corrections === 'object' ? raw.corrections : {})
+        .filter(([, value]) => typeof value === 'number' && value >= 0 && value <= 1);
+    if (corrections.length) replay.corrections = Object.fromEntries(corrections);
     // How another logger's file was read (src/loggerCsv.mjs): kept as it was given, and checked when it is used.
     if (raw.logger && typeof raw.logger === 'object' && raw.logger.time && Array.isArray(raw.logger.signals)) replay.logger = structuredClone(raw.logger);
     if (raw.live && typeof raw.live === 'object') {

@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { Aedes } from 'aedes';
 import mqtt from 'mqtt';
 import { readDataLog } from '../src/dataLog.mjs';
+import { startRigServer } from './fixtures/opcuaRigServer.mjs';
 
 // These 10 primitives, and every scenario below, operate on a "handle" -- a driver-produced
 // object wrapping either a live Electron BrowserWindow (tests/drivers/electronWindowDriver.mjs)
@@ -4663,6 +4664,17 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`), /^The whole log has been played: 31 moves/);
         assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /no drift/);
         assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().goal`), 'replay', 'How the log was replayed is kept with the project.');
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinObserved').textContent`), /^The readings reach Water tank · Water temperature\. The model carries .* alone, unchecked by any reading\.$/, 'The card says which states the data reaches.');
+
+        // Watched only: after the first move the model runs on unaided, and the choice is kept with the project.
+        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'watch');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The watched live twin did not play the whole log.', 60000);
+        assert.equal((await evaluate(opened, `window.__debugParameterTuning.liveTwin()`)).last.corrections.tankTemperature.reason, 'watched only');
+        assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().replay.corrections.tankTemperature`), 0);
+        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'nudge');
+        assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="gain"]').hidden`), false, 'A nudge asks how far.');
+        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'reset');
 
         // At an hour a second, detach part way, switch the heater off and run ahead; back to live keeps what was tried as a draft.
         await set('#liveTwinSpeed', '3600');
@@ -4822,6 +4834,72 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    await run('a live twin follows an OPC UA server: the server trusted when asked, its tags browsed with their units, and what arrives recorded', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-opcua-'));
+        const server = await startRigServer({ pkiFolder: join(directory, 'serverPki') });
+        // The PLC: a minute of the tank every 75 ms, each reading stamped with when it was measured.
+        const epoch = Math.floor(Date.now() / 1000) * 1000;
+        const capacitance = 209000, heatLoss = 20, ambient = 293.15;
+        let minute = 0;
+        let temperature = ambient;
+        server.set('HeaterPower', 1000, new Date(epoch));
+        server.set('TankTemperature', temperature, new Date(epoch));
+        const reporting = setInterval(() => {
+            minute += 1;
+            const settled = ambient + 1000 / heatLoss;
+            temperature = settled + (temperature - settled) * Math.exp(-heatLoss * 60 / capacitance);
+            server.set('TankTemperature', temperature, new Date(epoch + minute * 60000));
+        }, 75);
+        try {
+            const projectPath = join(directory, 'rig.kjt');
+            await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+            const before = driver.allHandles();
+            await driver.simulateOsFileOpen(projectPath);
+            const opened = await driver.waitForNewHandle(before);
+            await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+            await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+            await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+            await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
+            assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningOpcUa').hidden`), false, 'The replay goal offers an OPC UA server.');
+            const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await set('#parameterTuningOpcUaUrl', server.url);
+            await set('#parameterTuningOpcUaSecurity', 'signAndEncrypt');
+            // Signed and encrypted: the server's certificate is new to this computer, so the person is asked, and says yes.
+            await evaluate(opened, `(() => { window.__asked = []; window.confirm = (message) => { window.__asked.push(message); return true; }; })()`);
+            await evaluate(opened, `document.querySelector('#parameterTuningOpcUaBrowse').click()`);
+            await waitFor(opened, `/^Found \\d+ tags/.test(document.querySelector('#parameterTuningOpcUaStatus').textContent)`, 'Browsing the server did not find its tags.', 30000);
+            assert.match((await evaluate(opened, `window.__asked`))[0] ?? '', /does not trust yet/, 'The person was asked before the server was trusted.');
+            const tag = (path) => `#parameterTuningOpcUaTags .sourceSignalChoice[data-id="${server.nodeId(path)}"]`;
+            assert.match(await evaluate(opened, `document.querySelector('${tag('TankTemperature')} small').textContent`), / K, 250 to 400/, 'The unit and range the server gives are shown.');
+            assert.equal(await evaluate(opened, `document.querySelector('${tag('TankTemperature')} input[data-field="unit"]').value`), 'K');
+            await set(`${tag('HeaterPower')} select`, 'input');
+            await set(`${tag('HeaterPower')} input[data-field="name"]`, 'heaterPower');
+            await set(`${tag('TankTemperature')} select`, 'output');
+            await set(`${tag('TankTemperature')} input[data-field="name"]`, 'tankTemperature');
+            await evaluate(opened, `document.querySelector('#parameterTuningOpcUaUse').click()`);
+            await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The tags did not set the card up.');
+            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), true, 'A server is followed, not replayed.');
+            assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] select').value`), '2');
+            await set('#parameterTuningReplayTimeStep', '60');
+            await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the server.', 60000);
+            await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
+            await waitFor(opened, `/recorded in .*recordings/.test(document.querySelector('#liveTwinStatus').textContent)`, 'Stopping did not say where the readings were recorded.', 15000);
+            const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
+            const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
+            // The subscription starts with each tag's value as it is then (the PLC ran on while the tags were chosen), and from there
+            // every reading is recorded: a minute apart, none missing.
+            const times = recorded.observations.filter((observation) => observation.signal === 'tankTemperature').map((observation) => observation.time);
+            assert.ok(times.length >= 20, `The recording holds what arrived: ${times.length} readings.`);
+            assert.ok(times.every((time, index) => index === 0 || Math.abs(time - times[index - 1] - 60) < 1e-6), 'Every reading from the first to the last is recorded, a minute apart.');
+            await evaluate(opened, `window.confirm = () => true; undefined`);
+            await closeWhenValidated(opened);
+        } finally {
+            clearInterval(reporting);
+            await server.shutdown();
+        }
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
     await run('a live twin follows an MQTT broker: listening finds the topics, and what arrives is recorded', async () => {
         // A broker in this process, and a gateway publishing the tank's readings as a lab's would: one topic each, JSON with the
         // reading's own time, a minute of the tank every 20 ms, for as long as the test needs.
@@ -4861,7 +4939,7 @@ export async function runInteractionTests(driver) {
             await set('#parameterTuningMqttUrl', url);
             await evaluate(opened, `document.querySelector('#parameterTuningMqttListen').click()`);
             await waitFor(opened, `/^Heard 2 topics/.test(document.querySelector('#parameterTuningMqttStatus').textContent)`, 'Listening did not find the two topics.', 15000);
-            const topic = (name) => `#parameterTuningMqttTopics .parameterTuningMqttTopic[data-topic="${name}"]`;
+            const topic = (name) => `#parameterTuningMqttTopics .sourceSignalChoice[data-id="${name}"]`;
             await set(`${topic('lab/rig/heater/power')} select`, 'input');
             await set(`${topic('lab/rig/heater/power')} input[data-field="name"]`, 'heaterPower');
             await set(`${topic('lab/rig/tank/temperature')} select`, 'output');

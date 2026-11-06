@@ -2032,10 +2032,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningMqtt { margin-top: 8px; font-size: 10px; color: #b8c7ce; }
 .parameterTuningMqtt[hidden] { display: none; }
 .parameterTuningMqtt summary { cursor: pointer; color: #9fb6c0; }
-.parameterTuningMqttTopic { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 54px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #243640; font-size: 9px; }
-.parameterTuningMqttTopic > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.parameterTuningMqttTopic small { display: block; color: #7d929c; }
-.parameterTuningMqttTopic select, .parameterTuningMqttTopic input { min-width: 0; padding: 3px 4px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.sourceSignalChoice { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 54px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #243640; font-size: 9px; }
+.sourceSignalChoice > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sourceSignalChoice small { display: block; color: #7d929c; }
+.sourceSignalChoice select, .sourceSignalChoice input { min-width: 0; padding: 3px 4px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
 
 .parameterTuningProgramHeading { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; font-size: 10px; }
 .parameterTuningProgramHeading button, .parameterTuningProgramBinding button { padding: 1px 7px; color: #d6e4ea; background: #13232d; border: 1px solid #2b3d48; border-radius: 3px; }

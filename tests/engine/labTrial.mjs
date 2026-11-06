@@ -145,7 +145,7 @@ try {
     });
     assert.equal(await writerDone, 0, writerErrors);
     await follower.stop();
-    await session.idle();
+    await session.end();
     const cycles = session.cycles;
     await session.close();
     assert.equal(cycles.length, Math.floor((8 * hour - hour) / 600) + 1, 'Every move was made from the logger\'s file as it grew.');

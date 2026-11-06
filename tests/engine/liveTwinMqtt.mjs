@@ -71,8 +71,10 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 200)); // subscribed
     // The gateway sends what the rig logged, in the order it was logged.
     for (const observation of log.observations) await publish(observation);
-    for (let waited = 0; waited < 10000 && events.filter((event) => event.type === 'cycle').length < 31; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
-    await twin.session.idle();
+    // Every reading in (a broker or a server never says it has finished), then the data is complete.
+    const lastTime = Math.max(...log.observations.map((observation) => observation.time)) - log.observations[0].time;
+    for (let waited = 0; waited < 60000 && twin.session.latestTime < lastTime; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+    await twin.session.end();
     const liveCycles = twin.session.cycles;
     await twin.stop();
     assert.equal(events.filter((event) => event.type === 'cycle').length, 31, 'Every move was made from the broker\'s readings.');
@@ -87,7 +89,7 @@ try {
     // The same moves as a twin fed the rig's own log.
     const direct = new WindowSession({ ...settings, header: log.header, engineOptions });
     direct.push(log.observations);
-    await direct.idle();
+    await direct.end();
     const outcome = (cycles) => cycles.map(({ anchor, now, jumps, window, forecast, restored }) => JSON.stringify({ anchor, now, jumps, window, forecast, restored }));
     assert.deepEqual(outcome(liveCycles), outcome(direct.cycles), 'Through the broker or from the file, the moves are the same.');
     await direct.close();

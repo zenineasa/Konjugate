@@ -41,6 +41,7 @@ export class EngineSession {
     #samples = [];
     #diagnostics = '';
     #stateTable = null;
+    #algebraicStateIds = [];
     #ready;
     #exited;
     #ended = false;
@@ -76,6 +77,9 @@ export class EngineSession {
                 for (const event of this.#decoder.append(chunk)) {
                     if (event.stateTable && !this.#stateTable) {
                         this.#stateTable = event.stateTable;
+                    } else if (event.sessionInfo) {
+                        // Sent once, after the state table: the session is ready.
+                        this.#algebraicStateIds = event.sessionInfo.algebraicStateIds;
                         readyResolve();
                     } else if (event.sampleBatch) {
                         const { times, stateCount, values } = event.sampleBatch;
@@ -104,6 +108,8 @@ export class EngineSession {
     get stateIds() { return this.#stateTable; }
     get reportedStateIds() { return this.configuration.reportedStateIds ?? this.#stateTable; }
     get alive() { return !this.#ended; }
+    // The states the model computes from others: they can be compared with a measurement, never set to one.
+    get algebraicStateIds() { return this.#algebraicStateIds; }
     // The engine process's id, to watch its memory or tell it apart in a process list.
     get pid() { return this.#child.pid; }
 

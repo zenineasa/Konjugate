@@ -8,6 +8,8 @@
 //                                         (Infinity for as fast as it can go)
 //   { kind: 'mqtt', url, signals, recordTo } topics on an MQTT broker, each a signal (src/mqttSource.mjs); since a broker keeps no
 //                                         history, what arrives is also written to a data log at `recordTo`, to replay later
+//   { kind: 'opcua', url, signals, security, pkiFolder, trustServer, recordTo }  tags on an OPC UA server (src/opcuaSource.mjs),
+//                                         recorded the same way
 //
 // Events, each { type, ... }: 'cycle' with what a cycle found and the session's figures, 'ended' when a recording has been played
 // through or the twin was stopped, 'error' with the reason it stopped. A detached sandbox is reached through the same host.
@@ -17,6 +19,7 @@ import { LoggerCsvReader, readLoggerCsv } from './loggerCsv.mjs';
 import { followDataLog } from './dataLogFollower.mjs';
 import { DataLogWriter } from './dataLogWriter.mjs';
 import { followMqtt } from './mqttSource.mjs';
+import { followOpcUa } from './opcuaSource.mjs';
 import { WindowSession } from './windowSession.mjs';
 
 // What a window needs of a cycle, kept small: the jumps, the comparison in the window, the forecast and the trend.
@@ -25,6 +28,7 @@ export function cycleEvent(cycle, stats) {
         type: 'cycle',
         cycle: {
             index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, wallSeconds: cycle.wallSeconds,
+            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved,
             // Each input's last reading up to now, for a sandbox to start its controls from.
             inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null]))
         },
@@ -80,7 +84,7 @@ export class LiveTwin {
     #onEvent;
     #stopped = false;
 
-    // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt }; source as above.
+    // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt, corrections }; source as above.
     constructor(settings, source, engineOptions, onEvent) {
         this.settings = settings;
         this.engineOptions = engineOptions;
@@ -105,18 +109,21 @@ export class LiveTwin {
             this.#source = playRecording(source.content, source.speed ?? Infinity, {
                 onHeader, onObservations, logger: source.logger ?? null,
                 onEnd: () => {
-                    this.#session?.idle().then(() => { if (!this.#stopped) this.#onEvent({ type: 'ended', stats: this.#session.stats(), reason: 'played' }); })
+                    this.#session?.end().then(() => { if (!this.#stopped) this.#onEvent({ type: 'ended', stats: this.#session.stats(), reason: 'played' }); })
                         .catch((error) => this.#fail(error));
                 }
             });
-        } else if (source.kind === 'mqtt') {
+        } else if (source.kind === 'mqtt' || source.kind === 'opcua') {
+            // A broker and an OPC UA server keep no history: what arrives is also written to a data log, to replay later.
             let recording = null;
-            this.#source = followMqtt(source.url, {
-                signals: source.signals, options: source.options,
+            const follow = source.kind === 'mqtt' ? followMqtt : followOpcUa;
+            const label = source.kind === 'mqtt' ? 'MQTT' : 'OPC UA';
+            this.#source = follow(source.url, {
+                signals: source.signals, options: source.options, security: source.security, pkiFolder: source.pkiFolder, trustServer: source.trustServer,
                 onHeader: (header) => {
                     onHeader(header);
                     if (source.recordTo) {
-                        recording = DataLogWriter.create(source.recordTo, { source: `MQTT ${source.url}`, epoch: header.epoch, signals: header.signals }).catch((error) => { this.#fail(error); return null; });
+                        recording = DataLogWriter.create(source.recordTo, { source: `${label} ${source.url}`, epoch: header.epoch, signals: header.signals }).catch((error) => { this.#fail(error); return null; });
                         this.#recording = recording;
                     }
                 },
@@ -128,7 +135,7 @@ export class LiveTwin {
             });
             this.recordedTo = source.recordTo ?? null;
         } else {
-            throw new Error('A live twin reads a followed file, a recording, or an MQTT broker.');
+            throw new Error('A live twin reads a followed file, a recording, an MQTT broker or an OPC UA server.');
         }
     }
 

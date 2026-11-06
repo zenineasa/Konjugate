@@ -79,6 +79,7 @@
         "aedes": "^1.2.0",
         "electron": "^43.8.3",
         "js-yaml": "^5.4.3",
+        "node-opcua-server": "^2.187.23",
         "playwright": "^1.64.0",
         "protobufjs-cli": "^2.7.1"
     },
@@ -96,6 +97,8 @@
         "fflate": "0.8.3",
         "mathlive": "^0.110.0",
         "mqtt": "^5.16.1",
+        "node-opcua-certificate-manager": "^2.187.23",
+        "node-opcua-client": "^2.187.23",
         "occt-import-js": "^0.0.23",
         "plotly.js-dist-min": "^3.7.0",
         "protobufjs": "^8.8.1",

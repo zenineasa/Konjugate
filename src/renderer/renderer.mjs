@@ -8588,6 +8588,7 @@ function setParameterTuningGoalUi(goal) {
     $('#parameterTuningObjectiveSection').hidden = goal !== 'objective';
     $('#parameterTuningParametersSection').hidden = goal === 'replay';
     $('#parameterTuningMqtt').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
+    $('#parameterTuningOpcUa').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
     $('#parameterTuningObjectiveStatus').textContent = '';
 }
 
@@ -9084,7 +9085,9 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
         const good = latestReadings(log.observations, entry.signal).filter((reading) => reading.quality !== 'bad');
         return [entry.signal, good.length ? defaultTolerance(good) : 1];
     }));
-    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, lastRun: null, running: false, path: null, source };
+    // How the live twin brings each measured state back in step at a move: a gain from 0 (watch only) to 1 (reset to the reading).
+    const corrections = new Map(mapping.filter((entry) => entry.role === 'output').map((entry) => [entry.signal, 1]));
+    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, corrections, lastRun: null, running: false, path: null, source };
     $('#parameterTuningReplayTimeStep').value = String(suggestedReplayTimeStep(document_, log.observations, mapping));
     applySavedReplaySetup(parameterTuningReplay);
     // Not first and last: a correction comes later in the file than the row it corrects.
@@ -9099,14 +9102,14 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
     const inputs = mapping.filter((entry) => entry.role === 'input');
     status.className = 'equationDiagnostics valid';
     status.textContent = `${note}${log.header.signals.length} signal${log.header.signals.length === 1 ? '' : 's'}`
-        + (source?.kind === 'mqtt' ? ` from ${source.url}, followed as they arrive` : `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`)
+        + (source?.kind === 'mqtt' || source?.kind === 'opcua' ? ` from ${source.url}, followed as they arrive` : `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`)
         + `. Matched ${matched} of ${mapping.length} by name; change any below.`
         + (inputs.length && !targets.parameters.length ? ' The model has no shared parameters, so its inputs cannot follow the log: make a parameter shared to drive it from a recording.' : '');
     renderParameterTuningReplayRows();
     $('#parameterTuningReplaySection').hidden = false;
     // A broker's readings are followed, not replayed: there is nothing recorded yet to replay, or to calibrate on.
-    $('#runParameterTuningReplay').hidden = source?.kind === 'mqtt';
-    $('#replayCalibrate').hidden = source?.kind === 'mqtt';
+    $('#runParameterTuningReplay').hidden = source?.kind === 'mqtt' || source?.kind === 'opcua';
+    $('#replayCalibrate').hidden = source?.kind === 'mqtt' || source?.kind === 'opcua';
     refreshParameterTuningReplayRunnable();
     refreshLiveTwinControls();
     renderLiveTwinScenarios();
@@ -9175,10 +9178,48 @@ function renderParameterTuningReplayRows() {
                 if (replay.lastRun) renderParameterTuningReplayOutcome();
             });
             tolerance.append(text, input, unit);
-            row.append(tolerance);
+            row.append(tolerance, correctionChoice(replay, entry));
         }
         return row;
     }));
+}
+
+// How the live twin brings a measured state back in step at each move: reset to the reading, nudged part of the way to it, or
+// watched only, with the model running on unaided (docs/proposals/predictionActualWindow.md, step 4).
+function correctionChoice(replay, entry) {
+    const label = document.createElement('label');
+    label.className = 'parameterTuningReplayTolerance';
+    const text = document.createElement('span');
+    text.textContent = 'at each move';
+    const select = document.createElement('select');
+    select.dataset.field = 'correction';
+    select.setAttribute('aria-label', `How the live twin brings ${entry.signal} back in step at each move`);
+    select.append(new Option('reset to the reading', 'reset'), new Option('nudge toward it by', 'nudge'), new Option('watch only', 'watch'));
+    const gain = document.createElement('input');
+    gain.type = 'number';
+    gain.min = '0.05';
+    gain.max = '0.95';
+    gain.step = '0.05';
+    gain.dataset.field = 'gain';
+    gain.setAttribute('aria-label', `The fraction of the way to the reading ${entry.signal} is nudged`);
+    const show = () => {
+        const value = replay.corrections.get(entry.signal) ?? 1;
+        select.value = value === 1 ? 'reset' : value === 0 ? 'watch' : 'nudge';
+        gain.hidden = select.value !== 'nudge';
+        if (select.value === 'nudge') gain.value = String(value);
+    };
+    select.addEventListener('change', () => {
+        replay.corrections.set(entry.signal, select.value === 'reset' ? 1 : select.value === 'watch' ? 0 : 0.3);
+        show();
+    });
+    gain.addEventListener('change', () => {
+        const value = Number(gain.value);
+        if (value > 0 && value < 1) replay.corrections.set(entry.signal, value);
+        show();
+    });
+    show();
+    label.append(text, select, gain);
+    return label;
 }
 
 function clearParameterTuningReplayOutcome(message = '') {
@@ -9276,6 +9317,7 @@ function rememberReplaySetup() {
             ...(replay.source?.kind === 'logger' ? { logger: replay.source.settings } : {}),
             mapping: replay.mapping.map((entry) => ({ signal: entry.signal, role: entry.role, target: entry.role === 'input' ? entry.parameterId : entry.stateId })),
             tolerances: Object.fromEntries(replay.tolerances),
+            corrections: Object.fromEntries(replay.corrections),
             live: { window: Number($('#liveTwinWindow').value), stride: Number($('#liveTwinStride').value), horizon: Number($('#liveTwinHorizon').value), speed: $('#liveTwinSpeed').value }
         }
     });
@@ -9301,6 +9343,7 @@ function applySavedReplaySetup(replay) {
         else entry.stateId = kept.target;
     }
     for (const [signal, tolerance] of Object.entries(saved.tolerances)) if (replay.tolerances.has(signal)) replay.tolerances.set(signal, tolerance);
+    for (const [signal, gain] of Object.entries(saved.corrections ?? {})) if (replay.corrections.has(signal)) replay.corrections.set(signal, gain);
     if (saved.timeStep) $('#parameterTuningReplayTimeStep').value = String(saved.timeStep);
     $('#parameterTuningReplayAnchor').checked = saved.anchor;
     if (saved.live?.window) $('#liveTwinWindow').value = String(saved.live.window);
@@ -9319,9 +9362,9 @@ function refreshLiveTwinControls() {
     const replay = parameterTuningReplay;
     const running = Boolean(liveTwinState?.running);
     const follow = $('#liveTwinSpeed option[value="follow"]');
-    const broker = replay?.source?.kind === 'mqtt';
+    const broker = replay?.source?.kind === 'mqtt' || replay?.source?.kind === 'opcua';
     follow.disabled = !replay?.path && !broker;
-    follow.textContent = broker ? 'As they arrive from the broker' : replay?.path ? 'As the file grows' : 'As the file grows (choose the log from disk)';
+    follow.textContent = broker ? (replay.source.kind === 'opcua' ? 'As the server reports them' : 'As they arrive from the broker') : replay?.path ? 'As the file grows' : 'As the file grows (choose the log from disk)';
     if (broker) $('#liveTwinSpeed').value = 'follow';
     for (const option of $('#liveTwinSpeed').options) if (option.value !== 'follow') option.disabled = broker;
     if (follow.disabled && $('#liveTwinSpeed').value === 'follow') $('#liveTwinSpeed').value = '3600';
@@ -9343,7 +9386,18 @@ function clearLiveTwinView() {
     $('#liveTwinNote').textContent = '';
     $('#liveTwinTrend').textContent = '';
     $('#liveTwinTrend').classList.remove('leaning');
+    $('#liveTwinObserved').textContent = '';
     $('#liveTwinSandbox').hidden = true;
+}
+
+// Which states the readings reach and which the model carries alone, and any measured state the model computes, so is never set.
+function liveTwinObservedText(cycle) {
+    const label = (stateId) => parameterTuningReplay?.targets.states.find((state) => state.stateId === stateId)?.label ?? `state ${stateId}`;
+    const list = (ids) => ids.map(label).join(', ');
+    const computed = Object.entries(cycle.corrections ?? {}).filter(([, correction]) => /^computed/.test(correction.reason ?? '')).map(([signal]) => signal);
+    return `The readings reach ${list(cycle.observed)}.`
+        + (cycle.unobserved.length ? ` The model carries ${list(cycle.unobserved)} alone, unchecked by any reading.` : '')
+        + (computed.length ? ` ${computed.join(', ')} ${computed.length === 1 ? 'is' : 'are'} computed by the model from other states, so compared at every move but never set.` : '');
 }
 
 async function startLiveTwin() {
@@ -9358,10 +9412,12 @@ async function startLiveTwin() {
         mapping: replay.mapping.map((entry) => ({ ...entry })),
         window: minutes('#liveTwinWindow'), stride: minutes('#liveTwinStride'), horizon: minutes('#liveTwinHorizon'),
         timeStep: Number($('#parameterTuningReplayTimeStep').value),
-        tolerances: Object.fromEntries(replay.tolerances)
+        tolerances: Object.fromEntries(replay.tolerances),
+        corrections: Object.fromEntries([...replay.corrections].filter(([, gain]) => gain !== 1).map(([signal, gain]) => [signal, { gain }]))
     };
     const logger = replay.source?.kind === 'logger' ? replay.source.settings : undefined;
     const source = replay.source?.kind === 'mqtt' ? { kind: 'mqtt', url: replay.source.url, signals: replay.source.signals }
+        : replay.source?.kind === 'opcua' ? { kind: 'opcua', url: replay.source.url, signals: replay.source.signals, security: replay.source.security, trustServer: replay.source.trustServer }
         : speedChoice === 'follow' ? { kind: 'file', path: replay.path, logger }
             : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice), logger };
     clearLiveTwinView();
@@ -9369,7 +9425,7 @@ async function startLiveTwin() {
     rememberReplaySetup();
     refreshLiveTwinControls();
     status.className = 'equationDiagnostics';
-    status.textContent = source.kind === 'mqtt' ? `Following ${source.url}: waiting for a window's worth of readings…`
+    status.textContent = source.kind === 'mqtt' || source.kind === 'opcua' ? `Following ${source.url}: waiting for a window's worth of readings…`
         : speedChoice === 'follow' ? `Following ${replay.fileName} as it grows…` : 'Starting the live twin…';
     try {
         await window.engine.liveTwin.start(settings, source, currentProjectPath);
@@ -9444,6 +9500,7 @@ window.engine.liveTwin?.onEvent?.((update) => {
         const trend = liveTwinTrendText(cycle.trend, twin.outputs[0].unit);
         $('#liveTwinTrend').textContent = trend.text;
         $('#liveTwinTrend').classList.toggle('leaning', trend.leaning);
+        if (cycle.observed) $('#liveTwinObserved').textContent = liveTwinObservedText(cycle);
         refreshLiveTwinControls();
         scheduleLiveTwinDraw();
     } else if (update.type === 'ended') {
@@ -9505,55 +9562,122 @@ async function listenToMqttBroker() {
     }
 }
 
-function renderMqttTopics() {
-    $('#parameterTuningMqttTopics').replaceChildren(...mqttHeard.map((heard) => {
+// The signals a source offers (an MQTT broker's topics, an OPC UA server's tags), one row each: what it is, what it says, and the
+// role, name and unit to give it. One builder for every source, so each offers its signals the same way.
+function renderSignalChoices(container, entries, useButton) {
+    container.replaceChildren(...entries.map((entry) => {
         const row = document.createElement('div');
-        row.className = 'parameterTuningMqttTopic';
-        row.dataset.topic = heard.topic;
+        row.className = 'sourceSignalChoice';
+        row.dataset.id = entry.id;
         const label = document.createElement('span');
-        label.textContent = heard.topic;
-        const last = document.createElement('small');
-        last.textContent = heard.numeric ? `last ${heard.value}, ${heard.count}× heard` : `not a number: ${heard.last}`;
-        label.append(last);
+        label.textContent = entry.label;
+        const detail = document.createElement('small');
+        detail.textContent = entry.detail;
+        label.append(detail);
         const role = document.createElement('select');
         role.dataset.field = 'role';
-        role.setAttribute('aria-label', `What ${heard.topic} is`);
+        role.setAttribute('aria-label', `What ${entry.label} is`);
         role.append(new Option('Not used', ''), new Option('Input (what was done)', 'input'), new Option('Measured', 'output'));
-        role.disabled = !heard.numeric;
+        role.disabled = !entry.usable;
         const name = document.createElement('input');
         name.dataset.field = 'name';
-        name.value = suggestSymbol(heard.topic.split('/').filter(Boolean).slice(-2).join(' '));
-        name.setAttribute('aria-label', `Signal name for ${heard.topic}`);
+        name.value = entry.name;
+        name.setAttribute('aria-label', `Signal name for ${entry.label}`);
         const unit = document.createElement('input');
         unit.dataset.field = 'unit';
         unit.placeholder = 'unit';
-        unit.setAttribute('aria-label', `Unit of ${heard.topic}`);
+        unit.value = entry.unit ?? '';
+        unit.setAttribute('aria-label', `Unit of ${entry.label}`);
         row.append(label, role, name, unit);
-        role.addEventListener('change', () => { $('#parameterTuningMqttUse').hidden = !$$('#parameterTuningMqttTopics select').some((select) => select.value); });
+        role.addEventListener('change', () => { useButton.hidden = !$$('select[data-field="role"]', container).some((select) => select.value); });
         return row;
     }));
-    $('#parameterTuningMqttUse').hidden = true;
+    useButton.hidden = true;
+}
+
+// The rows given a role, as { id, role, name, unit }, or what is wrong with them.
+function chosenSignals(container) {
+    const signals = $$('.sourceSignalChoice', container).map((row) => ({
+        id: row.dataset.id, role: $('[data-field="role"]', row).value, name: $('[data-field="name"]', row).value.trim(), unit: $('[data-field="unit"]', row).value.trim()
+    })).filter((signal) => signal.role);
+    const badName = signals.find((signal) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(signal.name));
+    if (badName) return { error: `"${badName.name}" cannot name a signal: use letters, digits and underscores, starting with a letter.` };
+    if (new Set(signals.map((signal) => signal.name)).size !== signals.length) return { error: 'Each signal needs a name of its own.' };
+    return { signals };
+}
+
+// Sets the card up for a source with no recording to replay: its signals are followed as they arrive.
+function openLiveSource(source, url) {
+    resetParameterTuningReplay();
+    const header = { version: 1, source: url, epoch: null, signals: source.signals.map(({ name, unit, role }) => ({ name, unit, role })) };
+    openParameterTuningReplay({ header, observations: [] }, { fileName: url, source });
+}
+
+function renderMqttTopics() {
+    renderSignalChoices($('#parameterTuningMqttTopics'), mqttHeard.map((heard) => ({
+        id: heard.topic, label: heard.topic, detail: heard.numeric ? `last ${heard.value}, ${heard.count}× heard` : `not a number: ${heard.last}`,
+        usable: heard.numeric, name: suggestSymbol(heard.topic.split('/').filter(Boolean).slice(-2).join(' '))
+    })), $('#parameterTuningMqttUse'));
 }
 
 function useMqttTopics() {
-    const status = $('#parameterTuningMqttStatus');
     const url = $('#parameterTuningMqttUrl').value.trim();
-    const signals = $$('#parameterTuningMqttTopics .parameterTuningMqttTopic').map((row) => ({
-        topic: row.dataset.topic, role: $('[data-field="role"]', row).value, name: $('[data-field="name"]', row).value.trim(), unit: $('[data-field="unit"]', row).value.trim()
-    })).filter((signal) => signal.role);
-    const badName = signals.find((signal) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(signal.name));
-    if (badName) {
-        status.textContent = `"${badName.name}" cannot name a signal: use letters, digits and underscores, starting with a letter.`;
+    const { signals, error } = chosenSignals($('#parameterTuningMqttTopics'));
+    if (error) {
+        $('#parameterTuningMqttStatus').textContent = error;
         return;
     }
-    if (new Set(signals.map((signal) => signal.name)).size !== signals.length) {
-        status.textContent = 'Each topic needs a name of its own.';
-        return;
-    }
-    resetParameterTuningReplay();
-    const header = { version: 1, source: url, epoch: null, signals: signals.map(({ name, unit, role }) => ({ name, unit, role })) };
-    openParameterTuningReplay({ header, observations: [] }, { fileName: url, source: { kind: 'mqtt', url, signals } });
+    openLiveSource({ kind: 'mqtt', url, signals: signals.map(({ id, ...signal }) => ({ topic: id, ...signal })) }, url);
 }
+
+// Following an OPC UA server: browse its tags (with the unit and range it gives), choose them, and follow them as with a broker. A
+// server whose certificate this computer does not know is trusted only when the person says so.
+let opcUaTags = [];
+
+async function browseOpcUaServer(trustServer = false) {
+    const status = $('#parameterTuningOpcUaStatus');
+    const url = $('#parameterTuningOpcUaUrl').value.trim();
+    const security = $('#parameterTuningOpcUaSecurity').value;
+    const button = $('#parameterTuningOpcUaBrowse');
+    button.disabled = true;
+    status.className = 'equationDiagnostics';
+    status.textContent = `Browsing ${url}…`;
+    try {
+        const answer = await window.engine.liveTwin.browseOpcUa(url, security, trustServer);
+        if (answer.untrusted) {
+            status.textContent = answer.message;
+            if (window.confirm(`${answer.message}\n\nTrust this server's certificate?`)) return browseOpcUaServer(true);
+            return;
+        }
+        opcUaTags = answer.tags;
+        renderSignalChoices($('#parameterTuningOpcUaTags'), opcUaTags.map((tag) => ({
+            id: tag.nodeId, label: tag.path,
+            detail: `${tag.value ?? '—'}${tag.unit ? ` ${tag.unit}` : ''}${tag.range ? `, ${tag.range.low} to ${tag.range.high}` : ''}${tag.quality !== 'good' ? `, ${tag.quality}` : ''}`,
+            usable: tag.numeric, name: suggestSymbol(tag.path.split('/').slice(-1)[0]), unit: tag.unit
+        })), $('#parameterTuningOpcUaUse'));
+        status.className = 'equationDiagnostics valid';
+        status.textContent = opcUaTags.length ? `Found ${opcUaTags.length} tag${opcUaTags.length === 1 ? '' : 's'}. Say which are inputs and which are measured, then use them.` : 'The server has no tags to offer.';
+        if (parameterTuningReplay?.source?.kind === 'opcua') parameterTuningReplay.source.trustServer = trustServer;
+        opcUaTrusted = trustServer;
+    } catch (error) {
+        status.textContent = `Could not browse ${url}: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+    } finally {
+        button.disabled = false;
+    }
+}
+let opcUaTrusted = false;
+
+function useOpcUaTags() {
+    const url = $('#parameterTuningOpcUaUrl').value.trim();
+    const { signals, error } = chosenSignals($('#parameterTuningOpcUaTags'));
+    if (error) {
+        $('#parameterTuningOpcUaStatus').textContent = error;
+        return;
+    }
+    openLiveSource({ kind: 'opcua', url, security: $('#parameterTuningOpcUaSecurity').value, trustServer: opcUaTrusted, signals: signals.map(({ id, ...signal }) => ({ nodeId: id, ...signal })) }, url);
+}
+$('#parameterTuningOpcUaBrowse').addEventListener('click', () => browseOpcUaServer(false));
+$('#parameterTuningOpcUaUse').addEventListener('click', () => useOpcUaTags());
 
 $('#parameterTuningMqttListen').addEventListener('click', () => listenToMqttBroker());
 $('#parameterTuningMqttUse').addEventListener('click', () => useMqttTopics());
@@ -9834,7 +9958,7 @@ let replayCalibration = null;
 async function calibrateOnStretch() {
     const replay = parameterTuningReplay;
     const status = $('#replayCalibrateStatus');
-    if (!replay || replay.source?.kind === 'mqtt') return;
+    if (!replay || replay.source?.kind === 'mqtt' || replay.source?.kind === 'opcua') return;
     const hours = (selector) => { const text = $(selector).value.trim(); return text === '' ? null : Number(text) * 3600; };
     const tunable = findTunableParametersInModel();
     status.className = 'equationDiagnostics';

@@ -79,7 +79,7 @@ async function liveTwin({ name, drift = 0, atCycle = {} }) {
     });
     assert.equal(await rigDone, 0, rigErrors);
     await follower.stop();
-    await session.idle();
+    await session.end();
     const cycles = session.cycles;
     const stats = session.stats();
     await session.close();
@@ -182,7 +182,7 @@ try {
         const document = tankRigProject();
         const behind = new WindowSession({ document, header: log.header, mapping: guessReplayMapping(log.header, replayTargets(document)), window, stride, horizon, timeStep, tolerances: { tankTemperature: 0.5 }, engineOptions, keepUp: true });
         behind.push(log.observations);
-        await behind.idle();
+        await behind.end();
         const stats = behind.stats();
         assert.equal(stats.skipped, expectedCycles - 1, `It skipped to the newest anchor: ${stats.skipped} moves skipped.`);
         assert.equal(behind.cycles.length, 1);

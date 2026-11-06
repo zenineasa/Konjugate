@@ -1068,6 +1068,16 @@
                     <div class="liveTwinActions"><button id="parameterTuningMqttUse" type="button" hidden>Use these topics</button></div>
                     <div id="parameterTuningMqttStatus" class="equationDiagnostics" role="status"></div>
                 </details>
+                <details id="parameterTuningOpcUa" class="parameterTuningMqtt" hidden>
+                    <summary>Or follow an OPC UA server</summary>
+                    <p class="builderHint">Konjugate connects to the lab's server (a PLC, or the gateway in front of the instruments) like any other client, browses its tags, and subscribes to the ones you choose, with the unit, range and quality the server gives. With security, a server's certificate is trusted only once you say so. What arrives is recorded as a data log beside the project.</p>
+                    <label class="editorField"><span>Server</span><input id="parameterTuningOpcUaUrl" type="text" spellcheck="false" value="opc.tcp://localhost:4840"></label>
+                    <label class="editorField"><span>Security</span><select id="parameterTuningOpcUaSecurity"><option value="none">None</option><option value="sign">Sign</option><option value="signAndEncrypt">Sign and encrypt</option></select></label>
+                    <div class="liveTwinActions"><button id="parameterTuningOpcUaBrowse" type="button">Browse the tags</button></div>
+                    <div id="parameterTuningOpcUaTags"></div>
+                    <div class="liveTwinActions"><button id="parameterTuningOpcUaUse" type="button" hidden>Use these tags</button></div>
+                    <div id="parameterTuningOpcUaStatus" class="equationDiagnostics" role="status"></div>
+                </details>
             </section>
             <section id="parameterTuningLoggerSection" hidden>
                 <h3>Reading another logger's file</h3>
@@ -1173,6 +1183,7 @@
                     <div id="liveTwinStatus" class="equationDiagnostics" role="status"></div>
                     <div id="liveTwinNote" class="equationDiagnostics valid" role="status"></div>
                     <div id="liveTwinTrend" class="liveTwinTrend" role="status"></div>
+                    <div id="liveTwinObserved" class="equationDiagnostics valid" role="status"></div>
                     <div id="liveTwinPlot" class="parameterTuningComparisonPlot" role="img" aria-label="Every reading so far, the model over the latest window and its forecast" hidden></div>
                     <div id="liveTwinJumpPlot" class="liveTwinJumpPlot" role="img" aria-label="The jump at each move of the window, with the tolerance" hidden></div>
                     <section id="liveTwinSandbox" class="liveTwinSandbox" hidden>

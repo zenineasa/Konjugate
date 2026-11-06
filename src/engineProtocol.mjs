@@ -594,6 +594,19 @@ export function decodeEngineEvent(buffer) {
             event.sampleBatch = decodedSampleBatch(field.value);
         } else if (field.number === 5 && field.wireType === 2) {
             event.sessionReply = decodedSessionReply(field.value);
+        } else if (field.number === 6 && field.wireType === 2) {
+            const algebraicStateIds = [];
+            for (const item of fields(field.value)) {
+                if (item.number === 1 && item.wireType === 0) algebraicStateIds.push(item.value);
+                else if (item.number === 1 && item.wireType === 2) {
+                    for (let offset = 0; offset < item.value.length;) {
+                        const varint = readVarint(item.value, offset);
+                        algebraicStateIds.push(varint.value);
+                        offset = varint.offset;
+                    }
+                }
+            }
+            event.sessionInfo = { algebraicStateIds };
         }
     }
     if (event.protocolVersion !== 1) throw new Error(`Unsupported engine protocol version ${event.protocolVersion}.`);

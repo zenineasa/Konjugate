@@ -217,6 +217,8 @@ contextBridge.exposeInMainWorld('engine', {
         start: (settings, source, projectPath) => ipcRenderer.invoke('liveTwinStart', settings, source, projectPath),
         // The topics an MQTT broker sends in a few seconds of listening: [{ topic, count, value, numeric, last }].
         listen: (url, seconds) => ipcRenderer.invoke('liveTwinListen', url, seconds),
+        // An OPC UA server's tags, or { untrusted, message } for a server whose certificate is not trusted yet.
+        browseOpcUa: (url, security, trustServer) => ipcRenderer.invoke('liveTwinBrowseOpcUa', url, security, trustServer),
         stop: () => ipcRenderer.invoke('liveTwinStop'),
         onEvent: (callback) => ipcRenderer.on('liveTwinEvent', (_event, update) => callback(update)),
         detach: () => ipcRenderer.invoke('liveTwinDetach'),

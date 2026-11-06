@@ -1587,6 +1587,15 @@ void Simulation::reply(const protocol::EngineCommand& command, bool ok, const st
 // Answers commands, one at a time and in order, until the control stream closes. A command that cannot be carried out is
 // answered with the reason and changes nothing, and the commands after it in the same batch are not carried out.
 void Simulation::serveSession() {
+    {
+        protocol::EngineEvent event;
+        event.set_protocol_version(1);
+        auto* info = event.mutable_session_info();
+        for (const auto stateId : executionPlan.stateIds) {
+            if (algebraicIndexes.contains(executionPlan.stateIndexes.at(stateId))) info->add_algebraic_state_ids(stateId);
+        }
+        writeFramedEvent(*eventStream, event);
+    }
     std::uint64_t failedBatch = 0;
     while (const auto command = waitForCommand()) {
         if (command->batch() && command->batch() == failedBatch) {

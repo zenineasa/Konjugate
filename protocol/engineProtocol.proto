@@ -278,7 +278,15 @@ message EngineEvent {
         StateTable state_table = 3;
         SampleBatch sample_batch = 4;
         SessionReply session_reply = 5;
+        SessionInfo session_info = 6;
     }
+}
+
+// What a session says about the model once, when it starts, after its StateTable: the states the model computes from others (a
+// setsValue source term, an algebraic relationship's output, a node provider's setsValue output), which can be compared with a
+// measurement but not set to one.
+message SessionInfo {
+    repeated uint64 algebraic_state_ids = 1;
 }
 
 // One-shot report messages, written once by a CLI subcommand (validate/infer/fit/inspect) and

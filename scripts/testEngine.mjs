@@ -33,7 +33,9 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'dataLogRepl
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'engineSession.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwin.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinMqtt.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinOpcUa.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'labTrial.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowCorrections.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'interventionRecord.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterHistory.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'metisStdoutIsolation.mjs'), executable]);

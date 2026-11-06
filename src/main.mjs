@@ -46,6 +46,7 @@ import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLife
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { LiveTwin } from './liveTwinHost.mjs';
 import { listenToBroker } from './mqttSource.mjs';
+import { browseOpcUa } from './opcuaSource.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
 import { isNewerPackageVersion } from './versionCompare.mjs';
@@ -2852,10 +2853,20 @@ async function recordingPathFor(source, projectPath) {
 }
 
 ipcMain.handle('liveTwinListen', async (_event, url, seconds) => listenToBroker(url, { seconds }));
+// Konjugate's own OPC UA certificate, and the servers it has been told to trust, in the app's own folder.
+const opcUaPkiFolder = () => join(app.getPath('userData'), 'opcua-pki');
+ipcMain.handle('liveTwinBrowseOpcUa', async (_event, url, security, trustServer) => {
+    try {
+        return { tags: await browseOpcUa(url, { security, trustServer, pkiFolder: opcUaPkiFolder() }) };
+    } catch (error) {
+        if (error.untrusted) return { untrusted: true, message: error.message };
+        throw error;
+    }
+});
 ipcMain.handle('liveTwinStart', async (event, settings, source, projectPath = null) => {
     const owner = event.sender;
     await liveTwins.get(owner.id)?.stop();
-    if (source.kind === 'mqtt') source = { ...source, recordTo: await recordingPathFor(source, projectPath) };
+    if (source.kind === 'mqtt' || source.kind === 'opcua') source = { ...source, recordTo: await recordingPathFor(source, projectPath), ...(source.kind === 'opcua' ? { pkiFolder: opcUaPkiFolder() } : {}) };
     const twin = new LiveTwin(settings, source, await engineOptions(), (update) => {
         if (!owner.isDestroyed()) owner.send('liveTwinEvent', update);
         if (update.type === 'ended' || update.type === 'error') {

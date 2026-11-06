@@ -12,7 +12,7 @@ status: draft
 
 This page is for anyone who wants their equipment, logger or script to feed a Konjugate model: a lab rig, a pilot plant, a microcontroller, a program that collects data from the internet. It describes the **Konjugate data log**, a plain CSV file that your program appends to while the experiment runs, and gives a working simulated rig to start from.
 
-**Status: Konjugate replays a finished log, and runs a log as a live twin, played back or followed while a logger writes it.** Both read exactly this format, with the same reader the checker uses ([below](#replaying-a-log-in-konjugate), and [Running a log as a live twin](#running-a-log-as-a-live-twin)). An MQTT broker can be followed too ([Following an MQTT broker](#following-an-mqtt-broker)); OPC UA is a later step of [Digital twin connections](proposals/digitalTwinConnections.md).
+**Status: Konjugate replays a finished log, and runs a log as a live twin, played back or followed while a logger writes it.** Both read exactly this format, with the same reader the checker uses ([below](#replaying-a-log-in-konjugate), and [Running a log as a live twin](#running-a-log-as-a-live-twin)). An MQTT broker ([Following an MQTT broker](#following-an-mqtt-broker)) and an OPC UA server ([Following an OPC UA server](#following-an-opc-ua-server)) can be followed too.
 
 ## Why a file
 
@@ -165,8 +165,9 @@ Under **Calibrate on a stretch**, choose a stretch of the log (from and to, in h
 Replaying runs the model once, unaided, from the start of the log. A live twin keeps it in step instead, the way it would be kept beside a running rig ([The prediction-actual comparison window](proposals/predictionActualWindow.md)): every time the data has moved on by a stride, it goes back to the start of the window, sets each measured state to its reading there, runs the window on what was really done, and forecasts what comes next. The **jump** at each move, how far the model's prediction was from the reading it is replaced by, is how far it had drifted: jumps that stay at the noise mean the model is right, and jumps that keep to one side mean something in the real system is moving away from it.
 
 1. Set up the replay as above, then under **As a live twin** choose the window (how far back each move compares), how often it moves, and how far ahead it forecasts.
-2. Choose how the data arrives: **as the file grows** follows the log while a logger is still writing it (the log must have been chosen from disk), and the other choices play a finished log back at that speed, or as fast as it can go.
-3. **Start live twin.** The plot shows every reading so far, the model over the latest window (shaded) and its forecast after now (dashed); a second plot shows the jumps with the tolerance either side, and a line under them says whether they lean to one side. The status line says how much faster than real time the model runs, and, if the data arrives faster than the twin can keep up, that it skipped moves to keep up.
+2. Beside each measured signal, choose what a move does with it: **reset to the reading** (the default), **nudge toward it** by a fraction you give (gentler on noisy readings, and on a state a sudden change would throw out of balance with the rest, such as one that holds energy), or **watch only**, which corrects nothing after the first move, so you see how long the model stays right on its own. A state the model computes from others is compared and never set, whatever you choose, and a line under the plots says which states the readings reach and which the model carries alone, unchecked.
+3. Choose how the data arrives: **as the file grows** follows the log while a logger is still writing it (the log must have been chosen from disk), and the other choices play a finished log back at that speed, or as fast as it can go.
+4. **Start live twin.** The plot shows every reading so far, the model over the latest window (shaded) and its forecast after now (dashed); a second plot shows the jumps with the tolerance either side, and a line under them says whether they lean to one side. The status line says how much faster than real time the model runs, and, if the data arrives faster than the twin can keep up, that it skipped moves to keep up.
 
 **Detach and try…** starts a sandbox: a copy of the twin, from the latest move, in an engine of its own. Set an input to a value of your own (the heater off, say), run ahead, and the plot shows what would happen beside the live forecast. The live twin carries on underneath, and nothing done in the sandbox reaches it or its record. **Back to live** ends the sandbox; if anything was tried, it is kept with the project as a draft scenario, with no question asked, and the list under the card renames or deletes it.
 
@@ -183,6 +184,18 @@ Many labs already have a broker that their instruments, a Raspberry Pi or a Node
 A payload can be a plain number (`301.2`), or JSON: a number, or an object with `value` and, optionally, `time` (seconds or milliseconds since 1970, or an ISO 8601 date and time) and `quality` (`good`, `uncertain` or `bad`). Give the reading's own `time` when you can: one stamped when it arrives carries the network's delays with it. A payload that is none of these is skipped.
 
 A broker keeps no history, so what arrives is also written to a data log as it comes, in a `recordings` folder beside the project (or in the app's own folder for a project not yet saved), named after the broker and the time. Stopping says where it is; it can be replayed and checked like any other log. [tests/engine/liveTwinMqtt.mjs](../tests/engine/liveTwinMqtt.mjs) runs a broker, publishes the simulated rig's six hours to it, and checks that the moves are the same, to the bit, as from the rig's own log.
+
+## Following an OPC UA server
+
+A PLC, or the gateway in front of a lab's instruments, often serves its readings over OPC UA. Konjugate connects to it as a client, as the lab's own screens do, so the server needs nothing new.
+
+1. In the replay goal, open **Or follow an OPC UA server**, give its address (`opc.tcp://host:4840/…`) and the security it uses: **None**, **Sign**, or **Sign and encrypt**. With security, a server whose certificate this computer has not seen is not trusted until you say so: the card asks, and remembers the answer. Konjugate's own certificate, and the servers it trusts, are kept in the app's own folder.
+2. **Browse the tags.** The server's tags are listed by their path, with the value, the unit and the range the server gives for each (an analog item's engineering units and range), so a tag is chosen by name, not by its node identifier, and its unit comes filled in.
+3. Say which tags are inputs and which are measured, name them as the model does, **Use these tags**, and **Start live twin**.
+
+Each reading is timed by the server's source timestamp, when it was measured, and carries the server's quality: a status that is Good, Uncertain or Bad. The connection reconnects by itself when the PLC restarts. A server keeps no history, so what arrives is recorded as a data log beside the project, as for a broker.
+
+Two things about OPC UA worth knowing, both found by testing: a subscription reports what the server samples, at the sampling interval it grants (often 50 to 1000 ms), not every change, so a tag that changes faster than that has changes no client sees; and a server sends the readings of several tags together, grouped by tag rather than by time, so Konjugate puts each batch back in time order, and makes a move only once the data has gone past it, never on one tag's reading while another tag's reading for the same moment is still on its way. [tests/engine/liveTwinOpcUa.mjs](../tests/engine/liveTwinOpcUa.mjs) runs a server, reports the simulated rig's six hours through its tags, and checks that the moves are the same, to the bit, as from the rig's own log.
 
 ## Checking your log
 

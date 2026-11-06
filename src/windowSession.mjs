@@ -50,6 +50,7 @@ export class WindowSession {
     #inputsSent = new Map(); // parameterId -> the time of the last reading sent to the engine
     #recoveries = 0;
     #skipped = 0;
+    #ended = false;
     #closed = false;
     #failure = null;
     cycles = [];
@@ -60,7 +61,12 @@ export class WindowSession {
     // a multiple of the tolerance the jumps' recent mean must pass to raise the alarm, or null for no alarm. keepUp: when the data
     // is arriving in real time and the twin falls `maxBehind` strides or more behind it, skip to the newest anchor instead of
     // working through the backlog (the first rung of the window document's degrade ladder: a longer stride, said so in stats()).
-    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3 }) {
+    // corrections: { signal: { gain } } (docs/proposals/predictionActualWindow.md, "Other ways to bring the model back in step"): at
+    // each move the measured state at the anchor is set to the prediction plus `gain` times the gap to the measurement. 1 (the
+    // default) resets it to the measurement; 0 corrects nothing, and the model runs on unaided from the first move (the hold policy,
+    // to see how long it stays right on its own); between, it is nudged part of the way, which is gentler on noisy readings and on a
+    // state a sudden change would put out of balance with the rest. A state the model computes from others is compared, never set.
+    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {} }) {
         if (!(timeStep > 0)) throw new Error('The time step must be a positive number of seconds.');
         for (const [name, value] of [['window', window], ['stride', stride], ['horizon', horizon]]) {
             if (!(value > 0) || !isWholeMultiple(value, timeStep)) throw new Error(`The ${name} must be a whole number of time steps.`);
@@ -72,7 +78,10 @@ export class WindowSession {
         this.inputs = mapping.filter((entry) => entry.role === 'input' && entry.parameterId !== null);
         this.outputs = mapping.filter((entry) => entry.role === 'output' && entry.stateId !== null);
         if (!this.outputs.length) throw new Error('Map at least one measured signal to a state, so there is something to compare.');
-        Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind });
+        for (const [signal, correction] of Object.entries(corrections)) {
+            if (!(correction?.gain >= 0 && correction.gain <= 1)) throw new Error(`The correction for ${signal} is a gain from 0 (none) to 1 (reset to the measurement).`);
+        }
+        Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections });
         for (const entry of [...this.inputs, ...this.outputs]) this.#readings.set(entry.signal, new Map());
     }
 
@@ -105,6 +114,17 @@ export class WindowSession {
         this.#queue = this.#queue.then(() => this.#runDueCycles()).catch((error) => { this.#failure ??= error; });
     }
 
+    // The time of the latest reading, counted from the first.
+    get latestTime() { return this.#latest; }
+
+    // The data is complete (a recording played through, a log finished): the last move, whose now is the last reading's time, is
+    // made too. Resolves when every move is made.
+    async end() {
+        this.#ended = true;
+        this.#queue = this.#queue.then(() => this.#runDueCycles()).catch((error) => { this.#failure ??= error; });
+        return this.idle();
+    }
+
     // Resolves when every cycle the data so far makes due has run; rejects if the session failed.
     async idle() {
         await this.#queue;
@@ -113,10 +133,19 @@ export class WindowSession {
 
     #anchor(index) { return index * this.stride; }
 
+    // A move is due once the data has gone past its now, not merely reached it: several signals' readings for the same instant can
+    // arrive one after another (an OPC UA server's tags, separate MQTT topics), and a later reading of any signal is what says all
+    // of them up to now are in, each source handing its readings on in time order. When the data has ended, reaching it is enough.
+    #due(index) {
+        const now = this.#anchor(index) + this.window;
+        return this.#ended ? now <= this.#latest + 1e-9 : now < this.#latest - 1e-9;
+    }
+
     async #runDueCycles() {
-        while (!this.#closed && this.#anchor(this.#nextCycle) + this.window <= this.#latest + 1e-9) {
+        while (!this.#closed && this.#due(this.#nextCycle)) {
             if (this.keepUp) {
-                const newest = Math.floor((this.#latest - this.window) / this.stride + 1e-9);
+                let newest = Math.floor((this.#latest - this.window) / this.stride + 1e-9);
+                if (!this.#due(newest)) newest -= 1;
                 if (newest - this.#nextCycle >= this.maxBehind) {
                     this.#skipped += newest - this.#nextCycle;
                     this.#nextCycle = newest;
@@ -163,16 +192,32 @@ export class WindowSession {
         const now = anchor + this.window;
         const end = now + this.horizon;
         const previous = this.cycles.at(-1) ?? null;
+        if (!this.#engine) await this.#startEngine();
+        const computed = new Set(this.#engine.algebraicStateIds);
         const overrides = [];
         const jumps = {};
+        const corrections = {};
         for (const entry of this.outputs) {
             const measured = this.#measurementAt(entry.signal, anchor, now);
-            if (measured === null) continue;
-            overrides.push({ stateId: entry.stateId, value: measured });
-            if (previous) {
-                const predicted = interpolate(this.#modelSeries(previous, entry.signal), anchor);
-                if (Number.isFinite(predicted)) jumps[entry.signal] = { predicted, measured, jump: predicted - measured };
+            if (measured === null) {
+                corrections[entry.signal] = { applied: null, reason: 'no reading at the anchor' };
+                continue;
             }
+            const predicted = previous ? interpolate(this.#modelSeries(previous, entry.signal), anchor) : NaN;
+            if (Number.isFinite(predicted)) jumps[entry.signal] = { predicted, measured, jump: predicted - measured };
+            const gain = this.corrections[entry.signal]?.gain ?? 1;
+            if (computed.has(entry.stateId)) {
+                corrections[entry.signal] = { applied: null, reason: 'computed by the model from other states: compared, not set' };
+                continue;
+            }
+            // The first move starts every measured state at its reading, whatever the gain: there is no prediction yet to correct.
+            const value = !Number.isFinite(predicted) ? measured : predicted + gain * (measured - predicted);
+            if (Number.isFinite(predicted) && gain === 0) {
+                corrections[entry.signal] = { gain, applied: null, reason: 'watched only' };
+                continue;
+            }
+            overrides.push({ stateId: entry.stateId, value });
+            corrections[entry.signal] = { gain: Number.isFinite(predicted) ? gain : 1, applied: value };
         }
         const started = performance.now();
         let replies;
@@ -203,6 +248,7 @@ export class WindowSession {
         const computeSeconds = replies.reduce((sum, reply) => sum + reply.computeNanoseconds, 0) / 1e9;
         const window = {};
         const forecast = {};
+        const model = {};
         this.outputs.forEach((entry, outputIndex) => {
             const series = samples.map((sample) => ({ time: sample.time, value: sample.values[outputIndex] }));
             const inWindow = [{ time: anchor, value: restored.values[this.#engine.stateIds.indexOf(entry.stateId)] }, ...series.filter((sample) => sample.time <= now + 1e-9)];
@@ -211,12 +257,16 @@ export class WindowSession {
                 return { time: reading.time, measured: reading.value, simulated, error: simulated - reading.value };
             });
             forecast[entry.signal] = series.filter((sample) => sample.time > now + 1e-9);
+            model[entry.signal] = [...inWindow, ...forecast[entry.signal]].filter((sample, position, all) => position === 0 || sample.time > all[position - 1].time);
         });
         const cycle = {
-            index, anchor, now, jumps, window, forecast,
+            index, anchor, now, jumps, window, forecast, model,
             restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),
-            wallSeconds, computeSeconds, checkpointsTaken
+            wallSeconds, computeSeconds, checkpointsTaken, corrections,
+            // Which states the data reaches: those compared with a measurement, and those the model carries alone, unchecked.
+            observed: this.outputs.map((entry) => entry.stateId),
+            unobserved: this.#engine.stateIds.filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId))
         };
         cycle.trend = this.#trend([...this.cycles, cycle]);
         this.cycles.push(cycle);
@@ -237,12 +287,10 @@ export class WindowSession {
         return [from, { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true }];
     }
 
-    // The model's series for a signal in a cycle: the restored value at the anchor, the window, then the forecast.
+    // The model's own series for a signal in a cycle, from the restored value at the anchor through the window and the forecast, at
+    // the engine's output samples (not at reading times: a bad reading at the next anchor must not move the prediction there).
     #modelSeries(cycle, signal) {
-        const entry = this.outputs.find((candidate) => candidate.signal === signal);
-        const atAnchor = { time: cycle.anchor, value: cycle.restored.values[this.#engine.stateIds.indexOf(entry.stateId)] };
-        return [atAnchor, ...cycle.window[signal].map((row) => ({ time: row.time, value: row.simulated })), ...cycle.forecast[signal]]
-            .filter((sample, position, all) => position === 0 || sample.time > all[position - 1].time);
+        return cycle.model[signal];
     }
 
     // What the jumps of the last few cycles say, per signal and for the first measured signal on the cycle itself: their trend in

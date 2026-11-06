@@ -28,7 +28,7 @@ export function cycleEvent(cycle, stats) {
         type: 'cycle',
         cycle: {
             index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, wallSeconds: cycle.wallSeconds,
-            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved,
+            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null,
             // Each input's last reading up to now, for a sandbox to start its controls from.
             inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null]))
         },
@@ -160,6 +160,20 @@ export class LiveTwin {
         const stats = this.#session?.stats() ?? null;
         await this.#session?.close();
         this.#onEvent({ type: 'ended', stats, reason: 'stopped', recordedTo: this.recordedTo ?? null });
+    }
+
+    // A refit over the latest window (src/windowSession.mjs, refitPlan): the plan for the engine's fit, which the window runs.
+    refitPlan() {
+        if (!this.#session) throw new Error('The live twin has not started yet.');
+        const { document, csv, anchor, now, cycle, tunable } = this.#session.refitPlan();
+        return { document, csv, anchor, now, cycle, tunable };
+    }
+
+    // What the fit found, for the twin to run on from the move the refit was planned on.
+    async applyRefit(values, cycle) {
+        if (!this.#session) throw new Error('The live twin has not started yet.');
+        await this.#session.applyRefit({ values, cycle });
+        return true;
     }
 
     // A sandbox from the last cycle's now; one at a time.

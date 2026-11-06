@@ -2882,6 +2882,8 @@ ipcMain.handle('liveTwinStop', async (event) => {
     return true;
 });
 ipcMain.handle('liveTwinDetach', async (event) => liveTwinFor(event).detach());
+ipcMain.handle('liveTwinRefitPlan', async (event) => liveTwinFor(event).refitPlan());
+ipcMain.handle('liveTwinApplyRefit', async (event, values, cycle) => liveTwinFor(event).applyRefit(values, cycle));
 ipcMain.handle('liveTwinSandboxSetInput', async (event, signal, value) => liveTwinFor(event).sandboxSetInput(signal, value));
 ipcMain.handle('liveTwinSandboxRunFor', async (event, seconds) => liveTwinFor(event).sandboxRunFor(seconds));
 ipcMain.handle('liveTwinSandboxClose', async (event) => liveTwins.get(event.sender.id)?.closeSandbox() ?? null);

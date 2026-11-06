@@ -21,6 +21,7 @@ const run = (losses) => {
 
 test('durations read at the size they are', () => {
     assert.equal(formatDuration(0.0004), '1 ms');
+    assert.equal(formatDuration(0), '0 s');
     assert.equal(formatDuration(0.85), '850 ms');
     assert.equal(formatDuration(4.26), '4.3 s');
     assert.equal(formatDuration(42.4), '42 s');

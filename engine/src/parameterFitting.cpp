@@ -150,6 +150,23 @@ std::vector<TunableParameter> findTunableParameters(const boost::property_tree::
     if (const auto nodes = document.get_child_optional("nodes")) {
         std::size_t nodeIndex = 0;
         for (const auto& nodeEntry : *nodes) {
+            std::size_t stateIndex = 0;
+            if (const auto states = nodeEntry.second.get_child_optional("states")) for (const auto& stateEntry : *states) {
+                const auto& state = stateEntry.second;
+                if (state.get_child_optional("tuning")) {
+                    TunableParameter tunable;
+                    tunable.state = true;
+                    tunable.nodeIndex = nodeIndex;
+                    tunable.stateIndex = stateIndex;
+                    tunable.parameterId = state.get<std::uint64_t>("id");
+                    tunable.name = state.get<std::string>("name", "");
+                    tunable.initialValue = state.get<double>("initialValue", 0.0);
+                    tunable.bounds.minimum = state.get<double>("tuning.minimum");
+                    tunable.bounds.maximum = state.get<double>("tuning.maximum");
+                    found.push_back(std::move(tunable));
+                }
+                ++stateIndex;
+            }
             std::size_t sourceTermIndex = 0;
             if (const auto terms = nodeEntry.second.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
                 std::size_t parameterIndex = 0;
@@ -298,6 +315,10 @@ FittingTrialScore scoreFittingTrial(const FittingProblem& problem, const Fitting
         const auto& tunable = problem.tunableParameters[index];
         if (tunable.shared) {
             childAt(document.get_child("sharedParameters"), tunable.sharedIndex).put("value", parameterValues[index]);
+            continue;
+        }
+        if (tunable.state) {
+            childAt(childAt(nodes, tunable.nodeIndex).get_child("states"), tunable.stateIndex).put("initialValue", parameterValues[index]);
             continue;
         }
         auto& parameters = tunable.sourceTerm

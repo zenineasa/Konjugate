@@ -9,6 +9,8 @@ export const noImprovementWindow = 50;
 // "850 ms", "12.4 s", "2 min 40 s", "1 h 05 min": as short as is still readable at that size.
 export function formatDuration(seconds) {
     if (!Number.isFinite(seconds) || seconds < 0) return '—';
+    // Nothing at all is 0 s (a live twin's first window starts there); anything more, however little, is at least 1 ms.
+    if (seconds === 0) return '0 s';
     if (seconds < 1) return `${Math.max(1, Math.round(seconds * 1000))} ms`;
     if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
     const rounded = Math.round(seconds);

@@ -18,7 +18,8 @@
 // reaches neither the live session nor its record.
 
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
-import { interpolate } from './dataLogReplay.mjs';
+import { interpolate, ReplayError } from './dataLogReplay.mjs';
+import { fitPlanFromLog } from './dataLogFit.mjs';
 
 const isWholeMultiple = (value, of) => Math.abs(value / of - Math.round(value / of)) <= 1e-9 * Math.max(1, Math.abs(value / of));
 const median = (values) => {
@@ -53,6 +54,8 @@ export class WindowSession {
     #ended = false;
     #closed = false;
     #failure = null;
+    #refit = null; // what was last applied by a refit, to be recorded on the next move
+    #restartFrom = null; // the state a refit restarted the twin from, for a restart before the next move
     cycles = [];
 
     // document: the model; header and mapping: the log's description and how its signals map to the model (as replay maps them);
@@ -75,6 +78,7 @@ export class WindowSession {
         if (!isWholeMultiple(window, stride)) throw new Error('The window must be a whole number of strides.');
         this.document = document;
         this.header = header;
+        this.mapping = mapping;
         this.inputs = mapping.filter((entry) => entry.role === 'input' && entry.parameterId !== null);
         this.outputs = mapping.filter((entry) => entry.role === 'output' && entry.stateId !== null);
         if (!this.outputs.length) throw new Error('Map at least one measured signal to a state, so there is something to compare.');
@@ -264,11 +268,15 @@ export class WindowSession {
             restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),
             wallSeconds, computeSeconds, checkpointsTaken, corrections,
+            // A refit applied since the last move: the parameters it changed, and the states it set at that move's anchor.
+            ...(this.#refit ? { refit: this.#refit } : {}),
             // Which states the data reaches: those compared with a measurement, and those the model carries alone, unchecked.
             observed: this.outputs.map((entry) => entry.stateId),
             unobserved: this.#engine.stateIds.filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId))
         };
         cycle.trend = this.#trend([...this.cycles, cycle]);
+        this.#refit = null;
+        this.#restartFrom = null;
         this.cycles.push(cycle);
         if (this.onCycle) await this.onCycle(cycle, index);
     }
@@ -325,15 +333,107 @@ export class WindowSession {
     // of the cycle that failed, which leaves it with the same checkpoint there the dead one had.
     async #recover(index) {
         this.#recoveries += 1;
+        await this.#restart(index);
+    }
+
+    // A new engine for the current document, from a logged state (by default the one a refit last set, or else the last cycle's),
+    // run on the real inputs up to the anchor of the cycle with this index.
+    async #restart(index, from = null) {
         await this.#engine?.close().catch(() => {});
         await this.#startEngine();
         const last = this.cycles.at(-1);
         if (!last) return;
+        const state = from ?? this.#restartFrom ?? last.restored;
         await this.#engine.run([
             ...this.#inputCommands(last.now),
-            { type: 'restoreState', time: last.restored.time, values: last.restored.values, providerStates: last.restored.providerStates },
+            { type: 'restoreState', time: state.time, values: state.values, providerStates: state.providerStates },
             { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true }
         ]);
+    }
+
+    // A refit over the latest window (docs/proposals/predictionActualWindow.md, step 5): the window as a small calibration, to find
+    // the tunable parameters, and the tunable initial values at its anchor, that make the window's run match its readings. Returns
+    // a plan for the engine's fit (src/dataLogFit.mjs), whose time 0 is the anchor: every state starts where the last move left
+    // it there, a measured one at its reading, and the inputs are what was really done. A tunable state's bounds are widened to
+    // take in where it starts, as nothing better is known. The fit is run by the caller; applyRefit takes what it found.
+    refitPlan({ timeStep = this.timeStep } = {}) {
+        const cycle = this.cycles.at(-1);
+        if (!cycle) throw new ReplayError('There is no window to refit before the first move.');
+        if (cycle.restored.providerStates.length) throw new ReplayError('A node program here keeps a state of its own, which a refit cannot start from yet.');
+        const document = structuredClone(this.document);
+        const stateIds = this.#engine.stateIds;
+        for (const state of document.nodes.flatMap((node) => node.states ?? [])) {
+            const position = stateIds.indexOf(state.id);
+            if (position < 0) continue;
+            state.initialValue = cycle.restored.values[position];
+            if (state.tuning) state.tuning = { minimum: Math.min(state.tuning.minimum, state.initialValue), maximum: Math.max(state.tuning.maximum, state.initialValue) };
+        }
+        const observations = [...this.#readings].flatMap(([signal, readings]) => [...readings.values()].map((reading) => ({ signal, ...reading })));
+        const plan = fitPlanFromLog(document, { header: this.header, observations }, this.mapping, { from: cycle.anchor, to: cycle.now, timeStep });
+        const tunable = [
+            ...(plan.document.sharedParameters ?? []).filter((parameter) => parameter.tuning).map((parameter) => ({ kind: 'parameter', id: parameter.id })),
+            ...plan.document.edges.flatMap((edge) => (edge.parameters ?? []).filter((parameter) => parameter.tuning).map((parameter) => ({ kind: 'parameter', id: parameter.id }))),
+            ...plan.document.nodes.flatMap((node) => [
+                ...(node.states ?? []).filter((state) => state.tuning).map((state) => ({ kind: 'state', id: state.id })),
+                ...(node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? []).filter((parameter) => parameter.tuning).map((parameter) => ({ kind: 'parameter', id: parameter.id })))
+            ])
+        ];
+        if (!tunable.length) throw new ReplayError('Mark the parameters, or the initial values of states the data does not reach, as tunable (with bounds) first.');
+        return { ...plan, anchor: cycle.anchor, now: cycle.now, cycle: cycle.index, tunable };
+    }
+
+    // Takes what a refit found, as the fit reports it: [{ parameterId, value }], where an id is a tunable parameter's (its new value)
+    // or a tunable state's (its value at the anchor of the window the fit was run on). `cycle` is the index of the move the refit was
+    // planned on. The twin is started again from that move's anchor, with the new parameters and those states, and run on the real
+    // inputs to where it has got to, so a twin that moved on while the fit ran takes it as well; the moves already made keep their
+    // record as they were made.
+    async applyRefit({ values: fitted, cycle }) {
+        let refused = null;
+        this.#queue = this.#queue.then(async () => {
+            const target = this.cycles.find((candidate) => candidate.index === cycle);
+            if (!target) throw new ReplayError('The move this refit was planned on is not one this twin made.');
+            const document = structuredClone(this.document);
+            const parameters = [
+                ...(document.sharedParameters ?? []),
+                ...document.edges.flatMap((edge) => edge.parameters ?? []),
+                ...document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+            ];
+            const stateIdsInModel = new Set(document.nodes.flatMap((node) => (node.states ?? []).map((state) => state.id)));
+            const states = {};
+            for (const { parameterId, value } of fitted) {
+                if (!Number.isFinite(value)) throw new ReplayError(`The refit found no finite value for ${parameterId}.`);
+                if (stateIdsInModel.has(parameterId)) {
+                    states[parameterId] = value;
+                    continue;
+                }
+                const parameter = parameters.find((candidate) => candidate.id === parameterId);
+                if (!parameter) throw new ReplayError(`Parameter ${parameterId} is not in the twin.`);
+                parameter.value = value;
+            }
+            const stateIds = this.#engine.stateIds;
+            const values = [...target.restored.values];
+            for (const [stateId, value] of Object.entries(states)) {
+                const position = stateIds.indexOf(Number(stateId));
+                if (position < 0) throw new ReplayError(`State ${stateId} is not in the twin.`);
+                values[position] = value;
+            }
+            const before = this.document;
+            this.document = document;
+            const from = { time: target.restored.time, values, providerStates: target.restored.providerStates };
+            try {
+                await this.#restart(this.#nextCycle, from);
+                if (JSON.stringify(this.#engine.stateIds) !== JSON.stringify(stateIds)) throw new ReplayError('A refit changes values only, not the model\'s states.');
+            } catch (error) {
+                // The twin goes on with the model it had.
+                this.document = before;
+                await this.#restart(this.#nextCycle);
+                throw error;
+            }
+            this.#restartFrom = from;
+            this.#refit = { fromCycle: target.index, anchor: target.anchor, states };
+        }).catch((error) => { refused = error; });
+        await this.idle();
+        if (refused) throw refused;
     }
 
     // A run, for the engine's ordinary `run`, that does exactly what a cycle did, from the state it logged: to check the cycle on

@@ -1922,7 +1922,9 @@ function renderNodeEditorModel(node) {
             <input data-field="unit" value="${escapeHtml(state.unit ?? '')}" aria-label="Unit">
             <button type="button" class="moveState" data-move="-1" title="Move up (${altKeyLabel}↑): earlier in the list, updated earlier by semi-implicit integration" aria-label="Move ${escapeHtml(state.symbol)} up" ${index === 0 ? 'disabled data-unavailable' : ''}>↑</button>
             <button type="button" class="moveState" data-move="1" title="Move down (${altKeyLabel}↓)" aria-label="Move ${escapeHtml(state.symbol)} down" ${index === definition.states.length - 1 ? 'disabled data-unavailable' : ''}>↓</button>
+            <button type="button" class="tuneState" aria-pressed="${state.tuning ? 'true' : 'false'}" title="Fit the initial value: a tuning, a calibration or a live twin's refit finds it within bounds" aria-label="Fit the initial value of ${escapeHtml(state.symbol)}">◎</button>
             <button type="button" class="removeState" title="Remove state">×</button>
+            ${state.tuning ? `<div class="editorStateTuning"><span>Initial value fitted between</span><input data-tuning-field="minimum" type="number" value="${escapeHtml(state.tuning.minimum)}" aria-label="Lowest initial value of ${escapeHtml(state.symbol)}"><span>and</span><input data-tuning-field="maximum" type="number" value="${escapeHtml(state.tuning.maximum)}" aria-label="Highest initial value of ${escapeHtml(state.symbol)}"></div>` : ''}
         `;
         $$('.moveState', row).forEach((button) => button.addEventListener('click', () => moveNodeState(node, state.id, Number(button.dataset.move))));
         row.addEventListener('keydown', (event) => {
@@ -1930,7 +1932,24 @@ function renderNodeEditorModel(node) {
             event.preventDefault();
             moveNodeState(node, state.id, event.key === 'ArrowUp' ? -1 : 1, event.target.dataset.field);
         });
-        $$('input', row).forEach((input) => input.addEventListener('change', () => {
+        // A tunable initial value: its bounds start as the value give or take its own size, as a parameter's do, and a bound that
+        // would leave the initial value outside them is refused.
+        $('.tuneState', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
+            const target = snapshot.states.find((candidate) => candidate.id === state.id);
+            if (target.tuning) delete target.tuning;
+            else target.tuning = normalizedParameterTuning({ value: target.initialValue });
+        }));
+        $$('[data-tuning-field]', row).forEach((input) => input.addEventListener('change', () => {
+            const tuning = { ...state.tuning, [input.dataset.tuningField]: Number(input.value) };
+            const error = parameterTuningError(Number(state.initialValue) || 0, tuning);
+            if (error) {
+                $('#editNodeError').textContent = error;
+                input.value = String(state.tuning[input.dataset.tuningField]);
+                return;
+            }
+            changeNodeModel(node, (snapshot) => { snapshot.states.find((candidate) => candidate.id === state.id).tuning = tuning; });
+        }));
+        $$('input[data-field]', row).forEach((input) => input.addEventListener('change', () => {
             changeNodeModel(node, (snapshot) => {
                 const target = snapshot.states.find((candidate) => candidate.id === state.id);
                 const previousSymbol = target.symbol;
@@ -1938,6 +1957,10 @@ function renderNodeEditorModel(node) {
                 target[field === 'name' ? 'label' : field === 'value' ? 'initialValue' : field] =
                     field === 'value' ? Number(input.value) || 0 : input.value.trim();
                 ({ text: target.value, exact: target.exactValue } = stateValueText(target.initialValue, target.unit));
+                // A new initial value outside its fitting bounds widens them to take it in.
+                if (field === 'value' && target.tuning) {
+                    target.tuning = { minimum: Math.min(target.tuning.minimum, target.initialValue), maximum: Math.max(target.tuning.maximum, target.initialValue) };
+                }
                 if (field === 'symbol') {
                     snapshot.sourceTerms.forEach((term) => {
                         if (term.state === previousSymbol) term.state = target.symbol;
@@ -8514,6 +8537,15 @@ function findTunableParametersInModel() {
         }
     }
     for (const node of document.nodes) {
+        // A state's initial value can be fitted too (`kind: 'state'`; its id is the parameterId, ids being unique in a document).
+        for (const state of node.states ?? []) {
+            if (state.tuning) {
+                found.push({
+                    kind: 'state', nodeId: node.id, ownerName: `${node.name} · initial value`, parameterId: state.id,
+                    name: state.name, symbol: state.symbol, value: state.initialValue, tuning: state.tuning
+                });
+            }
+        }
         for (const term of node.sourceTerms ?? []) {
             for (const parameter of term.parameters ?? []) {
                 if (parameter.tuning) {
@@ -9374,6 +9406,9 @@ function refreshLiveTwinControls() {
     $('#liveTwinStop').hidden = !running;
     $('#liveTwinDetach').hidden = !running || Boolean(liveTwinState?.sandbox);
     $('#liveTwinDetach').disabled = !liveTwinState?.cycles.length;
+    $('#liveTwinRefit').hidden = !running;
+    if (!running) for (const button of ['#liveTwinRefitApply', '#liveTwinRefitKeep']) $(button).hidden = true;
+    $('#liveTwinRefit').disabled = !liveTwinState?.cycles.length || Boolean(liveTwinState?.refitting);
     for (const field of ['#liveTwinWindow', '#liveTwinStride', '#liveTwinHorizon', '#liveTwinSpeed']) $(field).disabled = running;
 }
 
@@ -9388,7 +9423,93 @@ function clearLiveTwinView() {
     $('#liveTwinTrend').classList.remove('leaning');
     $('#liveTwinObserved').textContent = '';
     $('#liveTwinSandbox').hidden = true;
+    $('#liveTwinRefitResult').hidden = true;
 }
+
+// A refit over the latest window (docs/proposals/predictionActualWindow.md, step 5): the twin plans it, the engine's fit runs it as
+// a calibration does, and what it found is shown to be applied or not. Applied, the twin runs on from the move it was planned on
+// with the new parameters and the initial values found at that window's anchor; the parameters can be kept in the model too.
+async function refitLiveTwin() {
+    const twin = liveTwinState;
+    if (!twin?.running || twin.refitting) return;
+    const status = $('#liveTwinRefitStatus');
+    const message = (error) => error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?(ENGINE_FAILURE: )?/, '');
+    $('#liveTwinRefitResult').hidden = false;
+    $('#liveTwinRefitRows').replaceChildren();
+    $('#liveTwinRefitApply').hidden = true;
+    $('#liveTwinRefitKeep').hidden = true;
+    status.className = 'equationDiagnostics';
+    twin.refit = null;
+    let plan;
+    try {
+        plan = await window.engine.liveTwin.refitPlan();
+    } catch (error) {
+        status.textContent = message(error);
+        return;
+    }
+    twin.refitting = true;
+    refreshLiveTwinControls();
+    status.textContent = `Refitting on the window from ${formatDuration(plan.anchor)} to ${formatDuration(plan.now)}…`;
+    try {
+        const result = await window.engine.fit(JSON.stringify(plan.document), plan.csv, { backend: $('#parameterTuningBackend').value || 'nlopt-bobyqa', maxIterations: 400 });
+        if (!result.available) throw new Error('The native fitting engine is unavailable.');
+        const states = new Map(plan.document.nodes.flatMap((node) => (node.states ?? []).map((state) => [state.id, { node, state }])));
+        const parameters = new Map([
+            ...(plan.document.sharedParameters ?? []).map((parameter) => [parameter.id, { owner: 'Shared', parameter }]),
+            ...plan.document.edges.flatMap((edge) => (edge.parameters ?? []).map((parameter) => [parameter.id, { owner: edge.name, parameter }])),
+            ...plan.document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? []).map((parameter) => [parameter.id, { owner: `${node.name} · source term`, parameter }])))
+        ]);
+        const shown = (value) => (value === null || !Number.isFinite(value) ? 'not finite' : Number(value).toPrecision(6));
+        $('#liveTwinRefitRows').replaceChildren(...result.report.finalParameters.map((entry) => {
+            const row = document.createElement('div');
+            const state = states.get(entry.parameterId);
+            const parameter = parameters.get(entry.parameterId);
+            row.textContent = state
+                ? `${state.node.name} · ${state.state.name} at ${formatDuration(plan.anchor)}: ${shown(state.state.initialValue)} → ${shown(entry.value)}`
+                : `${parameter?.owner ?? 'Parameter'} · ${parameter?.parameter.name ?? entry.parameterId}: ${shown(parameter?.parameter.value)} → ${shown(entry.value)}`;
+            return row;
+        }));
+        if (liveTwinState !== twin) return;
+        twin.refit = { plan, report: result.report };
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `${parameterTuningEndText(result.report)} Apply it to run the twin on from that window with these values.`;
+        $('#liveTwinRefitApply').hidden = !twin.running;
+        $('#liveTwinRefitKeep').hidden = !twin.running || !plan.tunable.some((entry) => entry.kind === 'parameter');
+    } catch (error) {
+        status.textContent = `The refit could not run: ${message(error)}`;
+    } finally {
+        twin.refitting = false;
+        if (liveTwinState === twin) refreshLiveTwinControls();
+    }
+}
+
+async function applyLiveTwinRefit(keepInModel) {
+    const twin = liveTwinState;
+    if (!twin?.refit) return;
+    const { plan, report } = twin.refit;
+    const status = $('#liveTwinRefitStatus');
+    $('#liveTwinRefitApply').hidden = true;
+    $('#liveTwinRefitKeep').hidden = true;
+    try {
+        await window.engine.liveTwin.applyRefit(report.finalParameters, plan.cycle);
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = `The refit was not applied: ${error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?/, '')}`;
+        return;
+    }
+    twin.refit = null;
+    let kept = '';
+    if (keepInModel) {
+        const parameterIds = new Set(plan.tunable.filter((entry) => entry.kind === 'parameter').map((entry) => entry.id));
+        const outcome = await applyFittedValues(report.finalParameters.filter((entry) => parameterIds.has(entry.parameterId)));
+        kept = outcome.applied ? ' The parameters are kept in the model too (Undo takes them back).' : ` The model was left as it was: ${outcome.message}`;
+    }
+    status.className = 'equationDiagnostics valid';
+    status.textContent = `Applied to the twin from the move at ${formatDuration(plan.anchor)}: it runs on with the refitted values from there.${kept}`;
+}
+$('#liveTwinRefit').addEventListener('click', () => refitLiveTwin());
+$('#liveTwinRefitApply').addEventListener('click', () => applyLiveTwinRefit(false));
+$('#liveTwinRefitKeep').addEventListener('click', () => applyLiveTwinRefit(true));
 
 // Which states the readings reach and which the model carries alone, and any measured state the model computes, so is never set.
 function liveTwinObservedText(cycle) {
@@ -10542,7 +10663,9 @@ async function applyFittedValues(values) {
     const current = findTunableParametersInModel();
     const operations = values.filter((entry) => entry.value !== null && Number.isFinite(entry.value))
         .filter((entry) => current.some((parameter) => parameter.parameterId === entry.parameterId && parameter.value !== entry.value))
-        .map((entry) => ({ kind: 'updateParameter', parameterRef: entry.parameterId, value: entry.value }));
+        .map((entry) => (current.find((parameter) => parameter.parameterId === entry.parameterId).kind === 'state'
+            ? { kind: 'updateState', stateRef: entry.parameterId, initialValue: entry.value }
+            : { kind: 'updateParameter', parameterRef: entry.parameterId, value: entry.value }));
     if (!operations.length) return { applied: false, message: 'The fitted values already match the model.' };
     let prepared;
     try {

@@ -4643,6 +4643,15 @@ export async function runInteractionTests(driver) {
         await driver.simulateOsFileOpen(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt'));
         const opened = await driver.waitForNewHandle(before);
         await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        // The room's temperature, which no reading reaches, is marked in its node's editor as an initial value to fit.
+        const roomLabel = `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes('Ambient air'))`;
+        await waitFor(opened, `Boolean(${roomLabel})`, 'The Ambient air label was not on the canvas.');
+        await evaluate(opened, `${roomLabel}.click()`);
+        await waitFor(opened, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Ambient air'`, 'The Ambient air editor did not open.');
+        await evaluate(opened, `document.querySelector('#nodeEditorStates .editorStateRow .tuneState').click()`);
+        await waitFor(opened, `Boolean(document.querySelector('#nodeEditorStates .editorStateTuning'))`, 'The bounds of a fitted initial value were not offered.');
+        assert.deepEqual(await evaluate(opened, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Ambient air').states[0].tuning`), { minimum: 0, maximum: 586.3 }, 'The bounds start as the value give or take its own size.');
+        await evaluate(opened, `document.querySelector('#nodeEditor [data-close-card]').click()`);
         await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
         await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
         await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
@@ -4699,6 +4708,22 @@ export async function runInteractionTests(driver) {
         const afterSandbox = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
         assert.equal(afterSandbox.cycles, 31, 'The live twin made every move, sandbox or not.');
         assert.deepEqual(afterSandbox.last.jumps, played.last.jumps, 'Nothing tried in the sandbox reached the live twin.');
+
+        // Ten minutes a second: the latest window is refitted, the room's value at its anchor found with it, and applied to the twin.
+        await set('#liveTwinSpeed', '600');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.running && window.__debugParameterTuning.liveTwin().cycles >= 1 && !document.querySelector('#liveTwinRefit').disabled`, 'The live twin did not get going for a refit.', 30000);
+        await evaluate(opened, `document.querySelector('#liveTwinRefit').click()`);
+        await waitFor(opened, `/Apply it to run the twin on/.test(document.querySelector('#liveTwinRefitStatus').textContent)`, 'The refit did not finish.', 60000);
+        const refitRow = await evaluate(opened, `document.querySelector('#liveTwinRefitRows').textContent`);
+        const room = refitRow.match(/^Ambient air · Temperature at \d.*: 293\.150 → ([\d.]+)$/);
+        assert.ok(room && Math.abs(Number(room[1]) - 293.15) < 0.5, `The room is fitted at the window's anchor, and found again near the truth: ${refitRow}`);
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinRefitKeep').hidden`), true, 'With no parameter refitted there is nothing to keep in the model.');
+        await evaluate(opened, `document.querySelector('#liveTwinRefitApply').click()`);
+        await waitFor(opened, `/^Applied to the twin from the move at /.test(document.querySelector('#liveTwinRefitStatus').textContent)`, 'The refit was not applied.', 15000);
+        await waitFor(opened, `Boolean(window.__debugParameterTuning.liveTwin()?.last?.refit)`, 'The next move did not say a refit was applied.', 30000);
+        await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
+        await waitFor(opened, `!window.__debugParameterTuning.liveTwin()?.running`, 'The live twin did not stop.', 15000);
 
         // The scenario is renamed and deleted from the list.
         await set('#liveTwinScenarioRows .liveTwinScenarioRow input', 'Heater off at the start');

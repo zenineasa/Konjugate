@@ -586,6 +586,16 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             stateIds[id].insert(stateId);
             if (!nodeEnabled) continue;
             if (!std::regex_match(symbol, symbolPattern)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
+            // A state's initial value can be a fitting target too, with the same bounds as a parameter.
+            if (state.get_child_optional("tuning")) {
+                const auto minimum = state.get_optional<double>("tuning.minimum");
+                const auto maximum = state.get_optional<double>("tuning.maximum");
+                const auto initialValue = state.get_optional<double>("initialValue");
+                if (!minimum || !maximum || !initialValue || !std::isfinite(*minimum) || !std::isfinite(*maximum) ||
+                    !(*minimum < *maximum) || *initialValue < *minimum || *initialValue > *maximum) {
+                    add(result, "stateTuningInvalid", "error", "A tunable initial value needs minimum < maximum and the initial value within them.", "node", id, "states");
+                }
+            }
             else if (!stateSymbols[id].insert(symbol).second) add(result, "stateSymbolDuplicate", "error", "State symbol \"" + symbol + "\" is duplicated in this node.", "node", id, "states");
         }
         // Per-node: (outputStateId, [stateIds its bindings reference]) for this node's own

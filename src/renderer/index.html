@@ -1179,11 +1179,20 @@
                         <button id="liveTwinStart" type="button" disabled>Start live twin</button>
                         <button id="liveTwinStop" type="button" hidden>Stop</button>
                         <button id="liveTwinDetach" type="button" hidden title="Try your own inputs on a copy of the twin, ahead of real time">Detach and try…</button>
+                        <button id="liveTwinRefit" type="button" hidden title="Fit the tunable parameters, and the tunable initial values, to the latest window">Refit on the latest window</button>
                     </div>
                     <div id="liveTwinStatus" class="equationDiagnostics" role="status"></div>
                     <div id="liveTwinNote" class="equationDiagnostics valid" role="status"></div>
                     <div id="liveTwinTrend" class="liveTwinTrend" role="status"></div>
                     <div id="liveTwinObserved" class="equationDiagnostics valid" role="status"></div>
+                    <section id="liveTwinRefitResult" class="liveTwinSandbox" hidden>
+                        <div id="liveTwinRefitStatus" class="equationDiagnostics" role="status"></div>
+                        <div id="liveTwinRefitRows" class="parameterTuningBestValues"></div>
+                        <div class="liveTwinActions">
+                            <button id="liveTwinRefitApply" type="button" class="doneButton" hidden>Apply to the twin</button>
+                            <button id="liveTwinRefitKeep" type="button" hidden title="Also set the refitted parameters in the model (Undo takes them back); initial values found at the window's anchor stay with the twin">Apply, and keep the parameters in the model</button>
+                        </div>
+                    </section>
                     <div id="liveTwinPlot" class="parameterTuningComparisonPlot" role="img" aria-label="Every reading so far, the model over the latest window and its forecast" hidden></div>
                     <div id="liveTwinJumpPlot" class="liveTwinJumpPlot" role="img" aria-label="The jump at each move of the window, with the tolerance" hidden></div>
                     <section id="liveTwinSandbox" class="liveTwinSandbox" hidden>

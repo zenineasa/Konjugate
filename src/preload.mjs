@@ -222,6 +222,8 @@ contextBridge.exposeInMainWorld('engine', {
         stop: () => ipcRenderer.invoke('liveTwinStop'),
         onEvent: (callback) => ipcRenderer.on('liveTwinEvent', (_event, update) => callback(update)),
         detach: () => ipcRenderer.invoke('liveTwinDetach'),
+        refitPlan: () => ipcRenderer.invoke('liveTwinRefitPlan'),
+        applyRefit: (values, cycle) => ipcRenderer.invoke('liveTwinApplyRefit', values, cycle),
         sandboxSetInput: (signal, value) => ipcRenderer.invoke('liveTwinSandboxSetInput', signal, value),
         sandboxRunFor: (seconds) => ipcRenderer.invoke('liveTwinSandboxRunFor', seconds),
         sandboxClose: () => ipcRenderer.invoke('liveTwinSandboxClose'),

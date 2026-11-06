@@ -73,7 +73,8 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
             unit: state.unit ?? '',
             value: context.stateValueText(state.initialValue, state.unit).text,
             exactValue: context.stateValueText(state.initialValue, state.unit).exact,
-            className: ''
+            className: '',
+            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {})
         })),
         ...unknownFields(node, nodeDocumentKeys)
     };
@@ -102,7 +103,9 @@ export function nodeToDocument(definition, context) {
             name: state.label,
             symbol: state.symbol,
             initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
-            unit: state.unit ?? ''
+            unit: state.unit ?? '',
+            // A tunable initial value: a fitting target with bounds, as for a parameter.
+            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {})
         })),
         sourceTerms: (definition.sourceTerms ?? []).map((term) => ({
             ...term,

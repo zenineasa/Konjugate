@@ -37,6 +37,10 @@ struct TunableParameter {
     bool shared = false;
     std::size_t sharedIndex = 0;
     bool sourceTerm = false;
+    // A state's initial value rather than a parameter (docs/proposals/predictionActualWindow.md, step 5): located by nodeIndex and
+    // stateIndex, and parameterId holds the state's id (ids are unique across the whole document).
+    bool state = false;
+    std::size_t stateIndex = 0;
     std::size_t edgeIndex = 0;
     std::size_t nodeIndex = 0;
     std::size_t sourceTermIndex = 0;
@@ -47,7 +51,7 @@ struct TunableParameter {
     ParameterBounds bounds;
 };
 
-// Scans relationship, source-term and shared parameters for every entry with a "tuning" child.
+// Scans relationship, source-term and shared parameters, and states (their initial values), for every entry with a "tuning" child.
 std::vector<TunableParameter> findTunableParameters(const boost::property_tree::ptree& document);
 
 // Case-insensitive exact match of each CSV column name against every state's own symbol or

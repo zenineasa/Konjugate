@@ -121,6 +121,8 @@ export function replayPlan(document, log, mapping, { timeStep, anchor = true, fr
             const state = run.nodes.flatMap((node) => node.states ?? []).find((candidate) => candidate.id === entry.stateId);
             if (!state) throw new ReplayError(`The state for ${entry.signal} is no longer in the model.`);
             state.initialValue = good[0].value;
+            // A measured state starts at its reading, so its initial value is not fitted: that is for the states the data does not reach.
+            delete state.tuning;
         }
         return {
             signal: entry.signal, stateId: entry.stateId, unit: entry.unit,

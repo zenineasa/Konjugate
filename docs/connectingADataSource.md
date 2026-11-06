@@ -12,7 +12,7 @@ status: draft
 
 This page is for anyone who wants their equipment, logger or script to feed a Konjugate model: a lab rig, a pilot plant, a microcontroller, a program that collects data from the internet. It describes the **Konjugate data log**, a plain CSV file that your program appends to while the experiment runs, and gives a working simulated rig to start from.
 
-**Status: the format is fixed, and Konjugate replays a finished log; it does not yet follow one as it grows.** Replaying a recording through a model ([below](#replaying-a-log-in-konjugate)) is the first step of [Digital twin connections](proposals/digitalTwinConnections.md), and following a live log is its third; both read exactly this format, with the same reader the checker uses.
+**Status: Konjugate replays a finished log, and runs a log as a live twin, played back or followed while a logger writes it.** Both read exactly this format, with the same reader the checker uses ([below](#replaying-a-log-in-konjugate), and [Running a log as a live twin](#running-a-log-as-a-live-twin)). An MQTT broker can be followed too ([Following an MQTT broker](#following-an-mqtt-broker)); OPC UA is a later step of [Digital twin connections](proposals/digitalTwinConnections.md).
 
 ## Why a file
 
@@ -102,6 +102,7 @@ tail -f tankRun.csv                                                        # in 
 | `--start` | now | The date and time the experiment starts, with its zone. |
 | `--seed` | 1 | The noise's seed, so a run can be repeated exactly. |
 | `--glitch` | 5400 | A rig time at which the thermometer glitches; give it more than once for several. |
+| `--drift` | 0 | How fast the tank's heat loss grows, as a fraction an hour, as wet insulation would: something for a live twin to find. |
 
 **To connect a real rig,** keep the `DataLog` class and replace `TankRig` and the loop in `main` with code that reads your instruments:
 
@@ -139,6 +140,30 @@ For each measured signal the card then says whether the model stayed within the 
 A replay changes nothing in the model: it runs a copy, so there is nothing to undo and nothing to save.
 
 [examples/dataSources/simulatedTankRig.kjt](../examples/dataSources/simulatedTankRig.kjt) is the simulated rig's model, with its true values and the heater power as a shared parameter, so the rig's logs can be replayed through it straight away. (It is written by `node scripts/generateTankRigModel.mjs`.) Put in the [Tank Calibration](../examples/tankCalibration.md) example's starting guesses (300000 J/K and 10 W/K) and replay again to see a model that is out of step within minutes.
+
+## Running a log as a live twin
+
+Replaying runs the model once, unaided, from the start of the log. A live twin keeps it in step instead, the way it would be kept beside a running rig ([The prediction-actual comparison window](proposals/predictionActualWindow.md)): every time the data has moved on by a stride, it goes back to the start of the window, sets each measured state to its reading there, runs the window on what was really done, and forecasts what comes next. The **jump** at each move, how far the model's prediction was from the reading it is replaced by, is how far it had drifted: jumps that stay at the noise mean the model is right, and jumps that keep to one side mean something in the real system is moving away from it.
+
+1. Set up the replay as above, then under **As a live twin** choose the window (how far back each move compares), how often it moves, and how far ahead it forecasts.
+2. Choose how the data arrives: **as the file grows** follows the log while a logger is still writing it (the log must have been chosen from disk), and the other choices play a finished log back at that speed, or as fast as it can go.
+3. **Start live twin.** The plot shows every reading so far, the model over the latest window (shaded) and its forecast after now (dashed); a second plot shows the jumps with the tolerance either side, and a line under them says whether they lean to one side. The status line says how much faster than real time the model runs, and, if the data arrives faster than the twin can keep up, that it skipped moves to keep up.
+
+**Detach and try…** starts a sandbox: a copy of the twin, from the latest move, in an engine of its own. Set an input to a value of your own (the heater off, say), run ahead, and the plot shows what would happen beside the live forecast. The live twin carries on underneath, and nothing done in the sandbox reaches it or its record. **Back to live** ends the sandbox; if anything was tried, it is kept with the project as a draft scenario, with no question asked, and the list under the card renames or deletes it.
+
+The engine stays running for the whole twin ([Live engine session](proposals/liveEngineSession.md)), so a move costs well under a millisecond for a model like the tank and no start-up at all; if it dies, a new one is started from the last move's state and the twin carries on as if nothing happened. The live twin is a desktop feature: a web page cannot keep an engine running or read a file as it grows. [tests/engine/liveTwin.mjs](../tests/engine/liveTwin.mjs) runs the simulated rig, follows its log as it grows and checks all of this, drift included.
+
+## Following an MQTT broker
+
+Many labs already have a broker that their instruments, a Raspberry Pi or a Node-RED flow publish to. Konjugate connects to it like any other client, so it needs no port of its own, and several people can follow the same rig from their own computers.
+
+1. In the replay goal, open **Or follow an MQTT broker**, give the broker's address (`mqtt://host:1883`) and **Listen for 3 seconds**. The topics heard are listed with their last value.
+2. For each topic you want, say whether it is an input (something done to the system) or measured, and give it a name and a unit. **Use these topics** sets the card up as for a log, with each signal matched to the model by name.
+3. **Start live twin.** The moves are made as readings arrive.
+
+A payload can be a plain number (`301.2`), or JSON: a number, or an object with `value` and, optionally, `time` (seconds or milliseconds since 1970, or an ISO 8601 date and time) and `quality` (`good`, `uncertain` or `bad`). Give the reading's own `time` when you can: one stamped when it arrives carries the network's delays with it. A payload that is none of these is skipped.
+
+A broker keeps no history, so what arrives is also written to a data log as it comes, in a `recordings` folder beside the project (or in the app's own folder for a project not yet saved), named after the broker and the time. Stopping says where it is; it can be replayed and checked like any other log. [tests/engine/liveTwinMqtt.mjs](../tests/engine/liveTwinMqtt.mjs) runs a broker, publishes the simulated rig's six hours to it, and checks that the moves are the same, to the bit, as from the rig's own log.
 
 ## Checking your log
 

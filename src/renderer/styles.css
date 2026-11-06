@@ -2011,3 +2011,34 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .ownershipDialog .ownershipSaveTimes { margin: 12px 0 0; }
 .ownershipDialog .ownershipSaveTimes:empty { display: none; }
 .ownershipDialog .assistantConfigurationStatus[hidden] { display: none; }
+.liveTwin { margin-top: 12px; padding-top: 10px; border-top: 1px solid #263742; }
+.liveTwinFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.liveTwinActions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.liveTwinActions button { padding: 5px 10px; color: #d6e4ea; background: #13232d; border: 1px solid #2b3d48; border-radius: 4px; font-size: 9px; }
+.liveTwinActions button:disabled { opacity: .5; }
+.liveTwinTrend { margin: 4px 0; color: #b9ccd4; font-size: 10px; line-height: 1.4; }
+.liveTwinTrend.leaning { color: #e0b27d; }
+.liveTwinJumpPlot { width: 100%; height: 160px; margin-top: 6px; }
+.liveTwinJumpPlot[hidden] { display: none; }
+.liveTwinSandbox { margin-top: 8px; padding: 8px; border: 1px solid #3b8f88; border-radius: 5px; background: rgb(66 201 188 / 6%); }
+.liveTwinSandbox[hidden] { display: none; }
+.liveTwinBanner { margin-bottom: 6px; color: #9fe9e1; font-size: 10px; line-height: 1.4; }
+.liveTwinScenarios { margin-top: 12px; padding-top: 10px; border-top: 1px solid #263742; }
+.liveTwinScenarios[hidden] { display: none; }
+.liveTwinScenarioRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid #243640; font-size: 9px; }
+.liveTwinScenarioRow input { min-width: 0; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.liveTwinScenarioRow small { grid-column: 1 / -1; color: #7d929c; }
+.liveTwinScenarioRow button { padding: 2px 7px; color: #d6e4ea; background: #13232d; border: 1px solid #2b3d48; border-radius: 3px; }
+.parameterTuningMqtt { margin-top: 8px; font-size: 10px; color: #b8c7ce; }
+.parameterTuningMqtt[hidden] { display: none; }
+.parameterTuningMqtt summary { cursor: pointer; color: #9fb6c0; }
+.parameterTuningMqttTopic { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 54px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #243640; font-size: 9px; }
+.parameterTuningMqttTopic > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parameterTuningMqttTopic small { display: block; color: #7d929c; }
+.parameterTuningMqttTopic select, .parameterTuningMqttTopic input { min-width: 0; padding: 3px 4px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+
+.parameterTuningProgramHeading { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; font-size: 10px; }
+.parameterTuningProgramHeading button, .parameterTuningProgramBinding button { padding: 1px 7px; color: #d6e4ea; background: #13232d; border: 1px solid #2b3d48; border-radius: 3px; }
+.parameterTuningProgramBinding { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto; gap: 4px; align-items: center; padding: 3px 0; }
+.parameterTuningProgramBinding input, .parameterTuningProgramBinding select { min-width: 0; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.parameterTuningProgramSource { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 6px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 4px; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }

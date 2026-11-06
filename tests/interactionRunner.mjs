@@ -7,6 +7,10 @@ import { unzipSync } from 'fflate';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
+import { createServer } from 'node:net';
+import { Aedes } from 'aedes';
+import mqtt from 'mqtt';
+import { readDataLog } from '../src/dataLog.mjs';
 
 // These 10 primitives, and every scenario below, operate on a "handle" -- a driver-produced
 // object wrapping either a live Electron BrowserWindow (tests/drivers/electronWindowDriver.mjs)
@@ -4612,6 +4616,197 @@ export async function runInteractionTests(driver) {
         assert.equal(document_.nodes.find((node) => node.id === 1).states[0].initialValue, 293.15, 'Replaying must not move the model\'s initial state.');
         assert.equal(await evaluate(opened, `document.querySelector('#undoButton').disabled`), true, 'Replaying is not an edit.');
         await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('a data log runs as a live twin: moves, forecasts, jumps, a sandbox and a draft scenario', async () => {
+        // Six hours of the rig with no noise: the heater on for two hours, off for one, on for two, then off; a reading a minute.
+        const capacitance = 209000, heatLoss = 20, ambient = 293.15;
+        const heaterAt = (time) => (time < 7200 || (time >= 10800 && time < 18000) ? 1000 : 0);
+        const rows = [];
+        let temperature = ambient;
+        for (let time = 0; time <= 21600; time += 60) {
+            if (time > 0) {
+                const settled = ambient + heaterAt(time - 60) / heatLoss;
+                temperature = settled + (temperature - settled) * Math.exp(-heatLoss * 60 / capacitance);
+            }
+            const changed = time === 0 || heaterAt(time) !== heaterAt(time - 60);
+            rows.push(`${time},${changed ? heaterAt(time) : ''},${temperature.toFixed(3)},`);
+        }
+        const log = [
+            '# konjugate data log: 1', '# source: Interaction test', '# time: seconds since 2026-11-06T09:00:00Z',
+            '# inputs: heaterPower', '# outputs: tankTemperature', 'time,heaterPower [W],tankTemperature [K],tankTemperature quality', ...rows
+        ].join('\n') + '\n';
+
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt'));
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+        await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
+        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(log)}, 'tankRun.csv')`);
+        await waitFor(opened, `!document.querySelector('#liveTwinStart').disabled`, 'The live twin could not be started for a mapped log.');
+        // A log handed over as text has no file on disk to follow.
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed option[value="follow"]').disabled`), true);
+        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
+        // As fast as it can go: every move of the window, then the end.
+        await set('#liveTwinSpeed', 'Infinity');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The live twin did not play the whole log.', 60000);
+        const played = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
+        assert.equal(played.cycles, 31, 'A one-hour window moving every ten minutes over six hours makes 31 moves.');
+        assert.equal(played.last.now, 21600);
+        assert.ok(Math.abs(played.last.jumps.tankTemperature.jump) < 0.2, `The true model jumps by little: ${played.last.jumps.tankTemperature.jump}.`);
+        await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.length === 3 && document.querySelector('#liveTwinJumpPlot').data?.length === 3`, 'The live twin and its jumps were not drawn.');
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`), /^The whole log has been played: 31 moves/);
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /no drift/);
+        assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().goal`), 'replay', 'How the log was replayed is kept with the project.');
+
+        // At an hour a second, detach part way, switch the heater off and run ahead; back to live keeps what was tried as a draft.
+        await set('#liveTwinSpeed', '3600');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.running && window.__debugParameterTuning.liveTwin().cycles >= 3 && !document.querySelector('#liveTwinDetach').disabled`, 'The live twin did not get going.', 30000);
+        await evaluate(opened, `document.querySelector('#liveTwinDetach').click()`);
+        await waitFor(opened, `!document.querySelector('#liveTwinSandbox').hidden`, 'The sandbox did not open.', 15000);
+        await set('#liveTwinSandboxInputs input[data-signal="heaterPower"]', '0');
+        await set('#liveTwinSandboxMinutes', '90');
+        await evaluate(opened, `document.querySelector('#liveTwinSandboxRun').click()`);
+        await waitFor(opened, `/^Ran ahead to .* with heaterPower 0/.test(document.querySelector('#liveTwinSandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
+        await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.length === 4`, 'What was tried was not drawn beside the forecast.');
+        await evaluate(opened, `document.querySelector('#liveTwinSandboxReturn').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.scenarios().length === 1`, 'Going back to live did not keep the scenario.', 15000);
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinNote').textContent`), /^Back to live\. 1 scenario kept as a draft\.$/, 'The note says so, and the moves do not write over it.');
+        const scenarios = await evaluate(opened, `window.__debugParameterTuning.scenarios()`);
+        assert.equal(scenarios.length, 1);
+        assert.deepEqual(scenarios[0].tried.map(({ signal, value }) => [signal, value]), [['heaterPower', 0]]);
+        assert.equal(scenarios[0].ranFor, 5400);
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinScenarioRows .liveTwinScenarioRow').length`), 1);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The live twin did not carry on to the end after the sandbox.', 60000);
+        const afterSandbox = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
+        assert.equal(afterSandbox.cycles, 31, 'The live twin made every move, sandbox or not.');
+        assert.deepEqual(afterSandbox.last.jumps, played.last.jumps, 'Nothing tried in the sandbox reached the live twin.');
+
+        // The scenario is renamed and deleted from the list.
+        await set('#liveTwinScenarioRows .liveTwinScenarioRow input', 'Heater off at the start');
+        assert.equal((await evaluate(opened, `window.__debugParameterTuning.scenarios()`))[0].name, 'Heater off at the start');
+        await evaluate(opened, `document.querySelector('#liveTwinScenarioRows .liveTwinScenarioRow button').click()`);
+        assert.equal((await evaluate(opened, `window.__debugParameterTuning.scenarios()`)).length, 0);
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinScenarios').hidden`), true);
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('a tuning objective written as a Python program, from a template, finds the true values', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-program-'));
+        const projectPath = join(directory, 'tank.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'tankCalibration.kjt')));
+        const measured = await readFile(join(process.cwd(), 'examples', 'tankCalibrationMeasured.csv'), 'utf8');
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The tank model did not load.');
+        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+        await evaluate(opened, `document.querySelector('#parameterTuningGoalObjective').click()`);
+        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(measured)}, 'tankCalibrationMeasured.csv')`);
+        await waitFor(opened, `/Added 1 measured column/.test(document.querySelector('#parameterTuningStatus').textContent)`, 'The measured data was not added.');
+
+        // Written as a Python program: the expression gives way to the program, its keys and its templates.
+        await evaluate(opened, `document.querySelector('#parameterTuningObjectiveKind [data-objective-kind="python"]').click()`);
+        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningExpressionPart').hidden`), true);
+        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningProgramPart').hidden`), false);
+        assert.match(await evaluate(opened, `document.querySelector('#parameterTuningTuneHint').textContent`), /Write the objective program/);
+        await evaluate(opened, `[...document.querySelectorAll('#parameterTuningProgramTemplates button')].find((button) => button.textContent === 'Squared error against measured data').click()`);
+        assert.match(await evaluate(opened, `document.querySelector('#parameterTuningProgramSource').value`), /def objective\(run\):/);
+        const keys = await evaluate(opened, `[...document.querySelectorAll('#parameterTuningProgramBindings .parameterTuningProgramBinding')].map((row) => [row.querySelector('input').value, row.querySelector('select').value])`);
+        assert.deepEqual(keys, [['simulated', 'state:2'], ['measured', 'measured:tankTemperature']], 'Each key starts bound to the first thing of its kind.');
+        assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuning').disabled`), false, 'A program with every key bound can run.');
+
+        await evaluate(opened, `(() => { document.querySelector('#parameterTuningMaxSimulations').value = '150'; document.querySelector('#runParameterTuning').click(); })()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'The program objective did not reach its review.', 120000);
+        const report = await evaluate(opened, `window.__debugParameterTuning.report()`);
+        const value = (parameterId) => report.finalParameters.find((entry) => entry.parameterId === parameterId).value;
+        assert.ok(Math.abs(value(20) / 209000 - 1) < 0.02, `The program objective finds the capacitance: ${value(20)}.`);
+        assert.ok(Math.abs(value(10) / 20 - 1) < 0.02, `The program objective finds the heat loss: ${value(10)}.`);
+        assert.equal(report.failedTrials, 0);
+        const setup = await evaluate(opened, `window.__debugParameterTuning.setup()`);
+        assert.equal(setup.objective.program.language, 'python', 'The program is kept with the project, to run again.');
+        assert.deepEqual(setup.objective.program.bindings, [{ key: 'simulated', kind: 'state', id: 2 }, { key: 'measured', kind: 'measured', column: 'tankTemperature' }]);
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('a live twin follows an MQTT broker: listening finds the topics, and what arrives is recorded', async () => {
+        // A broker in this process, and a gateway publishing the tank's readings as a lab's would: one topic each, JSON with the
+        // reading's own time, a minute of the tank every 20 ms, for as long as the test needs.
+        const broker = await Aedes.createBroker();
+        const server = createServer(broker.handle);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const url = `mqtt://127.0.0.1:${server.address().port}`;
+        const gateway = await mqtt.connectAsync(url);
+        const epoch = Date.parse('2026-11-06T09:00:00Z') / 1000;
+        const capacitance = 209000, heatLoss = 20, ambient = 293.15;
+        let minute = 0;
+        let temperature = ambient;
+        const publishing = setInterval(() => {
+            const time = minute * 60;
+            if (minute > 0) {
+                const settled = ambient + 1000 / heatLoss;
+                temperature = settled + (temperature - settled) * Math.exp(-heatLoss * 60 / capacitance);
+            }
+            if (minute % 30 === 0) gateway.publish('lab/rig/heater/power', JSON.stringify({ value: 1000, time: epoch + time }));
+            gateway.publish('lab/rig/tank/temperature', JSON.stringify({ value: temperature, time: epoch + time }));
+            minute += 1;
+        }, 20);
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-mqtt-'));
+        try {
+            // The model copied somewhere of its own, so the recording beside it lands there.
+            const projectPath = join(directory, 'rig.kjt');
+            await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+            const before = driver.allHandles();
+            await driver.simulateOsFileOpen(projectPath);
+            const opened = await driver.waitForNewHandle(before);
+            await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+            await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+            await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+            await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
+            assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningMqtt').hidden`), false, 'The replay goal offers a broker.');
+            const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await set('#parameterTuningMqttUrl', url);
+            await evaluate(opened, `document.querySelector('#parameterTuningMqttListen').click()`);
+            await waitFor(opened, `/^Heard 2 topics/.test(document.querySelector('#parameterTuningMqttStatus').textContent)`, 'Listening did not find the two topics.', 15000);
+            const topic = (name) => `#parameterTuningMqttTopics .parameterTuningMqttTopic[data-topic="${name}"]`;
+            await set(`${topic('lab/rig/heater/power')} select`, 'input');
+            await set(`${topic('lab/rig/heater/power')} input[data-field="name"]`, 'heaterPower');
+            await set(`${topic('lab/rig/tank/temperature')} select`, 'output');
+            await set(`${topic('lab/rig/tank/temperature')} input[data-field="name"]`, 'tankTemperature');
+            await set(`${topic('lab/rig/tank/temperature')} input[data-field="unit"]`, 'K');
+            await evaluate(opened, `document.querySelector('#parameterTuningMqttUse').click()`);
+            await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The topics did not set the card up.');
+            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), true, 'A broker is followed, not replayed.');
+            const target = (signal) => `document.querySelector('.parameterTuningReplayRow[data-signal="${signal}"] select').value`;
+            assert.equal(await evaluate(opened, target('heaterPower')), '40');
+            assert.equal(await evaluate(opened, target('tankTemperature')), '2');
+            assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed').value`), 'follow');
+            await set('#parameterTuningReplayTimeStep', '60');
+            await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the broker.', 30000);
+            await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
+            await waitFor(opened, `/recorded in .*recordings/.test(document.querySelector('#liveTwinStatus').textContent)`, 'Stopping did not say where the readings were recorded.', 15000);
+            const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
+            assert.ok(recordedTo.startsWith(join(directory, 'recordings')), `The recording is beside the project: ${recordedTo}.`);
+            const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
+            assert.deepEqual(recorded.header.signals.map((signal) => signal.name), ['heaterPower', 'tankTemperature']);
+            assert.ok(recorded.observations.length >= 61, `The recording holds at least the hour of readings the first move needed: ${recorded.observations.length}.`);
+            await evaluate(opened, `window.confirm = () => true; undefined`);
+            await closeWhenValidated(opened);
+        } finally {
+            clearInterval(publishing);
+            await gateway.endAsync();
+            await new Promise((resolve) => server.close(resolve));
+            broker.close();
+        }
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
     await run('a parameter linked to a shared parameter edits and unlinks through the edge editor', async () => {

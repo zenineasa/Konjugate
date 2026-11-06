@@ -136,6 +136,8 @@ add_executable(konjugateEngine
     src/modelValidator.cpp
     src/nloptBackend.cpp
     src/fittingObjective.cpp
+    src/runMeasure.cpp
+    src/childProcess.cpp
     src/parameterFitting.cpp
     src/parameterFittingReport.cpp
     src/partitionPlan.cpp
@@ -206,6 +208,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessNodeShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/fmiGlue.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/objectiveProgramMain.cpp"
     DESTINATION src
 )
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/sdk/python/konjugate" DESTINATION sdk/python
@@ -423,6 +426,8 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/finiteDifferenceGradient.cpp
         src/fittingObjective.cpp
+        src/runMeasure.cpp
+        src/childProcess.cpp
         src/modelValidator.cpp
         src/nloptBackend.cpp
         src/parameterFitting.cpp

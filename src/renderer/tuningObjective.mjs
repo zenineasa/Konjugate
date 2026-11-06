@@ -68,8 +68,9 @@ export function objectiveVocabulary(document, measuredColumns = []) {
 
 // What `window.engine.fit` is given as `config.objective` (see fitWithEngine in src/engineAdapter.mjs).
 // `latex` is how the objective is written in the editor, kept so it can be shown again; the engine reads `expression`, its text form.
-export function objectivePayload({ expression, latex = '', direction, targetTime, timeStep, variables, constraints = [] }) {
+export function objectivePayload({ expression = '', latex = '', direction, targetTime, timeStep, variables, constraints = [], program = null }) {
     return {
+        ...(program ? { program: { language: program.language, source: program.source, bindings: program.bindings.map((binding) => ({ ...binding })) } } : {}),
         expression: expression.trim(), latex, direction: direction === 'maximise' ? 'maximise' : 'minimise', targetTime, timeStep, variables,
         constraints: constraints.map(({ expression: limited, latex = '', relation, limit }) => ({ expression: limited.trim(), latex, relation: relation === '>=' ? '>=' : '<=', limit: Number(limit) }))
     };

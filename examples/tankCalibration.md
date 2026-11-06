@@ -100,6 +100,10 @@ From the starting guesses the model warms too slowly and settles too high, well 
 
 The same card can tune towards a goal rather than towards data. Choose **Optimise an objective**, set the goal to **Maximise**, and write the objective in the editor, which works like an edge's equation: click **final** under Summaries, then click Water tank · Water temperature under States, so it reads as the final value of the water temperature. Set each simulation to run for 28800 s with a 600 s step and run it: the search drives both parameters to their lower bounds, since a smaller thermal mass warms faster and a smaller loss coefficient leaks less heat, and the progress plot shows the final temperature rising rather than a loss falling. Add a limit with the plus beside Limits, such as the max of the water temperature staying at most 340, and run it again to see the search settle just under it. Apply a result only if you want to keep it; the calibrated model is the one to keep.
 
+## Write the objective as a program
+
+Some goals are not a formula: how long the water takes to settle near a temperature, or how far it overshoots it. Under **Optimise an objective**, choose **Python program** (or **C++ program**) and start from one of the templates. **Squared error against measured data** is the calibration again, written as a program: add the measured data, keep its two keys bound to Water tank · Water temperature and the measured column, and run it, and it finds the same 209000 J/K and 20 W/K. **Settling time to a target** reads one key, the response, and returns how long after the start it stays within 2 % of the target; set the target in the program, bind the key to the water temperature, choose **Minimise** and run it to see which tank settles soonest. The program runs in a process of its own, started once for the whole tuning, so a mistake in it fails a trial, with its message shown, and never the app.
+
 ## Simplifications
 
 The water is perfectly mixed, the room temperature and the heater's power stay fixed, and the measurements are synthetic: the model's own output with the true values, plus a little random noise.

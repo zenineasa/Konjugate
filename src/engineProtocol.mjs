@@ -174,13 +174,55 @@ export function encodeEngineCommand(sequence, command) {
             ] : [])
         ]);
         payloadField = 6;
+    } else if (command.type === 'advanceTo') {
+        payload = concatBytes([encodedDoubleField(1, Number(command.time)), ...(command.takeCheckpoints ? [encodedField(2, 0, encodeVarint(1))] : [])]);
+        payloadField = 7;
+    } else if (command.type === 'appendInputSamples') {
+        if (!Number.isSafeInteger(command.parameterId) || command.parameterId <= 0) throw new Error('An input requires a positive safe integer parameter identifier.');
+        payload = concatBytes([
+            encodedField(1, 0, encodeVarint(command.parameterId)),
+            ...(command.samples ?? []).map((sample) => encodedMessageField(2, concatBytes([
+                encodedDoubleField(1, Number(sample.time)),
+                encodedDoubleField(2, Number(sample.value))
+            ]))),
+            ...(command.replaceFrom !== undefined ? [encodedField(3, 0, encodeVarint(1)), encodedDoubleField(4, Number(command.replaceFrom))] : [])
+        ]);
+        payloadField = 8;
+    } else if (command.type === 'restoreCheckpoint') {
+        payload = concatBytes([
+            encodedDoubleField(1, Number(command.time)),
+            ...(command.overrides ?? []).map((override) => encodedMessageField(2, concatBytes([
+                encodedField(1, 0, encodeVarint(override.stateId)),
+                encodedDoubleField(2, Number(override.value))
+            ])))
+        ]);
+        payloadField = 9;
+    } else if (command.type === 'restoreState') {
+        const values = new Uint8Array(8 * command.values.length);
+        command.values.forEach((value, index) => {
+            if (!Number.isFinite(value)) throw new Error('A state to restore must be finite.');
+            writeDoubleLE(values, 8 * index, value);
+        });
+        payload = concatBytes([
+            encodedDoubleField(1, Number(command.time)),
+            encodedField(2, 2, concatBytes([encodeVarint(values.length), values])),
+            ...(command.providerStates ?? []).map((saved) => encodedMessageField(3, concatBytes([
+                encodedField(1, 0, encodeVarint(saved.nodeId)),
+                encodedField(2, 2, concatBytes([encodeVarint(saved.payload.length), saved.payload]))
+            ])))
+        ]);
+        payloadField = 10;
+    } else if (command.type === 'retainCheckpointsFrom') {
+        payload = encodedDoubleField(1, Number(command.time));
+        payloadField = 11;
     } else {
         throw new Error('Unsupported engine command.');
     }
     const message = concatBytes([
         encodedField(1, 0, encodeVarint(1)),
         encodedField(2, 0, encodeVarint(sequence)),
-        encodedMessageField(payloadField, payload)
+        encodedMessageField(payloadField, payload),
+        ...(command.batch ? [encodedField(12, 0, encodeVarint(command.batch))] : [])
     ]);
     if (message.length > 1024 * 1024) throw new Error('The engine command frame is too large.');
     const frame = new Uint8Array(message.length + 4);
@@ -511,6 +553,29 @@ function decodedIntervention(buffer) {
     return intervention;
 }
 
+// A session's answer to one command (SessionReply in protocol/engineProtocol.proto). A provider's saved state stays as bytes.
+function decodedSessionReply(buffer) {
+    const reply = { sequence: 0, ok: false, message: '', time: 0, values: [], providerStates: [], computeNanoseconds: 0, checkpointsTaken: 0 };
+    for (const item of fields(buffer)) {
+        if (item.number === 1 && item.wireType === 0) reply.sequence = item.value;
+        else if (item.number === 2 && item.wireType === 0) reply.ok = Boolean(item.value);
+        else if (item.number === 3 && item.wireType === 2) reply.message = decodeUtf8(item.value);
+        else if (item.number === 4 && item.wireType === 1) reply.time = readDoubleLE(item.value);
+        else if (item.number === 5 && item.wireType === 2) reply.values = reply.values.concat(packedDoubles(item.value));
+        else if (item.number === 5 && item.wireType === 1) reply.values.push(readDoubleLE(item.value));
+        else if (item.number === 6 && item.wireType === 2) {
+            const saved = { nodeId: 0, payload: new Uint8Array(0) };
+            for (const part of fields(item.value)) {
+                if (part.number === 1 && part.wireType === 0) saved.nodeId = part.value;
+                else if (part.number === 2 && part.wireType === 2) saved.payload = part.value.slice();
+            }
+            reply.providerStates.push(saved);
+        } else if (item.number === 7 && item.wireType === 0) reply.computeNanoseconds = item.value;
+        else if (item.number === 8 && item.wireType === 0) reply.checkpointsTaken = item.value;
+    }
+    return reply;
+}
+
 export function decodeEngineEvent(buffer) {
     const event = { protocolVersion: 0 };
     for (const field of fields(buffer)) {
@@ -527,6 +592,8 @@ export function decodeEngineEvent(buffer) {
             event.stateTable = decodedStateTable(field.value);
         } else if (field.number === 4 && field.wireType === 2) {
             event.sampleBatch = decodedSampleBatch(field.value);
+        } else if (field.number === 5 && field.wireType === 2) {
+            event.sessionReply = decodedSessionReply(field.value);
         }
     }
     if (event.protocolVersion !== 1) throw new Error(`Unsupported engine protocol version ${event.protocolVersion}.`);

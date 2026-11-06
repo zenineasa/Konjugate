@@ -211,7 +211,7 @@ export async function fitWithEngine(content, csvContent, config, options) {
         await writeFile(inputPath, await encodeProjectFile(resolvedContent));
         await writeFile(csvPath, csvContent ?? '', 'utf8');
         const objectivePath = join(directory, 'objective.json');
-        if (config?.objective) await writeFile(objectivePath, JSON.stringify(config.objective), 'utf8');
+        if (config?.objective) await writeFile(objectivePath, JSON.stringify(withProgramToolchains(config.objective, options)), 'utf8');
         const args = fitArguments({ inputPath, csvPath, reportPath, objectivePath, stopPath, progress: true }, config);
         options.onStart?.({ requestStop: () => writeFile(stopPath, '') });
         const execution = await runEngineWithFramedOutput(executable, args, options.signal, (message) => options.onProgress?.(decodeFittingProgressEvent(message)));
@@ -224,6 +224,20 @@ export async function fitWithEngine(content, csvContent, config, options) {
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// An objective written as a program is built and run with the same toolchains as a provider: the Python interpreter and SDK, and
+// the C++ compiler and the engine's SDK (include/ and the glue main in src/), from the Provider Toolchains choices or found as usual.
+export function withProgramToolchains(objective, options) {
+    if (!objective?.program) return objective;
+    return {
+        ...objective,
+        program: {
+            ...objective.program,
+            python: { sdkPath: pythonProviderSdkPath(options), ...(options.providerToolchains?.python?.interpreterPath ? { interpreter: options.providerToolchains.python.interpreterPath } : {}), ...objective.program.python },
+            cpp: { sdkPath: cppProviderSdkPath(options), ...(options.providerToolchains?.cpp?.compilerPath ? { compiler: options.providerToolchains.cpp.compilerPath } : {}), ...objective.program.cpp }
+        }
+    };
 }
 
 // Like runEngine, but reads stdout as framed messages, handing each to `onMessage` as it arrives.

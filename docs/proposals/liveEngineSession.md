@@ -10,7 +10,7 @@ status: draft
 
 # A long-lived engine session for keeping a model in step with live data
 
-**Status: step 1 built (the run loop as a `Simulation` object), the rest proposed.** Step 2 of [Digital twin connections](digitalTwinConnections.md): the engine side of a model kept in step with arriving data. A first version of this proposal recommended running each cycle of the comparison window as a fresh engine run, since the measured start-up cost was small (8 ms for an equation-only model, about 45 ms with one Python provider). That was turned down, on experience from the robotics toolbox that small per-call costs add up once they are paid thousands of times. This version designs the engine that stays running instead.
+**Status: steps 1 to 5 built: the run loop as a `Simulation` object, the session command, `WindowSession`, the live twin in the tuning card and the first rung of the degrade ladder.** Step 2 of [Digital twin connections](digitalTwinConnections.md): the engine side of a model kept in step with arriving data. A first version of this proposal recommended running each cycle of the comparison window as a fresh engine run, since the measured start-up cost was small (8 ms for an equation-only model, about 45 ms with one Python provider). That was turned down, on experience from the robotics toolbox that small per-call costs add up once they are paid thousands of times. This version designs the engine that stays running instead.
 
 ## What the cycle needs
 
@@ -150,8 +150,8 @@ When this is agreed, [Digital twin connections](digitalTwinConnections.md) "What
 ## Order of work
 
 1. **`Simulation` from `runSimulation`,** with no change in behaviour, its backends reached through the two state operations: every engine test, the numerical regression to the bit, and the interaction suite. **Built:** `Simulation` and the three `StepExecutor` classes (serial, thread pool, partitioned) are in `simulationRunner.cpp`, and `runSimulation` is a short loop over them. Every example model on every backend, and a restart from a checkpoint (a Python provider's included), gave samples, checkpoints and provider states identical to the bit with the code before it.
-2. **The session command and its messages,** with restore in mid-session (provider states included), input streams, bounded checkpoints and unthinned samples; `EngineSession` in JavaScript. Proved by the equivalence, repetition, memory, correction and crash tests above, and the cost comparison.
-3. **`WindowSession`** and the rig's `--drift`, proved through the real engine.
-4. **Replay as a live twin** in the tuning card.
-5. **The first rung of the degrade ladder** (lengthen the stride when cycles cannot keep up), tested with an artificially slow model.
+2. **Built.** **The session command and its messages,** with restore in mid-session (provider states included), input streams, bounded checkpoints and unthinned samples; `EngineSession` in JavaScript. Proved by the equivalence, repetition, memory, correction and crash tests above, and the cost comparison.
+3. **Built.** **`WindowSession`** and the rig's `--drift`, proved through the real engine (`tests/engine/engineSession.mjs`, `tests/engine/liveTwin.mjs`). A cycle of the PI-controlled tank, with its Python provider, takes about 16 ms in the session against about 75 ms as a fresh run.
+4. **Built.** **Replay as a live twin** in the tuning card, with detaching into a sandbox and draft scenarios kept with the project.
+5. **Built.** **The first rung of the degrade ladder:** a twin fed live data that falls three strides behind skips to the newest anchor, rebuilding the checkpoint there from the last move's state, and says how many moves it skipped. Tested by giving a twin the whole log at once.
 6. Then step 3 of the connections document: the same session fed by a file that is still growing.

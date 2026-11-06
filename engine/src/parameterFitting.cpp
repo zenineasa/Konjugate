@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "parameterFitting.hpp"
+#include "runMeasure.hpp"
 #include "nloptBackend.hpp"
 #include "simulationRunner.hpp"
 #include "engineProtocol.pb.h"
@@ -223,7 +224,29 @@ std::vector<FittingSignalMapping> autoMapColumnsToStates(const std::vector<std::
 void loadFittingObjective(const std::filesystem::path& path, FittingProblem& problem) {
     boost::property_tree::ptree objective;
     boost::property_tree::read_json(path.string(), objective);
-    problem.objective = objective.get<std::string>("expression");
+    // An objective is an expression, or a program in its place.
+    if (const auto program = objective.get_child_optional("program")) {
+        ObjectiveProgram parsed;
+        parsed.language = program->get<std::string>("language");
+        parsed.source = program->get<std::string>("source");
+        if (const auto bindings = program->get_child_optional("bindings")) for (const auto& entry : *bindings) {
+            ProgramBinding binding;
+            binding.key = entry.second.get<std::string>("key");
+            binding.kind = entry.second.get<std::string>("kind");
+            binding.id = entry.second.get<std::uint64_t>("id", 0);
+            binding.column = entry.second.get<std::string>("column", "");
+            parsed.bindings.push_back(std::move(binding));
+        }
+        parsed.pythonInterpreter = program->get<std::string>("python.interpreter", "");
+        parsed.pythonSdkPath = program->get<std::string>("python.sdkPath", "");
+        parsed.cppCompiler = program->get<std::string>("cpp.compiler", "");
+        parsed.cppSdkPath = program->get<std::string>("cpp.sdkPath", "");
+        parsed.buildDirectory = program->get<std::string>("buildDirectory", "");
+        parsed.timeoutSeconds = program->get<double>("timeoutSeconds", 60.0);
+        problem.program = std::move(parsed);
+    } else {
+        problem.objective = objective.get<std::string>("expression");
+    }
     problem.maximize = objective.get<std::string>("direction", "minimise") == "maximise";
     problem.targetTime = objective.get<double>("targetTime", 0.0);
     problem.timeStep = objective.get<double>("timeStep", 0.0);
@@ -248,6 +271,13 @@ void loadFittingObjective(const std::filesystem::path& path, FittingProblem& pro
 }
 
 void checkFittingObjective(const FittingProblem& problem) {
+    // A program is checked by being made ready: its bindings read, and a C++ one compiled, so a mistake in it is reported before the
+    // first trial, with the compiler's own words.
+    if (problem.program) {
+        ProgramMeasure check(problem, *problem.program);
+        for (const auto& constraint : problem.constraints) FittingObjective(constraint.expression, problem.objectiveVariables);
+        return;
+    }
     if (problem.objective.empty()) return;
     FittingObjective(problem.objective, problem.objectiveVariables);
     for (const auto& constraint : problem.constraints) FittingObjective(constraint.expression, problem.objectiveVariables);
@@ -258,7 +288,7 @@ double evaluateFittingLoss(const FittingProblem& problem, const std::vector<doub
     return evaluateFittingTrial(problem, parameterValues, scratchOutputPath).objective;
 }
 
-FittingTrialScore evaluateFittingTrial(const FittingProblem& problem, const std::vector<double>& parameterValues,
+FittingTrialScore scoreFittingTrial(const FittingProblem& problem, const FittingMeasures& measures, const std::vector<double>& parameterValues,
     const std::filesystem::path& scratchOutputPath) {
     // ptree assignment is a deep copy -- each trial gets its own document, the base is untouched.
     boost::property_tree::ptree document = problem.baseDocument;
@@ -276,87 +306,34 @@ FittingTrialScore evaluateFittingTrial(const FittingProblem& problem, const std:
         childAt(parameters, tunable.parameterIndex).put("value", parameterValues[index]);
     }
 
-    const bool useObjective = !problem.objective.empty();
-    const auto rowCount = problem.measured.rows.size();
+    // The run the objective needs; every limit is measured on the same run.
+    const auto length = measures.objective->runLength();
     boost::property_tree::ptree configuration;
-    if (useObjective) {
-        if (!(problem.targetTime > 0.0) || !(problem.timeStep > 0.0)) throw std::runtime_error("An objective needs a run length and a time step above zero.");
-        configuration.put("targetTime", problem.targetTime);
-        configuration.put("globalTimeStep", problem.timeStep);
-        configuration.put("outputInterval", problem.timeStep);
-    } else {
-        if (rowCount < 2) throw std::runtime_error("The measured series needs at least two rows to define a fitting run's duration.");
-        configuration.put("targetTime", problem.measured.timeStep * static_cast<double>(rowCount - 1));
-        configuration.put("globalTimeStep", problem.measured.timeStep);
-        configuration.put("outputInterval", problem.measured.timeStep);
-    }
-
+    configuration.put("targetTime", length.targetTime);
+    configuration.put("globalTimeStep", length.timeStep);
+    configuration.put("outputInterval", length.timeStep);
     runSimulation(document, configuration, scratchOutputPath);
     const auto samples = readSimulationSamples(scratchOutputPath);
+    const TrialRun run(samples, problem, parameterValues);
 
-    if (useObjective) {
-        ObjectiveData data;
-        data.times = samples.times;
-        for (std::size_t column = 0; column < samples.stateIds.size(); ++column) {
-            auto& series = data.states[samples.stateIds[column]];
-            series.reserve(samples.valuesByTime.size());
-            for (const auto& row : samples.valuesByTime) series.push_back(row[column]);
-        }
-        for (std::size_t column = 0; column < problem.measured.columnNames.size(); ++column) {
-            auto& series = data.measured[problem.measured.columnNames[column]];
-            for (const auto& row : problem.measured.rows) series.push_back(row[column]);
-        }
-        for (std::size_t index = 0; index < problem.tunableParameters.size(); ++index) {
-            data.parameters[problem.tunableParameters[index].parameterId] = parameterValues[index];
-        }
-        const double value = FittingObjective(problem.objective, problem.objectiveVariables).evaluate(data);
-        FittingTrialScore score;
-        score.objective = problem.maximize ? -value : value;
-        for (const auto& constraint : problem.constraints) {
-            const double reached = FittingObjective(constraint.expression, problem.objectiveVariables).evaluate(data);
-            const double excess = constraint.atMost ? reached - constraint.limit : constraint.limit - reached;
-            // Relative to the limit; against the size of the value itself when the limit is zero, which has no size to be relative to.
-            const double scale = constraint.limit != 0.0 ? std::abs(constraint.limit) : std::max(1.0, std::abs(reached));
-            const double relative = std::isnan(excess) ? std::numeric_limits<double>::infinity() : std::max(0.0, excess) / scale;
-            score.violationSquares += relative * relative;
-            score.worstViolation = std::max(score.worstViolation, relative);
-        }
-        return score;
-    }
-
-    // Resolve each mapping's simulated-state column index and measured-CSV column index once,
-    // outside the row loop below, rather than searching per row.
-    std::vector<std::size_t> stateIndexByMapping(problem.mapping.size());
-    std::vector<std::size_t> csvColumnIndexByMapping(problem.mapping.size());
-    for (std::size_t mappingIndex = 0; mappingIndex < problem.mapping.size(); ++mappingIndex) {
-        const auto& mapping = problem.mapping[mappingIndex];
-        const auto stateIt = std::find(samples.stateIds.begin(), samples.stateIds.end(), mapping.stateId);
-        if (stateIt == samples.stateIds.end()) throw std::runtime_error("A mapped signal's state did not appear in the simulated result.");
-        stateIndexByMapping[mappingIndex] = static_cast<std::size_t>(std::distance(samples.stateIds.begin(), stateIt));
-        const auto columnIt = std::find(problem.measured.columnNames.begin(), problem.measured.columnNames.end(), mapping.csvColumnName);
-        if (columnIt == problem.measured.columnNames.end()) throw std::runtime_error("A mapped CSV column was not found in the measured series.");
-        csvColumnIndexByMapping[mappingIndex] = static_cast<std::size_t>(std::distance(problem.measured.columnNames.begin(), columnIt));
-    }
-
-    // Paired by row index, not by searching for the nearest timestamp -- both grids were built
-    // from the same step size and start time (see runParameterFit()/this function's own
-    // configuration above), so row i of the CSV and sample i of the simulation are the same
-    // instant by construction. Clamped to the shorter of the two as a defensive measure against a
-    // boundary-condition off-by-one in the simulation's own output cadence, not because the
-    // counts are expected to differ.
-    const auto pairedRowCount = std::min(rowCount, samples.valuesByTime.size());
-    double totalLoss = 0.0;
-    for (std::size_t row = 0; row < pairedRowCount; ++row) {
-        for (std::size_t mappingIndex = 0; mappingIndex < problem.mapping.size(); ++mappingIndex) {
-            const double measuredValue = problem.measured.rows[row][csvColumnIndexByMapping[mappingIndex]];
-            const double simulatedValue = samples.valuesByTime[row][stateIndexByMapping[mappingIndex]];
-            const double residual = simulatedValue - measuredValue;
-            totalLoss += problem.mapping[mappingIndex].weight * residual * residual;
-        }
-    }
     FittingTrialScore score;
-    score.objective = totalLoss;
+    const double value = measures.objective->evaluate(run);
+    score.objective = problem.maximize ? -value : value;
+    for (const auto& [constraint, measure] : measures.limits) {
+        const double reached = measure->evaluate(run);
+        const double excess = constraint.atMost ? reached - constraint.limit : constraint.limit - reached;
+        // Relative to the limit; against the size of the value itself when the limit is zero, which has no size to be relative to.
+        const double scale = constraint.limit != 0.0 ? std::abs(constraint.limit) : std::max(1.0, std::abs(reached));
+        const double relative = std::isnan(excess) ? std::numeric_limits<double>::infinity() : std::max(0.0, excess) / scale;
+        score.violationSquares += relative * relative;
+        score.worstViolation = std::max(score.worstViolation, relative);
+    }
     return score;
+}
+
+FittingTrialScore evaluateFittingTrial(const FittingProblem& problem, const std::vector<double>& parameterValues,
+    const std::filesystem::path& scratchOutputPath) {
+    return scoreFittingTrial(problem, makeFittingMeasures(problem), parameterValues, scratchOutputPath);
 }
 
 namespace {
@@ -371,6 +348,8 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
     const auto backend = createOptimizerBackend(problem.optimizerBackendId);
     // An objective that cannot be read is the person's to fix, so it ends the fit before any simulation instead of scoring every trial as failed.
     checkFittingObjective(problem);
+    // What scores a trial, made once for the whole fit rather than read again for every simulation.
+    const auto measures = makeFittingMeasures(problem);
     // The search always minimises; maximising searches for the smallest negative. What is reported is the objective as written.
     const auto shown = [&](double loss) { return problem.maximize ? -loss : loss; };
     const auto scratchPath = std::filesystem::temp_directory_path() /
@@ -416,7 +395,7 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
         double violation = 0.0;
         bool failed = false;
         try {
-            const auto trial = evaluateFittingTrial(problem, values, scratchPath);
+            const auto trial = scoreFittingTrial(problem, measures, values, scratchPath);
             if (baseline) penaltyScale = std::isfinite(trial.objective) ? 1e3 * std::max(1.0, std::abs(trial.objective)) : 1e6;
             loss = trial.objective + penaltyScale * trial.violationSquares;
             violation = trial.worstViolation;

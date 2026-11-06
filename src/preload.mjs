@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { contextBridge, ipcRenderer, webFrame } from 'electron';
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -209,6 +209,23 @@ contextBridge.exposeInMainWorld('engine', {
     // Whether a tuning objective is usable and, if not, why, in the engine's words.
     checkObjective: (objective) => ipcRenderer.invoke('engineCheckObjective', objective),
     discardFit: () => ipcRenderer.invoke('engineFitDiscard'),
+    // An objective written as a program can be built and run (desktop only).
+    programObjectives: true,
+    // A live twin (desktop only): started from settings and a source, its events as they come, a sandbox detached from it.
+    liveTwin: {
+        available: true,
+        start: (settings, source, projectPath) => ipcRenderer.invoke('liveTwinStart', settings, source, projectPath),
+        // The topics an MQTT broker sends in a few seconds of listening: [{ topic, count, value, numeric, last }].
+        listen: (url, seconds) => ipcRenderer.invoke('liveTwinListen', url, seconds),
+        stop: () => ipcRenderer.invoke('liveTwinStop'),
+        onEvent: (callback) => ipcRenderer.on('liveTwinEvent', (_event, update) => callback(update)),
+        detach: () => ipcRenderer.invoke('liveTwinDetach'),
+        sandboxSetInput: (signal, value) => ipcRenderer.invoke('liveTwinSandboxSetInput', signal, value),
+        sandboxRunFor: (seconds) => ipcRenderer.invoke('liveTwinSandboxRunFor', seconds),
+        sandboxClose: () => ipcRenderer.invoke('liveTwinSandboxClose'),
+        // Where a chosen file is on disk, so a log a logger is still writing can be followed.
+        pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } }
+    },
     checkSubstepConvergence: (content, runConfiguration, nodeIds) => ipcRenderer.invoke('engineCheckSubstepConvergence', content, runConfiguration, nodeIds),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),

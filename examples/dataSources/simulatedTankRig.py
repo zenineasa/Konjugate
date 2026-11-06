@@ -96,10 +96,15 @@ class TankRig:
     # What the operator does: (time in seconds, heater power in watts). On for two hours, off for one, on for two, then off.
     schedule = [(0, heater_power), (7200, 0.0), (10800, heater_power), (18000, 0.0)]
 
-    def __init__(self, seed, glitches):
+    def __init__(self, seed, glitches, drift=0.0):
         self.temperature = self.ambient
         self.random = random.Random(seed)
         self.glitches = set(glitches)
+        # How fast the heat loss grows, as a fraction of it per hour: insulation getting wet, say. 0 keeps the rig as the model is.
+        self.drift = drift
+
+    def heat_loss_at(self, seconds):
+        return self.heat_loss * (1.0 + self.drift * seconds / 3600.0)
 
     def heater_at(self, seconds):
         power = 0.0
@@ -108,11 +113,13 @@ class TankRig:
                 power = value
         return power
 
-    def advance(self, seconds, power):
-        # The tank's temperature after `seconds` with the heater held at `power`. With the heater constant over the stretch, the
-        # tank's equation C dT/dt = P + h (T_room - T) has an exact answer, so the pretend rig carries no numerical error of its own.
-        settled = self.ambient + power / self.heat_loss
-        self.temperature = settled + (self.temperature - settled) * math.exp(-self.heat_loss * seconds / self.capacitance)
+    def advance(self, start, seconds, power):
+        # The tank's temperature `seconds` after `start` with the heater held at `power`. With the heater and the heat loss constant
+        # over the stretch, the tank's equation C dT/dt = P + h (T_room - T) has an exact answer, so the pretend rig carries no
+        # numerical error of its own. A drifting heat loss is taken at the middle of the stretch.
+        heat_loss = self.heat_loss_at(start + seconds / 2.0)
+        settled = self.ambient + power / heat_loss
+        self.temperature = settled + (self.temperature - settled) * math.exp(-heat_loss * seconds / self.capacitance)
 
     def read_thermometer(self, seconds):
         """A reading and its quality. At a glitch time the sensor reads nonsense, and the logger marks it bad, as many do."""
@@ -130,10 +137,11 @@ def main():
     parser.add_argument("--start", help="the date and time the experiment starts, with its zone (default: now)")
     parser.add_argument("--seed", type=int, default=1, help="the thermometer noise's seed, so a run can be repeated exactly")
     parser.add_argument("--glitch", type=float, action="append", help="a rig time at which the thermometer glitches (default: 5400)")
+    parser.add_argument("--drift", type=float, default=0.0, help="how fast the tank's heat loss grows, as a fraction an hour (default: 0, none)")
     args = parser.parse_args()
 
     start = datetime.fromisoformat(args.start.replace("Z", "+00:00")) if args.start else datetime.now(timezone.utc).replace(microsecond=0)
-    rig = TankRig(args.seed, args.glitch if args.glitch is not None else [5400])
+    rig = TankRig(args.seed, args.glitch if args.glitch is not None else [5400], args.drift)
     log = DataLog(
         args.output,
         source="Simulated tank rig (examples/dataSources/simulatedTankRig.py)",
@@ -154,7 +162,7 @@ def main():
     power = rig.heater_at(0)
     try:
         for moment in moments:
-            rig.advance(moment - now, power)
+            rig.advance(now, moment - now, power)
             now = moment
             # Wait until this moment comes round on the wall clock, so the file grows at the speed asked for, as a real one would.
             delay = began + moment / args.speed - time.monotonic()

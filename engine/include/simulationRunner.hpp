@@ -29,4 +29,14 @@ void runSimulation(const boost::property_tree::ptree& document,
                    std::ostream* eventStream = nullptr,
                    std::shared_ptr<const ExecutionPlan> plan = nullptr);
 
+// A session (docs/proposals/liveEngineSession.md): sets the model up once, then answers commands on controlStream (advance,
+// restore a checkpoint or a whole state, append input readings, retain checkpoints) on eventStream until controlStream
+// closes. The configuration has a globalTimeStep and outputInterval and no targetTime, and may name `reportedStateIds`
+// (the states whose samples are sent; all of them by default) and a `checkpointInterval` (the output interval by default).
+void runSession(const boost::property_tree::ptree& document,
+                const boost::property_tree::ptree& configuration,
+                std::istream* controlStream,
+                std::ostream* eventStream,
+                std::shared_ptr<const ExecutionPlan> plan = nullptr);
+
 }

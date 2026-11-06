@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "causalInference.hpp"
 #include "fittingObjective.hpp"
 #include "optimizerBackend.hpp"
@@ -67,6 +69,27 @@ struct FittingConstraint {
     double limit = 0.0;
 };
 
+// An objective written as a C++ or Python program (runMeasure.hpp's ProgramMeasure, docs/proposals/tuningEditorsAndPrograms.md): its
+// source, the keys it reads and what each is bound to, and how to build and run it.
+struct ProgramBinding {
+    std::string key;
+    std::string kind;          // "state", "parameter" or "measured"
+    std::uint64_t id = 0;      // the state or the tuned parameter
+    std::string column;        // the measured column
+};
+
+struct ObjectiveProgram {
+    std::string language;      // "cpp" or "python"
+    std::string source;
+    std::vector<ProgramBinding> bindings;
+    std::string pythonInterpreter;
+    std::string pythonSdkPath;
+    std::string cppCompiler;
+    std::string cppSdkPath;    // the engine/ root: include/ and src/objectiveProgramMain.cpp
+    std::string buildDirectory;
+    double timeoutSeconds = 60.0;
+};
+
 struct FittingProblem {
     boost::property_tree::ptree baseDocument;
     InferenceSeries measured; // parseInferenceCsv()'s output -- reused as-is for the measured data
@@ -84,6 +107,9 @@ struct FittingProblem {
     double targetTime = 0.0;
     double timeStep = 0.0;
     std::vector<FittingConstraint> constraints; // used with an objective only
+    // An objective written as a program, in place of `objective`; the run's length and step come from targetTime and timeStep as
+    // for an expression, and limits are still expressions.
+    std::optional<ObjectiveProgram> program;
 };
 
 // Reads the objective file `fit --objective-file` takes -- { expression, direction, targetTime, timeStep, variables, constraints } -- into

@@ -28,7 +28,11 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'startPaused
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'fitProgress.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'tankCalibrationExample.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'objectiveFit.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'objectiveProgram.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'dataLogReplay.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'engineSession.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwin.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinMqtt.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'interventionRecord.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterHistory.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'metisStdoutIsolation.mjs'), executable]);

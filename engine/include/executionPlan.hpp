@@ -164,6 +164,9 @@ struct ParameterSchedule {
     double phaseDegrees = 0;
     double dutyCycle = 0;
     std::uint64_t seed = 0;
+    // An input stream (a session's AppendInputSamples): readings of what was really done, held between them, which drive the
+    // parameter from the first of them on whether or not it is live, ahead of every other value it could have.
+    bool input = false;
 };
 
 double evaluateParameterSchedule(const ParameterSchedule& schedule, double simulationTime);
@@ -440,7 +443,8 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     double simulationTime,
                                     double synchronizationStep,
                                     ProviderEvaluator* providerEvaluator = nullptr,
-                                    const std::vector<ParameterSchedule>& activeSchedules = {});
+                                    const std::vector<ParameterSchedule>& activeSchedules = {},
+                                    double synchronizationEndTime = std::numeric_limits<double>::quiet_NaN());
 
 // Sets every node's algebraic states in `states` (the global state vector) from its other states at
 // `time`, before a run's first step or its first step after a restart. A stored algebraic value --

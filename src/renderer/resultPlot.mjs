@@ -334,3 +334,57 @@ export async function renderBeforeAfterComparison(element, entries) {
         legend: { orientation: 'h', x: 0, y: 1.14, yanchor: 'bottom' }, xaxis: { ...axis, title: { text: 'Time (s)', standoff: 4 } }, yaxis: axis
     }, { responsive: true, displaylogo: false, scrollZoom: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] });
 }
+
+const plotAxis = { gridcolor: '#1d303a', zerolinecolor: '#2b414c', automargin: true };
+const plotFrame = {
+    autosize: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(7,15,21,.52)',
+    font: { color: '#8297a1', family: 'system-ui, sans-serif', size: 9 }, showlegend: true,
+    legend: { orientation: 'h', x: 0, y: 1.14, yanchor: 'bottom' }
+};
+const plotConfig = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };
+
+// A live twin, as it stands (docs/proposals/predictionActualWindow.md's figure): every reading so far, the model over the latest
+// comparison window (shaded) and its forecast after now (dashed), and a line at now. Times are hours from the start of the log.
+// view: { name, unit, measured: [{ time, value }], window: [{ time, value }], forecast: [{ time, value }], anchor, now }
+export async function renderLiveTwin(element, view) {
+    if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
+    const hours = (samples) => samples.map((sample) => sample.time / 3600);
+    const unit = view.unit ? ` ${view.unit}` : '';
+    const traces = [
+        { type: 'scatter', mode: 'markers', name: 'Measured', x: hours(view.measured), y: view.measured.map((sample) => sample.value), marker: { size: 3, color: measuredColor }, hovertemplate: `Measured %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` },
+        { type: 'scatter', mode: 'lines', name: 'Model in the window', x: hours(view.window), y: view.window.map((sample) => sample.value), line: { width: 2, color: simulatedColor }, hovertemplate: `Model %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` },
+        { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(view.forecast), y: view.forecast.map((sample) => sample.value), line: { width: 2, dash: 'dash', color: simulatedColor }, hovertemplate: `Forecast %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` }
+    ];
+    if (view.sandbox?.length) {
+        traces.push({ type: 'scatter', mode: 'lines', name: 'With what you tried', x: hours(view.sandbox), y: view.sandbox.map((sample) => sample.value), line: { width: 2, color: '#42c9bc' }, hovertemplate: `Tried %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` });
+    }
+    await globalThis.Plotly.react(element, traces, {
+        ...plotFrame, margin: { l: 48, r: 12, t: 30, b: 32 },
+        xaxis: { ...plotAxis, title: { text: 'Hours from the start of the log', standoff: 4 } },
+        yaxis: { ...plotAxis, title: { text: `${view.name}${unit}`, standoff: 4 } },
+        shapes: [
+            { type: 'rect', xref: 'x', yref: 'paper', x0: view.anchor / 3600, x1: view.now / 3600, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' },
+            { type: 'line', xref: 'x', yref: 'paper', x0: view.now / 3600, x1: view.now / 3600, y0: 0, y1: 1, line: { width: 1, dash: 'dot', color: '#8297a1' } }
+        ]
+    }, plotConfig);
+}
+
+// The jump at each move of the window (the model's prediction against the reading it is replaced by), with the tolerance either
+// side: drift shows as jumps that keep to one side. jumps: [{ time, jump }], times in seconds from the start of the log.
+export async function renderJumps(element, { name, unit, jumps, tolerance }) {
+    if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
+    const x = jumps.map((entry) => entry.time / 3600);
+    const span = x.length ? [x[0], x.at(-1)] : [0, 1];
+    const suffix = unit ? ` ${unit}` : '';
+    const traces = [{ type: 'scatter', mode: 'lines+markers', name: `${name}: jump`, x, y: jumps.map((entry) => entry.jump), line: { width: 1.5, color: simulatedColor }, marker: { size: 4 }, hovertemplate: `Jump %{y:.3g}${suffix}<br>%{x:.3f} h<extra></extra>` }];
+    if (tolerance > 0) {
+        for (const level of [tolerance, -tolerance]) {
+            traces.push({ type: 'scatter', mode: 'lines', showlegend: false, hoverinfo: 'skip', x: span, y: [level, level], line: { width: 1, dash: 'dash', color: measuredColor } });
+        }
+    }
+    await globalThis.Plotly.react(element, traces, {
+        ...plotFrame, showlegend: false, margin: { l: 48, r: 12, t: 8, b: 32 },
+        xaxis: { ...plotAxis, title: { text: 'Hours from the start of the log', standoff: 4 } },
+        yaxis: { ...plotAxis, title: { text: `Jump${suffix}`, standoff: 4 } }
+    }, plotConfig);
+}

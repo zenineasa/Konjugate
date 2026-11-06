@@ -50,8 +50,7 @@ import {
     parseCausalMappingValue,
     parseEquationOutput,
     parseProviderReference,
-    providerReferenceValue
-} from '../selectValues.mjs';
+    providerReferenceValue, parseProgramBindingValue, programBindingValue } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
 import { defaultNodeProviderSource, defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
@@ -66,7 +65,7 @@ import './phoneSheets.mjs';
 import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle, stabilityGroupWhen } from '../stabilityFindingGroups.mjs';
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
-import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
+import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderJumps, renderLiveTwin, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
@@ -87,6 +86,8 @@ import { applyAssistantProposal as buildAssistantProposal, summarizeDocumentForA
 import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from '../instabilityFingerprint.mjs';
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import { looksLikeDataLog, readDataLog } from '../dataLog.mjs';
+import { draftScenario, modelFingerprint, normalizeScenarios, withScenario } from '../scenarios.mjs';
+import { objectiveTemplate, objectiveTemplateIds, programBindingsProblem } from '../objectiveTemplates.mjs';
 import { compareReplay, defaultTolerance, guessReplayMapping, latestReadings, replayPlan, replaySentence, replayTargets, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import {
     CSS2DObject,
@@ -449,6 +450,9 @@ let projectAddonData = {};
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
+// Scenarios tried in a live twin's sandbox (src/scenarios.mjs), kept with the project the same way: read on open, written on save,
+// and counted as unsaved work when one is added, renamed or deleted.
+let projectScenarios = [];
 // Who made the project, its copyright notice, license and contact, and when it was first and last saved (src/ownership.mjs,
 // docs/proposals/modelOwnership.md): kept beside the model the same way, and counted as unsaved work when it is edited. A project
 // that is opened keeps what its file says; only a new one starts from the person's defaults (ownershipSettled says which it is).
@@ -7464,6 +7468,7 @@ async function loadProjectDocument(document, {
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
+    projectScenarios = normalizeScenarios(document?.scenarios);
     projectOwnership = normalizeOwnership(document?.ownership, document?.copyright);
     ownershipSettled = true;
     savedCopyOwnership = null;
@@ -8448,6 +8453,8 @@ $('#commitCausalInference').addEventListener('click', () => { commitCausalInfere
 let parameterTuningState = null;
 // The data log being replayed, when the card's goal is replaying one: see loadParameterTuningReplay. Null when none is open.
 let parameterTuningReplay = null;
+// The live twin started from the replayed log (see startLiveTwin), or null when none runs.
+let liveTwinState = null;
 
 // Friendly labels only -- NOT the source of truth for which backends exist. That's
 // window.engine.capabilities() (engine/src/main.cpp's "capabilities" command reports
@@ -8578,6 +8585,7 @@ function setParameterTuningGoalUi(goal) {
     $('#parameterTuningFileLabel').textContent = { data: '↥ Choose CSV file', objective: '↥ Add measured data (optional)', replay: '↥ Choose data log' }[goal];
     $('#parameterTuningObjectiveSection').hidden = goal !== 'objective';
     $('#parameterTuningParametersSection').hidden = goal === 'replay';
+    $('#parameterTuningMqtt').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
     $('#parameterTuningObjectiveStatus').textContent = '';
 }
 
@@ -8689,6 +8697,7 @@ function refreshParameterTuningObjectiveButtons() {
     chips('#parameterTuningStateChips', vocabulary.states);
     chips('#parameterTuningParameterChips', vocabulary.parameters.map((parameter) => ({ ...parameter, label: parameter.tunable ? `${parameter.label} (tuned)` : parameter.label })));
     chips('#parameterTuningMeasuredChips', vocabulary.measured.map((column) => ({ ...column, label: `${column.label} (measured)` })));
+    if (parameterTuningProgram.language) renderParameterTuningProgramBindings();
     $('#parameterTuningMeasuredPicker').hidden = !vocabulary.measured.length;
     const names = vocabulary.variables.map((variable) => variable.name);
     parameterTuningObjective.setNames(names);
@@ -8705,6 +8714,10 @@ function startParameterTuningObjective() {
     $('#parameterTuningTimeStep').value = String(configuration?.globalTimeStep ?? 1);
     parameterTuningObjective.load('');
     parameterTuningObjective.showVerdict(false, '');
+    setParameterTuningObjectiveKind('expression');
+    $('#parameterTuningProgramSource').value = '';
+    parameterTuningProgram.bindings = [];
+    renderParameterTuningProgramBindings();
     clearParameterTuningConstraintRows();
     parameterTuningEditor = parameterTuningObjective;
     renderParameterTuningParameters();
@@ -8744,11 +8757,25 @@ function applySavedTuningSetup() {
         loadParameterTuningBackendIds().then(apply);
     }
     const status = $('#parameterTuningStatus');
+    if (setup.goal === 'replay') {
+        setParameterTuningGoalUi('replay');
+        status.className = 'equationDiagnostics';
+        status.textContent = setup.replay?.logFileName
+            ? `Last time this replayed ${setup.replay.logFileName}: choose it again to continue, mapped as it was.`
+            : 'Choose a data log to replay.';
+        return;
+    }
     if (setup.goal === 'objective' && setup.objective) {
         startParameterTuningObjective();
         if (setup.objective.latex) {
             parameterTuningObjective.load(setup.objective.latex);
             parameterTuningObjective.diagnose();
+        }
+        if (setup.objective.program) {
+            setParameterTuningObjectiveKind(setup.objective.program.language);
+            $('#parameterTuningProgramSource').value = setup.objective.program.source;
+            parameterTuningProgram.bindings = setup.objective.program.bindings.map((binding) => ({ ...binding }));
+            renderParameterTuningProgramBindings();
         }
         $('#parameterTuningDirection').value = setup.objective.direction;
         if (setup.objective.targetTime) $('#parameterTuningRunTime').value = String(setup.objective.targetTime);
@@ -8817,6 +8844,14 @@ function parameterTuningNotReady() {
     if (!parameterTuningState) return '';
     if (!parameterTuningState.tunableParameters.length) return 'Tick Tune on at least one parameter to run.';
     if (parameterTuningState.goal !== 'objective') return '';
+    if (parameterTuningProgram.language) {
+        if (!window.engine.programObjectives) return 'An objective written as a program needs the desktop app.';
+        if (!$('#parameterTuningProgramSource').value.trim()) return 'Write the objective program, or start from one of the templates.';
+        const problem = programBindingsProblem(parameterTuningProgram.bindings);
+        if (problem) return problem;
+        if (parameterTuningLimits.some((limit) => limit.editor.latex.trim() && !limit.editor.valid)) return 'A limit cannot be read yet: the line under it says why.';
+        return '';
+    }
     if (!parameterTuningObjective.valid) return parameterTuningObjective.latex.trim() ? 'The objective cannot be run yet: the line under it says why.' : 'Write an objective to run.';
     if (parameterTuningLimits.some((limit) => limit.editor.latex.trim() && !limit.editor.valid)) return 'A limit cannot be read yet: the line under it says why.';
     return '';
@@ -8985,12 +9020,22 @@ $('#parameterTuningFile').addEventListener('change', async () => {
     if (!file) return;
     await loadParameterTuningCsv(await file.text(), file.name);
     if (parameterTuningState) parameterTuningState.csvFileName = file.name;
+    // A log chosen from disk can also be followed while a logger is still writing it.
+    if (parameterTuningReplay) {
+        parameterTuningReplay.path = window.engine.liveTwin?.pathForFile?.(file) ?? null;
+        refreshLiveTwinControls();
+    }
 });
 
 // Replaying a data log (docs/proposals/digitalTwinConnections.md, step 1): the log's inputs drive the model's shared parameters, its
 // measured signals are compared with states, and the card says how long the model stayed in step. The rules live in dataLogReplay.mjs;
 // this draws them. A replay changes nothing in the model: it runs a copy. `parameterTuningReplay` is declared beside the card's other state.
 function resetParameterTuningReplay() {
+    if (liveTwinState) {
+        stopLiveTwin().catch(() => {});
+        liveTwinState = null;
+    }
+    clearLiveTwinView();
     parameterTuningReplay = null;
     $('#parameterTuningReplaySection').hidden = true;
     $('#parameterTuningReplayRows').replaceChildren();
@@ -9012,6 +9057,13 @@ function loadParameterTuningReplay(content, fileName, note = '') {
         status.textContent = `${note}${fileName ? `${fileName} ` : 'The file '}cannot be read as a data log. ${error.message}`;
         return;
     }
+    openParameterTuningReplay(log, { content, fileName, note });
+}
+
+// Sets the card up to replay, or run as a live twin, the signals of a log (or of a broker's topics, `source` saying which: a broker
+// has no readings yet and nothing to replay, only to follow).
+function openParameterTuningReplay(log, { content = null, fileName = '', note = '', source = null }) {
+    const status = $('#parameterTuningStatus');
     const document_ = serializeProjectDocument();
     const targets = replayTargets(document_);
     const mapping = guessReplayMapping(log.header, targets);
@@ -9019,8 +9071,9 @@ function loadParameterTuningReplay(content, fileName, note = '') {
         const good = latestReadings(log.observations, entry.signal).filter((reading) => reading.quality !== 'bad');
         return [entry.signal, good.length ? defaultTolerance(good) : 1];
     }));
-    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, lastRun: null, running: false };
+    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, lastRun: null, running: false, path: null, source };
     $('#parameterTuningReplayTimeStep').value = String(suggestedReplayTimeStep(document_, log.observations, mapping));
+    applySavedReplaySetup(parameterTuningReplay);
     // Not first and last: a correction comes later in the file than the row it corrects.
     let first = Infinity;
     let last = -Infinity;
@@ -9032,13 +9085,17 @@ function loadParameterTuningReplay(content, fileName, note = '') {
     const matched = mapping.filter((entry) => (entry.role === 'input' ? entry.parameterId : entry.stateId) !== null).length;
     const inputs = mapping.filter((entry) => entry.role === 'input');
     status.className = 'equationDiagnostics valid';
-    status.textContent = `${note}${log.header.signals.length} signal${log.header.signals.length === 1 ? '' : 's'}, ${log.observations.length} readings over ${formatDuration(span)}`
-        + `${log.header.source ? `, from ${log.header.source}` : ''}. Matched ${matched} of ${mapping.length} by name; change any below.`
+    status.textContent = `${note}${log.header.signals.length} signal${log.header.signals.length === 1 ? '' : 's'}`
+        + (source?.kind === 'mqtt' ? ` from ${source.url}, followed as they arrive` : `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`)
+        + `. Matched ${matched} of ${mapping.length} by name; change any below.`
         + (inputs.length && !targets.parameters.length ? ' The model has no shared parameters, so its inputs cannot follow the log: make a parameter shared to drive it from a recording.' : '');
     renderParameterTuningReplayRows();
     $('#parameterTuningReplaySection').hidden = false;
-    $('#runParameterTuningReplay').hidden = false;
+    // A broker's readings are followed, not replayed: there is nothing recorded yet to replay.
+    $('#runParameterTuningReplay').hidden = source?.kind === 'mqtt';
     refreshParameterTuningReplayRunnable();
+    refreshLiveTwinControls();
+    renderLiveTwinScenarios();
 }
 
 function refreshParameterTuningReplayRunnable() {
@@ -9076,6 +9133,7 @@ function renderParameterTuningReplayRows() {
             else entry.stateId = value;
             clearParameterTuningReplayOutcome('The mapping changed: replay again to compare.');
             refreshParameterTuningReplayRunnable();
+            refreshLiveTwinControls();
         });
         row.append(name, select);
         if (entry.role === 'output') {
@@ -9136,6 +9194,7 @@ async function runParameterTuningReplay() {
     }
     replay.running = true;
     refreshParameterTuningReplayRunnable();
+    rememberReplaySetup();
     status.textContent = `Replaying ${formatDuration(plan.configuration.targetTime)} of the recording…`;
     try {
         const run = await window.engine.run(JSON.stringify(plan.document), plan.configuration);
@@ -9190,9 +9249,547 @@ async function renderParameterTuningReplayOutcome() {
     await renderMeasuredVsSimulatedComparison(plot, entries, { simulatedLabel: 'Replayed' });
 }
 
+// What the replay was set up as, kept with the project (src/tuningSetup.mjs), so the same log is mapped the same way next time.
+function rememberReplaySetup() {
+    const replay = parameterTuningReplay;
+    if (!replay) return;
+    const setup = tuningSetupFromRun({
+        goal: 'replay', backend: $('#parameterTuningBackend').value || undefined,
+        replay: {
+            logFileName: replay.fileName, timeStep: Number($('#parameterTuningReplayTimeStep').value), anchor: $('#parameterTuningReplayAnchor').checked,
+            mapping: replay.mapping.map((entry) => ({ signal: entry.signal, role: entry.role, target: entry.role === 'input' ? entry.parameterId : entry.stateId })),
+            tolerances: Object.fromEntries(replay.tolerances),
+            live: { window: Number($('#liveTwinWindow').value), stride: Number($('#liveTwinStride').value), horizon: Number($('#liveTwinHorizon').value), speed: $('#liveTwinSpeed').value }
+        }
+    });
+    if (!sameTuningSetup(setup, projectTuningSetup)) {
+        projectTuningSetup = setup;
+        addonDataUnsaved = true;
+        updateHistoryControls();
+    }
+}
+
+// Puts back how the same signals were mapped, judged and played last time; a signal or target that no longer exists keeps the guess.
+function applySavedReplaySetup(replay) {
+    const saved = projectTuningSetup?.goal === 'replay' ? projectTuningSetup.replay : null;
+    if (!saved) return;
+    for (const entry of replay.mapping) {
+        const kept = saved.mapping.find((candidate) => candidate.signal === entry.signal && candidate.role === entry.role);
+        if (!kept) continue;
+        const exists = kept.target === null || (entry.role === 'input'
+            ? replay.targets.parameters.some((parameter) => parameter.parameterId === kept.target)
+            : replay.targets.states.some((state) => state.stateId === kept.target));
+        if (!exists) continue;
+        if (entry.role === 'input') entry.parameterId = kept.target;
+        else entry.stateId = kept.target;
+    }
+    for (const [signal, tolerance] of Object.entries(saved.tolerances)) if (replay.tolerances.has(signal)) replay.tolerances.set(signal, tolerance);
+    if (saved.timeStep) $('#parameterTuningReplayTimeStep').value = String(saved.timeStep);
+    $('#parameterTuningReplayAnchor').checked = saved.anchor;
+    if (saved.live?.window) $('#liveTwinWindow').value = String(saved.live.window);
+    if (saved.live?.stride) $('#liveTwinStride').value = String(saved.live.stride);
+    if (saved.live?.horizon) $('#liveTwinHorizon').value = String(saved.live.horizon);
+    if (saved.live?.speed && [...$('#liveTwinSpeed').options].some((option) => option.value === saved.live.speed)) $('#liveTwinSpeed').value = saved.live.speed;
+}
+
+// The live twin (src/liveTwinHost.mjs, run by the main process): the replay's log, played as if it were arriving or followed while a
+// logger writes it, kept in step by a long-lived engine. The card draws each cycle as it comes. Desktop only. `liveTwinState` is
+// declared beside the card's other state.
+
+const liveTwinAvailable = () => Boolean(window.engine.liveTwin?.available);
+
+function refreshLiveTwinControls() {
+    const replay = parameterTuningReplay;
+    const running = Boolean(liveTwinState?.running);
+    const follow = $('#liveTwinSpeed option[value="follow"]');
+    const broker = replay?.source?.kind === 'mqtt';
+    follow.disabled = !replay?.path && !broker;
+    follow.textContent = broker ? 'As they arrive from the broker' : replay?.path ? 'As the file grows' : 'As the file grows (choose the log from disk)';
+    if (broker) $('#liveTwinSpeed').value = 'follow';
+    for (const option of $('#liveTwinSpeed').options) if (option.value !== 'follow') option.disabled = broker;
+    if (follow.disabled && $('#liveTwinSpeed').value === 'follow') $('#liveTwinSpeed').value = '3600';
+    const compared = replay?.mapping.some((entry) => entry.role === 'output' && entry.stateId !== null);
+    $('#liveTwinStart').disabled = !replay || !compared || running || !liveTwinAvailable() || Boolean(activeResult);
+    $('#liveTwinStart').title = !liveTwinAvailable() ? 'The live twin needs the desktop app: a web page cannot keep an engine running.' : !compared ? 'Map at least one measured signal to a state' : '';
+    $('#liveTwinStop').hidden = !running;
+    $('#liveTwinDetach').hidden = !running || Boolean(liveTwinState?.sandbox);
+    $('#liveTwinDetach').disabled = !liveTwinState?.cycles.length;
+    for (const field of ['#liveTwinWindow', '#liveTwinStride', '#liveTwinHorizon', '#liveTwinSpeed']) $(field).disabled = running;
+}
+
+function clearLiveTwinView() {
+    for (const selector of ['#liveTwinPlot', '#liveTwinJumpPlot']) {
+        if (!$(selector).hidden) globalThis.Plotly?.purge($(selector));
+        $(selector).hidden = true;
+    }
+    $('#liveTwinStatus').textContent = '';
+    $('#liveTwinNote').textContent = '';
+    $('#liveTwinTrend').textContent = '';
+    $('#liveTwinTrend').classList.remove('leaning');
+    $('#liveTwinSandbox').hidden = true;
+}
+
+async function startLiveTwin() {
+    const replay = parameterTuningReplay;
+    if (!replay || liveTwinState?.running || !liveTwinAvailable()) return;
+    const status = $('#liveTwinStatus');
+    const minutes = (selector) => Number($(selector).value) * 60;
+    const speedChoice = $('#liveTwinSpeed').value;
+    const outputs = replay.mapping.filter((entry) => entry.role === 'output' && entry.stateId !== null);
+    const settings = {
+        document: serializeProjectDocument(),
+        mapping: replay.mapping.map((entry) => ({ ...entry })),
+        window: minutes('#liveTwinWindow'), stride: minutes('#liveTwinStride'), horizon: minutes('#liveTwinHorizon'),
+        timeStep: Number($('#parameterTuningReplayTimeStep').value),
+        tolerances: Object.fromEntries(replay.tolerances)
+    };
+    const source = replay.source?.kind === 'mqtt' ? { kind: 'mqtt', url: replay.source.url, signals: replay.source.signals }
+        : speedChoice === 'follow' ? { kind: 'file', path: replay.path }
+            : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice) };
+    clearLiveTwinView();
+    liveTwinState = { running: true, cycles: [], measured: new Map(outputs.map((entry) => [entry.signal, new Map()])), outputs, settings, sandbox: null, lastDrawAt: 0, drawTimer: null, ended: null };
+    rememberReplaySetup();
+    refreshLiveTwinControls();
+    status.className = 'equationDiagnostics';
+    status.textContent = source.kind === 'mqtt' ? `Following ${source.url}: waiting for a window's worth of readings…`
+        : speedChoice === 'follow' ? `Following ${replay.fileName} as it grows…` : 'Starting the live twin…';
+    try {
+        await window.engine.liveTwin.start(settings, source, currentProjectPath);
+    } catch (error) {
+        liveTwinState.running = false;
+        status.textContent = `The live twin could not start: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+        refreshLiveTwinControls();
+    }
+}
+
+function liveTwinTrendText(trend, unit) {
+    if (!trend || trend.direction === 'none') return { text: 'The jumps show no drift: the model stays as close to the measurements as their noise allows.', leaning: false };
+    const amount = `${Math.abs(trend.mean).toPrecision(2)}${unit ? ` ${unit}` : ''}`;
+    return {
+        text: `The model has lately been predicting ${trend.direction === 'above' ? 'above' : 'below'} the measurements, by ${amount} a move on average`
+            + ` (changing by ${trend.slopePerHour.toPrecision(2)}${unit ? ` ${unit}` : ''} an hour). Something in the real system may be drifting away from the model.`
+            + (trend.alarm ? ' This has passed the alert you set.' : ''),
+        leaning: true
+    };
+}
+
+async function drawLiveTwin() {
+    const twin = liveTwinState;
+    if (!twin?.cycles.length || !globalThis.Plotly) return;
+    twin.lastDrawAt = Date.now();
+    const cycle = twin.cycles.at(-1);
+    const entry = twin.outputs[0];
+    const target = parameterTuningReplay?.targets.states.find((state) => state.stateId === entry.stateId);
+    const measured = [...twin.measured.get(entry.signal).values()].sort((a, b) => a.time - b.time);
+    const view = {
+        name: target?.label ?? entry.signal, unit: entry.unit, measured, anchor: cycle.anchor, now: cycle.now,
+        window: cycle.window[entry.signal].map((row) => ({ time: row.time, value: row.simulated })),
+        forecast: cycle.forecast[entry.signal],
+        sandbox: twin.sandbox?.series?.[entry.signal] ?? null
+    };
+    $('#liveTwinPlot').hidden = false;
+    await renderLiveTwin($('#liveTwinPlot'), view);
+    const jumps = twin.cycles.filter((item) => item.jumps[entry.signal]).map((item) => ({ time: item.anchor, jump: item.jumps[entry.signal].jump }));
+    if (jumps.length) {
+        $('#liveTwinJumpPlot').hidden = false;
+        await renderJumps($('#liveTwinJumpPlot'), { name: view.name, unit: entry.unit, jumps, tolerance: twin.settings.tolerances[entry.signal] });
+    }
+}
+
+function scheduleLiveTwinDraw() {
+    const twin = liveTwinState;
+    if (!twin || twin.drawTimer) return;
+    const wait = Math.max(0, 250 - (Date.now() - twin.lastDrawAt));
+    twin.drawTimer = setTimeout(() => {
+        twin.drawTimer = null;
+        if (liveTwinState === twin) drawLiveTwin();
+    }, wait);
+}
+
+window.engine.liveTwin?.onEvent?.((update) => {
+    const twin = liveTwinState;
+    if (!twin) return;
+    const status = $('#liveTwinStatus');
+    if (update.type === 'cycle') {
+        const { cycle, stats } = update;
+        twin.cycles.push(cycle);
+        for (const [signal, rows] of Object.entries(cycle.window)) {
+            const measured = twin.measured.get(signal);
+            for (const row of rows) measured?.set(row.time, { time: row.time, value: row.measured });
+        }
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `${stats.cycles} move${stats.cycles === 1 ? '' : 's'}; the window is now ${formatDuration(cycle.anchor)} to ${formatDuration(cycle.now)}.`
+            + ` The model runs ${Number.isFinite(stats.realTimeFactor) ? Math.round(stats.realTimeFactor).toLocaleString() : 'far'} times faster than real time; a move takes ${(stats.cycleSeconds.median * 1000).toFixed(1)} ms.`
+            + (stats.lagSeconds > 0 ? ` It is ${formatDuration(stats.lagSeconds)} behind the data.` : '')
+            + (stats.recoveries ? ` The engine was restarted ${stats.recoveries} time${stats.recoveries === 1 ? '' : 's'} and carried on.` : '')
+            + (stats.skipped ? ` It fell behind the data and skipped ${stats.skipped} move${stats.skipped === 1 ? '' : 's'} to keep up: choose a longer stride or a shorter window if this goes on.` : '');
+        const trend = liveTwinTrendText(cycle.trend, twin.outputs[0].unit);
+        $('#liveTwinTrend').textContent = trend.text;
+        $('#liveTwinTrend').classList.toggle('leaning', trend.leaning);
+        refreshLiveTwinControls();
+        scheduleLiveTwinDraw();
+    } else if (update.type === 'ended') {
+        twin.running = false;
+        twin.ended = update.reason;
+        twin.recordedTo = update.recordedTo ?? null;
+        if (update.recordedTo) {
+            status.className = 'equationDiagnostics valid';
+            status.textContent = `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}. What the broker sent is recorded in ${update.recordedTo}, to replay later.`;
+        }
+        if (update.reason === 'played') {
+            status.className = 'equationDiagnostics valid';
+            status.textContent = `The whole log has been played: ${update.stats?.cycles ?? twin.cycles.length} moves, each with its own forecast.`;
+        }
+        refreshLiveTwinControls();
+        drawLiveTwin();
+    } else if (update.type === 'error') {
+        twin.running = false;
+        status.className = 'equationDiagnostics';
+        status.textContent = `The live twin stopped: ${update.message}`;
+        refreshLiveTwinControls();
+    }
+});
+
+async function stopLiveTwin() {
+    if (!liveTwinState) return;
+    const twin = liveTwinState;
+    if (twin.sandbox) await returnFromSandbox();
+    if (twin.running) await window.engine.liveTwin.stop();
+    twin.running = false;
+    if (liveTwinState === twin) {
+        $('#liveTwinStatus').textContent = `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}.`
+            + (twin.recordedTo ? ` What the broker sent is recorded in ${twin.recordedTo}, to replay later.` : '');
+        refreshLiveTwinControls();
+    }
+}
+
+// Following an MQTT broker: listen a moment to see the topics, say what each is, and carry on as with a log.
+let mqttHeard = [];
+
+async function listenToMqttBroker() {
+    const status = $('#parameterTuningMqttStatus');
+    const url = $('#parameterTuningMqttUrl').value.trim();
+    const button = $('#parameterTuningMqttListen');
+    button.disabled = true;
+    status.className = 'equationDiagnostics';
+    status.textContent = `Listening to ${url}…`;
+    try {
+        mqttHeard = await window.engine.liveTwin.listen(url, 3);
+        renderMqttTopics();
+        status.className = 'equationDiagnostics valid';
+        status.textContent = mqttHeard.length
+            ? `Heard ${mqttHeard.length} topic${mqttHeard.length === 1 ? '' : 's'}. Say which are inputs (what was done) and which are measured, then use them.`
+            : 'Nothing was heard in 3 seconds. Is anything publishing to this broker?';
+    } catch (error) {
+        status.textContent = `Could not listen to ${url}: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function renderMqttTopics() {
+    $('#parameterTuningMqttTopics').replaceChildren(...mqttHeard.map((heard) => {
+        const row = document.createElement('div');
+        row.className = 'parameterTuningMqttTopic';
+        row.dataset.topic = heard.topic;
+        const label = document.createElement('span');
+        label.textContent = heard.topic;
+        const last = document.createElement('small');
+        last.textContent = heard.numeric ? `last ${heard.value}, ${heard.count}× heard` : `not a number: ${heard.last}`;
+        label.append(last);
+        const role = document.createElement('select');
+        role.dataset.field = 'role';
+        role.setAttribute('aria-label', `What ${heard.topic} is`);
+        role.append(new Option('Not used', ''), new Option('Input (what was done)', 'input'), new Option('Measured', 'output'));
+        role.disabled = !heard.numeric;
+        const name = document.createElement('input');
+        name.dataset.field = 'name';
+        name.value = suggestSymbol(heard.topic.split('/').filter(Boolean).slice(-2).join(' '));
+        name.setAttribute('aria-label', `Signal name for ${heard.topic}`);
+        const unit = document.createElement('input');
+        unit.dataset.field = 'unit';
+        unit.placeholder = 'unit';
+        unit.setAttribute('aria-label', `Unit of ${heard.topic}`);
+        row.append(label, role, name, unit);
+        role.addEventListener('change', () => { $('#parameterTuningMqttUse').hidden = !$$('#parameterTuningMqttTopics select').some((select) => select.value); });
+        return row;
+    }));
+    $('#parameterTuningMqttUse').hidden = true;
+}
+
+function useMqttTopics() {
+    const status = $('#parameterTuningMqttStatus');
+    const url = $('#parameterTuningMqttUrl').value.trim();
+    const signals = $$('#parameterTuningMqttTopics .parameterTuningMqttTopic').map((row) => ({
+        topic: row.dataset.topic, role: $('[data-field="role"]', row).value, name: $('[data-field="name"]', row).value.trim(), unit: $('[data-field="unit"]', row).value.trim()
+    })).filter((signal) => signal.role);
+    const badName = signals.find((signal) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(signal.name));
+    if (badName) {
+        status.textContent = `"${badName.name}" cannot name a signal: use letters, digits and underscores, starting with a letter.`;
+        return;
+    }
+    if (new Set(signals.map((signal) => signal.name)).size !== signals.length) {
+        status.textContent = 'Each topic needs a name of its own.';
+        return;
+    }
+    resetParameterTuningReplay();
+    const header = { version: 1, source: url, epoch: null, signals: signals.map(({ name, unit, role }) => ({ name, unit, role })) };
+    openParameterTuningReplay({ header, observations: [] }, { fileName: url, source: { kind: 'mqtt', url, signals } });
+}
+
+$('#parameterTuningMqttListen').addEventListener('click', () => listenToMqttBroker());
+$('#parameterTuningMqttUse').addEventListener('click', () => useMqttTopics());
+
+$('#liveTwinStart').addEventListener('click', () => startLiveTwin());
+$('#liveTwinStop').addEventListener('click', () => stopLiveTwin());
+
+// Detaching: a sandbox from the live twin at its latest now, with a control per input to try a value and a button to run ahead.
+async function detachLiveTwin() {
+    const twin = liveTwinState;
+    if (!twin?.running || twin.sandbox) return;
+    const status = $('#liveTwinSandboxStatus');
+    try {
+        const opened = await window.engine.liveTwin.detach();
+        const cycle = twin.cycles.at(-1);
+        twin.sandbox = { startedAt: opened.time, series: null, ranFor: 0, tried: [] };
+        const rows = opened.inputs.map((signal) => {
+            const row = document.createElement('label');
+            row.className = 'editorField';
+            const name = document.createElement('span');
+            name.textContent = `${signal} from now`;
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = 'any';
+            input.dataset.signal = signal;
+            input.value = String(cycle.inputs?.[signal] ?? '');
+            row.append(name, input);
+            return row;
+        });
+        $('#liveTwinSandboxInputs').replaceChildren(...rows);
+        $('#liveTwinSandbox').hidden = false;
+        $('#liveTwinNote').textContent = '';
+        status.className = 'equationDiagnostics';
+        status.textContent = `Detached at ${formatDuration(opened.time)}. Change an input and run ahead to see what it would do.`;
+        refreshLiveTwinControls();
+    } catch (error) {
+        status.textContent = `Could not detach: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+    }
+}
+
+async function runSandboxAhead() {
+    const twin = liveTwinState;
+    if (!twin?.sandbox) return;
+    const status = $('#liveTwinSandboxStatus');
+    const button = $('#liveTwinSandboxRun');
+    button.disabled = true;
+    try {
+        const cycle = twin.cycles.find((item) => item.now === twin.sandbox.startedAt) ?? twin.cycles.at(-1);
+        for (const input of $$('#liveTwinSandboxInputs input')) {
+            const value = Number(input.value);
+            const before = twin.sandbox.tried.filter((step) => step.signal === input.dataset.signal).at(-1)?.value ?? cycle.inputs?.[input.dataset.signal];
+            if (input.value.trim() === '' || !Number.isFinite(value) || value === before) continue;
+            await window.engine.liveTwin.sandboxSetInput(input.dataset.signal, value);
+        }
+        const seconds = Number($('#liveTwinSandboxMinutes').value) * 60;
+        if (!(seconds > 0)) throw new Error('Run ahead for a positive number of minutes.');
+        const result = await window.engine.liveTwin.sandboxRunFor(seconds);
+        twin.sandbox.tried = result.tried;
+        twin.sandbox.ranFor = result.time - twin.sandbox.startedAt;
+        const previous = twin.sandbox.series ?? {};
+        twin.sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, [...(previous[signal] ?? []), ...samples]]));
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `Ran ahead to ${formatDuration(result.time)}${result.tried.length ? ` with ${result.tried.map((step) => `${step.signal} ${step.value}`).join(', ')}` : ' with nothing changed'}.`;
+        await drawLiveTwin();
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+// Back to live: the sandbox is ended and nothing it did reaches the live twin. If something was tried, it is kept as a draft scenario
+// with the project, with no question asked, and the banner says so (the project then has unsaved work, which is why).
+async function returnFromSandbox() {
+    const twin = liveTwinState;
+    if (!twin?.sandbox) return;
+    const sandbox = twin.sandbox;
+    twin.sandbox = null;
+    const closed = await window.engine.liveTwin.sandboxClose().catch(() => null);
+    $('#liveTwinSandbox').hidden = true;
+    const scenario = draftScenario({
+        id: crypto.randomUUID(), logFileName: parameterTuningReplay?.fileName ?? '', startedAt: sandbox.startedAt, ranFor: sandbox.ranFor,
+        settings: { window: twin.settings.window, stride: twin.settings.stride, horizon: twin.settings.horizon }, tried: closed?.tried ?? sandbox.tried, document: twin.settings.document
+    });
+    if (scenario) {
+        const { scenarios, dropped } = withScenario(projectScenarios, scenario);
+        projectScenarios = scenarios;
+        addonDataUnsaved = true;
+        updateHistoryControls();
+        renderLiveTwinScenarios();
+        $('#liveTwinNote').textContent = `Back to live. 1 scenario kept as a draft${dropped ? `; the oldest, "${dropped.name}", made room for it` : ''}.`;
+    } else {
+        $('#liveTwinNote').textContent = 'Back to live. Nothing was tried, so nothing was kept.';
+    }
+    refreshLiveTwinControls();
+    drawLiveTwin();
+}
+
+$('#liveTwinDetach').addEventListener('click', () => detachLiveTwin());
+$('#liveTwinSandboxRun').addEventListener('click', () => runSandboxAhead());
+$('#liveTwinSandboxReturn').addEventListener('click', () => returnFromSandbox());
+
+// The scenarios kept with the project: each can be renamed or deleted; one tried with a model since changed says so.
+function renderLiveTwinScenarios() {
+    const container = $('#liveTwinScenarioRows');
+    $('#liveTwinScenarios').hidden = !projectScenarios.length;
+    const fingerprint = modelFingerprint(serializeProjectDocument());
+    container.replaceChildren(...projectScenarios.map((scenario) => {
+        const row = document.createElement('div');
+        row.className = 'liveTwinScenarioRow';
+        row.dataset.scenarioId = scenario.id;
+        const name = document.createElement('input');
+        name.value = scenario.name;
+        name.setAttribute('aria-label', 'Scenario name');
+        name.addEventListener('change', () => {
+            const value = name.value.trim();
+            if (!value || value === scenario.name) return;
+            projectScenarios = projectScenarios.map((item) => (item.id === scenario.id ? { ...item, name: value } : item));
+            addonDataUnsaved = true;
+            updateHistoryControls();
+        });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'Delete';
+        remove.addEventListener('click', () => {
+            projectScenarios = projectScenarios.filter((item) => item.id !== scenario.id);
+            addonDataUnsaved = true;
+            updateHistoryControls();
+            renderLiveTwinScenarios();
+        });
+        const details = document.createElement('small');
+        details.textContent = `From ${formatDuration(scenario.startedAt)} into ${scenario.logFileName || 'the log'}, run ahead ${formatDuration(scenario.ranFor)}`
+            + (scenario.modelFingerprint && scenario.modelFingerprint !== fingerprint ? '. The model has changed since this was tried.' : '.');
+        row.append(name, remove, details);
+        return row;
+    }));
+}
+
+// An objective written as a program (docs/proposals/tuningEditorsAndPrograms.md, "An objective that is a program"): the language,
+// its source, and the keys it reads, each bound to a state, a tuned parameter or a measured column. `language` is null while the
+// objective is an expression. Limits stay expressions either way.
+const parameterTuningProgram = { language: null, bindings: [] };
+
+function setParameterTuningObjectiveKind(kind) {
+    parameterTuningProgram.language = kind === 'cpp' || kind === 'python' ? kind : null;
+    $$('#parameterTuningObjectiveKind button').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.objectiveKind === kind)));
+    $('#parameterTuningProgramPart').hidden = !parameterTuningProgram.language;
+    $('#parameterTuningExpressionPart').hidden = Boolean(parameterTuningProgram.language);
+    $('#parameterTuningProgramStatus').textContent = parameterTuningProgram.language && !window.engine.programObjectives
+        ? 'An objective written as a program runs only in the desktop app: a web page cannot start a program of its own.' : '';
+    renderParameterTuningProgramBindings();
+    refreshParameterTuningRunnable();
+}
+$$('#parameterTuningObjectiveKind button').forEach((button) => button.addEventListener('click', () => {
+    if (parameterTuningRun) return;
+    setParameterTuningObjectiveKind(button.dataset.objectiveKind);
+}));
+
+// What a key can be bound to: every state, the tuned parameters (a program reads only the values the search is trying), and the
+// measured columns, as the objective's own names list them.
+function parameterTuningProgramTargets() {
+    const vocabulary = parameterTuningState?.vocabulary;
+    if (!vocabulary) return [];
+    const byName = new Map(vocabulary.variables.map((variable) => [variable.name, variable]));
+    return [
+        ...vocabulary.states.map((state) => ({ value: programBindingValue({ kind: 'state', id: byName.get(state.name).id }), label: state.label, group: 'States' })),
+        ...vocabulary.parameters.filter((parameter) => parameter.tunable).map((parameter) => ({ value: programBindingValue({ kind: 'parameter', id: byName.get(parameter.name).id }), label: parameter.label, group: 'Tuned parameters' })),
+        ...vocabulary.measured.map((column) => ({ value: programBindingValue({ kind: 'measured', column: column.label }), label: column.label, group: 'Measured' }))
+    ];
+}
+
+function renderParameterTuningProgramBindings() {
+    const targets = parameterTuningProgramTargets();
+    $('#parameterTuningProgramBindings').replaceChildren(...parameterTuningProgram.bindings.map((binding, index) => {
+        const row = document.createElement('div');
+        row.className = 'parameterTuningProgramBinding';
+        const key = document.createElement('input');
+        key.value = binding.key;
+        key.dataset.field = 'key';
+        key.setAttribute('aria-label', 'Key');
+        key.addEventListener('change', () => { binding.key = key.value.trim(); refreshParameterTuningRunnable(); });
+        const target = document.createElement('select');
+        target.dataset.field = 'target';
+        target.setAttribute('aria-label', `What ${binding.key || 'this key'} reads`);
+        target.append(new Option('Choose…', ''));
+        for (const group of ['States', 'Tuned parameters', 'Measured']) {
+            const options = targets.filter((item) => item.group === group);
+            if (!options.length) continue;
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = group;
+            optgroup.append(...options.map((item) => new Option(item.label, item.value)));
+            target.append(optgroup);
+        }
+        target.value = targets.some((item) => item.value === programBindingValue(binding)) ? programBindingValue(binding) : '';
+        target.addEventListener('change', () => {
+            const chosen = parseProgramBindingValue(target.value);
+            binding.kind = chosen?.kind ?? binding.kind;
+            binding.id = chosen?.kind === 'measured' ? undefined : chosen?.id ?? null;
+            binding.column = chosen?.kind === 'measured' ? chosen.column : undefined;
+            refreshParameterTuningRunnable();
+        });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '×';
+        remove.title = 'Remove this key';
+        remove.addEventListener('click', () => {
+            parameterTuningProgram.bindings.splice(index, 1);
+            renderParameterTuningProgramBindings();
+            refreshParameterTuningRunnable();
+        });
+        row.append(key, target, remove);
+        return row;
+    }));
+}
+
+$('#addParameterTuningProgramBinding').addEventListener('click', () => {
+    const taken = new Set(parameterTuningProgram.bindings.map((binding) => binding.key));
+    let index = parameterTuningProgram.bindings.length + 1;
+    while (taken.has(`key${index}`)) index += 1;
+    parameterTuningProgram.bindings.push({ key: `key${index}`, kind: 'state', id: null });
+    renderParameterTuningProgramBindings();
+    refreshParameterTuningRunnable();
+});
+
+// A template replaces the program and its keys; each key starts bound to the first thing of its kind, to be changed.
+function applyParameterTuningProgramTemplate(id) {
+    if (!parameterTuningProgram.language) return;
+    if ($('#parameterTuningProgramSource').value.trim() && !window.confirm('Replace the objective program with this template?')) return;
+    const template = objectiveTemplate(id, parameterTuningProgram.language);
+    const targets = parameterTuningProgramTargets();
+    $('#parameterTuningProgramSource').value = template.source;
+    parameterTuningProgram.bindings = template.keys.map(({ key, kind }) => {
+        const first = targets.map((item) => parseProgramBindingValue(item.value)).find((chosen) => chosen?.kind === kind);
+        return kind === 'measured' ? { key, kind, column: first?.column ?? '' } : { key, kind, id: first?.id ?? null };
+    });
+    renderParameterTuningProgramBindings();
+    refreshParameterTuningRunnable();
+}
+new ReferenceChips($('#parameterTuningProgramTemplates')).render(objectiveTemplateIds.map((id) => ({
+    label: objectiveTemplate(id, 'python').label, title: 'Start from this program', onClick: () => applyParameterTuningProgramTemplate(id)
+})));
+$('#parameterTuningProgramSource').addEventListener('input', () => refreshParameterTuningRunnable());
+$('#parameterTuningProgramEditor').addEventListener('click', () => {
+    if (!parameterTuningProgram.language) return;
+    providerEditTarget = { type: 'objective' };
+    window.providerEditor.openWindow({ source: $('#parameterTuningProgramSource').value, kind: parameterTuningProgram.language, title: 'Tuning objective' });
+});
+
 // Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
 // driven by this app's interaction-test harness.
 window.__debugParameterTuning = {
+    liveTwin: () => (liveTwinState ? { running: liveTwinState.running, ended: liveTwinState.ended, cycles: liveTwinState.cycles.length, last: structuredClone(liveTwinState.cycles.at(-1) ?? null), sandbox: Boolean(liveTwinState.sandbox) } : null),
+    scenarios: () => structuredClone(projectScenarios),
     loadCsv: (content, fileName) => loadParameterTuningCsv(content, fileName),
     replay: () => (parameterTuningReplay?.outcome ? parameterTuningReplay.outcome.map(({ output, name, comparison, sentence }) => ({
         signal: output.signal, name, sentence,
@@ -9438,7 +10035,25 @@ $('#runParameterTuning').addEventListener('click', async () => {
     const minutes = Number($('#parameterTuningMaxMinutes').value);
     const seconds = minutes > 0 ? minutes * 60 : 0;
     let objective = null;
-    if (parameterTuningState.goal === 'objective') {
+    if (parameterTuningState.goal === 'objective' && parameterTuningProgram.language) {
+        const objectiveStatus = $('#parameterTuningObjectiveStatus');
+        const targetTime = Number($('#parameterTuningRunTime').value);
+        const timeStep = Number($('#parameterTuningTimeStep').value);
+        const problem = parameterTuningNotReady() || runSettingsError(targetTime, timeStep);
+        objectiveStatus.className = 'equationDiagnostics';
+        objectiveStatus.textContent = problem;
+        if (problem) return;
+        const limits = constraintRows(parameterTuningConstraintInputs());
+        if (limits.error) {
+            objectiveStatus.textContent = limits.error;
+            return;
+        }
+        objective = objectivePayload({
+            direction: $('#parameterTuningDirection').value, targetTime, timeStep, variables: parameterTuningState.vocabulary.variables, constraints: limits.constraints,
+            program: { language: parameterTuningProgram.language, source: $('#parameterTuningProgramSource').value, bindings: parameterTuningProgram.bindings }
+        });
+        $('#parameterTuningEstimate').textContent = parameterTuningProgram.language === 'cpp' ? 'Preparing the objective (compiling the program)…' : '';
+    } else if (parameterTuningState.goal === 'objective') {
         const objectiveStatus = $('#parameterTuningObjectiveStatus');
         const latex = parameterTuningObjective.latex;
         const verdict = parameterTuningObjective.diagnose();
@@ -9473,6 +10088,9 @@ $('#runParameterTuning').addEventListener('click', async () => {
     $('#commitParameterTuning').hidden = true;
     $('#commitParameterTuning').disabled = true;
     $('#parameterTuningEstimate').textContent = 'Timing one simulation with the starting values…';
+    // Which way better goes is known now, not only once progress arrives: a fit quicker than the first batch of progress would
+    // otherwise keep the label of the run before it.
+    $('#parameterTuningStatImprovement').previousElementSibling.textContent = run.limits.maximize ? 'Higher by' : 'Lower by';
     $('#parameterTuningStats').hidden = true;
     $('#parameterTuningBestValues').replaceChildren();
     $('#parameterTuningWarnings').replaceChildren();
@@ -10855,6 +11473,12 @@ window.providerEditor.onApplied(({ source }) => {
         });
         return succeed();
     }
+    if (providerEditTarget.type === 'objective') {
+        if (!parameterTuningProgram.language || $('#parameterTuning').classList.contains('hidden')) return fail('The tuning card is no longer showing an objective program.');
+        $('#parameterTuningProgramSource').value = source;
+        refreshParameterTuningRunnable();
+        return succeed();
+    }
     if (providerEditTarget.type === 'builder') {
         if ($('#edgeBuilder').classList.contains('hidden')) return fail('The relationship builder was closed.');
         $('#edgeProviderSource').value = source;
@@ -11366,7 +11990,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
             fileOwnership = choice.strip ? null : stampOwnership(choice.block, stampOptions);
             if (JSON.stringify(fileOwnership) !== JSON.stringify(savedOwnership)) copyOwnership = fileOwnership;
         }
-        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}) }, null, 4)}\n`;
+        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
         const activeBranchRecord = branches.get(activeBranchUuid);

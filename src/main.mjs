@@ -44,6 +44,8 @@ import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
 import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLifecycle.mjs';
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
+import { LiveTwin } from './liveTwinHost.mjs';
+import { listenToBroker } from './mqttSource.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
 import { isNewerPackageVersion } from './versionCompare.mjs';
@@ -2830,6 +2832,48 @@ ipcMain.handle('engineFitDiscard', (event) => {
     operations.forEach((operation) => operation.controller.abort());
     return operations.length > 0;
 });
+
+// Live twins (src/liveTwinHost.mjs): at most one per window, its events sent to that window as they come. A window that closes
+// ends its twin, and the engines it started with it.
+const liveTwins = new Map();
+const liveTwinFor = (event) => {
+    const twin = liveTwins.get(event.sender.id);
+    if (!twin) throw new Error('There is no live twin running.');
+    return twin;
+};
+// Where what an MQTT broker sends is recorded: a `recordings` folder beside the project when it has been saved, otherwise the app's
+// own, named after the broker and the time, never replacing a file. Nobody is asked where.
+async function recordingPathFor(source, projectPath) {
+    const folder = projectPath ? join(dirname(projectPath), 'recordings') : join(app.getPath('userData'), 'recordings');
+    await mkdir(folder, { recursive: true });
+    const host = (() => { try { return new URL(source.url).hostname || 'broker'; } catch { return 'broker'; } })();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return join(folder, `${host.replace(/[^A-Za-z0-9-]/g, '-')} ${stamp}.csv`);
+}
+
+ipcMain.handle('liveTwinListen', async (_event, url, seconds) => listenToBroker(url, { seconds }));
+ipcMain.handle('liveTwinStart', async (event, settings, source, projectPath = null) => {
+    const owner = event.sender;
+    await liveTwins.get(owner.id)?.stop();
+    if (source.kind === 'mqtt') source = { ...source, recordTo: await recordingPathFor(source, projectPath) };
+    const twin = new LiveTwin(settings, source, await engineOptions(), (update) => {
+        if (!owner.isDestroyed()) owner.send('liveTwinEvent', update);
+        if (update.type === 'ended' || update.type === 'error') {
+            if (liveTwins.get(owner.id) === twin) liveTwins.delete(owner.id);
+        }
+    });
+    liveTwins.set(owner.id, twin);
+    owner.once('destroyed', () => twin.stop().catch(() => {}));
+    return true;
+});
+ipcMain.handle('liveTwinStop', async (event) => {
+    await liveTwins.get(event.sender.id)?.stop();
+    return true;
+});
+ipcMain.handle('liveTwinDetach', async (event) => liveTwinFor(event).detach());
+ipcMain.handle('liveTwinSandboxSetInput', async (event, signal, value) => liveTwinFor(event).sandboxSetInput(signal, value));
+ipcMain.handle('liveTwinSandboxRunFor', async (event, seconds) => liveTwinFor(event).sandboxRunFor(seconds));
+ipcMain.handle('liveTwinSandboxClose', async (event) => liveTwins.get(event.sender.id)?.closeSandbox() ?? null);
 
 ipcMain.handle('engineRun', async (event, content, configuration) => {
     const execution = await startEngineRun(content, configuration, await engineOptions());

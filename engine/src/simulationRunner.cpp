@@ -12,11 +12,13 @@
 #include "taskExecutor.hpp"
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -72,6 +74,9 @@ struct ControlInbox {
     std::mutex mutex;
     std::vector<protocol::EngineCommand> commands;
     std::string error;
+    // A session waits on this for its next command (a run polls instead); `ended` is set when the stream closes.
+    std::condition_variable ready;
+    bool ended = false;
 };
 struct ExecutionSettings {
     ExecutionBackend requestedBackend = ExecutionBackend::automatic;
@@ -230,13 +235,19 @@ void handleControlCommandPayload(const char* payload, std::size_t size, ControlI
     if (!command.ParseFromArray(payload, static_cast<int>(size)) ||
         command.protocol_version() != 1 || !command.sequence() || command.sequence() <= previousSequence ||
         command.payload_case() == protocol::EngineCommand::PAYLOAD_NOT_SET) {
-        std::lock_guard lock(inbox.mutex);
-        inbox.error = "The engine received an invalid, unsupported or out-of-order command.";
+        {
+            std::lock_guard lock(inbox.mutex);
+            inbox.error = "The engine received an invalid, unsupported or out-of-order command.";
+        }
+        inbox.ready.notify_all();
         return;
     }
     previousSequence = command.sequence();
-    std::lock_guard lock(inbox.mutex);
-    inbox.commands.push_back(std::move(command));
+    {
+        std::lock_guard lock(inbox.mutex);
+        inbox.commands.push_back(std::move(command));
+    }
+    inbox.ready.notify_all();
 }
 
 #ifdef __EMSCRIPTEN__
@@ -328,6 +339,17 @@ std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
     auto inbox = std::make_shared<ControlInbox>();
     if (!stream) return inbox;
     std::thread([stream, inbox] {
+        // However the stream ends, a session waiting for its next command is woken to find it ended.
+        struct EndOnExit {
+            ControlInbox& inbox;
+            ~EndOnExit() {
+                {
+                    std::lock_guard lock(inbox.mutex);
+                    inbox.ended = true;
+                }
+                inbox.ready.notify_all();
+            }
+        } endOnExit{*inbox};
         std::uint64_t previousSequence = 0;
         while (true) {
             unsigned char header[4];
@@ -361,6 +383,103 @@ std::shared_ptr<ControlInbox> startControlReader(std::istream* stream) {
 }
 #endif
 
+// Applies one of the commands a run understands (pacing, run state, a parameter set or scheduled) to its controls. A session's
+// own commands are not among them and are left alone.
+void applyControlCommand(RunControl& current, const protocol::EngineCommand& command, double now) {
+    if (command.has_set_pacing()) {
+        const auto& update = command.set_pacing();
+        if (update.mode() == protocol::PACING_MODE_FASTEST) current.pacing.mode = PacingMode::fastest;
+        else if (update.mode() == protocol::PACING_MODE_REAL_TIME) current.pacing.mode = PacingMode::realTime;
+        else if (update.mode() == protocol::PACING_MODE_LIMITED_RATIO) current.pacing.mode = PacingMode::limitedRatio;
+        else throw std::runtime_error("The engine received an unsupported pacing mode.");
+        current.pacing.ratio = current.pacing.mode == PacingMode::realTime ? 1 : update.simulation_seconds_per_wall_second();
+        if (!(current.pacing.ratio > 0) || !std::isfinite(current.pacing.ratio)) {
+            throw std::runtime_error("The engine received an invalid pacing ratio.");
+        }
+    } else if (command.has_set_run_state()) {
+        const auto state = command.set_run_state().state();
+        if (state == protocol::RUN_STATE_RUNNING) current.executionState = RunState::running;
+        else if (state == protocol::RUN_STATE_PAUSED) current.executionState = RunState::paused;
+        else if (state == protocol::RUN_STATE_STOPPED) current.executionState = RunState::stopped;
+        else throw std::runtime_error("The engine received an unsupported run state.");
+    } else if (command.has_set_parameter_value()) {
+        const auto& update = command.set_parameter_value();
+        if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL || !std::isfinite(update.value())) {
+            throw std::runtime_error("The engine received an invalid live parameter value.");
+        }
+        current.parameterValues[update.parameter_id()] = update.value();
+        // Setting a value is the newest decision about this parameter, so it supersedes the schedules and waveforms
+        // recorded for it until now. Without this a schedule that has begun would govern forever (a waveform has no
+        // end of its own), and the slider could never take the parameter back.
+        std::erase_if(current.activeSchedules, [&](const ParameterSchedule& schedule) { return schedule.parameterId == update.parameter_id(); });
+        current.interventions.emplace_back(now, command);
+    } else if (command.has_schedule_parameter_value()) {
+        const auto& update = command.schedule_parameter_value();
+        if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL) {
+            throw std::runtime_error("The engine received an invalid parameter schedule identifier.");
+        }
+        if (!std::isfinite(update.start_time()) || !std::isfinite(update.duration()) ||
+            !std::isfinite(update.target_value()) || !std::isfinite(update.base_value())) {
+            throw std::runtime_error("The engine received a non-finite parameter schedule value.");
+        }
+        ParameterSchedule schedule;
+        schedule.parameterId = update.parameter_id();
+        schedule.startTime = update.start_time();
+        schedule.duration = update.duration();
+        schedule.targetValue = update.target_value();
+        schedule.baseValue = update.base_value();
+        switch (update.mode()) {
+        case protocol::PARAMETER_SCHEDULE_MODE_STEP: schedule.mode = ParameterSchedule::Mode::step; break;
+        case protocol::PARAMETER_SCHEDULE_MODE_RAMP: schedule.mode = ParameterSchedule::Mode::ramp; break;
+        case protocol::PARAMETER_SCHEDULE_MODE_PULSE: schedule.mode = ParameterSchedule::Mode::pulse; break;
+        case protocol::PARAMETER_SCHEDULE_MODE_WAVEFORM: {
+            schedule.mode = ParameterSchedule::Mode::waveform;
+            const double amplitude = update.amplitude();
+            const double frequency = update.frequency();
+            const double duty = update.duty_cycle();
+            if (!std::isfinite(amplitude) || amplitude < 0 || !std::isfinite(frequency) || frequency < 0 ||
+                !std::isfinite(update.phase_degrees()) || !std::isfinite(duty) || duty < 0 || duty >= 1) {
+                throw std::runtime_error("The engine received an invalid waveform parameter schedule.");
+            }
+            switch (update.waveform_shape()) {
+            case protocol::WAVEFORM_SHAPE_SINE: schedule.shape = ParameterSchedule::Shape::sine; break;
+            case protocol::WAVEFORM_SHAPE_SQUARE: schedule.shape = ParameterSchedule::Shape::square; break;
+            case protocol::WAVEFORM_SHAPE_TRIANGLE: schedule.shape = ParameterSchedule::Shape::triangle; break;
+            case protocol::WAVEFORM_SHAPE_SAWTOOTH: schedule.shape = ParameterSchedule::Shape::sawtooth; break;
+            case protocol::WAVEFORM_SHAPE_NOISE:
+                // Noise draws `frequency` values per second, so none at all is not a signal.
+                if (!(frequency > 0)) throw std::runtime_error("A noise parameter schedule needs a positive frequency.");
+                schedule.shape = ParameterSchedule::Shape::noise;
+                break;
+            default:
+                throw std::runtime_error("The engine received an unsupported waveform shape.");
+            }
+            schedule.amplitude = amplitude;
+            schedule.frequency = frequency;
+            schedule.phaseDegrees = update.phase_degrees();
+            schedule.dutyCycle = duty;
+            schedule.seed = update.seed();
+            break;
+        }
+        case protocol::PARAMETER_SCHEDULE_MODE_PIECEWISE:
+            schedule.mode = ParameterSchedule::Mode::piecewise;
+            schedule.samples.reserve(update.samples_size());
+            for (const auto& sample : update.samples()) {
+                if (!std::isfinite(sample.time()) || !std::isfinite(sample.value())) {
+                    throw std::runtime_error("The engine received a non-finite piecewise parameter schedule sample.");
+                }
+                schedule.samples.emplace_back(sample.time(), sample.value());
+            }
+            std::sort(schedule.samples.begin(), schedule.samples.end());
+            break;
+        default:
+            throw std::runtime_error("The engine received an unsupported parameter schedule mode.");
+        }
+        current.activeSchedules.push_back(std::move(schedule));
+        current.interventions.emplace_back(now, command);
+    }
+}
+
 RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunControl current, double now) {
     std::vector<protocol::EngineCommand> commands;
     {
@@ -368,100 +487,7 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
         if (!inbox->error.empty()) throw std::runtime_error(inbox->error);
         commands.swap(inbox->commands);
     }
-    for (const auto& command : commands) {
-        if (command.has_set_pacing()) {
-            const auto& update = command.set_pacing();
-            if (update.mode() == protocol::PACING_MODE_FASTEST) current.pacing.mode = PacingMode::fastest;
-            else if (update.mode() == protocol::PACING_MODE_REAL_TIME) current.pacing.mode = PacingMode::realTime;
-            else if (update.mode() == protocol::PACING_MODE_LIMITED_RATIO) current.pacing.mode = PacingMode::limitedRatio;
-            else throw std::runtime_error("The engine received an unsupported pacing mode.");
-            current.pacing.ratio = current.pacing.mode == PacingMode::realTime ? 1 : update.simulation_seconds_per_wall_second();
-            if (!(current.pacing.ratio > 0) || !std::isfinite(current.pacing.ratio)) {
-                throw std::runtime_error("The engine received an invalid pacing ratio.");
-            }
-        } else if (command.has_set_run_state()) {
-            const auto state = command.set_run_state().state();
-            if (state == protocol::RUN_STATE_RUNNING) current.executionState = RunState::running;
-            else if (state == protocol::RUN_STATE_PAUSED) current.executionState = RunState::paused;
-            else if (state == protocol::RUN_STATE_STOPPED) current.executionState = RunState::stopped;
-            else throw std::runtime_error("The engine received an unsupported run state.");
-        } else if (command.has_set_parameter_value()) {
-            const auto& update = command.set_parameter_value();
-            if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL || !std::isfinite(update.value())) {
-                throw std::runtime_error("The engine received an invalid live parameter value.");
-            }
-            current.parameterValues[update.parameter_id()] = update.value();
-            // Setting a value is the newest decision about this parameter, so it supersedes the schedules and waveforms
-            // recorded for it until now. Without this a schedule that has begun would govern forever (a waveform has no
-            // end of its own), and the slider could never take the parameter back.
-            std::erase_if(current.activeSchedules, [&](const ParameterSchedule& schedule) { return schedule.parameterId == update.parameter_id(); });
-            current.interventions.emplace_back(now, command);
-        } else if (command.has_schedule_parameter_value()) {
-            const auto& update = command.schedule_parameter_value();
-            if (!update.parameter_id() || update.parameter_id() > 9007199254740991ULL) {
-                throw std::runtime_error("The engine received an invalid parameter schedule identifier.");
-            }
-            if (!std::isfinite(update.start_time()) || !std::isfinite(update.duration()) ||
-                !std::isfinite(update.target_value()) || !std::isfinite(update.base_value())) {
-                throw std::runtime_error("The engine received a non-finite parameter schedule value.");
-            }
-            ParameterSchedule schedule;
-            schedule.parameterId = update.parameter_id();
-            schedule.startTime = update.start_time();
-            schedule.duration = update.duration();
-            schedule.targetValue = update.target_value();
-            schedule.baseValue = update.base_value();
-            switch (update.mode()) {
-            case protocol::PARAMETER_SCHEDULE_MODE_STEP: schedule.mode = ParameterSchedule::Mode::step; break;
-            case protocol::PARAMETER_SCHEDULE_MODE_RAMP: schedule.mode = ParameterSchedule::Mode::ramp; break;
-            case protocol::PARAMETER_SCHEDULE_MODE_PULSE: schedule.mode = ParameterSchedule::Mode::pulse; break;
-            case protocol::PARAMETER_SCHEDULE_MODE_WAVEFORM: {
-                schedule.mode = ParameterSchedule::Mode::waveform;
-                const double amplitude = update.amplitude();
-                const double frequency = update.frequency();
-                const double duty = update.duty_cycle();
-                if (!std::isfinite(amplitude) || amplitude < 0 || !std::isfinite(frequency) || frequency < 0 ||
-                    !std::isfinite(update.phase_degrees()) || !std::isfinite(duty) || duty < 0 || duty >= 1) {
-                    throw std::runtime_error("The engine received an invalid waveform parameter schedule.");
-                }
-                switch (update.waveform_shape()) {
-                case protocol::WAVEFORM_SHAPE_SINE: schedule.shape = ParameterSchedule::Shape::sine; break;
-                case protocol::WAVEFORM_SHAPE_SQUARE: schedule.shape = ParameterSchedule::Shape::square; break;
-                case protocol::WAVEFORM_SHAPE_TRIANGLE: schedule.shape = ParameterSchedule::Shape::triangle; break;
-                case protocol::WAVEFORM_SHAPE_SAWTOOTH: schedule.shape = ParameterSchedule::Shape::sawtooth; break;
-                case protocol::WAVEFORM_SHAPE_NOISE:
-                    // Noise draws `frequency` values per second, so none at all is not a signal.
-                    if (!(frequency > 0)) throw std::runtime_error("A noise parameter schedule needs a positive frequency.");
-                    schedule.shape = ParameterSchedule::Shape::noise;
-                    break;
-                default:
-                    throw std::runtime_error("The engine received an unsupported waveform shape.");
-                }
-                schedule.amplitude = amplitude;
-                schedule.frequency = frequency;
-                schedule.phaseDegrees = update.phase_degrees();
-                schedule.dutyCycle = duty;
-                schedule.seed = update.seed();
-                break;
-            }
-            case protocol::PARAMETER_SCHEDULE_MODE_PIECEWISE:
-                schedule.mode = ParameterSchedule::Mode::piecewise;
-                schedule.samples.reserve(update.samples_size());
-                for (const auto& sample : update.samples()) {
-                    if (!std::isfinite(sample.time()) || !std::isfinite(sample.value())) {
-                        throw std::runtime_error("The engine received a non-finite piecewise parameter schedule sample.");
-                    }
-                    schedule.samples.emplace_back(sample.time(), sample.value());
-                }
-                std::sort(schedule.samples.begin(), schedule.samples.end());
-                break;
-            default:
-                throw std::runtime_error("The engine received an unsupported parameter schedule mode.");
-            }
-            current.activeSchedules.push_back(std::move(schedule));
-            current.interventions.emplace_back(now, command);
-        }
-    }
+    for (const auto& command : commands) applyControlCommand(current, command, now);
     return current;
 }
 
@@ -502,8 +528,9 @@ public:
     };
 
     virtual ~StepExecutor() = default;
+    // `endTime` is the time the step ends at, as the run records it (see integrateNode).
     virtual std::vector<NodeIntegrationResult> integrate(const Values& snapshot, const RunControl& control, double time,
-        double step, std::size_t stepIndex, ProviderRuntime* providers) = 0;
+        double step, double endTime, std::size_t stepIndex, ProviderRuntime* providers) = 0;
     // The states the next step starts from have been set from outside (a restore); nothing to do while the states live in the
     // run's vector.
     virtual void restore(const Values&) {}
@@ -519,10 +546,10 @@ public:
     explicit SerialStepExecutor(const ExecutionPlan& plan) : StepExecutor(plan) {}
 
     std::vector<NodeIntegrationResult> integrate(const Values& snapshot, const RunControl& control, double time, double step,
-        std::size_t, ProviderRuntime* providers) override {
+        double endTime, std::size_t, ProviderRuntime* providers) override {
         std::vector<NodeIntegrationResult> nodeResults(plan_.nodes.size());
         for (std::size_t index = 0; index < plan_.nodes.size(); ++index) {
-            nodeResults[index] = integrateNode(plan_.nodes[index], snapshot, control.parameterValues, time, step, providers, control.activeSchedules);
+            nodeResults[index] = integrateNode(plan_.nodes[index], snapshot, control.parameterValues, time, step, providers, control.activeSchedules, endTime);
         }
         return nodeResults;
     }
@@ -533,7 +560,7 @@ public:
     ThreadPoolStepExecutor(const ExecutionPlan& plan, std::size_t workerThreads) : StepExecutor(plan), taskExecutor_(workerThreads) {}
 
     std::vector<NodeIntegrationResult> integrate(const Values& snapshot, const RunControl& control, double time, double step,
-        std::size_t, ProviderRuntime* providers) override {
+        double endTime, std::size_t, ProviderRuntime* providers) override {
         std::vector<NodeIntegrationResult> nodeResults(plan_.nodes.size());
         const auto parameterValues = control.parameterValues;
         const auto activeSchedules = control.activeSchedules;
@@ -542,8 +569,8 @@ public:
         futures.resize(plan_.nodes.size());
         for (const auto index : plan_.taskSubmissionOrder) {
             const auto* nodePlan = &plan_.nodes[index];
-            futures[index] = taskExecutor_.submit([nodePlan, &snapshot, &parameterValues, &activeSchedules, time, step, evaluatorPtr = providers] {
-                return integrateNode(*nodePlan, snapshot, parameterValues, time, step, evaluatorPtr, activeSchedules);
+            futures[index] = taskExecutor_.submit([nodePlan, &snapshot, &parameterValues, &activeSchedules, time, step, endTime, evaluatorPtr = providers] {
+                return integrateNode(*nodePlan, snapshot, parameterValues, time, step, evaluatorPtr, activeSchedules, endTime);
             });
         }
         for (std::size_t index = 0; index < futures.size(); ++index) nodeResults[index] = futures[index].get();
@@ -590,7 +617,7 @@ public:
     }
 
     std::vector<NodeIntegrationResult> integrate(const Values& snapshot, const RunControl& control, double time, double step,
-        std::size_t stepIndex, ProviderRuntime* providers) override {
+        double endTime, std::size_t stepIndex, ProviderRuntime* providers) override {
         std::vector<NodeIntegrationResult> nodeResults(plan_.nodes.size());
         // Each partition worker gets the run's active schedules with the live values, so a
         // scheduled parameter intervention (a scenario fork's changes) applies under this
@@ -620,7 +647,7 @@ public:
         for (auto& runtime : partitionRuntimes_) {
             futures.push_back(runtime->submit(
                 *partitionTransport_, stepIndex, parameterValues, step, time,
-                std::chrono::milliseconds(receiveTimeout_), providers, activeSchedules));
+                std::chrono::milliseconds(receiveTimeout_), providers, activeSchedules, endTime));
         }
         for (std::size_t partition = 0; partition < futures.size(); ++partition) {
             const auto result = futures[partition].get();
@@ -647,10 +674,14 @@ private:
 };
 
 // Throws the run settings' errors before the model is compiled, so a bad configuration is reported first, as it always was.
-bool checkTimeSettings(double targetTime, double globalTimeStep, double outputInterval) {
+// A session has no end time, so only its step and output interval are checked.
+bool checkTimeSettings(double targetTime, double globalTimeStep, double outputInterval, bool session) {
     const auto outputRatio = outputInterval / globalTimeStep;
-    if (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
-        !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval)) {
+    if (session && (!(globalTimeStep > 0) || !std::isfinite(globalTimeStep) || !(outputInterval > 0) || !std::isfinite(outputInterval))) {
+        throw std::runtime_error("A session requires a finite positive globalTimeStep and outputInterval.");
+    }
+    if (!session && (!(targetTime > 0) || !(globalTimeStep > 0) || globalTimeStep > targetTime || !(outputInterval > 0) ||
+        !std::isfinite(targetTime) || !std::isfinite(globalTimeStep) || !std::isfinite(outputInterval))) {
         throw std::runtime_error("A run requires a finite positive targetTime and numerical timestep values.");
     }
     if (outputInterval < globalTimeStep || std::abs(outputRatio - std::round(outputRatio)) > 1e-9) {
@@ -664,9 +695,11 @@ bool checkTimeSettings(double targetTime, double globalTimeStep, double outputIn
 // target time; a session (docs/proposals/liveEngineSession.md) will drive one by commands, going back to its checkpoints.
 class Simulation {
 public:
+    // `session` makes it a session (docs/proposals/liveEngineSession.md): no end time and no result file; it is driven by
+    // commands through serveSession() instead.
     Simulation(const boost::property_tree::ptree& document, const boost::property_tree::ptree& configuration,
                const std::filesystem::path& outputPath, std::istream* controlStream, std::ostream* eventStream,
-               std::shared_ptr<const ExecutionPlan> compiledPlan);
+               std::shared_ptr<const ExecutionPlan> compiledPlan, bool session = false);
 
     std::size_t steps = 0;
     bool wholeSteps = true;
@@ -684,8 +717,24 @@ public:
     void integrateStep(std::size_t step, double synchronizationStep, double elapsed);
     void paceStep(std::chrono::steady_clock::time_point wallStepStarted, double synchronizationStep);
     void recordStepOutput(std::size_t step, double elapsed);
+    // Answers commands until the control stream closes.
+    void serveSession();
 
 private:
+    // A session's commands; each throws, leaving the session as it was, when it cannot be carried out.
+    std::uint32_t advanceTo(double time, bool takeCheckpoints);
+    const ProviderCheckpointStates& restoreCheckpoint(const protocol::RestoreCheckpoint& command);
+    ProviderCheckpointStates restoreState(const protocol::RestoreState& command);
+    void retainFrom(double time);
+    void appendInputSamples(const protocol::AppendInputSamples& command);
+    void settleAt(double time);
+    void restoreProviderStates(const std::vector<std::pair<EntityId, std::vector<std::byte>>>& providerStates);
+    long long checkpointKey(double time) const;
+    std::optional<protocol::EngineCommand> waitForCommand();
+    // `restored`, for a restore: the provider states it restored, sent back with the whole state rather than asked for again.
+    void reply(const protocol::EngineCommand& command, bool ok, const std::string& message, const ProviderCheckpointStates* restored,
+               std::uint64_t computeNanoseconds, std::uint32_t checkpointsTaken = 0);
+
     void flushSampleEvents();
     void appendStreamRecord(const std::string& type, double time, const Values& recordStates, const std::string& uuid = {});
     ProviderCheckpointStates captureProviderStates();
@@ -727,6 +776,19 @@ private:
     double nextOutputTime = 0;
     // How many parameter changes the algebraic states were last set with (see settleIfParametersChanged).
     std::size_t settledInterventions = 0;
+    // A session's own: the states it sends samples of, its checkpoints (one every checkpointInterval from the time it began,
+    // the latest pass through each kept), the time it was last restored to and how many steps it has taken since, the step
+    // counter partitions are told (never reused), and the states the model computes from others, which cannot be set.
+    bool sessionMode = false;
+    std::vector<std::size_t> reportedIndexes;
+    double checkpointInterval = 0;
+    double sessionOrigin = 0;
+    std::map<long long, Checkpoint> sessionCheckpoints;
+    double baseTime = 0;
+    long long stepsSinceBase = 0;
+    long long outputSteps = 1;
+    std::size_t stepCounter = 0;
+    std::unordered_set<std::size_t> algebraicIndexes;
 
 public:
     std::chrono::steady_clock::time_point lastPublishedAt;
@@ -734,8 +796,8 @@ public:
 
 Simulation::Simulation(const boost::property_tree::ptree& document, const boost::property_tree::ptree& configuration,
                        const std::filesystem::path& outputPath, std::istream* controlStream, std::ostream* eventStream,
-                       std::shared_ptr<const ExecutionPlan> compiledPlan)
-    : targetTime(configuration.get<double>("targetTime")),
+                       std::shared_ptr<const ExecutionPlan> compiledPlan, bool session)
+    : targetTime(session ? std::numeric_limits<double>::infinity() : configuration.get<double>("targetTime")),
       globalTimeStep(configuration.get<double>("globalTimeStep", configuration.get<double>("timeStep", 0.01))),
       pacing(pacingFromTree(configuration)),
       // `startPaused` holds the run at its first step (the state is written, nothing is integrated) until it is resumed, so
@@ -754,11 +816,12 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
 #else
       controlInbox(startControlReader(controlStream)),
 #endif
-      timeSettingsChecked(checkTimeSettings(targetTime, globalTimeStep, outputInterval)),
+      timeSettingsChecked(checkTimeSettings(targetTime, globalTimeStep, outputInterval, session)),
       planningStartedAt(std::chrono::steady_clock::now()),
       plan(compiledPlan ? std::move(compiledPlan) : std::make_shared<const ExecutionPlan>(compileExecutionPlan(document))),
       executionPlan(*plan),
-      lastControlReadAt(std::chrono::steady_clock::now() - std::chrono::seconds(1)) {
+      lastControlReadAt(std::chrono::steady_clock::now() - std::chrono::seconds(1)),
+      sessionMode(session) {
     ProviderConfiguration providerConfig;
     if (const auto providers = configuration.get_child_optional("providers")) {
         providerConfig.cppCompiler = providers->get<std::string>("cpp.compiler", "");
@@ -857,9 +920,11 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     // A run (or the rest of one, from a checkpoint) that is a whole number of steps, give or take rounding in
     // targetTime - startTime, takes exactly that many full steps: a resumed run then steps exactly as the run it
     // came from, rather than ending on a step a few ulps short.
-    const auto stepsExactly = (targetTime - startTime) / globalTimeStep;
-    wholeSteps = std::abs(stepsExactly - std::round(stepsExactly)) <= 1e-9 * std::max(1.0, stepsExactly);
-    steps = static_cast<std::size_t>(wholeSteps ? std::round(stepsExactly) : std::ceil(stepsExactly));
+    if (!sessionMode) {
+        const auto stepsExactly = (targetTime - startTime) / globalTimeStep;
+        wholeSteps = std::abs(stepsExactly - std::round(stepsExactly)) <= 1e-9 * std::max(1.0, stepsExactly);
+        steps = static_cast<std::size_t>(wholeSteps ? std::round(stepsExactly) : std::ceil(stepsExactly));
+    }
     nodeMetrics.resize(executionPlan.nodes.size());
     // Algebraic states are set from their expressions before anything is recorded or read, so the
     // first sample, the first checkpoint and every node's first step all see consistent values --
@@ -884,11 +949,44 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         for (const auto stateId : executionPlan.stateIds) table->add_states()->set_state_id(stateId);
         writeFramedEvent(*eventStream, event);
     }
-    appendStreamRecord("sample", startTime, states);
-    appendStreamRecord("checkpoint", startTime, states, checkpoints.front().uuid);
     currentTime = startTime;
     nextOutputTime = startTime + outputInterval;
     settledInterventions = runControl.interventions.size();
+    if (!sessionMode) {
+        appendStreamRecord("sample", startTime, states);
+        appendStreamRecord("checkpoint", startTime, states, checkpoints.front().uuid);
+        return;
+    }
+    // A session: what it reports, how often it keeps a checkpoint, and which states it may not set.
+    if (const auto reported = configuration.get_child_optional("reportedStateIds")) {
+        for (const auto& entry : *reported) {
+            const auto stateIndex = executionPlan.stateIndexes.find(entry.second.get_value<EntityId>());
+            if (stateIndex == executionPlan.stateIndexes.end()) throw std::runtime_error("A reported state is not in the model.");
+            reportedIndexes.push_back(stateIndex->second);
+        }
+    } else {
+        for (const auto stateId : executionPlan.stateIds) reportedIndexes.push_back(executionPlan.stateIndexes.at(stateId));
+    }
+    outputSteps = std::llround(outputInterval / globalTimeStep);
+    checkpointInterval = configuration.get<double>("checkpointInterval", outputInterval);
+    const auto checkpointRatio = checkpointInterval / globalTimeStep;
+    if (!(checkpointInterval > 0) || !std::isfinite(checkpointInterval) || std::abs(checkpointRatio - std::round(checkpointRatio)) > 1e-9) {
+        throw std::runtime_error("checkpointInterval must be a whole number of time steps.");
+    }
+    sessionOrigin = startTime;
+    baseTime = startTime;
+    sessionCheckpoints.emplace(0, checkpoints.front());
+    checkpoints.clear();
+    samples.clear();
+    for (const auto& node : executionPlan.nodes) {
+        for (const auto& task : node.algebraicTasks) algebraicIndexes.insert(node.stateIndexes.at(task.outputStateIndex));
+        if (node.nodeProvider) {
+            for (const auto& output : node.nodeProvider->outputs) {
+                if (output.setsValue) algebraicIndexes.insert(executionPlan.stateIndexes.at(output.stateId));
+            }
+        }
+    }
+    for (const auto index : executionPlan.algebraicStateIndexes) algebraicIndexes.insert(index);
 }
 
 void Simulation::restoreStartCheckpoint(const boost::property_tree::ptree& checkpoint) {
@@ -1215,7 +1313,7 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
     const auto synchronizationStartedAt = std::chrono::steady_clock::now();
     const auto snapshot = states;
     auto synchronizedStates = snapshot;
-    const auto nodeResults = stepExecutor->integrate(snapshot, runControl, currentTime, synchronizationStep, step, providerRuntime.get());
+    const auto nodeResults = stepExecutor->integrate(snapshot, runControl, currentTime, synchronizationStep, elapsed, step, providerRuntime.get());
     for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
         const auto& node = executionPlan.nodes[index];
         const auto& result = nodeResults[index];
@@ -1280,6 +1378,248 @@ void Simulation::recordStepOutput(std::size_t step, double elapsed) {
     }
 }
 
+// Which checkpoint of a session a time is: the number of checkpoint intervals since the session began, if it is a whole number.
+long long Simulation::checkpointKey(double time) const {
+    const auto intervals = (time - sessionOrigin) / checkpointInterval;
+    const auto rounded = std::round(intervals);
+    if (!std::isfinite(intervals) || std::abs(intervals - rounded) > 1e-9 * std::max(1.0, std::abs(rounded))) return -1;
+    return static_cast<long long>(rounded);
+}
+
+// The algebraic states set again for the instant, as a run does when it starts or resumes from a checkpoint.
+void Simulation::settleAt(double time) {
+    settleAlgebraicStates(executionPlan, states, runControl.parameterValues, time, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
+    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time);
+}
+
+void Simulation::restoreProviderStates(const std::vector<std::pair<EntityId, std::vector<std::byte>>>& providerStates) {
+    for (const auto& [nodeId, payload] : providerStates) {
+        const auto node = std::find_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
+            [&](const auto& candidate) { return candidate.nodeId == nodeId; });
+        if (node == executionPlan.nodes.end() || !node->nodeProvider) throw std::runtime_error("A saved provider state names a node with no provider.");
+        providerRuntime->requestNodeRestore(*node->nodeProvider, payload);
+    }
+}
+
+// Steps to `time` and holds there: a whole number of steps after the time the session was last restored to, counted from that
+// time (so a step ends at that time plus n steps, exactly as a run started there would have it). On the way, the reported
+// states' samples are sent at every output time, and a checkpoint is kept at every checkpoint time.
+std::uint32_t Simulation::advanceTo(double time, bool takeCheckpoints) {
+    const auto stepsTarget = (time - baseTime) / globalTimeStep;
+    const auto rounded = std::round(stepsTarget);
+    if (!std::isfinite(time) || std::abs(stepsTarget - rounded) > 1e-9 * std::max(1.0, std::abs(rounded))) {
+        throw std::runtime_error("A session advances by whole time steps from the time it was last restored to.");
+    }
+    const auto targetSteps = static_cast<long long>(rounded);
+    if (targetSteps < stepsSinceBase) throw std::runtime_error("A session cannot advance to a time before the one it is at.");
+    protocol::EngineEvent event;
+    event.set_protocol_version(1);
+    auto* batch = event.mutable_sample_batch();
+    batch->set_state_count(static_cast<std::uint32_t>(reportedIndexes.size()));
+    const auto flush = [&] {
+        if (!batch->times_size()) return;
+        writeFramedEvent(*eventStream, event);
+        batch->clear_times();
+        batch->clear_values();
+    };
+    std::uint32_t taken = 0;
+    while (stepsSinceBase < targetSteps) {
+        settleIfParametersChanged();
+        const double elapsed = baseTime + static_cast<double>(stepsSinceBase + 1) * globalTimeStep;
+        integrateStep(stepCounter++, globalTimeStep, elapsed);
+        ++stepsSinceBase;
+        if (stepsSinceBase % outputSteps == 0) {
+            batch->add_times(elapsed);
+            for (const auto index : reportedIndexes) batch->add_values(states[index]);
+            if (batch->times_size() >= 4096) flush();
+        }
+        if (const auto key = takeCheckpoints ? checkpointKey(elapsed) : -1; key >= 0) {
+            sessionCheckpoints[key] = Checkpoint{createUuid(), elapsed, states, captureProviderStates()};
+            ++taken;
+        }
+    }
+    flush();
+    return taken;
+}
+
+// Back to the checkpoint kept at `time`, with the listed states replaced, and the algebraic states set again. Everything is
+// checked before anything is changed, so a refused restore leaves the session where it was.
+const ProviderCheckpointStates& Simulation::restoreCheckpoint(const protocol::RestoreCheckpoint& command) {
+    const auto key = checkpointKey(command.time());
+    const auto found = key >= 0 ? sessionCheckpoints.find(key) : sessionCheckpoints.end();
+    if (found == sessionCheckpoints.end()) {
+        std::ostringstream message;
+        message << std::setprecision(17) << "No checkpoint is kept at " << command.time() << " s.";
+        throw std::runtime_error(message.str());
+    }
+    std::vector<std::pair<std::size_t, double>> overrides;
+    for (const auto& item : command.overrides()) {
+        const auto stateIndex = executionPlan.stateIndexes.find(item.state_id());
+        if (stateIndex == executionPlan.stateIndexes.end()) throw std::runtime_error("A state to set is not in the model.");
+        if (algebraicIndexes.contains(stateIndex->second)) {
+            throw std::runtime_error("State " + std::to_string(item.state_id()) + " is computed by the model from other states, so it cannot be set.");
+        }
+        if (!std::isfinite(item.value())) throw std::runtime_error("A state can only be set to a finite number.");
+        overrides.emplace_back(stateIndex->second, item.value());
+    }
+    const auto& checkpoint = found->second;
+    states = checkpoint.states;
+    restoreProviderStates(checkpoint.providerStates);
+    for (const auto& [index, value] : overrides) states[index] = value;
+    currentTime = checkpoint.time;
+    baseTime = checkpoint.time;
+    stepsSinceBase = 0;
+    settleAt(currentTime);
+    stepExecutor->restore(states);
+    return checkpoint.providerStates;
+}
+
+// The whole state from the message: how a session is carried on in a new engine.
+ProviderCheckpointStates Simulation::restoreState(const protocol::RestoreState& command) {
+    if (static_cast<std::size_t>(command.values_size()) != states.size()) throw std::runtime_error("The state to restore does not match the model's states.");
+    for (const auto value : command.values()) {
+        if (!std::isfinite(value)) throw std::runtime_error("A state can only be set to a finite number.");
+    }
+    if (!std::isfinite(command.time())) throw std::runtime_error("The time to restore to must be finite.");
+    const auto providerNodes = std::count_if(executionPlan.nodes.begin(), executionPlan.nodes.end(), [](const auto& node) { return node.nodeProvider.has_value(); });
+    if (command.provider_states_size() != providerNodes) throw std::runtime_error("The state to restore needs the saved state of every node provider.");
+    std::vector<std::pair<EntityId, std::vector<std::byte>>> providerStates;
+    for (const auto& item : command.provider_states()) {
+        const auto* bytes = reinterpret_cast<const std::byte*>(item.payload().data());
+        providerStates.emplace_back(item.node_id(), std::vector<std::byte>(bytes, bytes + item.payload().size()));
+    }
+    const auto& stateIds = executionPlan.stateIds;
+    for (std::size_t index = 0; index < stateIds.size(); ++index) states[executionPlan.stateIndexes.at(stateIds[index])] = command.values(static_cast<int>(index));
+    restoreProviderStates(providerStates);
+    currentTime = command.time();
+    baseTime = command.time();
+    stepsSinceBase = 0;
+    settleAt(currentTime);
+    stepExecutor->restore(states);
+    return providerStates;
+}
+
+// Forgets the checkpoints from before `time`, and every input reading from before it but the last, which still holds at it.
+void Simulation::retainFrom(double time) {
+    std::erase_if(sessionCheckpoints, [&](const auto& entry) { return entry.second.time < time - 1e-9 * std::max(1.0, std::abs(time)); });
+    for (auto& schedule : runControl.activeSchedules) {
+        if (!schedule.input || schedule.samples.size() < 2) continue;
+        const auto firstKept = std::upper_bound(schedule.samples.begin(), schedule.samples.end(), time,
+            [](double at, const auto& sample) { return at < sample.first; });
+        if (firstKept - schedule.samples.begin() > 1) schedule.samples.erase(schedule.samples.begin(), firstKept - 1);
+    }
+}
+
+void Simulation::appendInputSamples(const protocol::AppendInputSamples& command) {
+    if (!command.parameter_id()) throw std::runtime_error("An input names no parameter.");
+    std::vector<std::pair<double, double>> incoming;
+    for (const auto& sample : command.samples()) {
+        if (!std::isfinite(sample.time()) || !std::isfinite(sample.value())) throw std::runtime_error("An input reading must be a finite time and value.");
+        if (!incoming.empty() && !(sample.time() > incoming.back().first)) throw std::runtime_error("Input readings must come in time order.");
+        incoming.emplace_back(sample.time(), sample.value());
+    }
+    auto existing = std::find_if(runControl.activeSchedules.begin(), runControl.activeSchedules.end(),
+        [&](const auto& schedule) { return schedule.input && schedule.parameterId == command.parameter_id(); });
+    auto kept = existing == runControl.activeSchedules.end() ? std::vector<std::pair<double, double>>{} : existing->samples;
+    if (command.replace()) std::erase_if(kept, [&](const auto& sample) { return sample.first >= command.replace_from(); });
+    if (!kept.empty() && !incoming.empty() && !(incoming.front().first > kept.back().first)) {
+        throw std::runtime_error("Input readings must come in time order; a corrected reading is sent with replace.");
+    }
+    kept.insert(kept.end(), incoming.begin(), incoming.end());
+    if (existing == runControl.activeSchedules.end()) {
+        if (kept.empty()) return;
+        ParameterSchedule schedule;
+        schedule.parameterId = command.parameter_id();
+        schedule.mode = ParameterSchedule::Mode::piecewise;
+        schedule.hold = true;
+        schedule.input = true;
+        schedule.startTime = kept.front().first;
+        schedule.samples = std::move(kept);
+        runControl.activeSchedules.push_back(std::move(schedule));
+        return;
+    }
+    if (kept.empty()) {
+        runControl.activeSchedules.erase(existing);
+        return;
+    }
+    existing->samples = std::move(kept);
+    existing->startTime = std::min(existing->startTime, existing->samples.front().first);
+}
+
+#ifndef __EMSCRIPTEN__
+std::optional<protocol::EngineCommand> Simulation::waitForCommand() {
+    std::unique_lock lock(controlInbox->mutex);
+    controlInbox->ready.wait(lock, [&] { return !controlInbox->commands.empty() || controlInbox->ended || !controlInbox->error.empty(); });
+    if (!controlInbox->error.empty()) throw std::runtime_error(controlInbox->error);
+    if (controlInbox->commands.empty()) return std::nullopt;
+    auto command = std::move(controlInbox->commands.front());
+    controlInbox->commands.erase(controlInbox->commands.begin());
+    return command;
+}
+#else
+std::optional<protocol::EngineCommand> Simulation::waitForCommand() {
+    throw std::runtime_error("The web edition has no engine session yet.");
+}
+#endif
+
+void Simulation::reply(const protocol::EngineCommand& command, bool ok, const std::string& message, const ProviderCheckpointStates* restored,
+                       std::uint64_t computeNanoseconds, std::uint32_t checkpointsTaken) {
+    protocol::EngineEvent event;
+    event.set_protocol_version(1);
+    auto* answer = event.mutable_session_reply();
+    answer->set_sequence(command.sequence());
+    answer->set_ok(ok);
+    answer->set_message(message);
+    answer->set_time(currentTime);
+    answer->set_compute_nanoseconds(computeNanoseconds);
+    answer->set_checkpoints_taken(checkpointsTaken);
+    if (restored) {
+        for (const auto stateId : executionPlan.stateIds) answer->add_values(states[executionPlan.stateIndexes.at(stateId)]);
+        for (const auto& [nodeId, payload] : *restored) {
+            auto* saved = answer->add_provider_states();
+            saved->set_node_id(nodeId);
+            saved->set_payload(std::string(reinterpret_cast<const char*>(payload.data()), payload.size()));
+        }
+    }
+    writeFramedEvent(*eventStream, event);
+}
+
+// Answers commands, one at a time and in order, until the control stream closes. A command that cannot be carried out is
+// answered with the reason and changes nothing, and the commands after it in the same batch are not carried out.
+void Simulation::serveSession() {
+    std::uint64_t failedBatch = 0;
+    while (const auto command = waitForCommand()) {
+        if (command->batch() && command->batch() == failedBatch) {
+            reply(*command, false, "Not carried out: an earlier command in the same batch failed.", nullptr, 0);
+            continue;
+        }
+        const auto startedAt = std::chrono::steady_clock::now();
+        const auto elapsedNanoseconds = [&] {
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count());
+        };
+        try {
+            if (command->has_advance_to()) {
+                const auto taken = advanceTo(command->advance_to().time(), command->advance_to().take_checkpoints());
+                reply(*command, true, "", nullptr, elapsedNanoseconds(), taken);
+            } else if (command->has_restore_checkpoint()) {
+                const auto restored = restoreCheckpoint(command->restore_checkpoint());
+                reply(*command, true, "", &restored, elapsedNanoseconds());
+            } else if (command->has_restore_state()) {
+                const auto restored = restoreState(command->restore_state());
+                reply(*command, true, "", &restored, elapsedNanoseconds());
+            } else {
+                if (command->has_retain_checkpoints_from()) retainFrom(command->retain_checkpoints_from().time());
+                else if (command->has_append_input_samples()) appendInputSamples(command->append_input_samples());
+                else applyControlCommand(runControl, *command, currentTime);
+                reply(*command, true, "", nullptr, elapsedNanoseconds());
+            }
+        } catch (const std::exception& error) {
+            if (command->batch()) failedBatch = command->batch();
+            reply(*command, false, error.what(), nullptr, elapsedNanoseconds());
+        }
+    }
+}
+
 }
 
 void runSimulation(const boost::property_tree::ptree& document,
@@ -1326,6 +1666,17 @@ void runSimulation(const boost::property_tree::ptree& document,
         simulation.paceStep(wallStepStarted, synchronizationStep);
         simulation.recordStepOutput(step, elapsed);
     }
+}
+
+
+void runSession(const boost::property_tree::ptree& document,
+                const boost::property_tree::ptree& configuration,
+                std::istream* controlStream,
+                std::ostream* eventStream,
+                std::shared_ptr<const ExecutionPlan> plan) {
+    if (!controlStream || !eventStream) throw std::runtime_error("A session needs its control and event streams.");
+    Simulation simulation(document, configuration, {}, controlStream, eventStream, std::move(plan), true);
+    simulation.serveSession();
 }
 
 }

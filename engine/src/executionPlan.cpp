@@ -1366,11 +1366,17 @@ EntityId controlIdOf(const CompiledParameter& parameter) { return parameter.cont
 double resolveParameterValue(const CompiledParameter& parameter, const EntityValues& liveParameterValues,
                               const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
     // A stored schedule replaces the constant: the parameter's own value at this time.
+    // What was really done comes first: an input stream that has begun gives the value, live or not.
+    for (const auto& schedule : activeSchedules) {
+        if (schedule.input && schedule.parameterId == controlIdOf(parameter) && schedule.startTime <= simulationTime) {
+            return evaluateParameterSchedule(schedule, simulationTime);
+        }
+    }
     const double ownValue = parameter.schedule ? evaluateParameterSchedule(*parameter.schedule, simulationTime) : parameter.value;
     if (!parameter.live) return ownValue;
     const ParameterSchedule* active = nullptr;
     for (const auto& schedule : activeSchedules) {
-        if (schedule.parameterId != controlIdOf(parameter) || schedule.startTime > simulationTime) continue;
+        if (schedule.input || schedule.parameterId != controlIdOf(parameter) || schedule.startTime > simulationTime) continue;
         if (!active || schedule.startTime > active->startTime) active = &schedule;
     }
     if (active) return evaluateParameterSchedule(*active, simulationTime);
@@ -1488,7 +1494,8 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     double simulationTime,
                                     double synchronizationStep,
                                     ProviderEvaluator* providerEvaluator,
-                                    const std::vector<ParameterSchedule>& activeSchedules) {
+                                    const std::vector<ParameterSchedule>& activeSchedules,
+                                    double synchronizationEndTime) {
     const auto startedAt = std::chrono::steady_clock::now();
     StateValues localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
@@ -1553,7 +1560,10 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     // read a value computed from the states one step earlier, and a bidirectional edge reading it
     // would add one amount at this end and subtract another at the other.
     if (!node.algebraicTasks.empty()) {
-        const auto endTime = simulationTime + synchronizationStep;
+        // The time the caller says the step ends at, which is the time it records the step's sample at: worked out from the
+        // number of steps, not by adding the step to the start, the two can differ in the last bit, and a value that changes
+        // sharply at that instant (a noise draw, the edge of a pulse, a held input) must be read at the same time everywhere.
+        const auto endTime = std::isnan(synchronizationEndTime) ? simulationTime + synchronizationStep : synchronizationEndTime;
         if (hasSchedules) algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, endTime);
         applyAlgebraicTasks(node.algebraicTasks, localStates, algebraicParameterValues, endTime, nodeTimeStep, providerEvaluator);
     }

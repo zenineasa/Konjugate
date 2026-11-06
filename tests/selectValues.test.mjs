@@ -12,8 +12,7 @@ import {
     parseCausalMappingValue,
     parseEquationOutput,
     parseProviderReference,
-    providerReferenceValue
-} from '../src/selectValues.mjs';
+    providerReferenceValue, parseProgramBindingValue, programBindingValue } from '../src/selectValues.mjs';
 
 const roles = ['source', 'target'];
 // Includes 0, a multi-digit id, and the largest integers a number holds exactly.
@@ -236,6 +235,13 @@ test('fuzz: randomly built valid values always decode back to what built them', 
         assert.deepEqual(parseProviderReference(providerReferenceValue({ kind: 'parameter', parameterId: stateId })), { kind: 'parameter', parameterId: stateId });
         assert.deepEqual(parseCausalMappingValue(causalMappingValue(nodeId, stateId)), { createNew: false, nodeId, stateId });
     }
+});
+
+test('an objective program key reads a state, a tuned parameter or a measured column, and comes back as it went', () => {
+    for (const binding of [{ kind: 'state', id: 2 }, { kind: 'parameter', id: 40 }, { kind: 'measured', column: 'tankTemperature' }, { kind: 'measured', column: 'Tank — T (K): a' }]) {
+        assert.deepEqual(parseProgramBindingValue(programBindingValue(binding)), binding);
+    }
+    for (const bad of ['', 'state', 'state:', 'state:07', 'state:x', 'parameter:-1', 'measured:', 'node:3', null]) assert.equal(parseProgramBindingValue(bad), null, String(bad));
 });
 
 // ---- Guard against the original mistake coming back

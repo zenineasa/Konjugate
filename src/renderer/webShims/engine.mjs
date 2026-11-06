@@ -31,6 +31,10 @@ export default {
     onFitProgress: () => {},
     stopFit: async () => false,
     checkObjective: async () => ({ available: false }),
+    // A web page cannot start a program of its own: an objective written as a program is a desktop feature.
+    programObjectives: false,
+    // A web page cannot keep an engine running or read a file as it grows: the live twin is a desktop feature for now.
+    liveTwin: { available: false, onEvent: () => {}, pathForFile: () => null },
     discardFit: async () => false,
     checkSubstepConvergence: () => checkSubstepConvergenceWithWebEngine(),
     run: async (content, configuration) => runWithWebEngine(engineModuleUrl, await resolvePluginReferences(content), configuration),

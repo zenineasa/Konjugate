@@ -1,0 +1,185 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+// Runs live twins for the app (docs/proposals/digitalTwinConnections.md): the main process holds one per window, and the window sees
+// only the events. A live twin is a WindowSession (src/windowSession.mjs) fed from one of two sources:
+//
+//   { kind: 'file', path }               a data log followed while a logger writes it (src/dataLogFollower.mjs)
+//   { kind: 'recording', content, speed } a finished log played back as if it were arriving, `speed` model seconds a wall second
+//                                         (Infinity for as fast as it can go)
+//   { kind: 'mqtt', url, signals, recordTo } topics on an MQTT broker, each a signal (src/mqttSource.mjs); since a broker keeps no
+//                                         history, what arrives is also written to a data log at `recordTo`, to replay later
+//
+// Events, each { type, ... }: 'cycle' with what a cycle found and the session's figures, 'ended' when a recording has been played
+// through or the twin was stopped, 'error' with the reason it stopped. A detached sandbox is reached through the same host.
+
+import { readDataLog } from './dataLog.mjs';
+import { followDataLog } from './dataLogFollower.mjs';
+import { DataLogWriter } from './dataLogWriter.mjs';
+import { followMqtt } from './mqttSource.mjs';
+import { WindowSession } from './windowSession.mjs';
+
+// What a window needs of a cycle, kept small: the jumps, the comparison in the window, the forecast and the trend.
+export function cycleEvent(cycle, stats) {
+    return {
+        type: 'cycle',
+        cycle: {
+            index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, wallSeconds: cycle.wallSeconds,
+            // Each input's last reading up to now, for a sandbox to start its controls from.
+            inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null]))
+        },
+        stats
+    };
+}
+
+// Plays a finished log's observations as if they were arriving: those whose time has come, every tick.
+export function playRecording(content, speed, { onHeader, onObservations, onEnd, tickMilliseconds = 50, now = () => performance.now() }) {
+    const { header, observations } = readDataLog(content);
+    onHeader(header);
+    const ordered = [...observations].sort((a, b) => a.time - b.time);
+    if (!ordered.length) {
+        onEnd();
+        return { stop() {} };
+    }
+    const first = ordered[0].time;
+    const started = now();
+    let next = 0;
+    let timer = null;
+    let stopped = false;
+    const tick = () => {
+        if (stopped) return;
+        const reached = Number.isFinite(speed) ? first + ((now() - started) / 1000) * speed : Infinity;
+        let end = next;
+        while (end < ordered.length && ordered[end].time <= reached) end += 1;
+        if (end > next) {
+            onObservations(ordered.slice(next, end));
+            next = end;
+        }
+        if (next >= ordered.length) {
+            stopped = true;
+            onEnd();
+            return;
+        }
+        timer = setTimeout(tick, tickMilliseconds);
+    };
+    tick();
+    return {
+        stop() {
+            stopped = true;
+            if (timer) clearTimeout(timer);
+        }
+    };
+}
+
+export class LiveTwin {
+    #session = null;
+    #source = null;
+    #sandbox = null;
+    #recording = null;
+    #onEvent;
+    #stopped = false;
+
+    // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt }; source as above.
+    constructor(settings, source, engineOptions, onEvent) {
+        this.settings = settings;
+        this.engineOptions = engineOptions;
+        this.#onEvent = onEvent;
+        const onHeader = (header) => {
+            this.#session = new WindowSession({
+                // Data that arrives in real time is kept up with; a recording played as fast as it can go gets every move.
+                ...settings, header, engineOptions, keepUp: settings.keepUp ?? (source.kind !== 'recording' || Number.isFinite(source.speed ?? Infinity)),
+                onCycle: (cycle) => { this.#onEvent(cycleEvent(cycle, this.#session.stats())); }
+            });
+        };
+        const onObservations = (observations) => {
+            try {
+                this.#session?.push(observations);
+            } catch (error) {
+                this.#fail(error);
+            }
+        };
+        if (source.kind === 'file') {
+            this.#source = followDataLog(source.path, { onHeader, onObservations, onError: (error) => this.#fail(error) });
+        } else if (source.kind === 'recording') {
+            this.#source = playRecording(source.content, source.speed ?? Infinity, {
+                onHeader, onObservations,
+                onEnd: () => {
+                    this.#session?.idle().then(() => { if (!this.#stopped) this.#onEvent({ type: 'ended', stats: this.#session.stats(), reason: 'played' }); })
+                        .catch((error) => this.#fail(error));
+                }
+            });
+        } else if (source.kind === 'mqtt') {
+            let recording = null;
+            this.#source = followMqtt(source.url, {
+                signals: source.signals, options: source.options,
+                onHeader: (header) => {
+                    onHeader(header);
+                    if (source.recordTo) {
+                        recording = DataLogWriter.create(source.recordTo, { source: `MQTT ${source.url}`, epoch: header.epoch, signals: header.signals }).catch((error) => { this.#fail(error); return null; });
+                        this.#recording = recording;
+                    }
+                },
+                onObservations: (observations) => {
+                    recording?.then((writer) => writer?.append(observations)).catch((error) => this.#fail(error));
+                    onObservations(observations);
+                },
+                onError: (error) => this.#fail(error)
+            });
+            this.recordedTo = source.recordTo ?? null;
+        } else {
+            throw new Error('A live twin reads a followed file, a recording, or an MQTT broker.');
+        }
+    }
+
+    get session() { return this.#session; }
+
+    #fail(error) {
+        if (this.#stopped) return;
+        this.#onEvent({ type: 'error', message: error.message });
+        this.stop().catch(() => {});
+    }
+
+    async stop() {
+        if (this.#stopped) return;
+        this.#stopped = true;
+        try {
+            await this.#source?.stop();
+        } catch {
+            // a source that fails while stopping has nothing more to say
+        }
+        await this.closeSandbox();
+        await (await this.#recording)?.close().catch(() => {});
+        const stats = this.#session?.stats() ?? null;
+        await this.#session?.close();
+        this.#onEvent({ type: 'ended', stats, reason: 'stopped', recordedTo: this.recordedTo ?? null });
+    }
+
+    // A sandbox from the last cycle's now; one at a time.
+    async detach() {
+        if (!this.#session) throw new Error('The live twin has not started yet.');
+        await this.closeSandbox();
+        this.#sandbox = await this.#session.detach();
+        return { time: this.#sandbox.time, inputs: this.#session.inputs.map((entry) => entry.signal) };
+    }
+
+    async sandboxSetInput(signal, value) {
+        if (!this.#sandbox) throw new Error('There is no sandbox open.');
+        await this.#sandbox.setInput(signal, value);
+        return { time: this.#sandbox.time };
+    }
+
+    async sandboxRunFor(seconds) {
+        if (!this.#sandbox) throw new Error('There is no sandbox open.');
+        const series = await this.#sandbox.runFor(seconds);
+        return { time: this.#sandbox.time, series, tried: this.#sandbox.tried };
+    }
+
+    // Ends the sandbox and returns what was tried in it, for a draft scenario; nothing of it reaches the live twin.
+    async closeSandbox() {
+        if (!this.#sandbox) return null;
+        const sandbox = this.#sandbox;
+        this.#sandbox = null;
+        const tried = sandbox.tried;
+        await sandbox.close();
+        return { tried };
+    }
+}

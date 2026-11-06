@@ -82,6 +82,25 @@ export function parseCausalMappingValue(value) {
     return nodeId !== null && stateId !== null ? { createNew: false, nodeId, stateId } : null;
 }
 
+// ---- What a key of an objective program reads: "state:<id>", "parameter:<id>" or "measured:<column>" (a column name may itself
+// hold colons, so everything after the first is the column).
+
+export function programBindingValue(binding) {
+    return binding.kind === 'measured' ? `measured:${binding.column ?? ''}` : `${binding.kind}:${binding.id ?? ''}`;
+}
+
+export function parseProgramBindingValue(value) {
+    if (typeof value !== 'string') return null;
+    const colon = value.indexOf(':');
+    if (colon < 0) return null;
+    const kind = value.slice(0, colon);
+    const reference = value.slice(colon + 1);
+    if (kind === 'measured') return reference ? { kind, column: reference } : null;
+    if (kind !== 'state' && kind !== 'parameter') return null;
+    const id = parseId(reference);
+    return id !== null ? { kind, id } : null;
+}
+
 // ---- The live-run pacing dropdown: "realTime", "fastest", or "limitedRatio:<seconds per second>".
 
 // Deliberately does no validation of its own beyond shaping the value: the engine adapter's

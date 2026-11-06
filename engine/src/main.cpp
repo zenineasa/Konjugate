@@ -296,6 +296,7 @@ int main(int argc, char** argv) {
     }
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
+                      "       konjugateEngine session <project.kjt> --configuration session.json   (protobuf commands on stdin, events on stdout)\n"
                       "       konjugateEngine infer <series.csv> --report report.json [--skeleton-threshold X] [--coefficient-threshold X] [--validation-fraction X] [--lags 1] [--ridge-penalties 0.01,0.1,1.0,10.0] [--degrees 1,3]\n"
                       "       konjugateEngine fit <project.kjt> <measured.csv> --report report.json [--backend nlopt-bobyqa] [--max-iterations 200] [--max-seconds 600] [--stop-file path] [--progress-stream] [--objective-file objective.json]\n";
         std::_Exit(64);
@@ -304,9 +305,10 @@ int main(int argc, char** argv) {
     const auto report = optionPath(argc, argv, "--report");
     const auto configurationPath = optionPath(argc, argv, "--configuration");
     const auto outputPath = optionPath(argc, argv, "--output");
-    if ((command != "inspect" && command != "validate" && command != "run" && command != "infer" && command != "fit") ||
+    if ((command != "inspect" && command != "validate" && command != "run" && command != "infer" && command != "fit" && command != "session") ||
         ((command == "inspect" || command == "validate" || command == "infer" || command == "fit") && report.empty()) ||
         (command == "run" && (configurationPath.empty() || outputPath.empty())) ||
+        (command == "session" && configurationPath.empty()) ||
         (command == "fit" && argc < 4)) {
         std::cerr << "The selected command requires its report, configuration, and output paths.\n";
         std::_Exit(64);
@@ -399,6 +401,17 @@ int main(int argc, char** argv) {
         }
         boost::property_tree::ptree configuration;
         boost::property_tree::read_json(configurationPath.string(), configuration);
+        // A session always speaks protobuf both ways (docs/proposals/liveEngineSession.md): commands on stdin, samples and replies
+        // on stdout, until stdin closes.
+        if (command == "session") {
+#ifdef __EMSCRIPTEN__
+            throw std::runtime_error("The web edition has no engine session yet.");
+#else
+            konjugate::runSession(document, configuration, &std::cin, &std::cout, result.plan);
+            std::cout.flush();
+            std::_Exit(0);
+#endif
+        }
         const auto protobufEvents = optionPath(argc, argv, "--event-stream").string() == "protobuf";
         const auto controlStream = optionPath(argc, argv, "--control-stream").string();
         if (!controlStream.empty() && controlStream != "protobuf") {

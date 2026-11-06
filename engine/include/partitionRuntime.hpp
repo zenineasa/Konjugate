@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -75,7 +76,8 @@ public:
                                                double simulationTime = 0,
                                                std::chrono::milliseconds receiveTimeout = std::chrono::seconds(5),
                                                ProviderEvaluator* providerEvaluator = nullptr,
-                                               std::vector<ParameterSchedule> activeSchedules = {});
+                                               std::vector<ParameterSchedule> activeSchedules = {},
+                                               double synchronizationEndTime = std::numeric_limits<double>::quiet_NaN());
 
 private:
     std::size_t partition_;

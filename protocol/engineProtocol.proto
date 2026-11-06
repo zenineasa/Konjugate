@@ -134,6 +134,49 @@ message ScheduleParameterValue {
     uint64 seed = 13;
 }
 
+// Session commands (docs/proposals/liveEngineSession.md): an engine started with `konjugate session` stays running and is driven
+// by these, each answered by a SessionReply naming its sequence.
+// Steps to `time` and holds there, sending the reported states' samples on the way; with `take_checkpoints`, keeping a checkpoint
+// at every checkpoint time it passes (a session asks for them only where it will go back to, since each one asks every node
+// provider for its saved state).
+message AdvanceTo {
+    double time = 1;
+    bool take_checkpoints = 2;
+}
+
+// Readings of an input, driving a shared parameter from the first of them on, held between them; with `replace`, the readings
+// already kept at or after `replace_from` are dropped first, which is how a corrected reading arrives.
+message AppendInputSamples {
+    uint64 parameter_id = 1;
+    repeated ParameterScheduleSample samples = 2;
+    bool replace = 3;
+    double replace_from = 4;
+}
+
+message StateOverride {
+    uint64 state_id = 1;
+    double value = 2;
+}
+
+// Back to the checkpoint kept at exactly `time`, with some states replaced.
+message RestoreCheckpoint {
+    double time = 1;
+    repeated StateOverride overrides = 2;
+}
+
+// The whole state set from the message: every state, in the order of the session's first StateTable, and every node provider's
+// saved state. How a session's state is put into a new engine after the last one died.
+message RestoreState {
+    double time = 1;
+    repeated double values = 2;
+    repeated NodeProviderCheckpoint provider_states = 3;
+}
+
+// Forgets the checkpoints, and the input readings no longer needed, from before `time`.
+message RetainCheckpointsFrom {
+    double time = 1;
+}
+
 message EngineCommand {
     uint32 protocol_version = 1;
     uint64 sequence = 2;
@@ -142,7 +185,28 @@ message EngineCommand {
         SetRunState set_run_state = 4;
         SetParameterValue set_parameter_value = 5;
         ScheduleParameterValue schedule_parameter_value = 6;
+        AdvanceTo advance_to = 7;
+        AppendInputSamples append_input_samples = 8;
+        RestoreCheckpoint restore_checkpoint = 9;
+        RestoreState restore_state = 10;
+        RetainCheckpointsFrom retain_checkpoints_from = 11;
     }
+    // Commands sent together share a batch number; once one fails, the rest of its batch is not carried out. 0 is no batch.
+    uint64 batch = 12;
+}
+
+// A session's answer to one command: whether it was carried out, why not if it was not, the time the session is at, and for a
+// restore the whole state it restored (in the first StateTable's order) and each node provider's saved state, for the session log.
+message SessionReply {
+    uint64 sequence = 1;
+    bool ok = 2;
+    string message = 3;
+    double time = 4;
+    repeated double values = 5;
+    repeated NodeProviderCheckpoint provider_states = 6;
+    uint64 compute_nanoseconds = 7;
+    // For an advance: how many checkpoints it kept.
+    uint32 checkpoints_taken = 8;
 }
 
 message NodeProviderCheckpoint {
@@ -213,6 +277,7 @@ message EngineEvent {
         Capabilities capabilities = 2;
         StateTable state_table = 3;
         SampleBatch sample_batch = 4;
+        SessionReply session_reply = 5;
     }
 }
 
@@ -352,4 +417,34 @@ message FittingProgressEvent {
     // The largest relative constraint violation of this simulation and of the best one so far (0 when there are no constraints).
     double violation = 11;
     double best_violation = 12;
+}
+
+// An objective written as a program (docs/proposals/tuningEditorsAndPrograms.md, "An objective that is a program"): the engine
+// starts the program once for a whole fit and, for every trial, sends it the run and reads back its number. Framed like every other
+// message here (a 4-byte big-endian length, then the message). The program's side decodes these by hand (the C++ glue
+// engine/src/objectiveProgramMain.cpp and the Python module konjugate.objective), so it needs no protobuf library.
+message ObjectiveSeries {
+    string key = 1;
+    repeated double values = 2;
+}
+
+message ObjectiveValue {
+    string key = 1;
+    double value = 2;
+}
+
+// One trial's run, by the keys the program's bindings give: the output times, each bound state's or measured column's series, and
+// each bound parameter's value in the trial.
+message ObjectiveRunRequest {
+    repeated double times = 1;
+    repeated ObjectiveSeries series = 2;
+    repeated ObjectiveValue values = 3;
+}
+
+// The program's answer: its number, or why it has none; and any further numbers it reported by name.
+message ObjectiveRunResult {
+    bool ok = 1;
+    string message = 2;
+    double value = 3;
+    repeated ObjectiveValue reports = 4;
 }

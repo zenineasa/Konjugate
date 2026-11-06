@@ -76,6 +76,7 @@
     },
     "devDependencies": {
         "@electron/packager": "^20.3.0",
+        "aedes": "^1.2.0",
         "electron": "^43.8.3",
         "js-yaml": "^5.4.3",
         "playwright": "^1.64.0",
@@ -94,6 +95,7 @@
         "fast-xml-parser": "^5.11.2",
         "fflate": "0.8.3",
         "mathlive": "^0.110.0",
+        "mqtt": "^5.16.1",
         "occt-import-js": "^0.0.23",
         "plotly.js-dist-min": "^3.7.0",
         "protobufjs": "^8.8.1",

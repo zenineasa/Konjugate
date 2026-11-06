@@ -1744,7 +1744,16 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningGoal { display: flex; gap: 0; margin: 0 0 8px; }
 .parameterTuningGoal button { flex: 1; padding: 6px 8px; color: #8297a1; background: #111f28; border: 1px solid #243640; font-size: 9px; }
 .parameterTuningGoal button:first-child { border-radius: 4px 0 0 4px; }
-.parameterTuningGoal button:last-child { border-radius: 0 4px 4px 0; border-left: 0; }
+.parameterTuningGoal button:last-child { border-radius: 0 4px 4px 0; }
+.parameterTuningGoal button + button { border-left: 0; }
+.parameterTuningReplayRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: center; gap: 4px 8px; padding: 6px 7px; background: #111f28; border-bottom: 1px solid #243640; font-size: 9px; }
+.parameterTuningReplayRow:last-child { border-bottom: 0; }
+.parameterTuningReplayRow > span { min-width: 0; overflow: hidden; color: #b8c7ce; text-overflow: ellipsis; white-space: nowrap; }
+.parameterTuningReplayRow > span small { margin-left: 4px; color: #7d929c; font-size: 8px; }
+.parameterTuningReplayRow select, .parameterTuningReplayRow input { min-width: 0; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
+.parameterTuningReplayRow .parameterTuningReplayTolerance { grid-column: 2; display: flex; align-items: center; gap: 4px; color: #7d929c; }
+.parameterTuningReplayRow .parameterTuningReplayTolerance input { width: 72px; }
+.parameterTuningReplayResults p { margin: 6px 0 0; color: #b9ccd4; font-size: 10px; line-height: 1.4; }
 .parameterTuningGoal button[aria-pressed="true"] { color: #d8fffb; background: rgb(66 201 188 / 16%); border-color: #3b8f88; }
 .parameterTuningStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; margin: 8px 0; }
 .parameterTuningStats div { min-width: 0; }

@@ -13,6 +13,9 @@
 export const dataLogVersion = 1;
 export const qualities = Object.freeze(['good', 'uncertain', 'bad']);
 
+// Whether a file says it is a data log, before it is read: its first line that is not blank is the marker, of any version.
+export const looksLikeDataLog = (text) => /^\s*#\s*konjugate data log\s*:/i.test(text);
+
 export class DataLogError extends Error {
     constructor(line, message) {
         super(`Line ${line}: ${message}`);

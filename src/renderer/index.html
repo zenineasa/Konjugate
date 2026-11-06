@@ -1051,6 +1051,7 @@
                 <div id="parameterTuningGoal" class="parameterTuningGoal" role="group" aria-label="What to tune for">
                     <button id="parameterTuningGoalData" type="button" aria-pressed="true">Match measured data</button>
                     <button id="parameterTuningGoalObjective" type="button" aria-pressed="false">Optimise an objective</button>
+                    <button id="parameterTuningGoalReplay" type="button" aria-pressed="false">Replay a data log</button>
                 </div>
                 <p id="parameterTuningGoalHint" class="builderHint">Fit this model's tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship's editor first, then import a CSV of measured signals here.</p>
                 <label class="geometrySourceButton">
@@ -1083,6 +1084,16 @@
                 <h3>Column mapping</h3>
                 <p class="builderHint">Each column is matched to an existing state by exact name -- read-only for now; rename a CSV column or a state's symbol/name to change a match.</p>
                 <div id="parameterTuningMappingRows"></div>
+            </section>
+            <section id="parameterTuningReplaySection" hidden>
+                <h3>Signals</h3>
+                <p class="builderHint">Each input drives the shared parameter it is mapped to, held between readings. Each measured signal is compared with the state it is mapped to; the model then runs on its own for the whole recording, and a reading agrees when the model is within the tolerance of it.</p>
+                <div id="parameterTuningReplayRows"></div>
+                <label class="editorField"><span>Time step (s)</span><input id="parameterTuningReplayTimeStep" type="number" min="0" step="any"></label>
+                <label class="parameterTuningLogToggle"><input id="parameterTuningReplayAnchor" type="checkbox" checked><span>Start each measured state at its first reading</span></label>
+                <div id="parameterTuningReplayStatus" class="equationDiagnostics" role="status"></div>
+                <div id="parameterTuningReplayResults" class="parameterTuningReplayResults" role="status"></div>
+                <div id="parameterTuningReplayPlot" class="parameterTuningComparisonPlot" role="img" aria-label="Measured signals against the replayed model, and how far apart they are" hidden></div>
             </section>
             <section id="parameterTuningParametersSection" hidden>
                 <h3>Parameters to tune</h3>
@@ -1125,6 +1136,7 @@
             <footer>
                 <button id="cancelParameterTuning" type="button">Cancel</button>
                 <button id="runParameterTuning" type="button" disabled hidden>Run fit</button>
+                <button id="runParameterTuningReplay" type="button" disabled hidden>Replay</button>
                 <button id="commitParameterTuning" class="doneButton" type="button" disabled hidden>Apply fitted values</button>
             </footer>
         </div>

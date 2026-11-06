@@ -86,6 +86,8 @@ import {
 import { applyAssistantProposal as buildAssistantProposal, summarizeDocumentForAssistant } from '../assistantOperations.mjs';
 import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from '../instabilityFingerprint.mjs';
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
+import { looksLikeDataLog, readDataLog } from '../dataLog.mjs';
+import { compareReplay, defaultTolerance, guessReplayMapping, latestReadings, replayPlan, replaySentence, replayTargets, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import {
     CSS2DObject,
     CSS2DRenderer
@@ -8444,6 +8446,8 @@ $('#commitCausalInference').addEventListener('click', () => { commitCausalInfere
 // causal inference in one structural way: mapping here is existing-states-only (no "create new
 // node" option), since fitting requires a model that already exists.
 let parameterTuningState = null;
+// The data log being replayed, when the card's goal is replaying one: see loadParameterTuningReplay. Null when none is open.
+let parameterTuningReplay = null;
 
 // Friendly labels only -- NOT the source of truth for which backends exist. That's
 // window.engine.capabilities() (engine/src/main.cpp's "capabilities" command reports
@@ -8517,6 +8521,7 @@ function findTunableParametersInModel() {
 
 function resetParameterTuning() {
     parameterTuningState = null;
+    resetParameterTuningReplay();
     clearParameterTuningConstraintRows();
     setParameterTuningGoalUi('data');
     $('#parameterTuningFile').value = '';
@@ -8558,16 +8563,21 @@ function resetParameterTuning() {
 // an objective the person writes. `parameterTuningGoal` is which one the card is set up for; it goes back to data whenever the card resets.
 let parameterTuningGoal = 'data';
 
+const parameterTuningGoalHints = {
+    data: 'Fit this model\'s tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship\'s editor first, then import a CSV of measured signals here.',
+    objective: 'Find the parameter values that make an objective you write as small or as large as it can be. Mark a parameter "Tunable" with bounds in its relationship\'s editor first. Measured data is optional: add a CSV if the objective compares the model with it.',
+    replay: 'Run the model on what a recording says was done to the real system, and see how long it stays in step with what was measured. Choose a Konjugate data log (see "Connecting a data source" in the documentation). Nothing in the model is changed.'
+};
+
 function setParameterTuningGoalUi(goal) {
     parameterTuningGoal = goal;
-    const objective = goal === 'objective';
-    $('#parameterTuningGoalData').setAttribute('aria-pressed', String(!objective));
-    $('#parameterTuningGoalObjective').setAttribute('aria-pressed', String(objective));
-    $('#parameterTuningGoalHint').textContent = objective
-        ? 'Find the parameter values that make an objective you write as small or as large as it can be. Mark a parameter "Tunable" with bounds in its relationship\'s editor first. Measured data is optional: add a CSV if the objective compares the model with it.'
-        : 'Fit this model\'s tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship\'s editor first, then import a CSV of measured signals here.';
-    $('#parameterTuningFileLabel').textContent = objective ? '↥ Add measured data (optional)' : '↥ Choose CSV file';
-    $('#parameterTuningObjectiveSection').hidden = !objective;
+    $('#parameterTuningGoalData').setAttribute('aria-pressed', String(goal === 'data'));
+    $('#parameterTuningGoalObjective').setAttribute('aria-pressed', String(goal === 'objective'));
+    $('#parameterTuningGoalReplay').setAttribute('aria-pressed', String(goal === 'replay'));
+    $('#parameterTuningGoalHint').textContent = parameterTuningGoalHints[goal];
+    $('#parameterTuningFileLabel').textContent = { data: '↥ Choose CSV file', objective: '↥ Add measured data (optional)', replay: '↥ Choose data log' }[goal];
+    $('#parameterTuningObjectiveSection').hidden = goal !== 'objective';
+    $('#parameterTuningParametersSection').hidden = goal === 'replay';
     $('#parameterTuningObjectiveStatus').textContent = '';
 }
 
@@ -8704,17 +8714,21 @@ function startParameterTuningObjective() {
 // Changing the goal starts the card over, but the measured data the person chose stays: it is read again for the new goal (matched to
 // states for a fit, offered as columns for an objective), so the order of choosing the goal and the data does not matter.
 function switchParameterTuningGoal(goal) {
-    if (parameterTuningRun || parameterTuningGoal === goal) return;
-    const kept = parameterTuningState?.csvContent ? { content: parameterTuningState.csvContent, fileName: parameterTuningState.csvFileName } : null;
+    if (parameterTuningRun || parameterTuningReplay?.running || parameterTuningGoal === goal) return;
+    const kept = parameterTuningState?.csvContent ? { content: parameterTuningState.csvContent, fileName: parameterTuningState.csvFileName }
+        : parameterTuningReplay ? { content: parameterTuningReplay.content, fileName: parameterTuningReplay.fileName } : null;
     resetParameterTuning();
+    setParameterTuningGoalUi(goal);
     if (goal === 'objective') startParameterTuningObjective();
     if (!kept) return;
-    if (goal === 'objective') loadParameterTuningMeasuredColumns(kept.content);
-    else loadParameterTuningCsv(kept.content);
+    // A data log is read as a log whatever the goal: a fit or an objective that is handed one is moved to replaying it.
+    if (goal === 'objective' && !looksLikeDataLog(kept.content)) loadParameterTuningMeasuredColumns(kept.content);
+    else loadParameterTuningCsv(kept.content, kept.fileName);
     if (parameterTuningState) parameterTuningState.csvFileName = kept.fileName;
 }
 $('#parameterTuningGoalData').addEventListener('click', () => switchParameterTuningGoal('data'));
 $('#parameterTuningGoalObjective').addEventListener('click', () => switchParameterTuningGoal('objective'));
+$('#parameterTuningGoalReplay').addEventListener('click', () => switchParameterTuningGoal('replay'));
 
 // Puts the card back as it was last run in this project: the limits and optimiser, and for an objective its expression and run settings.
 // The measured file itself is not kept (a project is not the place for a large CSV), only its name, so the card says which to choose again.
@@ -8921,7 +8935,18 @@ function loadParameterTuningMeasuredColumns(content) {
     }
 }
 
-async function loadParameterTuningCsv(content) {
+async function loadParameterTuningCsv(content, fileName = '') {
+    // A data log is replayed, whichever goal was showing when it was chosen: fitting to one is not built yet, and reading it as a
+    // plain CSV would misread its description lines as data.
+    if (looksLikeDataLog(content) || parameterTuningGoal === 'replay') {
+        const moved = parameterTuningGoal !== 'replay';
+        if (moved) {
+            resetParameterTuning();
+            setParameterTuningGoalUi('replay');
+        }
+        loadParameterTuningReplay(content, fileName, moved ? 'This is a data log, so it is replayed: fitting to a data log is not built yet. ' : '');
+        return;
+    }
     if (parameterTuningGoal === 'objective') {
         if (parameterTuningState) loadParameterTuningMeasuredColumns(content);
         return;
@@ -8958,14 +8983,221 @@ async function loadParameterTuningCsv(content) {
 $('#parameterTuningFile').addEventListener('change', async () => {
     const file = $('#parameterTuningFile').files[0];
     if (!file) return;
-    await loadParameterTuningCsv(await file.text());
+    await loadParameterTuningCsv(await file.text(), file.name);
     if (parameterTuningState) parameterTuningState.csvFileName = file.name;
 });
+
+// Replaying a data log (docs/proposals/digitalTwinConnections.md, step 1): the log's inputs drive the model's shared parameters, its
+// measured signals are compared with states, and the card says how long the model stayed in step. The rules live in dataLogReplay.mjs;
+// this draws them. A replay changes nothing in the model: it runs a copy. `parameterTuningReplay` is declared beside the card's other state.
+function resetParameterTuningReplay() {
+    parameterTuningReplay = null;
+    $('#parameterTuningReplaySection').hidden = true;
+    $('#parameterTuningReplayRows').replaceChildren();
+    $('#parameterTuningReplayStatus').textContent = '';
+    $('#parameterTuningReplayResults').replaceChildren();
+    if (!$('#parameterTuningReplayPlot').hidden) globalThis.Plotly?.purge($('#parameterTuningReplayPlot'));
+    $('#parameterTuningReplayPlot').hidden = true;
+    $('#runParameterTuningReplay').hidden = true;
+    $('#runParameterTuningReplay').disabled = true;
+}
+
+function loadParameterTuningReplay(content, fileName, note = '') {
+    const status = $('#parameterTuningStatus');
+    let log;
+    try {
+        log = readDataLog(content);
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = `${note}${fileName ? `${fileName} ` : 'The file '}cannot be read as a data log. ${error.message}`;
+        return;
+    }
+    const document_ = serializeProjectDocument();
+    const targets = replayTargets(document_);
+    const mapping = guessReplayMapping(log.header, targets);
+    const tolerances = new Map(mapping.filter((entry) => entry.role === 'output').map((entry) => {
+        const good = latestReadings(log.observations, entry.signal).filter((reading) => reading.quality !== 'bad');
+        return [entry.signal, good.length ? defaultTolerance(good) : 1];
+    }));
+    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, lastRun: null, running: false };
+    $('#parameterTuningReplayTimeStep').value = String(suggestedReplayTimeStep(document_, log.observations, mapping));
+    // Not first and last: a correction comes later in the file than the row it corrects.
+    let first = Infinity;
+    let last = -Infinity;
+    for (const { time } of log.observations) {
+        first = Math.min(first, time);
+        last = Math.max(last, time);
+    }
+    const span = log.observations.length ? last - first : 0;
+    const matched = mapping.filter((entry) => (entry.role === 'input' ? entry.parameterId : entry.stateId) !== null).length;
+    const inputs = mapping.filter((entry) => entry.role === 'input');
+    status.className = 'equationDiagnostics valid';
+    status.textContent = `${note}${log.header.signals.length} signal${log.header.signals.length === 1 ? '' : 's'}, ${log.observations.length} readings over ${formatDuration(span)}`
+        + `${log.header.source ? `, from ${log.header.source}` : ''}. Matched ${matched} of ${mapping.length} by name; change any below.`
+        + (inputs.length && !targets.parameters.length ? ' The model has no shared parameters, so its inputs cannot follow the log: make a parameter shared to drive it from a recording.' : '');
+    renderParameterTuningReplayRows();
+    $('#parameterTuningReplaySection').hidden = false;
+    $('#runParameterTuningReplay').hidden = false;
+    refreshParameterTuningReplayRunnable();
+}
+
+function refreshParameterTuningReplayRunnable() {
+    const replay = parameterTuningReplay;
+    const button = $('#runParameterTuningReplay');
+    const compared = replay?.mapping.some((entry) => entry.role === 'output' && entry.stateId !== null);
+    button.disabled = !replay || replay.running || !compared;
+    button.title = replay && !compared ? 'Map at least one measured signal to a state' : '';
+}
+
+function renderParameterTuningReplayRows() {
+    const replay = parameterTuningReplay;
+    const container = $('#parameterTuningReplayRows');
+    container.replaceChildren(...replay.mapping.map((entry) => {
+        const row = document.createElement('div');
+        row.className = 'parameterTuningReplayRow';
+        row.dataset.signal = entry.signal;
+        const name = document.createElement('span');
+        name.textContent = `${entry.signal}${entry.unit ? ` [${entry.unit}]` : ''}`;
+        const role = document.createElement('small');
+        role.textContent = entry.role === 'input' ? 'input' : 'measured';
+        name.append(role);
+        const select = document.createElement('select');
+        select.dataset.field = 'target';
+        select.setAttribute('aria-label', `What ${entry.signal} ${entry.role === 'input' ? 'drives' : 'is compared with'}`);
+        select.append(new Option(entry.role === 'input' ? 'Drives nothing' : 'Not compared', ''));
+        const choices = entry.role === 'input'
+            ? replay.targets.parameters.map((parameter) => new Option(`${parameter.label}${parameter.unit ? ` (${parameter.unit})` : ''}`, String(parameter.parameterId)))
+            : replay.targets.states.map((state) => new Option(`${state.label}${state.unit ? ` (${state.unit})` : ''}`, String(state.stateId)));
+        select.append(...choices);
+        select.value = String((entry.role === 'input' ? entry.parameterId : entry.stateId) ?? '');
+        select.addEventListener('change', () => {
+            const value = select.value === '' ? null : Number(select.value);
+            if (entry.role === 'input') entry.parameterId = value;
+            else entry.stateId = value;
+            clearParameterTuningReplayOutcome('The mapping changed: replay again to compare.');
+            refreshParameterTuningReplayRunnable();
+        });
+        row.append(name, select);
+        if (entry.role === 'output') {
+            const tolerance = document.createElement('label');
+            tolerance.className = 'parameterTuningReplayTolerance';
+            const text = document.createElement('span');
+            text.textContent = 'agrees within ±';
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = '0';
+            input.step = 'any';
+            input.dataset.field = 'tolerance';
+            input.value = String(replay.tolerances.get(entry.signal));
+            input.setAttribute('aria-label', `How close the model must be to ${entry.signal} to agree`);
+            const unit = document.createElement('span');
+            unit.textContent = entry.unit;
+            input.addEventListener('change', () => {
+                const value = Number(input.value);
+                if (!(value > 0)) {
+                    input.value = String(replay.tolerances.get(entry.signal));
+                    return;
+                }
+                replay.tolerances.set(entry.signal, value);
+                // A tolerance only changes how the run is judged, so the last run is judged again without running it again.
+                if (replay.lastRun) renderParameterTuningReplayOutcome();
+            });
+            tolerance.append(text, input, unit);
+            row.append(tolerance);
+        }
+        return row;
+    }));
+}
+
+function clearParameterTuningReplayOutcome(message = '') {
+    if (!parameterTuningReplay) return;
+    parameterTuningReplay.lastRun = null;
+    parameterTuningReplay.outcome = null;
+    $('#parameterTuningReplayResults').replaceChildren();
+    if (!$('#parameterTuningReplayPlot').hidden) globalThis.Plotly?.purge($('#parameterTuningReplayPlot'));
+    $('#parameterTuningReplayPlot').hidden = true;
+    $('#parameterTuningReplayStatus').className = 'equationDiagnostics';
+    $('#parameterTuningReplayStatus').textContent = message;
+}
+
+async function runParameterTuningReplay() {
+    const replay = parameterTuningReplay;
+    if (!replay || replay.running || activeResult) return;
+    const status = $('#parameterTuningReplayStatus');
+    clearParameterTuningReplayOutcome();
+    let plan;
+    try {
+        plan = replayPlan(serializeProjectDocument(), replay.log, replay.mapping, {
+            timeStep: Number($('#parameterTuningReplayTimeStep').value), anchor: $('#parameterTuningReplayAnchor').checked
+        });
+    } catch (error) {
+        status.textContent = error.message;
+        return;
+    }
+    replay.running = true;
+    refreshParameterTuningReplayRunnable();
+    status.textContent = `Replaying ${formatDuration(plan.configuration.targetTime)} of the recording…`;
+    try {
+        const run = await window.engine.run(JSON.stringify(plan.document), plan.configuration);
+        if (parameterTuningReplay !== replay) return; // the card was reset while it ran
+        if (!run.available) throw new Error('The native simulation engine is unavailable.');
+        replay.lastRun = { plan, series: resultSeriesForStateIds(run.result, plan.outputs.map((output) => output.stateId)) };
+        status.className = 'equationDiagnostics valid';
+        status.textContent = `Replayed ${formatDuration(plan.configuration.targetTime)} at a ${formatDuration(plan.configuration.globalTimeStep)} step`
+            + `${plan.inputs.length ? `, driven by ${plan.inputs.join(', ')}` : ', with no input driving it'}.`;
+        await renderParameterTuningReplayOutcome();
+    } catch (error) {
+        if (parameterTuningReplay !== replay) return;
+        status.className = 'equationDiagnostics';
+        status.textContent = `The replay could not run: ${error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?ENGINE_FAILURE: /, '')}`;
+    } finally {
+        replay.running = false;
+        if (parameterTuningReplay === replay) refreshParameterTuningReplayRunnable();
+    }
+}
+$('#runParameterTuningReplay').addEventListener('click', () => runParameterTuningReplay());
+
+// Judges the last run against each measured signal: a sentence each, and the measured and replayed values plotted with the gap between
+// them and the tolerance either side of it.
+async function renderParameterTuningReplayOutcome() {
+    const replay = parameterTuningReplay;
+    const { plan, series } = replay.lastRun;
+    const results = $('#parameterTuningReplayResults');
+    const outcome = plan.outputs.map((output) => {
+        const state = replay.targets.states.find((candidate) => candidate.stateId === output.stateId);
+        const name = state?.label ?? output.signal;
+        try {
+            const comparison = compareReplay(output.readings, series.get(output.stateId) ?? [], { tolerance: replay.tolerances.get(output.signal) });
+            return { output, name, comparison, sentence: replaySentence(name, output.unit, comparison, { duration: plan.configuration.targetTime, leftOut: output.leftOut }) };
+        } catch (error) {
+            return { output, name, comparison: null, sentence: `${name}: ${error.message}` };
+        }
+    });
+    replay.outcome = outcome;
+    results.replaceChildren(...outcome.map(({ sentence }) => {
+        const line = document.createElement('p');
+        line.textContent = sentence;
+        return line;
+    }));
+    const entries = outcome.filter((entry) => entry.comparison).map(({ output, name, comparison }) => ({
+        name, unit: output.unit, tolerance: comparison.tolerance,
+        times: comparison.rows.map((row) => row.time), measured: comparison.rows.map((row) => row.measured), simulated: comparison.rows.map((row) => row.simulated)
+    }));
+    const plot = $('#parameterTuningReplayPlot');
+    if (!entries.length || !globalThis.Plotly) return;
+    // Shown before drawing, so Plotly measures the real width of the panel (see the note in renderParameterTuningComparison).
+    plot.hidden = false;
+    await renderMeasuredVsSimulatedComparison(plot, entries, { simulatedLabel: 'Replayed' });
+}
 
 // Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
 // driven by this app's interaction-test harness.
 window.__debugParameterTuning = {
-    loadCsv: (content) => loadParameterTuningCsv(content),
+    loadCsv: (content, fileName) => loadParameterTuningCsv(content, fileName),
+    replay: () => (parameterTuningReplay?.outcome ? parameterTuningReplay.outcome.map(({ output, name, comparison, sentence }) => ({
+        signal: output.signal, name, sentence,
+        ...(comparison ? { rms: comparison.rms, inStepUntil: comparison.inStepUntil, stretches: comparison.stretches, stray: comparison.stray, within: comparison.within } : {})
+    })) : null),
     report: () => structuredClone(parameterTuningState?.report ?? null),
     simulations: () => parameterTuningRun?.events.length ?? 0,
     setup: () => structuredClone(projectTuningSetup),

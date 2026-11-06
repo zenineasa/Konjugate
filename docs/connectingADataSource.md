@@ -12,7 +12,7 @@ status: draft
 
 This page is for anyone who wants their equipment, logger or script to feed a Konjugate model: a lab rig, a pilot plant, a microcontroller, a program that collects data from the internet. It describes the **Konjugate data log**, a plain CSV file that your program appends to while the experiment runs, and gives a working simulated rig to start from.
 
-**Status: the format is fixed, and Konjugate does not read it yet.** The format, its reader and its checker exist now, so a source can be built and checked before the app can use it. Replaying a finished log through a model, and then following a log as it grows, are the first and third steps of [Digital twin connections](proposals/digitalTwinConnections.md); both will read exactly this format, with the same reader the checker uses.
+**Status: the format is fixed, and Konjugate replays a finished log; it does not yet follow one as it grows.** Replaying a recording through a model ([below](#replaying-a-log-in-konjugate)) is the first step of [Digital twin connections](proposals/digitalTwinConnections.md), and following a live log is its third; both read exactly this format, with the same reader the checker uses.
 
 ## Why a file
 
@@ -123,6 +123,23 @@ log.close()
 
 If your logger already writes its own CSV and cannot be changed, a short script that follows its file and writes a data log beside it is the bridge; the mapping screen planned in the proposal will later read other layouts directly.
 
+## Replaying a log in Konjugate
+
+Replaying runs the model on what the log says was done to the real system, and shows how long it stays in step with what was measured. It answers the question to settle before connecting anything live: does this model agree with this rig?
+
+1. Open the model, then **Parameter tuning** in the toolbar, and choose **Replay a data log** (a data log chosen under either of the other goals is moved here, since fitting to a data log is not built yet).
+2. Choose the log. Each signal is matched to the model by name, and every match can be changed:
+   - An **input** drives a **shared parameter**, which follows the log's readings, held between them, as a schedule. Only a shared parameter can follow a schedule, so a parameter that a recording should drive must be made shared first.
+   - A **measured signal** is compared with a **state**. The state starts at the signal's first good reading (untick **Start each measured state at its first reading** to start from the model's own initial value instead), and from then on the model runs on its own for the whole recording.
+3. Set each measured signal's **tolerance**: how close the model must be to a reading to agree with it. It starts at a twentieth of the range the signal covered, which is only a first guess; set it to what you know about the sensor and the model.
+4. Choose **Replay**. The run starts at the log's first time and lasts as long as the log, at a time step no coarser than the readings' spacing.
+
+For each measured signal the card then says whether the model stayed within the tolerance for the whole recording, or for how long before it left it and how long it was out, with the typical and the largest miss. A single reading outside the tolerance on its own is taken as noise; three or more in a row put the model out of step. Bad readings are left out. A plot shows the measured and replayed values, and under them the gap between the two with the tolerance either side. Changing a tolerance judges the same run again without running it.
+
+A replay changes nothing in the model: it runs a copy, so there is nothing to undo and nothing to save.
+
+[examples/dataSources/simulatedTankRig.kjt](../examples/dataSources/simulatedTankRig.kjt) is the simulated rig's model, with its true values and the heater power as a shared parameter, so the rig's logs can be replayed through it straight away. (It is written by `node scripts/generateTankRigModel.mjs`.) Put in the [Tank Calibration](../examples/tankCalibration.md) example's starting guesses (300000 J/K and 10 W/K) and replay again to see a model that is out of step within minutes.
+
 ## Checking your log
 
 ```bash
@@ -131,7 +148,7 @@ node scripts/checkDataLog.mjs tankRun.csv
 
 It reads the file with the same reader Konjugate will use, and either says what is in it (each signal, its unit and role, how many readings, how many were not good and how many were corrected) or names the first line that breaks a rule and why. It treats the file as finished, so on a log still being written, a line caught half written is reported as having no newline at its end; run it again, or on a finished log.
 
-The rules are tested in [tests/dataLog.test.mjs](../tests/dataLog.test.mjs), and [tests/simulatedTankRig.test.mjs](../tests/simulatedTankRig.test.mjs) runs the rig sped up and follows its file while it grows: it checks that what was read along the way is exactly what the finished file holds, that the file grew over the run rather than appearing at the end, that the heater changes are where the schedule puts them, and that the temperatures are the true tank's plus noise. When Konjugate can follow a log, the receiving side joins that test.
+The rules are tested in [tests/dataLog.test.mjs](../tests/dataLog.test.mjs), and [tests/simulatedTankRig.test.mjs](../tests/simulatedTankRig.test.mjs) runs the rig sped up and follows its file while it grows: it checks that what was read along the way is exactly what the finished file holds, that the file grew over the run rather than appearing at the end, that the heater changes are where the schedule puts them, and that the temperatures are the true tank's plus noise. [tests/engine/dataLogReplay.mjs](../tests/engine/dataLogReplay.mjs) replays the rig's log through its model with the real engine: with the true values the model stays in step for all six hours, and with the wrong ones it leaves the tolerance within the hour. When Konjugate can follow a log as it grows, that is added to the same tests.
 
 ## Not yet covered
 

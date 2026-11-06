@@ -4542,6 +4542,71 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    await run('a data log is replayed through the model in the tuning card, and judged against a tolerance', async () => {
+        // Two hours of the simulated rig (examples/dataSources/simulatedTankRig.py), written here without noise: the heater on for an
+        // hour, then off, and the tank's exact temperature every minute, with one reading the logger marked bad.
+        const capacitance = 209000, heatLoss = 20, ambient = 293.15;
+        const rows = [];
+        let temperature = ambient;
+        for (let time = 0; time <= 7200; time += 60) {
+            const power = time < 3600 ? 1000 : 0;
+            if (time > 0) {
+                const previousPower = time - 60 < 3600 ? 1000 : 0;
+                const settled = ambient + previousPower / heatLoss;
+                temperature = settled + (temperature - settled) * Math.exp(-heatLoss * 60 / capacitance);
+            }
+            const heater = time === 0 || time === 3600 ? String(power) : '';
+            rows.push(time === 1800 ? `${time},${heater},${(temperature + 20).toFixed(3)},bad` : `${time},${heater},${temperature.toFixed(3)},`);
+        }
+        const log = [
+            '# konjugate data log: 1', '# source: Interaction test', '# time: seconds since 2026-11-06T09:00:00Z',
+            '# inputs: heaterPower', '# outputs: tankTemperature', 'time,heaterPower [W],tankTemperature [K],tankTemperature quality', ...rows
+        ].join('\n') + '\n';
+
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt'));
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+
+        // Chosen while the card is set to fit data, a data log moves the card to replaying it, and its signals are matched by name.
+        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(log)}, 'tankRun.csv')`);
+        await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The replay section did not appear for a data log.');
+        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').getAttribute('aria-pressed')`), 'true');
+        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningParametersSection').hidden`), true, 'Replaying tunes nothing.');
+        assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuning').hidden`), true);
+        assert.match(await evaluate(opened, `document.querySelector('#parameterTuningStatus').textContent`), /^This is a data log, so it is replayed.*2 signals, 123 readings over 2 h 00 min, from Interaction test\. Matched 2 of 2 by name/);
+        const target = (signal) => `document.querySelector('.parameterTuningReplayRow[data-signal="${signal}"] select').value`;
+        assert.equal(await evaluate(opened, target('heaterPower')), '40', 'The heater power drives the shared Heater power.');
+        assert.equal(await evaluate(opened, target('tankTemperature')), '2', 'The thermometer is compared with the water temperature.');
+        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningReplayTimeStep').value`), '60');
+
+        const tolerance = `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="tolerance"]')`;
+        await evaluate(opened, `(() => { const input = ${tolerance}; input.value = '0.2'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(opened, `document.querySelector('#runParameterTuningReplay').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.replay() !== null`, 'The replay did not finish.', 30000);
+        const [inStep] = await evaluate(opened, `window.__debugParameterTuning.replay()`);
+        assert.deepEqual(inStep.stretches, [], `The model the log was made with should stay in step: ${inStep.sentence}`);
+        assert.ok(inStep.rms < 0.1, `It should miss by little more than the rounding: ${inStep.sentence}`);
+        assert.match(inStep.sentence, /^Water tank · Water temperature stayed within 0\.2 K for the whole 2 h 00 min\..* 1 bad reading was left out\.$/);
+        await waitFor(opened, `document.querySelector('#parameterTuningReplayPlot').data?.length === 5`, 'The plot of measured against replayed, with the tolerance band, was not drawn.');
+
+        // A tighter tolerance judges the same run again, without running it.
+        await evaluate(opened, `(() => { const input = ${tolerance}; input.value = '0.000001'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(opened, `window.__debugParameterTuning.replay()[0].stretches.length > 0`, 'A tighter tolerance was not applied to the last run.');
+
+        // Comparing nothing cannot be replayed; and the model itself was never changed.
+        await evaluate(opened, `(() => { const select = document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] select'); select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').disabled`), true);
+        assert.equal(await evaluate(opened, `window.__debugParameterTuning.replay()`), null, 'Changing the mapping clears the last outcome.');
+        const document_ = await evaluate(opened, `window.__debugProject.serialize()`);
+        assert.equal(document_.sharedParameters.find((parameter) => parameter.id === 40).schedule, undefined, 'Replaying must not leave a schedule in the model.');
+        assert.equal(document_.nodes.find((node) => node.id === 1).states[0].initialValue, 293.15, 'Replaying must not move the model\'s initial state.');
+        assert.equal(await evaluate(opened, `document.querySelector('#undoButton').disabled`), true, 'Replaying is not an edit.');
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
     await run('a parameter linked to a shared parameter edits and unlinks through the edge editor', async () => {
         // Two edges link one parameter to a project-level shared parameter: the linked row shows the
         // shared value (2), not its own stale one (5); editing it changes the shared definition, so

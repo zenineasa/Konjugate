@@ -239,24 +239,33 @@ const measuredColor = '#d95926';
 // told apart by that label, not by hue. Revisit with small multiples if that turns out to matter
 // in practice; today's real usage is one mapped signal at a time.
 //
-// entries: [{ name, unit, times: number[], measured: number[], simulated: number[] }] -- times,
-// measured and simulated must already be the same length and index-paired per entry.
-export async function renderMeasuredVsSimulatedComparison(element, entries) {
+// entries: [{ name, unit, times: number[], measured: number[], simulated: number[], tolerance? }] -- times,
+// measured and simulated must already be the same length and index-paired per entry. An entry with a
+// `tolerance` (a replayed data log's) also draws it either side of zero on the residual, so the
+// stretches where the model was out of step can be seen. `simulatedLabel` names the model's line.
+export async function renderMeasuredVsSimulatedComparison(element, entries, { simulatedLabel = 'Simulated' } = {}) {
     if (!globalThis.Plotly) throw new Error('Plotly.js is unavailable.');
     const labelFor = (entry, kind) => (entries.length > 1 ? `${entry.name}: ${kind}` : kind);
     const traces = entries.flatMap((entry) => {
         const unitSuffix = entry.unit ? ` ${entry.unit}` : '';
+        const span = entry.times.length ? [entry.times[0], entry.times.at(-1)] : [];
+        const band = entry.tolerance > 0 ? [entry.tolerance, -entry.tolerance].map((level) => ({
+            type: 'scatter', mode: 'lines', name: `${entry.name} tolerance`, showlegend: false, hoverinfo: 'skip',
+            x: span, y: span.map(() => level), xaxis: 'x2', yaxis: 'y2',
+            line: { width: 1, dash: 'dash', color: measuredColor }
+        })) : [];
         return [
+            ...band,
             // Simulated is listed first and Measured second so Plotly, which draws traces in
             // array order (later = on top), draws the dotted measured line on top of the solid
             // simulated one -- with the reverse order the solid line was covering the dots
             // wherever the two nearly overlapped. legendrank keeps the legend itself reading
             // Measured-then-Simulated (ground truth first) independent of this draw order.
             {
-                type: 'scatter', mode: 'lines', name: labelFor(entry, 'Simulated'), legendrank: 2,
+                type: 'scatter', mode: 'lines', name: labelFor(entry, simulatedLabel), legendrank: 2,
                 x: entry.times, y: entry.simulated,
                 line: { width: 2, color: simulatedColor },
-                hovertemplate: `${entry.name} simulated<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
+                hovertemplate: `${entry.name} ${simulatedLabel.toLowerCase()}<br>%{y:.6g}${unitSuffix}<br>t = %{x:.6g} s<extra></extra>`
             },
             {
                 type: 'scatter', mode: 'lines', name: labelFor(entry, 'Measured'), legendrank: 1,

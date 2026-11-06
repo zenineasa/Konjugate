@@ -10,7 +10,7 @@ status: draft
 
 # The prediction-actual comparison window
 
-**Status: proposed, nothing built.** The idea comes from the review in [Digital twin connections](digitalTwinConnections.md): once measurements reach a running model, something has to decide how far the model is trusted, when it is corrected, and how. This document gives that a name and a shape. A first draft recommended two different windows at once, a fixed one that resets at every move and one that grows while the model is wrong; this version makes the first the default and keeps the second for monitoring only.
+**Status: step 1 built (the hold policy over a recording, as replaying a data log), the rest proposed.** The idea comes from the review in [Digital twin connections](digitalTwinConnections.md): once measurements reach a running model, something has to decide how far the model is trusted, when it is corrected, and how. This document gives that a name and a shape. A first draft recommended two different windows at once, a fixed one that resets at every move and one that grows while the model is wrong; this version makes the first the default and keeps the second for monitoring only.
 
 ## The idea
 
@@ -124,7 +124,7 @@ Replay is the window run at unlimited speed over a recording, so the logic of a 
 
 These follow the steps of [Digital twin connections](digitalTwinConnections.md#order-of-work).
 
-1. **The hold policy over a real recording, offline.** Run the recording's applied inputs as held parameter schedules, compare the measured outputs with the result, and show how long the model stays within its written limit. This needs no engine changes and is the first test of whether a model is worth connecting at all.
+1. **The hold policy over a real recording, offline.** Run the recording's applied inputs as held parameter schedules, compare the measured outputs with the result, and show how long the model stays within its written limit. This needs no engine changes and is the first test of whether a model is worth connecting at all. **Built** as replaying a data log ([Connecting a data source](../connectingADataSource.md#replaying-a-log-in-konjugate)), with a tolerance per signal in place of a written limit and three readings in a row outside it as the minimum to count as out of step. It anchors once, at the recording's start, so it reports when the model first left the tolerance and every stretch it was out, not yet a window that moves.
 2. **The default reset policy over the same recording,** once the engine runs in steps and can replace the measured states: the jumps and their trend, rolling checkpoints, and the real-time factor and lag, with the recording replayed faster than the model can follow so the degrade ladder is tested.
 3. **The same, live,** with nothing new in the window itself.
 4. **Nudge,** the observed-state marking, and the consistency and conservation guards.

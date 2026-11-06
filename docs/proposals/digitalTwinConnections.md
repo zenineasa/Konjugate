@@ -85,7 +85,7 @@ Each kind of source is an adapter, and every adapter produces the same `Observat
 
 A CSV offers its column headings, an OPC UA server its tag tree, MQTT the topics heard in a few seconds of listening, and a source that cannot list its fields (Modbus) is filled in by hand. The person drags a field onto a model state or parameter, chooses its role, and sets its unit, scale and offset, and its time zone or clock offset, since lab loggers often record local time with no zone, or seconds since the start. Matching by name, as the tuning card does with CSV columns, makes the first guess.
 
-The file adapter covers the most labs with the least, because nearly every logger can write a file and a shared folder is how a lab already shares data; it is also how a recording is replayed, so it is the same adapter offline and live. MQTT covers the next most, and gives several readers of one live source for free.
+The file adapter covers the most labs with the least, because nearly every logger can write a file and a shared folder is how a lab already shares data; it is also how a recording is replayed, so it is the same adapter offline and live. Its format, the Konjugate data log, is already fixed in [Connecting a data source](../connectingADataSource.md), with its reader (`src/dataLog.mjs`), a checker, and a simulated rig that writes one as it runs, so sources can be built before the adapter is. MQTT covers the next most, and gives several readers of one live source for free.
 
 **What a small lab needs from OPC UA.**
 - Browse the server's tags as a tree and drag one onto a state, instead of typing node identifiers.
@@ -203,7 +203,7 @@ Each step is proved on real data before the next starts.
 ## Demonstrations that need no hardware
 
 - A recorded tank run, replayed through the Tank Calibration model, with the comparison window showing where the model and the recording part.
-- A script writing a simulated tank's readings to a file, or publishing them to a local Mosquitto broker, with two copies of Konjugate following it.
+- The simulated tank rig ([Connecting a data source](../connectingADataSource.md)) writing its log into a shared folder, with two copies of Konjugate following it; later, the same rig publishing to a local Mosquitto broker.
 - A software OPC UA test server feeding the Tank Calibration model, with the comparison window running.
 
 ## Later

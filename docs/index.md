@@ -9,6 +9,7 @@ okf_version: "0.2"
 * [KJT Container Format](kjtFormat.md) - Binary container format specification for Konjugate project files
 * [Embedded Result Storage](resultFileFormat.md) - Binary simulation result segment format embedded within .kjt files
 * [Code & FMU Export](codeExport.md) - Specification for standalone C++ and FMI 2.0/3.0 FMU simulation code generation
+* [Connecting a Data Source](connectingADataSource.md) - The Konjugate data log a logger or script appends to during an experiment, the rules for writing and reading one, a simulated rig to copy, and a checker
 
 # Core Architecture
 

@@ -946,6 +946,13 @@ export async function runInteractionTests(driver) {
         await pressSave(false);
         const edited = await waitForSavedChange(strippedPath, null);
         assert.equal(edited.ownership.owner, 'Edited Owner');
+
+        // Renaming the file from the title bar is not a copy: it keeps the file's details and asks nothing.
+        const { bytes: renamedBytes } = await driver.captureExport(async () => {
+            await evaluate(window, `(() => { document.querySelector('.documentTitle').click(); const input = document.querySelector('.documentTitleInput'); input.value = 'Renamed Ownership Project'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        }, { extension: 'kjt' });
+        assert.equal(await evaluate(window, `document.querySelector('#saveOwnershipDialog').open`), false, 'Renaming must not ask for the details of a copy.');
+        assert.equal(JSON.parse(await decodeProjectFile(renamedBytes)).ownership.owner, 'Edited Owner');
     }, { skip: !driver.capabilities.osFileOpen && 'the native save dialog is a desktop-only way to choose where a project goes' });
 
     await run('exports carry the project\'s owner, copyright and license into the generated code and the FMU description', async () => {

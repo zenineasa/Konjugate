@@ -11340,7 +11340,9 @@ function requestSaveContentChoice() {
     });
 }
 
-async function saveProject(saveAs = false, password = currentProjectPassword) {
+// `rename` is a Save As under a new name that stands in for renaming the file (the title bar): the file keeps the ownership details it
+// was written with, and nothing is asked, since renaming a file does not make a copy of it.
+async function saveProject(saveAs = false, password = currentProjectPassword, { rename = false } = {}) {
     try {
         await waitForLauncherProjects();
         const hasEmbeddableResult = Boolean(activeResult && activeEngineJobId && !simulationRunning);
@@ -11354,11 +11356,11 @@ async function saveProject(saveAs = false, password = currentProjectPassword) {
         let fileOwnership = savedOwnership;
         // The kind of copy this save writes, to be remembered for the file if it differs from the project's own details.
         let copyOwnership;
-        const rewritesCopy = !saveAs && currentProjectPath !== null && savedCopyOwnership?.path === currentProjectPath;
+        const rewritesCopy = (!saveAs || rename) && currentProjectPath !== null && savedCopyOwnership?.path === currentProjectPath;
         if (rewritesCopy) {
             fileOwnership = savedCopyOwnership.block ? stampOwnership(savedCopyOwnership.block, stampOptions) : null;
             copyOwnership = fileOwnership;
-        } else if ((saveAs || !currentProjectPath) && hasUserDetails(savedOwnership)) {
+        } else if (!rename && (saveAs || !currentProjectPath) && hasUserDetails(savedOwnership)) {
             const choice = await editSaveOwnership({ block: savedOwnership, encrypted: Boolean(password) });
             if (!choice) return false;
             fileOwnership = choice.strip ? null : stampOwnership(choice.block, stampOptions);
@@ -14340,7 +14342,7 @@ async function commitFilenameEdit() {
     documentTitle.hidden = false;
     currentProjectFilename = nextFilename;
     updateDocumentTitle();
-    if (currentProjectPath && nextFilename !== previousFilename && !await saveProject(true)) {
+    if (currentProjectPath && nextFilename !== previousFilename && !await saveProject(true, currentProjectPassword, { rename: true })) {
         currentProjectFilename = previousFilename;
         updateDocumentTitle();
     }

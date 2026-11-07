@@ -37,3 +37,20 @@ test('a setup keeps its source, its usable mapping entries and its settings, and
     ]);
     assert.deepEqual(conversions, { TT101: { scale: 1, offset: 273.15 }, JI101: { scale: 1000, offset: 0 } });
 });
+
+test('the engineer\'s settings, the room\'s layout and the last run\'s events are kept, what is unusable dropped', () => {
+    const setup = normalizeTwinSetup({
+        source: { kind: 'push' },
+        mapping: [
+            { source: 'a', name: 'tankT', role: 'output', target: { kind: 'state', id: 3 } },
+            { source: 'b', name: 'power', role: 'input', target: { kind: 'parameter', id: 9 } }
+        ],
+        live: { timeStep: 30, members: 64, corrections: { tankT: { estimate: true }, power: { gain: 2 }, ghost: { gain: 0.5 } }, untracked: [10, 10, -1, 'x'] },
+        layout: { order: ['tankT', 'ghost'], wide: ['tankT'], pinned: [], hidden: 'tankT', bounds: { x: 1920, y: 0, width: 1600, height: 900, maximized: true } },
+        record: { startedAt: '2026-11-07T10:00:00Z', events: [{ at: '2026-11-07T10:05:00Z', kind: 'bad', text: 'Drifting', detail: 'past the warning' }, { at: 'x', kind: 'nonsense', text: 'dropped' }] }
+    });
+    assert.deepEqual(setup.live, { timeStep: 30, members: 64, corrections: { tankT: { estimate: true } }, untracked: [10] });
+    assert.deepEqual(setup.layout, { order: ['tankT'], wide: ['tankT'], bounds: { x: 1920, y: 0, width: 1600, height: 900, maximized: true } });
+    assert.deepEqual(setup.record, { startedAt: '2026-11-07T10:00:00Z', events: [{ at: '2026-11-07T10:05:00Z', kind: 'bad', text: 'Drifting', detail: 'past the warning' }] });
+    assert.equal(normalizeTwinSetup({ source: { kind: 'push' }, mapping: [], layout: { bounds: { x: 0, y: 0, width: 10, height: 10 } } }).layout, undefined, 'A window too small to use is not kept.');
+});

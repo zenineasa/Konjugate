@@ -635,7 +635,7 @@
                 <button id="causalInferenceButton" class="squareTool" type="button" aria-controls="causalInference" aria-label="Causal inference" data-tooltip="Causal inference">
                     <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="4" cy="11.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="4.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.6 10l4.8-4.2M7.2 5.6l3.3.2-.3 3.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
-                <button id="liveTwinButton" class="squareTool" type="button" aria-controls="parameterTuning" aria-label="Live twin: keep this model in step with a real system's readings" data-tooltip="Live twin" hidden>
+                <button id="liveTwinButton" class="squareTool" type="button" aria-label="Live twin: keep this model in step with a real system's readings" data-tooltip="Live twin" hidden>
                     <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 8.5h3l1.5-4 2.5 8 2-6 1 2h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
                 <button id="parameterTuningButton" class="squareTool" type="button" aria-controls="parameterTuning" aria-label="Parameter tuning" data-tooltip="Parameter tuning">
@@ -1063,34 +1063,6 @@
                     <span id="parameterTuningFileLabel">↥ Choose CSV file</span>
                 </label>
                 <div id="parameterTuningStatus" class="equationDiagnostics" role="status"></div>
-                <details id="parameterTuningMqtt" class="parameterTuningMqtt" hidden>
-                    <summary>Or follow an MQTT broker</summary>
-                    <p class="builderHint">Konjugate connects to the lab's broker like any other client and listens. Listen for a few seconds to see which topics it sends, choose what each one is, and follow them as a live twin. What arrives is also recorded as a data log, beside the project, to replay later.</p>
-                    <label class="editorField"><span>Broker</span><input id="parameterTuningMqttUrl" type="text" spellcheck="false" value="mqtt://localhost:1883"></label>
-                    <div class="liveTwinActions"><button id="parameterTuningMqttListen" type="button">Listen for 3 seconds</button></div>
-                    <div id="parameterTuningMqttTopics"></div>
-                    <div class="liveTwinActions"><button id="parameterTuningMqttUse" type="button" hidden>Use these topics</button></div>
-                    <div id="parameterTuningMqttStatus" class="equationDiagnostics" role="status"></div>
-                </details>
-                <details id="parameterTuningPush" class="parameterTuningMqtt" hidden>
-                    <summary>Or take readings a script sends</summary>
-                    <p class="builderHint">For a script with nowhere else to put its readings: it sends them to Konjugate's push service, as JSON, protobuf or gRPC, with a key that may send only the signals it is given. Start the service and make the key in the Connections panel, choose what each signal is, and follow them as a live twin. What arrives is recorded as a data log beside the project.</p>
-                    <div id="parameterTuningPushService" class="equationDiagnostics" role="status"></div>
-                    <div class="liveTwinActions"><button id="parameterTuningPushConnections" type="button">Connections…</button></div>
-                    <div id="parameterTuningPushSignals"></div>
-                    <div class="liveTwinActions"><button id="parameterTuningPushUse" type="button" hidden>Use these signals</button></div>
-                    <div id="parameterTuningPushStatus" class="equationDiagnostics" role="status"></div>
-                </details>
-                <details id="parameterTuningOpcUa" class="parameterTuningMqtt" hidden>
-                    <summary>Or follow an OPC UA server</summary>
-                    <p class="builderHint">Konjugate connects to the lab's server (a PLC, or the gateway in front of the instruments) like any other client, browses its tags, and subscribes to the ones you choose, with the unit, range and quality the server gives. With security, a server's certificate is trusted only once you say so. What arrives is recorded as a data log beside the project.</p>
-                    <label class="editorField"><span>Server</span><input id="parameterTuningOpcUaUrl" type="text" spellcheck="false" value="opc.tcp://localhost:4840"></label>
-                    <label class="editorField"><span>Security</span><select id="parameterTuningOpcUaSecurity"><option value="none">None</option><option value="sign">Sign</option><option value="signAndEncrypt">Sign and encrypt</option></select></label>
-                    <div class="liveTwinActions"><button id="parameterTuningOpcUaBrowse" type="button">Browse the tags</button></div>
-                    <div id="parameterTuningOpcUaTags"></div>
-                    <div class="liveTwinActions"><button id="parameterTuningOpcUaUse" type="button" hidden>Use these tags</button></div>
-                    <div id="parameterTuningOpcUaStatus" class="equationDiagnostics" role="status"></div>
-                </details>
             </section>
             <section id="parameterTuningLoggerSection" hidden>
                 <h3>Reading another logger's file</h3>
@@ -1184,72 +1156,10 @@
                     <div id="replayCalibrateStatus" class="equationDiagnostics" role="status"></div>
                     <div id="replayCalibrateRows" class="parameterTuningBestValues"></div>
                 </div>
-                <div id="liveTwin" class="liveTwin">
+                <div class="liveTwin">
                     <h3>As a live twin</h3>
-                    <p class="builderHint">Keeps the model in step with the log as it arrives. At every move it goes back to the start of the window, sets each measured state to its reading, runs the window on what was really done, and forecasts what comes after it. The jump at each move is how far the model had drifted.</p>
-                    <div class="liveTwinFields">
-                        <label class="editorField"><span>Window (min)</span><input id="liveTwinWindow" type="number" min="0" step="any" value="60"></label>
-                        <label class="editorField"><span>Moves every (min)</span><input id="liveTwinStride" type="number" min="0" step="any" value="10"></label>
-                        <label class="editorField"><span>Forecast (min)</span><input id="liveTwinHorizon" type="number" min="0" step="any" value="60"></label>
-                        <label class="editorField" title="When the model's corrections keep to one side by more than this on average, the real system is drifting away from the model: the twin warns you, on the card and on its chip in the toolbar. Empty for no warning."><span id="liveTwinAlertLabel">Warn when it drifts by (a move)</span><input id="liveTwinAlert" type="number" min="0" step="any" placeholder="no warning"></label>
-                        <label id="liveTwinMembersField" class="editorField" hidden title="How many copies of the model the estimator runs side by side: more is steadier and slower"><span>Ensemble members</span><input id="liveTwinMembers" type="number" min="4" max="1000" step="1" value="32"></label>
-                        <label class="editorField"><span>Data arrives</span><select id="liveTwinSpeed">
-                            <option value="follow">As the file grows</option>
-                            <option value="1">In real time</option>
-                            <option value="60">60× (a minute a second)</option>
-                            <option value="600">600×</option>
-                            <option value="3600" selected>3600× (an hour a second)</option>
-                            <option value="Infinity">As fast as it can go</option>
-                        </select></label>
-                    </div>
-                    <div id="liveTwinTrack" class="liveTwinTrack" hidden>
-                        <span>Also track as it goes</span>
-                        <p class="builderHint">Tunable parameters the estimator follows from the readings, as quantities that change slowly: a heat loss that grows as insulation gets wet, a pump that wears. Untick one to keep it at its value.</p>
-                        <div id="liveTwinTrackRows"></div>
-                    </div>
-                    <div class="liveTwinActions">
-                        <button id="liveTwinStart" type="button" disabled>Start live twin</button>
-                        <button id="liveTwinStop" type="button" hidden>Stop</button>
-                        <button id="liveTwinDetach" type="button" hidden title="Try your own inputs on a copy of the twin, ahead of real time">Detach and try…</button>
-                        <button id="liveTwinRefit" type="button" hidden title="Fit the tunable parameters, and the tunable initial values, to the latest window">Refit on the latest window</button>
-                        <button id="liveTwinReplayRecording" type="button" hidden title="Open what the source sent as a data log, to replay it, calibrate on it or run it as a twin again">Replay this recording</button>
-                        <button id="liveTwinShowRecording" type="button" hidden>Show in folder</button>
-                    </div>
-                    <div id="liveTwinStatus" class="equationDiagnostics" role="status"></div>
-                    <div id="liveTwinNote" class="equationDiagnostics valid" role="status"></div>
-                    <div id="liveTwinTrend" class="liveTwinTrend" role="status"></div>
-                    <div id="liveTwinObserved" class="equationDiagnostics valid" role="status"></div>
-                    <section id="liveTwinEstimate" class="liveTwinEstimate" hidden>
-                        <h4>Estimate</h4>
-                        <p class="builderHint">The estimator runs copies of the model from slightly different states and weighs them against the readings, so a reading corrects every state that moves with it, measured or not. Each state's estimate is shown with its spread. How far a state may drift in an hour beyond what the model says sets how much the readings are trusted over the model; a change applies when the twin is next started.</p>
-                        <div id="liveTwinEstimateRows" class="liveTwinEstimateRows"></div>
-                        <div id="liveTwinHonesty" class="equationDiagnostics valid" role="status"></div>
-                    </section>
-                    <section id="liveTwinRefitResult" class="liveTwinSandbox" hidden>
-                        <div id="liveTwinRefitStatus" class="equationDiagnostics" role="status"></div>
-                        <div id="liveTwinRefitRows" class="parameterTuningBestValues"></div>
-                        <div class="liveTwinActions">
-                            <button id="liveTwinRefitApply" type="button" class="doneButton" hidden>Apply to the twin</button>
-                            <button id="liveTwinRefitKeep" type="button" hidden title="Also set the refitted parameters in the model (Undo takes them back); initial values found at the window's anchor stay with the twin">Apply, and keep the parameters in the model</button>
-                        </div>
-                    </section>
-                    <div id="liveTwinPlot" class="parameterTuningComparisonPlot" role="img" aria-label="Every reading so far, the model over the latest window and its forecast" hidden></div>
-                    <div id="liveTwinJumpPlot" class="liveTwinJumpPlot" role="img" aria-label="The jump at each move of the window, with the tolerance" hidden></div>
-                    <section id="liveTwinSandbox" class="liveTwinSandbox" hidden>
-                        <div class="liveTwinBanner">Detached. You are trying things on a copy of the twin; nothing here reaches the live twin or its record. The live twin carries on underneath.</div>
-                        <div id="liveTwinSandboxInputs"></div>
-                        <label class="editorField"><span>Run ahead (min)</span><input id="liveTwinSandboxMinutes" type="number" min="0" step="any" value="60"></label>
-                        <div class="liveTwinActions">
-                            <button id="liveTwinSandboxRun" type="button">Run ahead</button>
-                            <button id="liveTwinSandboxReturn" type="button" class="doneButton">Back to live</button>
-                        </div>
-                        <div id="liveTwinSandboxStatus" class="equationDiagnostics" role="status"></div>
-                    </section>
-                </div>
-                <div id="liveTwinScenarios" class="liveTwinScenarios" hidden>
-                    <h3>Scenarios tried</h3>
-                    <p class="builderHint">What you tried after detaching is kept here with the project. Rename one to keep it, or delete it.</p>
-                    <div id="liveTwinScenarioRows"></div>
+                    <p class="builderHint">To keep the model in step with this log as it arrives, with a forecast and a warning when the real system drifts, open the live twin: it has a window of its own, with this log one click away.</p>
+                    <div class="liveTwinActions"><button id="replayLiveTwin" type="button">Open the live twin</button></div>
                 </div>
             </section>
             <section id="parameterTuningParametersSection" hidden>

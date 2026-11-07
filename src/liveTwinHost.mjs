@@ -217,6 +217,19 @@ export class LiveTwin {
         return true;
     }
 
+    // A changed model, applied from the latest move (src/windowSession.mjs, applyModel): what was carried across, added, removed.
+    async applyModel(document) {
+        if (!this.#session) throw new Error('The live twin has not started yet.');
+        return this.#session.applyModel(document);
+    }
+
+    // The warning changed while the twin runs: a multiple of the first measured signal's tolerance, or null for none.
+    setAlert(alertAt) {
+        if (!this.#session) throw new Error('The live twin has not started yet.');
+        this.#session.setAlert(alertAt);
+        return true;
+    }
+
     // A sandbox from the last cycle's now; one at a time.
     async detach() {
         if (!this.#session) throw new Error('The live twin has not started yet.');

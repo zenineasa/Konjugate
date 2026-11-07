@@ -85,31 +85,109 @@
         </footer>
     </main>
 
-    <!-- The control room: the twin running (docs/proposals/controlRoom.md, "The control room"). -->
+    <!-- The control room: the twin running (docs/proposals/controlRoom.md, "The control room"). The operator's view by default; the
+         Engineer switch opens what changes the twin. -->
     <main id="room" class="room" hidden>
         <div class="health" id="health">
             <span id="healthTwin" class="healthItem"></span>
             <span id="healthSource" class="healthItem"></span>
             <span id="healthDrift" class="healthItem"></span>
             <span class="spacer"></span>
+            <div class="timeControl" title="Scrub back through the moves the twin has made">
+                <input id="timeScrub" type="range" min="0" max="0" value="0" step="1" aria-label="Which move to show">
+                <span id="timeLabel">Following now</span>
+                <button id="timeFollow" type="button" hidden>Follow now</button>
+            </div>
+            <button id="hiddenTiles" type="button" hidden></button>
+            <button id="trySomething" type="button" title="A copy of the twin from now, to try what an input would do; the twin itself is not changed">Try something…</button>
+            <button id="engineerToggle" type="button" aria-pressed="false" title="Refit, the estimator, the twin's settings, the tunable parameters, and model changes">Engineer</button>
             <button id="roomSetup" type="button">Setup</button>
             <button id="roomStop" type="button">Stop</button>
         </div>
-        <div id="tiles" class="tiles"></div>
-        <!-- Under the tiles: what was done to the real system, what the twin infers of what no sensor measures, and what happened. -->
-        <div class="roomLower">
-            <section class="panel" id="inputsPanel" aria-label="Inputs">
-                <h3>Inputs <small>what was done, as the twin received it</small></h3>
-                <div id="inputRows" class="inputRows"></div>
-            </section>
-            <section class="panel" id="inferredPanel" aria-label="What the twin infers">
-                <h3>What the twin infers <small>what no sensor measures</small></h3>
-                <div id="inferredRows" class="inferredRows" role="table"></div>
-            </section>
-            <section class="panel" id="eventsPanel" aria-label="Events">
-                <h3>Events</h3>
-                <ol id="eventsList" class="eventsList"></ol>
-            </section>
+        <div id="modelBanner" class="banner" hidden>
+            <span id="modelBannerText"></span>
+            <button id="modelApply" type="button" class="primary">Apply to the twin</button>
+            <button id="modelDismiss" type="button">Not now</button>
+        </div>
+        <div id="sandboxBar" class="sandboxBar" hidden>
+            <strong>Trying something</strong>
+            <span class="hint" id="sandboxHint">A copy of the twin from now: set an input, run ahead, and the tiles show what would happen (dotted). The twin is not changed.</span>
+            <div id="sandboxInputs" class="sandboxInputs"></div>
+            <label class="field inline"><span>Run ahead</span><input id="sandboxMinutes" type="number" min="1" step="1" value="60"><span>min</span></label>
+            <button id="sandboxRun" type="button" class="primary">Run ahead</button>
+            <button id="sandboxBack" type="button">Back to live</button>
+            <span id="sandboxStatus" class="status"></span>
+        </div>
+        <div class="roomBody">
+            <div class="roomMain">
+                <div id="tiles" class="tiles"></div>
+                <!-- Under the tiles: what was done to the real system, what the twin infers of what no sensor measures, and what happened. -->
+                <div class="roomLower">
+                    <section class="panel" id="inputsPanel" aria-label="Inputs">
+                        <h3>Inputs <small>what was done, as the twin received it</small></h3>
+                        <div id="inputRows" class="inputRows"></div>
+                    </section>
+                    <section class="panel" id="inferredPanel" aria-label="What the twin infers">
+                        <h3>What the twin infers <small>what no sensor measures</small></h3>
+                        <div id="inferredRows" class="inferredRows" role="table"></div>
+                    </section>
+                    <section class="panel" id="eventsPanel" aria-label="Events">
+                        <h3>Events <button id="scenariosToggle" type="button" class="small" hidden></button></h3>
+                        <div id="scenarioList" class="scenarioList" hidden></div>
+                        <ol id="eventsList" class="eventsList"></ol>
+                    </section>
+                </div>
+            </div>
+            <!-- The engineer's view: everything that changes the twin. -->
+            <aside id="engineer" class="engineer" hidden aria-label="Engineer">
+                <section>
+                    <h3>Tunable parameters</h3>
+                    <p class="hint">Set one and the twin runs on with it from its latest move; the value is kept in the model too (Undo in the project window takes it back).</p>
+                    <div id="tunableRows" class="tunableRows"></div>
+                </section>
+                <section>
+                    <h3>Refit on the latest window</h3>
+                    <p class="hint">The window the twin has just run, as a small calibration of the tunable parameters, and of the initial values marked ◎.</p>
+                    <button id="refitRun" type="button">Refit</button>
+                    <p id="refitStatus" class="status"></p>
+                    <div id="refitRows" class="refitRows"></div>
+                    <div class="row"><button id="refitApply" type="button" hidden>Apply to the twin</button><button id="refitKeep" type="button" class="primary" hidden>Apply, and keep in the model</button></div>
+                </section>
+                <section>
+                    <h3>The warning</h3>
+                    <label class="field"><span id="alertLabel">Warn when it drifts by (a move)</span><input id="alertAmount" type="number" min="0" step="any"></label>
+                    <p class="hint">How far the model's corrections may keep to one side, on average a move, before the room warns; empty for none. Taken at once.</p>
+                </section>
+                <section>
+                    <h3>Each measured signal</h3>
+                    <p class="hint">What a move does with its reading: reset the state to it, nudge toward it, only watch, or estimate (the estimator weighs it against the model and moves every state with it).</p>
+                    <div id="correctionRows" class="correctionRows"></div>
+                    <div id="trackBlock" hidden>
+                        <div id="trackParameters">
+                            <h4>Track as it goes</h4>
+                            <p class="hint">Tunable parameters the estimator finds from the readings, as slowly changing quantities.</p>
+                            <div id="trackRows" class="trackRows"></div>
+                        </div>
+                        <h4>How far each state may drift in an hour</h4>
+                        <p class="hint">Beyond what the model says. Empty, the estimator chooses (shown faintly, once it has run).</p>
+                        <div id="driftRows" class="driftRows"></div>
+                        <label class="field inline"><span>Ensemble members</span><input id="members" type="number" min="4" max="1000" step="1" value="32"></label>
+                    </div>
+                </section>
+                <section>
+                    <h3>Timing</h3>
+                    <div class="timing">
+                        <label class="field"><span>Window (min)</span><input id="timingWindow" type="number" min="1" step="1"></label>
+                        <label class="field"><span>Moves every (min)</span><input id="timingStride" type="number" min="1" step="1"></label>
+                        <label class="field"><span>Forecast (min)</span><input id="timingHorizon" type="number" min="1" step="1"></label>
+                        <label class="field"><span>Time step (s)</span><input id="timingStep" type="number" min="0.001" step="any"></label>
+                    </div>
+                </section>
+                <div class="engineerFooter">
+                    <p id="restartNote" class="status"></p>
+                    <button id="restartTwin" type="button" class="primary" disabled>Start again with these</button>
+                </div>
+            </aside>
         </div>
         <p id="roomStatus" class="status" role="status"></p>
     </main>

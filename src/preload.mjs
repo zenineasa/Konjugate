@@ -228,7 +228,13 @@ contextBridge.exposeInMainWorld('engine', {
         onSetupChanged: (callback) => ipcRenderer.on('twinSetupChanged', (_event, setup) => callback(setup)),
         // The twin window's own twin: its status for the toolbar chip, and the window brought to the front.
         onStatusChanged: (callback) => ipcRenderer.on('twinStatusChanged', (_event, status) => callback(status)),
+        onBoundsChanged: (callback) => ipcRenderer.on('twinBoundsChanged', (_event, bounds) => callback(bounds)),
         focusWindow: () => ipcRenderer.invoke('twinFocusWindow'),
+        // What the twin window asks of this window (values kept in the model, scenarios), answered by id; and this window's model,
+        // handed to the twin window when it changes.
+        onRequest: (callback) => ipcRenderer.on('twinRequest', (_event, request) => callback(request)),
+        reply: (id, result, error = null) => ipcRenderer.send('twinReply', id, result, error),
+        modelChanged: (document) => ipcRenderer.send('twinModelChanged', document),
         onOpenConnections: (callback) => ipcRenderer.on('twinOpenConnections', () => callback()),
         onLoadDemoModel: (callback) => ipcRenderer.on('twinLoadDemoModel', (_event, variant) => callback(variant)),
         // A recording this twin made, read again to replay it, or shown in its folder.

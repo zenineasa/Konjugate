@@ -6,41 +6,9 @@
 // can be replayed later like any other log.
 
 import { open } from 'node:fs/promises';
+import { formatDataLog, headingLines, rowLines } from './dataLogFormat.mjs';
 
-const number = (value) => String(Number(value.toPrecision(12)));
-
-// The description and headings of a log with these signals.
-function headingLines({ source = '', epoch, signals }) {
-    return [
-        '# konjugate data log: 1',
-        ...(source ? [`# source: ${source.replace(/[\r\n]/g, ' ')}`] : []),
-        `# time: seconds since ${epoch === null || epoch === undefined ? 'start' : new Date(epoch).toISOString()}`,
-        `# inputs: ${signals.filter((signal) => signal.role === 'input').map((signal) => signal.name).join(', ')}`,
-        `# outputs: ${signals.filter((signal) => signal.role === 'output').map((signal) => signal.name).join(', ')}`,
-        ['time', ...signals.map((signal) => `${signal.name} [${signal.unit ?? ''}]`), ...signals.map((signal) => `${signal.name} quality`)].join(',')
-    ];
-}
-
-// One row per time, in the order the times first appear.
-function rowLines(signals, observations) {
-    const byTime = new Map();
-    for (const observation of observations) {
-        if (!byTime.has(observation.time)) byTime.set(observation.time, new Map());
-        byTime.get(observation.time).set(observation.signal, observation);
-    }
-    return [...byTime].map(([time, readings]) => [
-        number(time),
-        ...signals.map((signal) => (readings.has(signal.name) ? number(readings.get(signal.name).value) : '')),
-        ...signals.map((signal) => { const quality = readings.get(signal.name)?.quality; return quality && quality !== 'good' ? quality : ''; })
-    ].join(','));
-}
-
-// A whole log, header and observations, as the text of a Konjugate data log: to keep what another logger's file said in
-// Konjugate's own form, or to check it with scripts/checkDataLog.mjs.
-export function formatDataLog({ header, observations }) {
-    const ordered = [...observations].sort((a, b) => a.time - b.time);
-    return `${[...headingLines(header), ...rowLines(header.signals, ordered)].join('\n')}\n`;
-}
+export { formatDataLog };
 
 export class DataLogWriter {
     #handle;

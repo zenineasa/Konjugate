@@ -9,15 +9,16 @@
 import { readDataLog } from '../dataLog.mjs';
 import { defaultTolerance, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import { suggestSymbol } from '../csvImport.mjs';
+import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
 import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMatching.mjs';
-import { twinSessionMapping } from '../twinSetup.mjs';
+import { normalizeTwinSetup, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
+import { $, $$, cleanError, shown, sparkline } from './common.mjs';
+import { abandonRoom, closeRoom, currentTwin, handleEvent, initRoom, modelChanged, openRoom } from './room.mjs';
+import { initEngineer } from './engineer.mjs';
 
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const api = window.twin;
 const confident = 0.75;
-const cleanError = (error) => String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
 const state = {
     context: null,      // { document, projectName, projectPath, setup }
@@ -25,9 +26,9 @@ const state = {
     source: null,       // { kind, ... } chosen in step 2
     signals: [],        // what the source offers: { id (the source's own key), name, unit, values, role }
     rows: [],           // one per signal: { signal, name, role, target, conversion, suggestion }
-    log: null,          // a data log chosen or played: { content, header, observations, fileName, path, speed }
+    log: null,          // a data log chosen or played: { content, header, observations, fileName, path, speed, logger }
     memory: {},
-    twin: null          // the running twin's view
+    saved: null         // the setup as the project keeps it: its source, mapping, the twin's settings, the room's layout and record
 };
 
 // ---- Window controls -------------------------------------------------------------------------------------------------------------
@@ -75,17 +76,51 @@ function sourceStatus(text, kind = '') {
 // A data log's signals, with their first readings to judge them by.
 function offerLog(content, { fileName, path = null, speed = '600', demo = false }) {
     let log;
+    let logger = null;
     try {
         log = readDataLog(content);
     } catch (error) {
-        sourceStatus(`That file is not a Konjugate data log: ${cleanError(error)}`, 'warning');
-        return;
+        ({ log, logger } = readOtherLogger(content, fileName, cleanError(error)) ?? {});
+        if (!log) return;
     }
-    state.log = { content, header: log.header, observations: log.observations, fileName, path, speed, demo };
+    state.log = { content, header: log.header, observations: log.observations, fileName, path, speed, demo, logger };
     state.source = { kind: 'file', fileName };
     const values = (name) => log.observations.filter((observation) => observation.signal === name && observation.quality !== 'bad').slice(0, 60).map((observation) => observation.value);
     offerSignals(log.header.signals.map((signal) => ({ id: signal.name, name: signal.name, unit: signal.unit, role: signal.role, values: values(signal.name) })));
-    sourceStatus(`${log.header.signals.length} signals in ${fileName}, ${log.observations.length} readings${log.header.source ? `, from ${log.header.source}` : ''}.`, 'good');
+    sourceStatus(logger
+        ? `${fileName} is another logger's table: ${log.header.signals.length} columns of numbers, ${log.observations.length} readings${log.otherLogger}. Say below what each is.`
+        : `${log.header.signals.length} signals in ${fileName}, ${log.observations.length} readings${log.header.source ? `, from ${log.header.source}` : ''}.`, 'good');
+}
+
+// Another logger's table (src/loggerCsv.mjs): its separator, decimal mark and time column found as they seem to be, and every column
+// of numbers offered as a signal (its unit read from a "(unit)" or "[unit]" in its name), the mapping step saying what each is.
+function readOtherLogger(content, fileName, why) {
+    let described;
+    try {
+        described = describeLoggerCsv(content);
+    } catch (error) {
+        sourceStatus(`${fileName} is neither a Konjugate data log (${why}) nor a table Konjugate can read: ${cleanError(error)}`, 'warning');
+        return null;
+    }
+    if (!described.time) {
+        sourceStatus(`${fileName} is another logger's table, but no column of dates and times was found in it. Open it in the tuning card's "Replay a data log", which asks how to read it.`, 'warning');
+        return null;
+    }
+    const columns = described.columns.filter((column) => column.numeric && !described.time.columns.includes(column.name));
+    const names = twinNames(columns.map((column) => ({ name: column.name.replace(/\s*[([].*$/, '').trim() || column.name })));
+    const unitOf = (name) => { const found = /\(([^)]*)\)|\[([^\]]*)\]/.exec(name); return found?.[1] ?? found?.[2] ?? ''; };
+    const base = { delimiter: described.delimiter, decimal: described.decimal, time: { columns: described.time.columns, format: described.time.format, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }, source: fileName };
+    const signals = columns.map((column, index) => ({ column: column.name, name: names[index], role: 'output', unit: unitOf(column.name) }));
+    try {
+        const log = readLoggerCsv(content, { ...base, signals });
+        const left = described.columns.length - columns.length - described.time.columns.length;
+        log.header.signals = log.header.signals.map((signal) => ({ ...signal, role: undefined }));
+        log.otherLogger = left > 0 ? `; ${left} column${left === 1 ? '' : 's'} of words left out` : '';
+        return { log, logger: { base, columns: Object.fromEntries(signals.map((signal) => [signal.name, signal.column])) } };
+    } catch (error) {
+        sourceStatus(`${fileName} is another logger's table, but it could not be read as it seems to be: ${cleanError(error)}. Open it in the tuning card's "Replay a data log", which asks how to read it.`, 'warning');
+        return null;
+    }
 }
 
 $('#fileInput').addEventListener('change', async () => {
@@ -142,7 +177,7 @@ async function browseOpcUa(trustServer = false) {
         }
         state.source = { kind: 'opcua', url, security, trustServer };
         state.log = null;
-        offerSignals(answer.tags.filter((tag) => tag.numeric).map((tag) => ({ id: tag.nodeId, name: tag.path, unit: tag.unit, values: tag.value === null ? [] : [Number(tag.value)] })));
+        offerSignals(answer.tags.filter((tag) => tag.numeric).map((tag) => ({ id: tag.nodeId, name: tag.path, unit: tag.unit, range: tag.range, values: tag.value === null ? [] : [Number(tag.value)] })));
         sourceStatus(`Found ${answer.tags.length} tag${answer.tags.length === 1 ? '' : 's'}.`, 'good');
     } catch (error) {
         sourceStatus(`Could not browse ${url}: ${cleanError(error)}`, 'warning');
@@ -182,9 +217,12 @@ function offerSignals(signals) {
     state.signals = signals;
     const suggestions = suggestMapping(signals, state.context.document, { memory: state.memory });
     const names = twinNames(signals);
-    const saved = state.context.setup?.source?.kind === state.source.kind ? state.context.setup.mapping : [];
+    const saved = state.saved?.source?.kind === state.source.kind ? state.saved.mapping : [];
     state.rows = signals.map((signal, index) => {
         const suggestion = suggestions[index];
+        // A recording this twin made comes back with the mapping it was made with: its signals carry the twin's names.
+        const carried = state.carry?.get(signal.id);
+        if (carried) return { signal, name: names[index], role: carried.role, target: carried.target, conversion: carried.conversion, suggestion, kept: true };
         const kept = saved.find((entry) => entry.source === signal.id);
         if (kept) {
             const target = kept.target ? state.candidates.find((candidate) => candidate.kind === kept.target.kind && candidate.id === kept.target.id) : null;
@@ -198,30 +236,12 @@ function offerSignals(signals) {
             conversion: apply ? suggestion.conversion : null
         };
     });
+    state.carry = null;
     $('#stepMapping').hidden = false;
     renderRows();
     $('#stepMapping').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function sparkline(values) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 100 26');
-    svg.setAttribute('preserveAspectRatio', 'none');
-    if (values.length < 2) return svg;
-    const low = Math.min(...values);
-    const high = Math.max(...values);
-    const span = high - low || 1;
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    path.setAttribute('points', values.map((value, index) => `${(index / (values.length - 1)) * 100},${24 - ((value - low) / span) * 22}`).join(' '));
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', '#42c9bc');
-    path.setAttribute('stroke-width', '1.5');
-    path.setAttribute('vector-effect', 'non-scaling-stroke');
-    svg.append(path);
-    return svg;
-}
-
-const shown = (value) => (Number.isFinite(value) ? Number(value.toPrecision(5)).toString() : '—');
 
 function conversionFor(row, target) {
     if (!target || !row.signal.unit || !target.unit) return null;
@@ -243,7 +263,7 @@ function renderRows() {
         const signal = document.createElement('div');
         signal.className = 'signal';
         signal.append(Object.assign(document.createElement('strong'), { textContent: row.signal.name }),
-            Object.assign(document.createElement('small'), { textContent: `${shown(row.signal.values?.at(-1))}${row.signal.unit ? ` ${row.signal.unit}` : ''}${row.signal.role ? ` · declared ${row.signal.role === 'input' ? 'an input' : 'measured'}` : ''}` }),
+            Object.assign(document.createElement('small'), { textContent: `${shown(row.signal.values?.at(-1))}${row.signal.unit ? ` ${row.signal.unit}` : ''}${row.signal.range ? `, ${shown(row.signal.range.low)} to ${shown(row.signal.range.high)}` : ''}${row.signal.role ? ` · declared ${row.signal.role === 'input' ? 'an input' : 'measured'}` : ''}` }),
             sparkline(row.signal.values ?? []));
         // Its role.
         const role = document.createElement('select');
@@ -360,15 +380,23 @@ $('#useAllSuggestions').addEventListener('click', () => {
 });
 
 // ---- Opening the control room --------------------------------------------------------------------------------------------------
+const liveDefaults = { window: 3600, stride: 600, horizon: 3600, corrections: {}, members: 32, untracked: [] };
+
 function currentSetup() {
-    return {
+    return normalizeTwinSetup({
+        ...(state.saved ?? {}),
         source: state.source.kind === 'file' ? { kind: 'file', fileName: state.source.fileName } : state.source.kind === 'opcua' ? { kind: 'opcua', url: state.source.url, security: state.source.security } : { ...state.source },
         mapping: state.rows.map((row) => ({
             source: row.signal.id, name: row.name, role: row.target ? row.role : null, target: row.target ? { kind: row.target.kind, id: row.target.id } : null,
             unit: row.signal.unit ?? '', conversion: row.conversion ? { scale: row.conversion.scale, offset: row.conversion.offset } : null
         })),
-        live: { window: 3600, stride: 600, horizon: 3600, speed: state.log?.speed ?? 'follow' }
-    };
+        live: { ...(state.saved?.live ?? {}), speed: state.log?.speed ?? 'follow' }
+    });
+}
+
+async function saveSetup(setup) {
+    state.saved = setup;
+    await api.saveSetup(setup).catch(() => {});
 }
 
 // The live twin's source, for the setup: only the signals mapped are followed.
@@ -376,360 +404,153 @@ function twinSource() {
     const mapped = state.rows.filter((row) => row.target);
     const signal = (row, key) => ({ [key]: row.signal.id, name: row.name, role: row.role, unit: row.signal.unit ?? '' });
     if (state.source.kind === 'file') {
-        if (state.log.speed === 'follow' && state.log.path) return { kind: 'file', path: state.log.path };
-        return { kind: 'recording', content: state.log.content, speed: state.log.speed === 'Infinity' ? Infinity : Number(state.log.speed === 'follow' ? 600 : state.log.speed) };
+        // Another logger's table is read with the roles the mapping gave its columns.
+        const logger = state.log.logger ? { ...state.log.logger.base, signals: mapped.map((row) => ({ column: state.log.logger.columns[row.signal.id], name: row.signal.id, role: row.role, unit: row.signal.unit ?? '' })) } : undefined;
+        if (state.log.speed === 'follow' && state.log.path) return { kind: 'file', path: state.log.path, logger };
+        return { kind: 'recording', content: state.log.content, speed: state.log.speed === 'Infinity' ? Infinity : Number(state.log.speed === 'follow' ? 600 : state.log.speed), logger };
     }
     if (state.source.kind === 'mqtt') return { kind: 'mqtt', url: state.source.url, signals: mapped.map((row) => signal(row, 'topic')) };
     if (state.source.kind === 'opcua') return { kind: 'opcua', url: state.source.url, security: state.source.security, trustServer: state.source.trustServer, signals: mapped.map((row) => signal(row, 'nodeId')) };
     return { kind: 'push', url: 'the push service', signals: mapped.map((row) => signal(row, 'signal')) };
 }
 
-$('#openRoom').addEventListener('click', async () => {
-    const setup = currentSetup();
+// What the twin runs with: the setup's mapping and conversions, the tolerances read from the first readings, and the twin's settings
+// (the setup's, or the defaults: an hour's window moving every ten minutes, an hour's forecast, a warning at a quarter of the first
+// measured signal's tolerance).
+function buildRun(setup) {
     const { mapping, conversions } = twinSessionMapping(setup);
-    // A data log's signals keep their own names; the twin's names are the setup's.
-    const units = Object.fromEntries(state.rows.filter((row) => row.target).map((row) => [row.name, row.target.unit]));
+    const rows = state.rows.filter((row) => row.target);
+    const units = Object.fromEntries(rows.map((row) => [row.name, row.target.unit]));
     for (const [name, conversion] of Object.entries(conversions)) conversion.unit = units[name];
-    // The tolerance of each measured signal from its first readings, converted; the drift warning a quarter of it a move.
-    const tolerances = Object.fromEntries(state.rows.filter((row) => row.target && row.role === 'output').map((row) => {
+    const tolerances = Object.fromEntries(rows.filter((row) => row.role === 'output').map((row) => {
         const conversion = conversions[row.name];
         const readings = (row.signal.values ?? []).map((value) => ({ value: conversion ? value * conversion.scale + conversion.offset : value }));
         return [row.name, readings.length > 1 ? defaultTolerance(readings) : 1];
     }));
-    const timeStep = state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations, mapping) : 60;
-    const settings = {
-        document: state.context.document, mapping, window: setup.live.window, stride: setup.live.stride, horizon: setup.live.horizon, timeStep,
-        tolerances, corrections: {}, conversions, alertAt: 0.25
+    const first = mapping.find((entry) => entry.role === 'output');
+    const saved = { ...liveDefaults, ...setup.live };
+    const live = {
+        ...saved,
+        timeStep: saved.timeStep ?? (state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations.map((observation) => ({ ...observation, signal: rows.find((row) => row.signal.id === observation.signal)?.name ?? observation.signal })), mapping) : 60),
+        alert: saved.alert ?? 0.25 * tolerances[first.signal]
     };
-    // A data log's own names are those the readings carry; a live source's are the twin's.
-    if (state.source.kind === 'file') {
-        settings.mapping = mapping.map((entry) => ({ ...entry, signal: state.rows.find((row) => row.name === entry.signal).signal.id }));
-        settings.conversions = Object.fromEntries(Object.entries(conversions).map(([name, conversion]) => [state.rows.find((row) => row.name === name).signal.id, conversion]));
-        settings.tolerances = Object.fromEntries(Object.entries(tolerances).map(([name, tolerance]) => [state.rows.find((row) => row.name === name).signal.id, tolerance]));
+    const estimating = Object.values(live.corrections).some((correction) => correction.estimate);
+    const trackable = estimating ? tunableIds(state.context.document).filter((id) => !live.untracked.includes(id)) : [];
+    let settings = {
+        document: state.context.document, mapping, window: live.window, stride: live.stride, horizon: live.horizon, timeStep: live.timeStep,
+        tolerances, corrections: structuredClone(live.corrections), conversions,
+        estimator: { members: live.members, parameters: trackable, drift: Object.fromEntries(Object.entries(live.drift ?? {}).map(([id, value]) => [Number(id), value])) },
+        alertAt: live.alert > 0 && tolerances[first.signal] > 0 ? live.alert / tolerances[first.signal] : null
+    };
+    // A log's readings carry its own names for its signals (another logger's columns, the names they were read under); every other
+    // source's readings carry the twin's.
+    const idOf = (name) => state.rows.find((row) => row.name === name).signal.id;
+    const byId = state.source.kind === 'file';
+    if (byId) {
+        const rename = (object) => Object.fromEntries(Object.entries(object).map(([name, value]) => [idOf(name), value]));
+        settings = { ...settings, mapping: mapping.map((entry) => ({ ...entry, signal: idOf(entry.signal) })), conversions: rename(conversions), tolerances: rename(tolerances), corrections: rename(settings.corrections) };
     }
+    const names = Object.fromEntries(rows.map((row) => [byId ? row.signal.id : row.name, row.name]));
+    const sourceLabel = state.source.kind === 'file' ? `${state.log.fileName}${state.log.speed === 'follow' ? ', followed as it grows' : `, played at ${state.log.speed === 'Infinity' ? 'full speed' : `${state.log.speed}×`}`}` : state.source.url ?? 'the push service';
+    return { settings, source: twinSource(), sourceLabel, logFileName: state.log?.fileName ?? '', nameOf: (signal) => names[signal] ?? signal, layout: setup.layout, live };
+}
+
+const tunableIds = (model) => [
+    ...(model.sharedParameters ?? []), ...model.edges.flatMap((edge) => edge.parameters ?? []),
+    ...model.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+].filter((parameter) => parameter.tuning && !parameter.sharedParameterId).map((parameter) => parameter.id);
+
+async function startTwin(carried = null) {
+    const setup = currentSetup();
+    let run;
     try {
-        await api.saveSetup(setup);
-        state.memory = rememberMapping(state.memory, state.rows.filter((row) => row.target).map((row) => ({ name: row.signal.name, role: row.role, target: row.target, conversion: row.conversion })), state.context.document);
-        await api.memory.save(state.memory).catch(() => {});
-        openRoom(settings);
-        await api.liveTwin.start(settings, twinSource(), state.context.projectPath ?? null);
+        run = { ...buildRun(setup), carried };
     } catch (error) {
         $('#setupStatus').className = 'status warning';
         $('#setupStatus').textContent = `The twin could not start: ${cleanError(error)}`;
-        closeRoom();
-    }
-});
-
-// ---- The control room ----------------------------------------------------------------------------------------------------------
-function openRoom(settings) {
-    $('#setup').hidden = true;
-    $('#room').hidden = false;
-    const measured = settings.mapping.filter((entry) => entry.role === 'output');
-    const label = (entry) => state.candidates.find((candidate) => candidate.kind === 'state' && candidate.id === entry.stateId);
-    const parameter = (entry) => state.candidates.find((candidate) => candidate.kind === 'parameter' && candidate.id === entry.parameterId);
-    state.twin = {
-        settings, running: true, cycles: [], events: [], drift: 'good', stats: { skipped: 0, recoveries: 0 },
-        tiles: measured.map((entry) => ({ signal: entry.signal, target: label(entry), measured: new Map(), tolerance: settings.tolerances[entry.signal] })),
-        inputs: settings.mapping.filter((entry) => entry.role === 'input').map((entry) => ({ signal: entry.signal, target: parameter(entry), readings: new Map() })),
-        inferred: new Map(),    // stateId → { target, history: Map(time → value) }
-        tracked: new Map()      // parameterId → { name, unit, history: Map(time → value) }
-    };
-    $('#tiles').replaceChildren(...state.twin.tiles.map((tile) => {
-        const element = document.createElement('section');
-        element.className = 'tile';
-        element.dataset.signal = tile.signal;
-        element.innerHTML = '<header><div><strong></strong> <small></small></div><span class="value">—</span></header><div class="plot"></div><div class="facts"></div>';
-        $('strong', element).textContent = tile.target?.label ?? tile.signal;
-        $('small', element).textContent = tile.signal;
-        tile.element = element;
-        return element;
-    }));
-    $('#healthTwin').className = 'healthItem';
-    $('#healthTwin').textContent = 'Starting the twin…';
-    $('#healthSource').className = 'healthItem';
-    $('#healthSource').textContent = state.source.kind === 'file' ? `${state.log.fileName}${state.log.speed === 'follow' ? ', followed as it grows' : `, played at ${state.log.speed === 'Infinity' ? 'full speed' : `${state.log.speed}×`}`}` : state.source.url ?? 'the push service';
-    $('#healthDrift').textContent = '';
-    $('#roomStatus').textContent = '';
-    renderInputs();
-    $('#inferredRows').replaceChildren(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Waiting for the twin\'s first move.' }));
-    $('#eventsList').replaceChildren();
-    addEvent('info', 'The twin started', $('#healthSource').textContent);
-    reportStatus();
-}
-
-// What a person in the room looks at from across it: the twin's status, also shown on the project window's toolbar chip.
-function reportStatus() {
-    const twin = state.twin;
-    api.reportStatus?.({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad' }).catch(() => {});
-}
-
-const clock = (date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-const dataTime = (seconds) => `at ${Number((seconds / 3600).toFixed(2))} h of data`;
-
-// One list, timed, newest first: warnings, the twin falling behind, the engine restarted, what the source says, refits, the end.
-function addEvent(kind, text, detail = '', time = null) {
-    const twin = state.twin;
-    if (!twin) return;
-    const event = { at: new Date(), kind, text, detail: [detail, time === null ? '' : dataTime(time)].filter(Boolean).join(' · ') };
-    twin.events.unshift(event);
-    twin.events.length = Math.min(twin.events.length, 500);
-    const item = document.createElement('li');
-    item.className = kind;
-    const body = document.createElement('div');
-    body.append(text);
-    if (event.detail) body.append(Object.assign(document.createElement('small'), { textContent: event.detail }));
-    item.append(Object.assign(document.createElement('time'), { textContent: clock(event.at), dateTime: event.at.toISOString() }), body);
-    $('#eventsList').prepend(item);
-    while ($('#eventsList').children.length > 500) $('#eventsList').lastElementChild.remove();
-}
-
-// The events a move brings: the twin's first move, the drift's state changing, moves skipped to keep up, the engine restarted, a
-// refit applied.
-function cycleEvents(cycle, stats) {
-    const twin = state.twin;
-    if (twin.cycles.length === 1) addEvent('good', 'The twin is live: its first move is made', '', cycle.now);
-    const trend = cycle.trend ?? {};
-    const drift = trend.alarm ? 'bad' : trend.direction && trend.direction !== 'none' ? 'lean' : 'good';
-    if (drift !== twin.drift) {
-        const tile = twin.tiles.find((candidate) => candidate.signal === trend.signal);
-        const name = tile?.target?.label ?? trend.signal;
-        const unit = tile?.target?.unit ? ` ${tile.target.unit}` : '';
-        const jumps = `the model is put right by ${shown(Math.abs(trend.mean))}${unit} a move on average`;
-        if (drift === 'bad') addEvent('bad', `${name} is drifting past the warning`, `${jumps}; the warning is ${shown(twin.settings.alertAt * (tile?.tolerance ?? 0))}${unit}`, cycle.now);
-        else if (drift === 'lean') addEvent('lean', `${name} is leaning ${trend.direction} the readings`, jumps, cycle.now);
-        else addEvent('good', 'Back in step with the readings', '', cycle.now);
-        twin.drift = drift;
-    }
-    if (stats.skipped > twin.stats.skipped) addEvent('lean', `The twin fell behind the data, and skipped ${stats.skipped - twin.stats.skipped} move${stats.skipped - twin.stats.skipped === 1 ? '' : 's'} to keep up`, '', cycle.now);
-    if (stats.recoveries > twin.stats.recoveries) addEvent('lean', 'The engine stopped, and was started again from the last move', '', cycle.now);
-    if (cycle.refit) addEvent('info', 'A refit was applied', '', cycle.now);
-    twin.stats = { skipped: stats.skipped ?? 0, recoveries: stats.recoveries ?? 0 };
-}
-
-const plotLayout = (extra = {}) => ({
-    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#9fb2bb', size: 11 }, showlegend: false,
-    xaxis: { gridcolor: '#1c2c38', zeroline: false }, yaxis: { gridcolor: '#1c2c38', zeroline: false }, ...extra
-});
-
-// The inputs: each as a step line of what it was set to, and when.
-function renderInputs() {
-    const twin = state.twin;
-    if (!twin.inputs.length) {
-        $('#inputRows').replaceChildren(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'No input is mapped: the model runs on its own parameter values.' }));
         return;
     }
-    $('#inputRows').replaceChildren(...twin.inputs.map((input) => {
-        const row = document.createElement('div');
-        row.className = 'inputRow';
-        row.dataset.signal = input.signal;
-        const name = document.createElement('div');
-        name.append(Object.assign(document.createElement('strong'), { textContent: input.target?.label.replace(/^Shared · /, '') ?? input.signal }),
-            Object.assign(document.createElement('small'), { className: 'latest', textContent: '—' }));
-        input.element = row;
-        row.append(name, Object.assign(document.createElement('div'), { className: 'plot' }));
-        return row;
-    }));
-}
-
-function drawInputs(cycle) {
-    for (const input of state.twin.inputs) {
-        for (const reading of cycle.inputChanges?.[input.signal] ?? []) input.readings.set(reading.time, reading.value);
-        const readings = [...input.readings].sort((a, b) => a[0] - b[0]);
-        const unit = input.target?.unit ? ` ${input.target.unit}` : '';
-        $('.latest', input.element).textContent = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
-        if (!globalThis.Plotly || !readings.length) continue;
-        // The last value held up to now, so a step is drawn to the present.
-        const x = [...readings.map(([time]) => time / 3600), cycle.now / 3600];
-        const y = [...readings.map(([, value]) => value), readings.at(-1)[1]];
-        globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
-            plotLayout({ margin: { l: 40, r: 6, t: 4, b: 16 }, xaxis: { gridcolor: '#1c2c38', zeroline: false, showticklabels: false } }), { displayModeBar: false, responsive: true, staticPlot: true });
+    await saveSetup(setup);
+    openRoom(run);
+    try {
+        await api.liveTwin.start(run.settings, run.source, state.context.projectPath ?? null);
+    } catch (error) {
+        $('#setupStatus').className = 'status warning';
+        $('#setupStatus').textContent = `The twin could not start: ${cleanError(error)}`;
+        abandonRoom();
     }
 }
 
-const valueAt = (series, time) => {
-    if (!series.length) return NaN;
-    if (time <= series[0].time) return series[0].value;
-    for (let index = 1; index < series.length; index += 1) {
-        if (series[index].time >= time) {
-            const [a, b] = [series[index - 1], series[index]];
-            return a.value + (b.value - a.value) * ((time - a.time) / (b.time - a.time || 1));
+$('#openRoom').addEventListener('click', async () => {
+    state.memory = rememberMapping(state.memory, state.rows.filter((row) => row.target).map((row) => ({ name: row.signal.name, role: row.role, target: row.target, conversion: row.conversion })), state.context.document);
+    await api.memory.save(state.memory).catch(() => {});
+    await startTwin();
+});
+
+// ---- The control room and the engineer's view ------------------------------------------------------------------------------------
+initRoom({
+    api,
+    candidates: () => state.candidates,
+    saveLayout: (layout) => saveSetup(normalizeTwinSetup({ ...state.saved, layout: { ...layout, ...(state.saved?.layout?.bounds ? { bounds: state.saved.layout.bounds } : {}) } })),
+    saveRecord: (record) => saveSetup(normalizeTwinSetup({ ...state.saved, record })),
+    backToSetup: () => closeRoom(),
+    askProject: (action, payload) => api.askProject(action, payload),
+    reportStatus: (status) => api.reportStatus?.(status).catch(() => {}),
+    // A recording the twin made, offered in the setup as a log to play again.
+    replayRecording: async (path) => {
+        try {
+            const content = await api.liveTwin.readRecording(path);
+            await api.liveTwin.stop();
+            state.carry = new Map(state.rows.filter((row) => row.target).map((row) => [row.name, row]));
+            closeRoom();
+            chooseSourceTile('file');
+            offerLog(content, { fileName: path.split(/[\\/]/).pop(), path, speed: $('#fileSpeed').value });
+        } catch (error) {
+            $('#roomStatus').textContent = `The recording could not be opened: ${cleanError(error)}`;
         }
     }
-    return series.at(-1).value;
-};
-
-// How a quantity has moved over the last hour of data: rising or falling when it moved by more than half a percent of itself (or of
-// its own range, for one near zero), else steady.
-function trendOf(history) {
-    const points = [...history].sort((a, b) => a[0] - b[0]);
-    if (points.length < 2) return { word: '—', kind: '' };
-    const [latestTime, latest] = points.at(-1);
-    const [earlierTime, earlier] = points.find(([time]) => time >= latestTime - 3600 - 1e-9);
-    if (latestTime - earlierTime < 1e-9) return { word: '—', kind: '' };
-    const perHour = (latest - earlier) / ((latestTime - earlierTime) / 3600);
-    const values = points.map(([, value]) => value);
-    const scale = Math.abs(latest) > 1e-12 ? Math.abs(latest) : Math.max(...values) - Math.min(...values);
-    if (!(scale > 0) || Math.abs(perHour) <= 0.005 * scale) return { word: 'steady', kind: 'steady', perHour };
-    return { word: perHour > 0 ? 'rising' : 'falling', kind: perHour > 0 ? 'rising' : 'falling', perHour };
-}
-
-// A parameter's name and unit, wherever in the model it is.
-function parameterInfo(parameterId) {
-    const model = state.context.document;
-    const all = [
-        ...(model.sharedParameters ?? []),
-        ...(model.edges ?? []).flatMap((edge) => edge.parameters ?? []),
-        ...(model.nodes ?? []).flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
-    ];
-    const found = all.find((candidate) => candidate.id === parameterId);
-    return { name: found?.name ?? `Parameter ${parameterId}`, unit: found?.unit ?? '' };
-}
-
-// What the twin infers: each state no sensor measures, at now (its spread when the estimator runs), and the parameters it tracks.
-function drawInferred(cycle) {
-    const twin = state.twin;
-    for (const [key, series] of Object.entries(cycle.inferred ?? {})) {
-        const stateId = Number(key);
-        if (!twin.inferred.has(stateId)) twin.inferred.set(stateId, { target: state.candidates.find((candidate) => candidate.kind === 'state' && candidate.id === stateId), history: new Map() });
-        const entry = twin.inferred.get(stateId);
-        for (const point of series) if (point.time <= cycle.now + 1e-9) entry.history.set(point.time, point.value);
-        entry.history.set(cycle.now, valueAt(series, cycle.now));
-        entry.spread = cycle.estimate?.states?.find((candidate) => candidate.stateId === stateId)?.spread ?? null;
-    }
-    for (const parameter of cycle.estimate?.parameters ?? []) {
-        if (!twin.tracked.has(parameter.parameterId)) twin.tracked.set(parameter.parameterId, { ...parameterInfo(parameter.parameterId), history: new Map() });
-        const entry = twin.tracked.get(parameter.parameterId);
-        entry.history.set(cycle.anchor, parameter.mean);
-        entry.spread = parameter.spread;
-    }
-    const row = ({ name, kind, unit, history, spread }) => {
-        const element = document.createElement('div');
-        element.className = 'inferredRow';
-        element.setAttribute('role', 'row');
-        const points = [...history].sort((a, b) => a[0] - b[0]);
-        const latest = points.at(-1)?.[1];
-        const trend = trendOf(history);
-        const units = unit ? ` ${unit}` : '';
-        element.append(
-            Object.assign(document.createElement('div'), { innerHTML: '<strong></strong><small></small>' }),
-            Object.assign(document.createElement('div'), { className: 'number' }),
-            Object.assign(document.createElement('span'), { className: `trend ${trend.kind}`, textContent: trend.word, title: Number.isFinite(trend.perHour) ? `${trend.perHour > 0 ? '+' : ''}${shown(trend.perHour)}${units} an hour` : '' }),
-            sparkline(points.slice(-120).map(([, value]) => value))
-        );
-        $('strong', element).textContent = name;
-        $('small', element).textContent = kind;
-        $('.number', element).textContent = `${shown(latest)}${units}`;
-        if (Number.isFinite(spread) && spread > 0) $('.number', element).append(Object.assign(document.createElement('small'), { textContent: ` ±${shown(spread)}` }));
-        return element;
-    };
-    const rows = [
-        ...[...twin.tracked.values()].map((entry) => row({ name: entry.name, kind: 'a parameter, tracked', unit: entry.unit, history: entry.history, spread: entry.spread })),
-        ...[...twin.inferred.values()].map((entry) => row({ name: entry.target?.label ?? 'A state', kind: entry.spread === null ? 'carried by the model' : 'estimated', unit: entry.target?.unit ?? '', history: entry.history, spread: entry.spread }))
-    ];
-    $('#inferredRows').replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Every state is measured: there is nothing left to infer.' })]));
-}
-
-function closeRoom() {
-    $('#room').hidden = true;
-    $('#setup').hidden = false;
-}
-
-function drawTile(tile, cycle) {
-    const rows = cycle.window[tile.signal] ?? [];
-    for (const row of rows) tile.measured.set(row.time, row.measured);
-    const measured = [...tile.measured].sort((a, b) => a[0] - b[0]);
-    const latest = measured.at(-1)?.[1];
-    const unit = tile.target?.unit ? ` ${tile.target.unit}` : '';
-    $('.value', tile.element).textContent = `${shown(latest)}${unit}`;
-    const jump = cycle.jumps?.[tile.signal]?.jump;
-    const leaning = cycle.trend?.signal === tile.signal && cycle.trend.direction !== 'none';
-    const alarm = cycle.trend?.signal === tile.signal && cycle.trend.alarm;
-    tile.element.className = `tile ${alarm ? 'bad' : leaning || (Number.isFinite(jump) && Math.abs(jump) > tile.tolerance) ? 'lean' : 'good'}`;
-    $('.facts', tile.element).textContent = '';
-    for (const fact of [
-        `last jump ${Number.isFinite(jump) ? `${shown(jump)}${unit}` : '—'}`,
-        `tolerance ±${shown(tile.tolerance)}${unit}`,
-        ...(alarm ? ['drifting past the warning'] : leaning ? [`leaning ${cycle.trend.direction} the readings`] : [])
-    ]) $('.facts', tile.element).append(Object.assign(document.createElement('span'), { textContent: fact }));
-    if (!globalThis.Plotly) return;
-    const hours = (points) => points.map((point) => point.time / 3600);
-    const window = rows.map((row) => ({ time: row.time, value: row.simulated }));
-    const forecast = cycle.forecast?.[tile.signal] ?? [];
-    globalThis.Plotly.react($('.plot', tile.element), [
-        { type: 'scatter', mode: 'markers', name: 'Measured', x: measured.map(([time]) => time / 3600), y: measured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
-        { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' } },
-        { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(forecast), y: forecast.map((point) => point.value), line: { width: 2, dash: 'dash', color: '#4b8fe2' } }
-    ], {
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#9fb2bb', size: 11 }, margin: { l: 46, r: 10, t: 6, b: 28 }, showlegend: false,
-        xaxis: { gridcolor: '#1c2c38', zeroline: false, title: { text: 'hours', standoff: 2 } }, yaxis: { gridcolor: '#1c2c38', zeroline: false },
-        shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: cycle.anchor / 3600, x1: cycle.now / 3600, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
-    }, { displayModeBar: false, responsive: true });
-}
-
-api.liveTwin.onEvent((update) => {
-    const twin = state.twin;
-    if (!twin) return;
-    if (update.type === 'cycle') {
-        twin.cycles.push(update.cycle);
-        const { stats, cycle } = update;
-        $('#healthTwin').className = 'healthItem good';
-        $('#healthTwin').textContent = `Live · ${stats.cycles} move${stats.cycles === 1 ? '' : 's'}${stats.lagSeconds > 0 ? ` · ${Math.round(stats.lagSeconds / 60)} min behind` : ''}`;
-        const alarm = cycle.trend?.alarm;
-        $('#healthDrift').className = `healthItem ${alarm ? 'bad' : cycle.trend?.direction !== 'none' ? 'lean' : 'good'}`;
-        $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : cycle.trend?.direction !== 'none' ? 'Leaning' : 'In step';
-        for (const tile of twin.tiles) drawTile(tile, cycle);
-        drawInputs(cycle);
-        drawInferred(cycle);
-        cycleEvents(cycle, stats);
-        reportStatus();
-    } else if (update.type === 'note') {
-        $('#roomStatus').textContent = update.message;
-        addEvent('info', update.message);
-    } else if (update.type === 'ended') {
-        twin.running = false;
-        $('#healthTwin').className = 'healthItem';
-        $('#healthTwin').textContent = update.reason === 'played' ? `The whole log has been played: ${twin.cycles.length} moves` : `Stopped after ${twin.cycles.length} moves`;
-        addEvent('info', update.reason === 'played' ? 'The whole log has been played' : 'The twin was stopped', `${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}`, twin.cycles.at(-1)?.now ?? null);
-        if (update.recordedTo) {
-            $('#roomStatus').textContent = `What the source sent is recorded in ${update.recordedTo}.`;
-            addEvent('info', 'What the source sent is recorded', update.recordedTo);
-        }
-        if (update.recordingLate) addEvent('lean', `${update.recordingLate} reading${update.recordingLate === 1 ? '' : 's'} came after later ones`, 'they reached the twin, but a log only goes forward, so the recording could not hold them');
-        reportStatus();
-    } else if (update.type === 'error') {
-        twin.running = false;
-        $('#healthTwin').className = 'healthItem bad';
-        $('#healthTwin').textContent = `Stopped: ${update.message}`;
-        addEvent('bad', 'The twin stopped', update.message);
-        reportStatus();
+});
+initEngineer({
+    api,
+    states: () => state.candidates.filter((candidate) => candidate.kind === 'state'),
+    askProject: (action, payload) => api.askProject(action, payload),
+    saveLive: (partial) => saveSetup(normalizeTwinSetup({ ...state.saved, live: { ...(state.saved?.live ?? {}), ...partial } })),
+    // The twin started again with the engineer's settings, kept with the setup.
+    restartWith: async (live) => {
+        const twin = currentTwin();
+        const { window, stride, horizon, timeStep, corrections, members, untracked, drift } = live;
+        state.saved = normalizeTwinSetup({ ...state.saved, live: { ...(state.saved?.live ?? {}), window, stride, horizon, timeStep, corrections, members, untracked, drift } });
+        await api.liveTwin.stop();
+        const estimated = Object.entries(corrections).filter(([, correction]) => correction.estimate).map(([name]) => name);
+        await startTwin({
+            events: twin?.events ?? [],
+            said: ['The twin was started again with the engineer\'s settings', `window ${window / 60} min, moving every ${stride / 60} min, forecast ${horizon / 60} min, time step ${timeStep} s${estimated.length ? `; estimating ${estimated.join(', ')}` : ''}`]
+        });
     }
 });
-
-$('#roomStop').addEventListener('click', async () => {
-    await api.liveTwin.stop();
-});
-$('#roomSetup').addEventListener('click', async () => {
-    if (state.twin?.running && !window.confirm('Go back to the setup? The twin stops.')) return;
-    await api.liveTwin.stop();
-    state.twin = null;
-    reportStatus();
-    closeRoom();
-});
+api.liveTwin.onEvent((update) => handleEvent(update));
 
 // ---- The window's context ------------------------------------------------------------------------------------------------------
 api.onContext(async (context) => {
     state.context = context;
+    state.saved = normalizeTwinSetup(context.setup) ?? state.saved;
     state.memory = await api.memory.get().catch(() => ({}));
     renderModel();
-    if (state.twin) return;
+    if (currentTwin()) return;
+    // A log handed over by the tuning card's replay: chosen as the source.
+    if (context.log?.content) {
+        chooseSourceTile('file');
+        offerLog(context.log.content, { fileName: context.log.fileName || 'the log', path: context.log.path ?? null, speed: $('#fileSpeed').value });
+        return;
+    }
     // A model opened again (a demonstration's, or the project changed) with readings already chosen: they are matched again.
-    if (state.signals.length && !state.twin) {
+    if (state.signals.length) {
         offerSignals(state.signals);
         if (state.log) sourceStatus(`${state.log.header.signals.length} signals in ${state.log.fileName}, matched to ${context.projectName || 'the model'}.`, 'good');
         return;
     }
     // A setup kept with the project: its source is chosen again, and its mapping comes back when the source's signals are found.
-    const saved = context.setup;
+    const saved = state.saved;
     if (saved?.source) {
         chooseSourceTile(saved.source.kind);
         if (saved.source.kind === 'mqtt') $('#mqttUrl').value = saved.source.url;
@@ -740,3 +561,27 @@ api.onContext(async (context) => {
         sourceStatus(saved.source.kind === 'file' ? `Last time this twin read ${saved.source.fileName}: choose it again, and its mapping comes back.` : 'Set up before: find the signals again, and the mapping comes back.');
     }
 });
+
+// The project's model changed in the project window: the setup shows it, and a running twin offers it to the engineer.
+api.onModelChanged((model) => {
+    if (!state.context) return;
+    state.context = { ...state.context, document: model };
+    renderModel();
+    if (currentTwin()?.running) modelChanged(model);
+    else if (state.signals.length && $('#room').hidden) offerSignals(state.signals);
+});
+
+// For the interaction tests: the chosen log's speed set to one the list does not offer, and the running twin's view.
+window.__debugTwinWindow = {
+    setSpeed: (speed) => { if (state.log) state.log.speed = String(speed); },
+    twin: () => currentTwin(),
+    // A log handed over as text, as if chosen.
+    offerLog: (content, fileName) => {
+        chooseSourceTile('file');
+        offerLog(content, { fileName, speed: $('#fileSpeed').value });
+    },
+    summary: () => {
+        const twin = currentTwin();
+        return twin ? { startedAt: twin.startedAt.toISOString(), running: twin.running, ended: twin.ended ?? null, moves: twin.cycles.length, last: structuredClone(twin.cycles.at(-1) ?? null), sandbox: Boolean(twin.sandbox), recordedTo: twin.recordedTo ?? null } : null;
+    }
+};

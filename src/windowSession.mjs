@@ -108,30 +108,40 @@ export class WindowSession {
         this.estimator = { members, seed: estimator.seed ?? 1, drift: estimator.drift ?? {}, spread: estimator.spread ?? {}, parameters: [...new Set(estimator.parameters ?? [])] };
         Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections });
         this.estimated = this.outputs.filter((entry) => corrections[entry.signal]?.estimate);
-        // Parameters estimated with the states: made live in this twin's own copy of the model, within their tuning bounds, so each
-        // member of the ensemble can be given its own value.
-        this.estimatedParameters = [];
-        if (this.estimator.parameters.length) {
-            if (!this.estimated.length) throw new Error('A parameter is estimated from readings: choose "estimate" for at least one measured signal.');
-            this.document = structuredClone(document);
-            const parameters = [
-                ...(this.document.sharedParameters ?? []),
-                ...this.document.edges.flatMap((edge) => edge.parameters ?? []),
-                ...this.document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
-            ];
-            for (const parameterId of this.estimator.parameters) {
-                const parameter = parameters.find((candidate) => candidate.id === parameterId);
-                if (!parameter) throw new Error(`Parameter ${parameterId} is not in the model.`);
-                if (parameter.sharedParameterId) throw new Error(`${parameter.name} takes its value from a shared parameter: estimate that one.`);
-                if (!parameter.tuning) throw new Error(`Mark ${parameter.name} tunable, with bounds, to estimate it.`);
-                parameter.mode = 'live';
-                parameter.control = { minimum: parameter.tuning.minimum, maximum: parameter.tuning.maximum, step: (parameter.tuning.maximum - parameter.tuning.minimum) / 1000 };
-                this.estimatedParameters.push({ parameterId, name: parameter.name, value: parameter.value, bounds: { ...parameter.tuning } });
-            }
-        }
-        // The states no sensor measures are reported too, after the measured ones, so a move says what the twin infers of them.
-        this.inferredStateIds = replayTargets(this.document).states.map((state) => state.stateId).filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId));
+        if (this.estimator.parameters.length && !this.estimated.length) throw new Error('A parameter is estimated from readings: choose "estimate" for at least one measured signal.');
+        this.#useModel(document);
         for (const entry of [...this.inputs, ...this.outputs]) this.#readings.set(entry.signal, new Map());
+    }
+
+    // The model this twin runs: its own copy when parameters are estimated with the states, those made live within their tuning
+    // bounds so each member of the ensemble can be given its own value; and the states no sensor measures, reported after the
+    // measured ones, so a move says what the twin infers of them.
+    #useModel(document) {
+        const prepared = this.estimator.parameters.length ? structuredClone(document) : document;
+        const estimatedParameters = [];
+        const parameters = [
+            ...(prepared.sharedParameters ?? []),
+            ...prepared.edges.flatMap((edge) => edge.parameters ?? []),
+            ...prepared.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+        ];
+        for (const parameterId of this.estimator.parameters) {
+            const parameter = parameters.find((candidate) => candidate.id === parameterId);
+            if (!parameter) throw new Error(`Parameter ${parameterId} is not in the model.`);
+            if (parameter.sharedParameterId) throw new Error(`${parameter.name} takes its value from a shared parameter: estimate that one.`);
+            if (!parameter.tuning) throw new Error(`Mark ${parameter.name} tunable, with bounds, to estimate it.`);
+            parameter.mode = 'live';
+            parameter.control = { minimum: parameter.tuning.minimum, maximum: parameter.tuning.maximum, step: (parameter.tuning.maximum - parameter.tuning.minimum) / 1000 };
+            estimatedParameters.push({ parameterId, name: parameter.name, value: parameter.value, bounds: { ...parameter.tuning } });
+        }
+        this.document = prepared;
+        this.estimatedParameters = estimatedParameters;
+        this.inferredStateIds = replayTargets(prepared).states.map((state) => state.stateId).filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId));
+    }
+
+    // The warning, changed while the twin runs: from the next move on (a multiple of the first measured signal's tolerance, or null).
+    setAlert(alertAt) {
+        if (alertAt !== null && !(alertAt > 0)) throw new Error('The warning is a positive multiple of the tolerance, or none.');
+        this.alertAt = alertAt;
     }
 
     get engine() { return this.#engine; }
@@ -523,8 +533,10 @@ export class WindowSession {
     #catchUp(index, previous) {
         const expected = previous ? previous.index + 1 : 0;
         if (index === expected) return [];
+        // A refit or a model change since that move restarted the twin from a state of its own, which is where to run from.
+        const logged = this.#restartFrom ?? previous?.restored;
         const from = previous
-            ? { type: 'restoreState', time: previous.restored.time, values: previous.restored.values, providerStates: previous.restored.providerStates }
+            ? { type: 'restoreState', time: logged.time, values: logged.values, providerStates: logged.providerStates }
             : { type: 'restoreCheckpoint', time: 0, overrides: this.outputs.flatMap((entry) => {
                 const measured = this.#measurementAt(entry.signal, 0, this.#anchor(index) + this.window);
                 return measured === null ? [] : [{ stateId: entry.stateId, value: measured }];
@@ -671,6 +683,59 @@ export class WindowSession {
         }).catch((error) => { refused = error; });
         await this.idle();
         if (refused) throw refused;
+    }
+
+    // A changed model (docs/proposals/controlRoom.md, "The engineer's view, and changing the model"), applied from the latest move:
+    // the twin starts again from that move's anchor with it, each state that is still in the model carried across by its id, a new
+    // one at its initial value, and runs on the real inputs to where it has got to. A mapped state or input parameter the change
+    // removed, or a tracked parameter no longer tunable, is refused with the twin going on as it was: the mapping must be fixed
+    // in the setup first, rather than part of the change applied. The estimator, if it runs, starts its ensemble again at the next
+    // move, since the states it spreads may have changed. Returns what was carried: { carried, added, removed } state ids.
+    async applyModel(document) {
+        let refused = null;
+        let outcome = null;
+        this.#queue = this.#queue.then(async () => {
+            const target = this.cycles.at(-1);
+            if (!target) throw new ReplayError('The twin has made no move to apply a change from yet.');
+            const states = new Map(document.nodes.flatMap((node) => (node.states ?? []).map((state) => [state.id, state])));
+            const shared = new Set((document.sharedParameters ?? []).map((parameter) => parameter.id));
+            const lost = [
+                ...this.outputs.filter((entry) => !states.has(entry.stateId)).map((entry) => `${entry.signal} is compared with a state the change removes`),
+                ...this.inputs.filter((entry) => !shared.has(entry.parameterId)).map((entry) => `${entry.signal} drives a shared parameter the change removes`)
+            ];
+            if (lost.length) throw new ReplayError(`The change was not applied: ${lost.join('; ')}. Fix the mapping in the setup first.`);
+            const before = { document: this.document, estimatedParameters: this.estimatedParameters, inferredStateIds: this.inferredStateIds };
+            const oldIds = this.#engine.stateIds;
+            const providerStates = target.restored.providerStates.filter((entry) => document.nodes.some((node) => node.id === entry.nodeId));
+            try {
+                this.#useModel(document);
+                await this.#engine?.close().catch(() => {});
+                await this.#startEngine();
+                const newIds = this.#engine.stateIds;
+                const values = newIds.map((stateId) => {
+                    const position = oldIds.indexOf(stateId);
+                    return position >= 0 ? target.restored.values[position] : Number(states.get(stateId)?.initialValue ?? 0);
+                });
+                const from = { time: target.restored.time, values, providerStates };
+                await this.#engine.run([
+                    ...this.#inputCommands(target.now),
+                    { type: 'restoreState', time: from.time, values, providerStates },
+                    { type: 'advanceTo', time: this.#anchor(this.#nextCycle), takeCheckpoints: true }
+                ]);
+                this.#restartFrom = from;
+                this.#ensemble = null;
+                outcome = { carried: newIds.filter((stateId) => oldIds.includes(stateId)), added: newIds.filter((stateId) => !oldIds.includes(stateId)), removed: oldIds.filter((stateId) => !newIds.includes(stateId)) };
+                this.#refit = { fromCycle: target.index, anchor: target.anchor, states: {}, model: outcome };
+            } catch (error) {
+                // The twin goes on with the model it had.
+                Object.assign(this, before);
+                await this.#restart(this.#nextCycle).catch(() => {});
+                throw error instanceof ReplayError ? error : new ReplayError(`The change was not applied: ${error.message}`);
+            }
+        }).catch((error) => { refused = error; });
+        await this.idle();
+        if (refused) throw refused;
+        return outcome;
     }
 
     // A run, for the engine's ordinary `run`, that does exactly what a cycle did, from the state it logged: to check the cycle on

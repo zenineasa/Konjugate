@@ -13,7 +13,7 @@ import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEd
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection } from './programSourceSection.mjs';
-import { ConnectionsPanel, pushServiceSentence } from './connectionsPanel.mjs';
+import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
@@ -68,7 +68,7 @@ import './phoneSheets.mjs';
 import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle, stabilityGroupWhen } from '../stabilityFindingGroups.mjs';
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
-import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderJumps, renderLiveTwin, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
+import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
@@ -90,6 +90,7 @@ import { detectInstabilityFingerprint, recommendedSubstepFixProposal } from '../
 import { mapColumnsToNodes, parseCsv, suggestSymbol } from '../csvImport.mjs';
 import { looksLikeDataLog, readDataLog } from '../dataLog.mjs';
 import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
+import { formatDataLog } from '../dataLogFormat.mjs';
 import { fitPlanFromLog } from '../dataLogFit.mjs';
 import { draftScenario, modelFingerprint, normalizeScenarios, withScenario } from '../scenarios.mjs';
 import { objectiveTemplate, objectiveTemplateIds, programBindingsProblem } from '../objectiveTemplates.mjs';
@@ -8506,7 +8507,6 @@ let parameterTuningState = null;
 // The data log being replayed, when the card's goal is replaying one: see loadParameterTuningReplay. Null when none is open.
 let parameterTuningReplay = null;
 // The live twin started from the replayed log (see startLiveTwin), or null when none runs.
-let liveTwinState = null;
 
 // Friendly labels only -- NOT the source of truth for which backends exist. That's
 // window.engine.capabilities() (engine/src/main.cpp's "capabilities" command reports
@@ -8646,9 +8646,6 @@ function setParameterTuningGoalUi(goal) {
     $('#parameterTuningFileLabel').textContent = { data: '↥ Choose CSV file', objective: '↥ Add measured data (optional)', replay: '↥ Choose data log' }[goal];
     $('#parameterTuningObjectiveSection').hidden = goal !== 'objective';
     $('#parameterTuningParametersSection').hidden = goal === 'replay';
-    $('#parameterTuningMqtt').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
-    $('#parameterTuningOpcUa').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
-    $('#parameterTuningPush').hidden = goal !== 'replay' || !window.engine.liveTwin?.available || !window.engine.pushService?.available;
     $('#parameterTuningObjectiveStatus').textContent = '';
 }
 
@@ -8905,28 +8902,89 @@ function openParameterTuning() {
     if (activeResult) return;
     hideCards($('#parameterTuning'));
     // A fit still running keeps its card as it was; only a fresh one starts from nothing.
-    if (!parameterTuningRun && !liveTwinState?.running) {
+    if (!parameterTuningRun) {
         resetParameterTuning();
         applySavedTuningSetup();
     }
     $('#parameterTuning').classList.remove('hidden');
 }
 
-// The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md).
-function openTwinWindow() {
+// The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md). From
+// the tuning card's replay, the log it has open goes too, chosen as the twin's source.
+function openTwinWindow(log = null) {
     if (activeResult) return;
     window.engine.liveTwin.openWindow({
-        document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup
+        document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup,
+        ...(log ? { log } : {})
     });
 }
 window.engine.liveTwin?.onSetupChanged?.((setup) => {
-    const normalized = normalizeTwinSetup(setup);
+    // Where the twin's window sits is this window's to keep (it is told when the twin's window closes), not the twin window's.
+    const bounds = projectTwinSetup?.layout?.bounds;
+    const normalized = normalizeTwinSetup(bounds ? { ...setup, layout: { ...(setup?.layout ?? {}), bounds } } : setup);
     if (JSON.stringify(normalized) === JSON.stringify(projectTwinSetup)) return;
     projectTwinSetup = normalized;
     addonDataUnsaved = true;
     updateHistoryControls();
 });
 window.engine.liveTwin?.onOpenConnections?.(() => connectionsPanel?.open());
+// The twin window's place and size when it closed, kept with the twin's setup (a change of place is unsaved work, as a layout is).
+window.engine.liveTwin?.onBoundsChanged?.((bounds) => {
+    if (!projectTwinSetup) return;
+    const next = normalizeTwinSetup({ ...projectTwinSetup, layout: { ...(projectTwinSetup.layout ?? {}), bounds } });
+    if (JSON.stringify(next) === JSON.stringify(projectTwinSetup)) return;
+    projectTwinSetup = next;
+    addonDataUnsaved = true;
+    updateHistoryControls();
+});
+// What the twin window asks of this one (src/twinWindow/): values kept in the model, as an undoable edit here, and the project's
+// scenarios, kept, renamed and deleted. A change to the scenarios is unsaved work in the project, as one made here is.
+const twinRequestHandlers = {
+    keepValues: async (values) => applyFittedValues(values),
+    scenarios: () => {
+        const fingerprint = modelFingerprint(serializeProjectDocument());
+        return projectScenarios.map((scenario) => ({ ...scenario, modelChanged: Boolean(scenario.modelFingerprint && scenario.modelFingerprint !== fingerprint) }));
+    },
+    keepScenario: (draft) => {
+        const scenario = draftScenario({ id: crypto.randomUUID(), ...draft });
+        if (!scenario) return { kept: false };
+        const { scenarios, dropped } = withScenario(projectScenarios, scenario);
+        projectScenarios = scenarios;
+        addonDataUnsaved = true;
+        updateHistoryControls();
+        return { kept: true, name: scenario.name, dropped: dropped?.name ?? null };
+    },
+    renameScenario: ({ id, name }) => {
+        const value = String(name ?? '').trim();
+        if (!value) return false;
+        projectScenarios = projectScenarios.map((item) => (item.id === id ? { ...item, name: value } : item));
+        addonDataUnsaved = true;
+        updateHistoryControls();
+        return true;
+    },
+    deleteScenario: ({ id }) => {
+        projectScenarios = projectScenarios.filter((item) => item.id !== id);
+        addonDataUnsaved = true;
+        updateHistoryControls();
+        return true;
+    }
+};
+window.engine.liveTwin?.onRequest?.(async ({ id, action, payload }) => {
+    try {
+        const handler = twinRequestHandlers[action];
+        if (!handler) throw new Error(`The project window cannot ${action}.`);
+        window.engine.liveTwin.reply(id, await handler(payload));
+    } catch (error) {
+        window.engine.liveTwin.reply(id, null, error.message);
+    }
+});
+// The model, handed to the twin window whenever it changes here (after a moment's quiet), for the twin to apply when asked.
+let twinModelTimer = null;
+documentController.subscribe(() => {
+    if (!window.engine.liveTwin?.modelChanged) return;
+    clearTimeout(twinModelTimer);
+    twinModelTimer = setTimeout(() => window.engine.liveTwin.modelChanged(serializeProjectDocument()), 400);
+});
 // For the interaction tests: the twin setup the project keeps.
 window.__debugTwin = { setup: () => structuredClone(projectTwinSetup) };
 window.engine.liveTwin?.onLoadDemoModel?.(async (variant) => {
@@ -8937,19 +8995,16 @@ window.engine.liveTwin?.onLoadDemoModel?.(async (variant) => {
 });
 
 $('#parameterTuningButton').addEventListener('click', openParameterTuning);
-$('#liveTwinButton').addEventListener('click', openTwinWindow);
+$('#liveTwinButton').addEventListener('click', () => openTwinWindow());
 
 $('#liveTwinButton').hidden = !window.engine.liveTwin?.available;
 
 // The twin's chip in the toolbar while one runs, so a person sees it is alive with its window behind this one or on another screen,
-// and sees at once when the real system drifts past the warning: the twin window's own twin, or one run from the tuning card's
-// replay goal. A click brings that twin to the front.
+// and sees at once when the real system drifts past the warning. A click brings the twin's window to the front.
 let windowTwinStatus = null;
 function refreshLiveTwinChip() {
     const chip = $('#liveTwinChip');
-    const fromWindow = windowTwinStatus?.running ? windowTwinStatus : null;
-    const fromCard = liveTwinState?.running ? { moves: liveTwinState.cycles.length, alarm: Boolean(liveTwinState.cycles.at(-1)?.trend?.alarm) } : null;
-    const twin = fromWindow ?? fromCard;
+    const twin = windowTwinStatus?.running ? windowTwinStatus : null;
     chip.hidden = !twin;
     if (!twin) return;
     chip.classList.toggle('failed', Boolean(twin.alarm));
@@ -8960,12 +9015,7 @@ window.engine.liveTwin?.onStatusChanged?.((status) => {
     windowTwinStatus = status;
     refreshLiveTwinChip();
 });
-$('#liveTwinChip').addEventListener('click', async () => {
-    if (windowTwinStatus?.running && await window.engine.liveTwin.focusWindow()) return;
-    if (!liveTwinState?.running) return;
-    openParameterTuning();
-    if (parameterTuningGoal !== 'replay') switchParameterTuningGoal('replay');
-});
+$('#liveTwinChip').addEventListener('click', () => { if (windowTwinStatus?.running) window.engine.liveTwin.focusWindow(); });
 
 function renderParameterTuningMapping() {
     const container = $('#parameterTuningMappingRows');
@@ -9206,10 +9256,7 @@ $('#parameterTuningFile').addEventListener('change', async () => {
     // A log chosen from disk can also be followed while a logger is still writing it.
     const path = window.engine.liveTwin?.pathForFile?.(file) ?? null;
     if (loggerFile) loggerFile.path = path;
-    if (parameterTuningReplay) {
-        parameterTuningReplay.path = path;
-        refreshLiveTwinControls();
-    }
+    if (parameterTuningReplay) parameterTuningReplay.path = path;
 });
 
 // Replaying a data log (docs/proposals/digitalTwinConnections.md, step 1): the log's inputs drive the model's shared parameters, its
@@ -9221,11 +9268,6 @@ function resetParameterTuningReplay() {
     $('#replayCalibrateStatus').textContent = '';
     $('#replayCalibrateApply').hidden = true;
     replayCalibration = null;
-    if (liveTwinState) {
-        stopLiveTwin().catch(() => {});
-        liveTwinState = null;
-    }
-    clearLiveTwinView();
     parameterTuningReplay = null;
     $('#parameterTuningReplaySection').hidden = true;
     $('#parameterTuningReplayRows').replaceChildren();
@@ -9254,8 +9296,7 @@ function loadParameterTuningReplay(content, fileName, note = '') {
     openParameterTuningReplay(log, { content, fileName, note });
 }
 
-// Sets the card up to replay, or run as a live twin, the signals of a log (or of a broker's topics, `source` saying which: a broker
-// has no readings yet and nothing to replay, only to follow).
+// Sets the card up to replay the signals of a log (`source` says when it is another logger's table, read with its settings).
 function openParameterTuningReplay(log, { content = null, fileName = '', note = '', source = null }) {
     const status = $('#parameterTuningStatus');
     const document_ = serializeProjectDocument();
@@ -9265,11 +9306,7 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
         const good = latestReadings(log.observations, entry.signal).filter((reading) => reading.quality !== 'bad');
         return [entry.signal, good.length ? defaultTolerance(good) : 1];
     }));
-    // How the live twin brings each measured state back in step at a move: a gain from 0 (watch only) to 1 (reset to the reading), or
-    // an estimate ({ estimate: true, noise }); and, for the estimator, how far a state may drift in an hour (stateId -> value).
-    const corrections = new Map(mapping.filter((entry) => entry.role === 'output').map((entry) => [entry.signal, 1]));
-    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, corrections, estimatorDrift: new Map(), untrackedParameters: new Set(), lastRun: null, running: false, path: null, source };
-    defaultLiveTwinAlert(parameterTuningReplay);
+    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, lastRun: null, running: false, path: null, source };
     $('#parameterTuningReplayTimeStep').value = String(suggestedReplayTimeStep(document_, log.observations, mapping));
     applySavedReplaySetup(parameterTuningReplay);
     // Not first and last: a correction comes later in the file than the row it corrects.
@@ -9284,17 +9321,14 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
     const inputs = mapping.filter((entry) => entry.role === 'input');
     status.className = 'equationDiagnostics valid';
     status.textContent = `${note}${log.header.signals.length} signal${log.header.signals.length === 1 ? '' : 's'}`
-        + (followedLiveSource(source) ? ` from ${source.url}, followed as they arrive` : `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`)
+        + `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`
         + `. Matched ${matched} of ${mapping.length} by name; change any below.`
         + (inputs.length && !targets.parameters.length ? ' The model has no shared parameters, so its inputs cannot follow the log: make a parameter shared to drive it from a recording.' : '');
     renderParameterTuningReplayRows();
     $('#parameterTuningReplaySection').hidden = false;
-    // A broker's readings are followed, not replayed: there is nothing recorded yet to replay, or to calibrate on.
-    $('#runParameterTuningReplay').hidden = followedLiveSource(source);
-    $('#replayCalibrate').hidden = followedLiveSource(source);
+    $('#runParameterTuningReplay').hidden = false;
+    $('#replayCalibrate').hidden = false;
     refreshParameterTuningReplayRunnable();
-    refreshLiveTwinControls();
-    renderLiveTwinScenarios();
 }
 
 function refreshParameterTuningReplayRunnable() {
@@ -9332,7 +9366,6 @@ function renderParameterTuningReplayRows() {
             else entry.stateId = value;
             clearParameterTuningReplayOutcome('The mapping changed: replay again to compare.');
             refreshParameterTuningReplayRunnable();
-            refreshLiveTwinControls();
         });
         row.append(name, select);
         if (entry.role === 'output') {
@@ -9360,105 +9393,8 @@ function renderParameterTuningReplayRows() {
                 if (replay.lastRun) renderParameterTuningReplayOutcome();
             });
             tolerance.append(text, input, unit);
-            row.append(tolerance, correctionChoice(replay, entry));
+            row.append(tolerance);
         }
-        return row;
-    }));
-}
-
-// How the live twin brings a measured state back in step at each move: reset to the reading, nudged part of the way to it,
-// watched only, with the model running on unaided (docs/proposals/predictionActualWindow.md, step 4), or estimated, its readings
-// weighed against the model with their noise (docs/proposals/stateEstimator.md).
-function correctionChoice(replay, entry) {
-    const label = document.createElement('label');
-    label.className = 'parameterTuningReplayTolerance';
-    const text = document.createElement('span');
-    text.textContent = 'at each move';
-    const select = document.createElement('select');
-    select.dataset.field = 'correction';
-    select.setAttribute('aria-label', `How the live twin brings ${entry.signal} back in step at each move`);
-    select.append(new Option('reset to the reading', 'reset'), new Option('nudge toward it by', 'nudge'), new Option('watch only', 'watch'), new Option('estimate, weighing readings and model', 'estimate'));
-    const noise = document.createElement('input');
-    noise.type = 'number';
-    noise.min = '0';
-    noise.step = 'any';
-    noise.dataset.field = 'noise';
-    noise.placeholder = 'noise: read';
-    noise.title = 'How noisy the readings are, as a standard deviation in their unit; left empty, it is read from the readings themselves';
-    noise.setAttribute('aria-label', `The noise of ${entry.signal}'s readings`);
-    const gain = document.createElement('input');
-    gain.type = 'number';
-    gain.min = '0.05';
-    gain.max = '0.95';
-    gain.step = '0.05';
-    gain.dataset.field = 'gain';
-    gain.setAttribute('aria-label', `The fraction of the way to the reading ${entry.signal} is nudged`);
-    const show = () => {
-        const value = replay.corrections.get(entry.signal) ?? 1;
-        select.value = typeof value === 'object' ? 'estimate' : value === 1 ? 'reset' : value === 0 ? 'watch' : 'nudge';
-        gain.hidden = select.value !== 'nudge';
-        noise.hidden = select.value !== 'estimate';
-        if (select.value === 'nudge') gain.value = String(value);
-        if (select.value === 'estimate') noise.value = value.noise ? String(value.noise) : '';
-        refreshEstimatorFields();
-    };
-    select.addEventListener('change', () => {
-        replay.corrections.set(entry.signal, select.value === 'estimate' ? { estimate: true } : select.value === 'reset' ? 1 : select.value === 'watch' ? 0 : 0.3);
-        show();
-    });
-    noise.addEventListener('change', () => {
-        const value = Number(noise.value);
-        replay.corrections.set(entry.signal, noise.value.trim() && value > 0 ? { estimate: true, noise: value } : { estimate: true });
-        show();
-    });
-    gain.addEventListener('change', () => {
-        const value = Number(gain.value);
-        if (value > 0 && value < 1) replay.corrections.set(entry.signal, value);
-        show();
-    });
-    show();
-    label.append(text, select, gain, noise);
-    return label;
-}
-
-// The drift warning starts at a quarter of the first measured signal's tolerance a move, in its unit, so a twin warns out of the box;
-// a saved setup's own value (or none) is put back after this.
-function defaultLiveTwinAlert(replay) {
-    const first = replay.mapping.find((entry) => entry.role === 'output');
-    const tolerance = first ? replay.tolerances.get(first.signal) : null;
-    $('#liveTwinAlertLabel').textContent = `Warn when it drifts by (${first?.unit ? `${first.unit} ` : ''}a move)`;
-    $('#liveTwinAlert').value = tolerance > 0 ? String(Number((tolerance / 4).toPrecision(2))) : '';
-}
-
-// The tunable parameters a twin's estimator can track: not those the readings drive (inputs), nor initial values.
-function trackableParameters(replay) {
-    const inputs = new Set(replay.mapping.filter((entry) => entry.role === 'input').map((entry) => entry.parameterId));
-    return findTunableParametersInModel().filter((parameter) => parameter.kind !== 'state' && !inputs.has(parameter.parameterId));
-}
-
-// The estimator's own settings, offered once a signal is estimated: the ensemble's size, and which tunable parameters to track.
-function refreshEstimatorFields() {
-    const replay = parameterTuningReplay;
-    const estimating = Boolean(replay) && [...replay.corrections.values()].some((value) => typeof value === 'object');
-    $('#liveTwinMembersField').hidden = !estimating;
-    const candidates = estimating ? trackableParameters(replay) : [];
-    $('#liveTwinTrack').hidden = !candidates.length;
-    $('#liveTwinTrackRows').replaceChildren(...candidates.map((parameter) => {
-        const row = document.createElement('label');
-        const box = document.createElement('input');
-        box.type = 'checkbox';
-        box.dataset.parameterId = String(parameter.parameterId);
-        box.checked = !replay.untrackedParameters.has(parameter.parameterId);
-        box.addEventListener('change', () => {
-            if (box.checked) replay.untrackedParameters.delete(parameter.parameterId);
-            else replay.untrackedParameters.add(parameter.parameterId);
-            rememberReplaySetup();
-        });
-        const name = document.createElement('span');
-        name.textContent = `${parameter.edgeName ?? parameter.ownerName} · ${parameter.name}`;
-        const bounds = document.createElement('small');
-        bounds.textContent = `${parameter.value}, between ${parameter.tuning.minimum} and ${parameter.tuning.maximum}`;
-        row.append(box, name, bounds);
         return row;
     }));
 }
@@ -9557,14 +9493,7 @@ function rememberReplaySetup() {
             logFileName: replay.fileName, timeStep: Number($('#parameterTuningReplayTimeStep').value), anchor: $('#parameterTuningReplayAnchor').checked,
             ...(replay.source?.kind === 'logger' ? { logger: replay.source.settings } : {}),
             mapping: replay.mapping.map((entry) => ({ signal: entry.signal, role: entry.role, target: entry.role === 'input' ? entry.parameterId : entry.stateId })),
-            tolerances: Object.fromEntries(replay.tolerances),
-            corrections: Object.fromEntries(replay.corrections),
-            live: {
-                window: Number($('#liveTwinWindow').value), stride: Number($('#liveTwinStride').value), horizon: Number($('#liveTwinHorizon').value), speed: $('#liveTwinSpeed').value,
-                members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift ?? []),
-                alert: $('#liveTwinAlert').value.trim() === '' ? 0 : Number($('#liveTwinAlert').value),
-                untracked: [...(replay.untrackedParameters ?? [])]
-            }
+            tolerances: Object.fromEntries(replay.tolerances)
         }
     });
     if (!sameTuningSetup(setup, projectTuningSetup)) {
@@ -9589,583 +9518,17 @@ function applySavedReplaySetup(replay) {
         else entry.stateId = kept.target;
     }
     for (const [signal, tolerance] of Object.entries(saved.tolerances)) if (replay.tolerances.has(signal)) replay.tolerances.set(signal, tolerance);
-    for (const [signal, gain] of Object.entries(saved.corrections ?? {})) if (replay.corrections.has(signal)) replay.corrections.set(signal, gain);
     if (saved.timeStep) $('#parameterTuningReplayTimeStep').value = String(saved.timeStep);
     $('#parameterTuningReplayAnchor').checked = saved.anchor;
-    if (saved.live?.window) $('#liveTwinWindow').value = String(saved.live.window);
-    if (saved.live?.stride) $('#liveTwinStride').value = String(saved.live.stride);
-    if (saved.live?.horizon) $('#liveTwinHorizon').value = String(saved.live.horizon);
-    if (saved.live?.speed && [...$('#liveTwinSpeed').options].some((option) => option.value === saved.live.speed)) $('#liveTwinSpeed').value = saved.live.speed;
-    if (saved.live?.members) $('#liveTwinMembers').value = String(saved.live.members);
-    if (saved.live && saved.live.alert !== undefined) $('#liveTwinAlert').value = saved.live.alert > 0 ? String(saved.live.alert) : '';
-    for (const parameterId of saved.live?.untracked ?? []) replay.untrackedParameters.add(parameterId);
-    for (const [stateId, drift] of Object.entries(saved.live?.drift ?? {})) {
-        if (replay.targets.states.some((state) => state.stateId === Number(stateId))) replay.estimatorDrift.set(Number(stateId), drift);
-    }
-    refreshEstimatorFields();
 }
 
-// The live twin (src/liveTwinHost.mjs, run by the main process): the replay's log, played as if it were arriving or followed while a
-// logger writes it, kept in step by a long-lived engine. The card draws each cycle as it comes. Desktop only. `liveTwinState` is
-// declared beside the card's other state.
-
-const liveTwinAvailable = () => Boolean(window.engine.liveTwin?.available);
-
-// A source with no file to replay, only followed as its readings arrive: a broker, an OPC UA server, or the push service.
-function followedLiveSource(source) {
-    return ['mqtt', 'opcua', 'push'].includes(source?.kind);
-}
-
-function refreshLiveTwinControls() {
-    const replay = parameterTuningReplay;
-    const running = Boolean(liveTwinState?.running);
-    const follow = $('#liveTwinSpeed option[value="follow"]');
-    const broker = followedLiveSource(replay?.source);
-    follow.disabled = !replay?.path && !broker;
-    follow.textContent = broker ? ({ opcua: 'As the server reports them', push: 'As the scripts send them' }[replay.source.kind] ?? 'As they arrive from the broker') : replay?.path ? 'As the file grows' : 'As the file grows (choose the log from disk)';
-    if (broker) $('#liveTwinSpeed').value = 'follow';
-    for (const option of $('#liveTwinSpeed').options) if (option.value !== 'follow') option.disabled = broker;
-    if (follow.disabled && $('#liveTwinSpeed').value === 'follow') $('#liveTwinSpeed').value = '3600';
-    const compared = replay?.mapping.some((entry) => entry.role === 'output' && entry.stateId !== null);
-    $('#liveTwinStart').disabled = !replay || !compared || running || !liveTwinAvailable() || Boolean(activeResult);
-    $('#liveTwinStart').title = !liveTwinAvailable() ? 'The live twin needs the desktop app: a web page cannot keep an engine running.' : !compared ? 'Map at least one measured signal to a state' : '';
-    $('#liveTwinStop').hidden = !running;
-    $('#liveTwinDetach').hidden = !running || Boolean(liveTwinState?.sandbox);
-    $('#liveTwinDetach').disabled = !liveTwinState?.cycles.length;
-    $('#liveTwinRefit').hidden = !running;
-    if (!running) for (const button of ['#liveTwinRefitApply', '#liveTwinRefitKeep']) $(button).hidden = true;
-    $('#liveTwinRefit').disabled = !liveTwinState?.cycles.length || Boolean(liveTwinState?.refitting);
-    for (const field of ['#liveTwinWindow', '#liveTwinStride', '#liveTwinHorizon', '#liveTwinSpeed']) $(field).disabled = running;
-}
-
-function clearLiveTwinView() {
-    for (const selector of ['#liveTwinPlot', '#liveTwinJumpPlot']) {
-        if (!$(selector).hidden) globalThis.Plotly?.purge($(selector));
-        $(selector).hidden = true;
-    }
-    $('#liveTwinStatus').textContent = '';
-    $('#liveTwinNote').textContent = '';
-    $('#liveTwinTrend').textContent = '';
-    $('#liveTwinTrend').classList.remove('leaning');
-    $('#liveTwinObserved').textContent = '';
-    $('#liveTwinSandbox').hidden = true;
-    $('#liveTwinRefitResult').hidden = true;
-    $('#liveTwinEstimate').hidden = true;
-    $('#liveTwinEstimateRows').replaceChildren();
-    $('#liveTwinReplayRecording').hidden = true;
-    $('#liveTwinShowRecording').hidden = true;
-    $('#liveTwinHonesty').textContent = '';
-}
-
-// What the estimator says at a move: each state's estimate and spread, with how far it may drift in an hour (the value used, or
-// one given for the next start), and how honest the spread has been so far: the share of readings outside the 10th to 90th
-// percentile of what the twin expected, about one in five when the noise and drift settings are right.
-function renderLiveTwinEstimate(twin, cycle) {
-    const estimate = cycle.estimate;
-    if (!estimate) return;
-    const replay = parameterTuningReplay;
-    const label = (stateId) => replay?.targets.states.find((state) => state.stateId === stateId)?.label ?? `state ${stateId}`;
-    const unitOf = (stateId) => replay?.targets.states.find((state) => state.stateId === stateId)?.unit ?? '';
-    const shown = (value) => Number(value.toPrecision(4)).toString();
-    $('#liveTwinEstimate').hidden = false;
-    const rows = $('#liveTwinEstimateRows');
-    const editing = rows.contains(document.activeElement);
-    // The parameters tracked come after the states, in the same rows, named as the model names them.
-    const quantities = [
-        ...estimate.states.map((state) => ({ ...state, id: state.stateId, label: label(state.stateId), unit: unitOf(state.stateId), reached: estimate.through[state.stateId] })),
-        ...(estimate.parameters ?? []).map((parameter) => ({ ...parameter, id: parameter.parameterId, label: `${parameter.name} (tracked)`, unit: '', reached: estimate.throughParameters?.[parameter.parameterId] }))
-    ];
-    if (!editing) {
-        rows.replaceChildren(...quantities.map((state) => {
-            const row = document.createElement('div');
-            row.className = 'liveTwinEstimateRow';
-            row.dataset.stateId = String(state.id);
-            const unit = state.unit ? ` ${state.unit}` : '';
-            const reached = state.reached;
-            const name = document.createElement('span');
-            name.innerHTML = '<strong></strong><small></small>';
-            name.querySelector('strong').textContent = state.label;
-            name.querySelector('small').textContent = reached ? `reached through ${reached.join(', ')}` : 'carried by the model this move';
-            const value = document.createElement('span');
-            value.dataset.field = 'estimate';
-            value.textContent = `${shown(state.mean)} ± ${shown(state.spread)}${unit}`;
-            const drift = document.createElement('label');
-            drift.innerHTML = '<span>drifts up to</span><input type="number" min="0" step="any"><span>an hour</span>';
-            const input = drift.querySelector('input');
-            input.setAttribute('aria-label', `How far ${state.label} may drift in an hour beyond what the model says`);
-            input.placeholder = shown(state.drift);
-            const given = replay?.estimatorDrift.get(state.id);
-            input.value = given ? String(given) : '';
-            input.addEventListener('change', () => {
-                const amount = Number(input.value);
-                if (input.value.trim() && amount > 0) replay.estimatorDrift.set(state.id, amount);
-                else replay.estimatorDrift.delete(state.id);
-                rememberReplaySetup();
-            });
-            row.append(name, value, drift);
-            return row;
-        }));
-    }
-    const signal = twin.outputs[0].signal;
-    const outside = twin.cycles.reduce((sum, item) => sum + (item.estimate?.outside[signal]?.outside ?? 0), 0);
-    const total = twin.cycles.reduce((sum, item) => sum + (item.estimate?.outside[signal]?.total ?? 0), 0);
-    if (!total) return;
-    const share = outside / total;
-    $('#liveTwinHonesty').className = `equationDiagnostics${share > 0.08 && share < 0.35 ? ' valid' : ''}`;
-    $('#liveTwinHonesty').textContent = `${outside} of ${total} readings of ${signal} (${Math.round(share * 100)}%) fell outside the spread the twin expected (its 10th to 90th percentile), where about 20% is honest.`
-        + (share <= 0.08 ? ' Far fewer: the noise or drift settings are more cautious than they need to be.' : share >= 0.35 ? ' Far more: the twin is surer than it should be; raise the drift of the states that matter, or the readings\' noise.' : '');
-}
-
-// A refit over the latest window (docs/proposals/predictionActualWindow.md, step 5): the twin plans it, the engine's fit runs it as
-// a calibration does, and what it found is shown to be applied or not. Applied, the twin runs on from the move it was planned on
-// with the new parameters and the initial values found at that window's anchor; the parameters can be kept in the model too.
-async function refitLiveTwin() {
-    const twin = liveTwinState;
-    if (!twin?.running || twin.refitting) return;
-    const status = $('#liveTwinRefitStatus');
-    const message = (error) => error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?(ENGINE_FAILURE: )?/, '');
-    $('#liveTwinRefitResult').hidden = false;
-    $('#liveTwinRefitRows').replaceChildren();
-    $('#liveTwinRefitApply').hidden = true;
-    $('#liveTwinRefitKeep').hidden = true;
-    status.className = 'equationDiagnostics';
-    twin.refit = null;
-    let plan;
-    try {
-        plan = await window.engine.liveTwin.refitPlan();
-    } catch (error) {
-        status.textContent = message(error);
-        return;
-    }
-    twin.refitting = true;
-    refreshLiveTwinControls();
-    status.textContent = `Refitting on the window from ${formatDuration(plan.anchor)} to ${formatDuration(plan.now)}…`;
-    try {
-        const result = await window.engine.fit(JSON.stringify(plan.document), plan.csv, { backend: $('#parameterTuningBackend').value || 'nlopt-bobyqa', maxIterations: 400 });
-        if (!result.available) throw new Error('The native fitting engine is unavailable.');
-        const states = new Map(plan.document.nodes.flatMap((node) => (node.states ?? []).map((state) => [state.id, { node, state }])));
-        const parameters = new Map([
-            ...(plan.document.sharedParameters ?? []).map((parameter) => [parameter.id, { owner: 'Shared', parameter }]),
-            ...plan.document.edges.flatMap((edge) => (edge.parameters ?? []).map((parameter) => [parameter.id, { owner: edge.name, parameter }])),
-            ...plan.document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? []).map((parameter) => [parameter.id, { owner: `${node.name} · source term`, parameter }])))
-        ]);
-        const shown = (value) => (value === null || !Number.isFinite(value) ? 'not finite' : Number(value).toPrecision(6));
-        $('#liveTwinRefitRows').replaceChildren(...result.report.finalParameters.map((entry) => {
-            const row = document.createElement('div');
-            const state = states.get(entry.parameterId);
-            const parameter = parameters.get(entry.parameterId);
-            row.textContent = state
-                ? `${state.node.name} · ${state.state.name} at ${formatDuration(plan.anchor)}: ${shown(state.state.initialValue)} → ${shown(entry.value)}`
-                : `${parameter?.owner ?? 'Parameter'} · ${parameter?.parameter.name ?? entry.parameterId}: ${shown(parameter?.parameter.value)} → ${shown(entry.value)}`;
-            return row;
-        }));
-        if (liveTwinState !== twin) return;
-        twin.refit = { plan, report: result.report };
-        status.className = 'equationDiagnostics valid';
-        status.textContent = `${parameterTuningEndText(result.report)} Apply it to run the twin on from that window with these values.`;
-        $('#liveTwinRefitApply').hidden = !twin.running;
-        $('#liveTwinRefitKeep').hidden = !twin.running || !plan.tunable.some((entry) => entry.kind === 'parameter');
-    } catch (error) {
-        status.textContent = `The refit could not run: ${message(error)}`;
-    } finally {
-        twin.refitting = false;
-        if (liveTwinState === twin) refreshLiveTwinControls();
-    }
-}
-
-async function applyLiveTwinRefit(keepInModel) {
-    const twin = liveTwinState;
-    if (!twin?.refit) return;
-    const { plan, report } = twin.refit;
-    const status = $('#liveTwinRefitStatus');
-    $('#liveTwinRefitApply').hidden = true;
-    $('#liveTwinRefitKeep').hidden = true;
-    try {
-        await window.engine.liveTwin.applyRefit(report.finalParameters, plan.cycle);
-    } catch (error) {
-        status.className = 'equationDiagnostics';
-        status.textContent = `The refit was not applied: ${error.message.replace(/^(Error invoking remote method '[^']*': )?(Error: )?/, '')}`;
-        return;
-    }
-    twin.refit = null;
-    let kept = '';
-    if (keepInModel) {
-        const parameterIds = new Set(plan.tunable.filter((entry) => entry.kind === 'parameter').map((entry) => entry.id));
-        const outcome = await applyFittedValues(report.finalParameters.filter((entry) => parameterIds.has(entry.parameterId)));
-        kept = outcome.applied ? ' The parameters are kept in the model too (Undo takes them back).' : ` The model was left as it was: ${outcome.message}`;
-    }
-    status.className = 'equationDiagnostics valid';
-    status.textContent = `Applied to the twin from the move at ${formatDuration(plan.anchor)}: it runs on with the refitted values from there.${kept}`;
-}
-$('#liveTwinRefit').addEventListener('click', () => refitLiveTwin());
-$('#liveTwinRefitApply').addEventListener('click', () => applyLiveTwinRefit(false));
-$('#liveTwinRefitKeep').addEventListener('click', () => applyLiveTwinRefit(true));
-
-// Which states the readings reach and which the model carries alone, and any measured state the model computes, so is never set.
-function liveTwinObservedText(cycle) {
-    const label = (stateId) => parameterTuningReplay?.targets.states.find((state) => state.stateId === stateId)?.label ?? `state ${stateId}`;
-    const list = (ids) => ids.map(label).join(', ');
-    const computed = Object.entries(cycle.corrections ?? {}).filter(([, correction]) => /^computed/.test(correction.reason ?? '')).map(([signal]) => signal);
-    // States the estimator reached through a measured signal are reached too, not carried alone.
-    const through = Object.entries(cycle.estimate?.through ?? {}).map(([stateId, signals]) => [Number(stateId), signals]).filter(([stateId]) => !cycle.observed.includes(stateId));
-    const alone = cycle.unobserved.filter((stateId) => !through.some(([reached]) => reached === stateId));
-    return `The readings reach ${list(cycle.observed)}`
-        + (through.length ? `, and through them ${through.map(([stateId, signals]) => `${label(stateId)} (through ${signals.join(', ')})`).join(', ')}.` : '.')
-        + (alone.length ? ` The model carries ${list(alone)} alone, unchecked by any reading.` : '')
-        + (computed.length ? ` ${computed.join(', ')} ${computed.length === 1 ? 'is' : 'are'} computed by the model from other states, so compared at every move but never set.` : '');
-}
-
-async function startLiveTwin() {
-    const replay = parameterTuningReplay;
-    if (!replay || liveTwinState?.running || !liveTwinAvailable()) return;
-    const status = $('#liveTwinStatus');
-    const minutes = (selector) => Number($(selector).value) * 60;
-    const speedChoice = $('#liveTwinSpeed').value;
-    const outputs = replay.mapping.filter((entry) => entry.role === 'output' && entry.stateId !== null);
-    const settings = {
-        document: serializeProjectDocument(),
-        mapping: replay.mapping.map((entry) => ({ ...entry })),
-        window: minutes('#liveTwinWindow'), stride: minutes('#liveTwinStride'), horizon: minutes('#liveTwinHorizon'),
-        timeStep: Number($('#parameterTuningReplayTimeStep').value),
-        tolerances: Object.fromEntries(replay.tolerances),
-        corrections: Object.fromEntries([...replay.corrections].filter(([, value]) => value !== 1).map(([signal, value]) => [signal, typeof value === 'object' ? { ...value } : { gain: value }])),
-        estimator: {
-            members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift),
-            // The tunable parameters tracked as the twin goes, when it estimates: all those it can, but the ones unticked.
-            parameters: [...replay.corrections.values()].some((value) => typeof value === 'object')
-                ? trackableParameters(replay).map((parameter) => parameter.parameterId).filter((parameterId) => !replay.untrackedParameters.has(parameterId))
-                : []
-        },
-        // The warning, given in the first measured signal's unit a move, as the window takes it: a multiple of that signal's tolerance.
-        alertAt: (() => {
-            const amount = Number($('#liveTwinAlert').value);
-            const tolerance = replay.tolerances.get(outputs[0]?.signal);
-            return $('#liveTwinAlert').value.trim() !== '' && amount > 0 && tolerance > 0 ? amount / tolerance : null;
-        })()
-    };
-    const logger = replay.source?.kind === 'logger' ? replay.source.settings : undefined;
-    const source = replay.source?.kind === 'mqtt' ? { kind: 'mqtt', url: replay.source.url, signals: replay.source.signals }
-        : replay.source?.kind === 'opcua' ? { kind: 'opcua', url: replay.source.url, signals: replay.source.signals, security: replay.source.security, trustServer: replay.source.trustServer }
-        : replay.source?.kind === 'push' ? { kind: 'push', url: replay.source.url, signals: replay.source.signals }
-        : speedChoice === 'follow' ? { kind: 'file', path: replay.path, logger }
-            : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice), logger };
-    clearLiveTwinView();
-    liveTwinState = { running: true, cycles: [], measured: new Map(outputs.map((entry) => [entry.signal, new Map()])), outputs, settings, sandbox: null, lastDrawAt: 0, drawTimer: null, ended: null };
-    refreshLiveTwinChip();
-    rememberReplaySetup();
-    refreshLiveTwinControls();
-    status.className = 'equationDiagnostics';
-    status.textContent = followedLiveSource(source) ? `Following ${source.url}: waiting for a window's worth of readings…`
-        : speedChoice === 'follow' ? `Following ${replay.fileName} as it grows…` : 'Starting the live twin…';
-    try {
-        await window.engine.liveTwin.start(settings, source, currentProjectPath);
-    } catch (error) {
-        liveTwinState.running = false;
-        status.textContent = `The live twin could not start: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
-        refreshLiveTwinControls();
-    }
-}
-
-function liveTwinTrendText(trend, unit) {
-    if (!trend || trend.direction === 'none') return { text: 'The jumps show no drift: the model stays as close to the measurements as their noise allows.', leaning: false };
-    const amount = `${Math.abs(trend.mean).toPrecision(2)}${unit ? ` ${unit}` : ''}`;
-    return {
-        text: `The model has lately been predicting ${trend.direction === 'above' ? 'above' : 'below'} the measurements, by ${amount} a move on average`
-            + ` (changing by ${trend.slopePerHour.toPrecision(2)}${unit ? ` ${unit}` : ''} an hour). Something in the real system may be drifting away from the model.`
-            + (trend.alarm ? ' This has passed the warning you set.' : ''),
-        leaning: true
-    };
-}
-
-async function drawLiveTwin() {
-    const twin = liveTwinState;
-    if (!twin?.cycles.length || !globalThis.Plotly) return;
-    twin.lastDrawAt = Date.now();
-    const cycle = twin.cycles.at(-1);
-    const entry = twin.outputs[0];
-    const target = parameterTuningReplay?.targets.states.find((state) => state.stateId === entry.stateId);
-    const measured = [...twin.measured.get(entry.signal).values()].sort((a, b) => a.time - b.time);
-    const view = {
-        name: target?.label ?? entry.signal, unit: entry.unit, measured, anchor: cycle.anchor, now: cycle.now,
-        window: cycle.window[entry.signal].map((row) => ({ time: row.time, value: row.simulated })),
-        forecast: cycle.forecast[entry.signal],
-        sandbox: twin.sandbox?.series?.[entry.signal] ?? null,
-        band: cycle.estimate?.band?.[entry.signal] ?? null
-    };
-    $('#liveTwinPlot').hidden = false;
-    await renderLiveTwin($('#liveTwinPlot'), view);
-    const jumps = twin.cycles.filter((item) => item.jumps[entry.signal]).map((item) => ({ time: item.anchor, jump: item.jumps[entry.signal].jump }));
-    if (jumps.length) {
-        $('#liveTwinJumpPlot').hidden = false;
-        await renderJumps($('#liveTwinJumpPlot'), { name: view.name, unit: entry.unit, jumps, tolerance: twin.settings.tolerances[entry.signal] });
-    }
-}
-
-function scheduleLiveTwinDraw() {
-    const twin = liveTwinState;
-    if (!twin || twin.drawTimer) return;
-    const wait = Math.max(0, 250 - (Date.now() - twin.lastDrawAt));
-    twin.drawTimer = setTimeout(() => {
-        twin.drawTimer = null;
-        if (liveTwinState === twin) drawLiveTwin();
-    }, wait);
-}
-
-window.engine.liveTwin?.onEvent?.((update) => {
-    const twin = liveTwinState;
-    if (!twin) return;
-    const status = $('#liveTwinStatus');
-    if (update.type === 'cycle') {
-        const { cycle, stats } = update;
-        twin.cycles.push(cycle);
-        for (const [signal, rows] of Object.entries(cycle.window)) {
-            const measured = twin.measured.get(signal);
-            for (const row of rows) measured?.set(row.time, { time: row.time, value: row.measured });
-        }
-        status.className = 'equationDiagnostics valid';
-        status.textContent = `${stats.cycles} move${stats.cycles === 1 ? '' : 's'}; the window is now ${formatDuration(cycle.anchor)} to ${formatDuration(cycle.now)}.`
-            + ` The model runs ${Number.isFinite(stats.realTimeFactor) ? Math.round(stats.realTimeFactor).toLocaleString() : 'far'} times faster than real time; a move takes ${(stats.cycleSeconds.median * 1000).toFixed(1)} ms.`
-            + (stats.lagSeconds > 0 ? ` It is ${formatDuration(stats.lagSeconds)} behind the data.` : '')
-            + (stats.recoveries ? ` The engine was restarted ${stats.recoveries} time${stats.recoveries === 1 ? '' : 's'} and carried on.` : '')
-            + (stats.skipped ? ` It fell behind the data and skipped ${stats.skipped} move${stats.skipped === 1 ? '' : 's'} to keep up: choose a longer stride or a shorter window if this goes on.` : '');
-        const trend = liveTwinTrendText(cycle.trend, twin.outputs[0].unit);
-        // Past the warning, what to do about it: find what changed over the window, or follow it as it goes.
-        const estimating = Object.values(cycle.corrections ?? {}).some((correction) => correction?.estimate);
-        const advice = cycle.trend?.alarm && !estimating
-            ? ' Refit on the latest window to find what changed, or set the measured signal to "estimate" and start again to track it as it goes.'
-            : '';
-        $('#liveTwinTrend').textContent = trend.text + advice;
-        $('#liveTwinTrend').classList.toggle('leaning', trend.leaning);
-        if (cycle.observed) $('#liveTwinObserved').textContent = liveTwinObservedText(cycle);
-        renderLiveTwinEstimate(twin, cycle);
-        refreshLiveTwinChip();
-        refreshLiveTwinControls();
-        scheduleLiveTwinDraw();
-    } else if (update.type === 'note') {
-        // Something about the source worth knowing, such as how often an OPC UA server samples its tags.
-        twin.sourceNote = update.message;
-        $('#liveTwinNote').textContent = update.message;
-    } else if (update.type === 'ended') {
-        twin.running = false;
-        refreshLiveTwinChip();
-        twin.ended = update.reason;
-        twin.recordedTo = update.recordedTo ?? null;
-        // What a broker, a server or a script sent is a data log now: one click opens it again, or shows where it is.
-        $('#liveTwinReplayRecording').hidden = !twin.recordedTo;
-        $('#liveTwinShowRecording').hidden = !twin.recordedTo;
-        if (update.recordedTo) {
-            const sender = { opcua: 'the server', push: 'the scripts' }[parameterTuningReplay?.source?.kind] ?? 'the broker';
-            const late = update.recordingLate
-                ? ` ${update.recordingLate} reading${update.recordingLate === 1 ? '' : 's'} came after a later one (the source sent ${update.recordingLate === 1 ? 'it' : 'them'} out of time order); the twin used ${update.recordingLate === 1 ? 'it' : 'them'}, but a log's rows only go forward, so ${update.recordingLate === 1 ? 'it is' : 'they are'} not in the recording.`
-                : '';
-            const recorded = `What ${sender} sent is recorded in ${update.recordedTo}, to replay later.${late}`;
-            // A twin its source stopped keeps saying why, with where its readings are.
-            status.className = twin.failure ? 'equationDiagnostics' : 'equationDiagnostics valid';
-            status.textContent = twin.failure ? `The live twin stopped: ${twin.failure} ${recorded}` : `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}. ${recorded}`;
-        }
-        if (update.reason === 'played') {
-            status.className = 'equationDiagnostics valid';
-            status.textContent = `The whole log has been played: ${update.stats?.cycles ?? twin.cycles.length} moves, each with its own forecast.`;
-        }
-        refreshLiveTwinControls();
-        drawLiveTwin();
-    } else if (update.type === 'error') {
-        twin.running = false;
-        twin.failure = update.message;
-        refreshLiveTwinChip();
-        status.className = 'equationDiagnostics';
-        status.textContent = `The live twin stopped: ${update.message}`;
-        refreshLiveTwinControls();
-    }
-});
-
-// Opens a recording the twin made as the card's data log: replayed, calibrated on, or run as a twin again, like any other log.
-async function replayLiveTwinRecording() {
-    const path = liveTwinState?.recordedTo;
-    if (!path) return;
-    const status = $('#liveTwinStatus');
-    try {
-        const content = await window.engine.liveTwin.readRecording(path);
-        const fileName = path.split(/[\\/]/).pop();
-        await loadParameterTuningCsv(content, fileName);
-        if (parameterTuningReplay) {
-            parameterTuningReplay.path = path;
-            refreshLiveTwinControls();
-        }
-        $('#parameterTuningReplaySection').scrollIntoView({ block: 'start', behavior: 'smooth' });
-    } catch (error) {
-        status.textContent = `The recording could not be opened: ${String(error.message).replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
-    }
-}
-$('#liveTwinReplayRecording').addEventListener('click', () => replayLiveTwinRecording());
-$('#liveTwinShowRecording').addEventListener('click', () => { if (liveTwinState?.recordedTo) window.engine.liveTwin.showRecording(liveTwinState.recordedTo); });
-
-async function stopLiveTwin() {
-    if (!liveTwinState) return;
-    const twin = liveTwinState;
-    if (twin.sandbox) await returnFromSandbox();
-    if (twin.running) await window.engine.liveTwin.stop();
-    twin.running = false;
-    refreshLiveTwinChip();
-    if (liveTwinState === twin) {
-        $('#liveTwinStatus').textContent = `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}.`
-            + (twin.recordedTo ? ` What the broker sent is recorded in ${twin.recordedTo}, to replay later.` : '');
-        refreshLiveTwinControls();
-    }
-}
-
-// Following an MQTT broker: listen a moment to see the topics, say what each is, and carry on as with a log.
-let mqttHeard = [];
-
-async function listenToMqttBroker() {
-    const status = $('#parameterTuningMqttStatus');
-    const url = $('#parameterTuningMqttUrl').value.trim();
-    const button = $('#parameterTuningMqttListen');
-    button.disabled = true;
-    status.className = 'equationDiagnostics';
-    status.textContent = `Listening to ${url}…`;
-    try {
-        mqttHeard = await window.engine.liveTwin.listen(url, 3);
-        renderMqttTopics();
-        status.className = 'equationDiagnostics valid';
-        status.textContent = mqttHeard.length
-            ? `Heard ${mqttHeard.length} topic${mqttHeard.length === 1 ? '' : 's'}. Say which are inputs (what was done) and which are measured, then use them.`
-            : 'Nothing was heard in 3 seconds. Is anything publishing to this broker?';
-    } catch (error) {
-        status.textContent = `Could not listen to ${url}: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
-    } finally {
-        button.disabled = false;
-    }
-}
-
-// The signals a source offers (an MQTT broker's topics, an OPC UA server's tags), one row each: what it is, what it says, and the
-// role, name and unit to give it. One builder for every source, so each offers its signals the same way.
-function renderSignalChoices(container, entries, useButton) {
-    container.replaceChildren(...entries.map((entry) => {
-        const row = document.createElement('div');
-        row.className = 'sourceSignalChoice';
-        row.dataset.id = entry.id;
-        const label = document.createElement('span');
-        label.textContent = entry.label;
-        const detail = document.createElement('small');
-        detail.textContent = entry.detail;
-        label.append(detail);
-        const role = document.createElement('select');
-        role.dataset.field = 'role';
-        role.setAttribute('aria-label', `What ${entry.label} is`);
-        role.append(new Option('Not used', ''), new Option('Input (what was done)', 'input'), new Option('Measured', 'output'));
-        role.disabled = !entry.usable;
-        const name = document.createElement('input');
-        name.dataset.field = 'name';
-        name.value = entry.name;
-        name.setAttribute('aria-label', `Signal name for ${entry.label}`);
-        const unit = document.createElement('input');
-        unit.dataset.field = 'unit';
-        unit.placeholder = 'unit';
-        unit.value = entry.unit ?? '';
-        unit.setAttribute('aria-label', `Unit of ${entry.label}`);
-        row.append(label, role, name, unit);
-        role.addEventListener('change', () => { useButton.hidden = !$$('select[data-field="role"]', container).some((select) => select.value); });
-        return row;
-    }));
-    useButton.hidden = true;
-}
-
-// The rows given a role, as { id, role, name, unit }, or what is wrong with them.
-function chosenSignals(container) {
-    const signals = $$('.sourceSignalChoice', container).map((row) => ({
-        id: row.dataset.id, role: $('[data-field="role"]', row).value, name: $('[data-field="name"]', row).value.trim(), unit: $('[data-field="unit"]', row).value.trim()
-    })).filter((signal) => signal.role);
-    const badName = signals.find((signal) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(signal.name));
-    if (badName) return { error: `"${badName.name}" cannot name a signal: use letters, digits and underscores, starting with a letter.` };
-    if (new Set(signals.map((signal) => signal.name)).size !== signals.length) return { error: 'Each signal needs a name of its own.' };
-    return { signals };
-}
-
-// Sets the card up for a source with no recording to replay: its signals are followed as they arrive.
-function openLiveSource(source, url) {
-    resetParameterTuningReplay();
-    const header = { version: 1, source: url, epoch: null, signals: source.signals.map(({ name, unit, role }) => ({ name, unit, role })) };
-    openParameterTuningReplay({ header, observations: [] }, { fileName: url, source });
-}
-
-function renderMqttTopics() {
-    renderSignalChoices($('#parameterTuningMqttTopics'), mqttHeard.map((heard) => ({
-        id: heard.topic, label: heard.topic, detail: heard.numeric ? `last ${heard.value}, ${heard.count}× heard` : `not a number: ${heard.last}`,
-        usable: heard.numeric, name: suggestSymbol(heard.topic.split('/').filter(Boolean).slice(-2).join(' '))
-    })), $('#parameterTuningMqttUse'));
-}
-
-function useMqttTopics() {
-    const url = $('#parameterTuningMqttUrl').value.trim();
-    const { signals, error } = chosenSignals($('#parameterTuningMqttTopics'));
-    if (error) {
-        $('#parameterTuningMqttStatus').textContent = error;
-        return;
-    }
-    openLiveSource({ kind: 'mqtt', url, signals: signals.map(({ id, ...signal }) => ({ topic: id, ...signal })) }, url);
-}
-
-// Following an OPC UA server: browse its tags (with the unit and range it gives), choose them, and follow them as with a broker. A
-// server whose certificate this computer does not know is trusted only when the person says so.
-let opcUaTags = [];
-
-async function browseOpcUaServer(trustServer = false) {
-    const status = $('#parameterTuningOpcUaStatus');
-    const url = $('#parameterTuningOpcUaUrl').value.trim();
-    const security = $('#parameterTuningOpcUaSecurity').value;
-    const button = $('#parameterTuningOpcUaBrowse');
-    button.disabled = true;
-    status.className = 'equationDiagnostics';
-    status.textContent = `Browsing ${url}…`;
-    try {
-        const answer = await window.engine.liveTwin.browseOpcUa(url, security, trustServer);
-        if (answer.untrusted) {
-            status.textContent = answer.message;
-            if (window.confirm(`${answer.message}\n\nTrust this server's certificate?`)) return browseOpcUaServer(true);
-            return;
-        }
-        opcUaTags = answer.tags;
-        renderSignalChoices($('#parameterTuningOpcUaTags'), opcUaTags.map((tag) => ({
-            id: tag.nodeId, label: tag.path,
-            detail: `${tag.value ?? '—'}${tag.unit ? ` ${tag.unit}` : ''}${tag.range ? `, ${tag.range.low} to ${tag.range.high}` : ''}${tag.quality !== 'good' ? `, ${tag.quality}` : ''}`,
-            usable: tag.numeric, name: suggestSymbol(tag.path.split('/').slice(-1)[0]), unit: tag.unit
-        })), $('#parameterTuningOpcUaUse'));
-        status.className = 'equationDiagnostics valid';
-        status.textContent = opcUaTags.length ? `Found ${opcUaTags.length} tag${opcUaTags.length === 1 ? '' : 's'}. Say which are inputs and which are measured, then use them.` : 'The server has no tags to offer.';
-        if (parameterTuningReplay?.source?.kind === 'opcua') parameterTuningReplay.source.trustServer = trustServer;
-        opcUaTrusted = trustServer;
-    } catch (error) {
-        status.textContent = `Could not browse ${url}: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
-    } finally {
-        button.disabled = false;
-    }
-}
-let opcUaTrusted = false;
-
-function useOpcUaTags() {
-    const url = $('#parameterTuningOpcUaUrl').value.trim();
-    const { signals, error } = chosenSignals($('#parameterTuningOpcUaTags'));
-    if (error) {
-        $('#parameterTuningOpcUaStatus').textContent = error;
-        return;
-    }
-    openLiveSource({ kind: 'opcua', url, security: $('#parameterTuningOpcUaSecurity').value, trustServer: opcUaTrusted, signals: signals.map(({ id, ...signal }) => ({ nodeId: id, ...signal })) }, url);
-}
-$('#parameterTuningOpcUaBrowse').addEventListener('click', () => browseOpcUaServer(false));
-$('#parameterTuningOpcUaUse').addEventListener('click', () => useOpcUaTags());
-
-$('#parameterTuningMqttListen').addEventListener('click', () => listenToMqttBroker());
-$('#parameterTuningMqttUse').addEventListener('click', () => useMqttTopics());
-
-// The push service (docs/proposals/pushService.md): the Connections panel to start it and make keys, a chip while it listens (red
-// with the reason if it ended unexpectedly), and in the card, the signals the keys may send, chosen and followed as with a broker.
+// The push service (docs/proposals/pushService.md): the Connections panel to start it and make keys, and a chip while it listens
+// (red with the reason if it ended unexpectedly). A twin follows what it takes from the twin's own window.
 const pushService = window.engine.pushService?.available ? window.engine.pushService : null;
 const connectionsPanel = pushService ? new ConnectionsPanel({ dialog: $('#connectionsDialog'), api: pushService }) : null;
 $('#connectionsButton').hidden = !connectionsPanel;
 $('#connectionsButton').addEventListener('click', () => connectionsPanel?.open());
 $('#pushServiceChip').addEventListener('click', () => connectionsPanel?.open());
-$('#parameterTuningPushConnections').addEventListener('click', () => connectionsPanel?.open());
 
 function showPushServiceState(state) {
     const chip = $('#pushServiceChip');
@@ -10176,178 +9539,21 @@ function showPushServiceState(state) {
     $('#pushServiceChipText').textContent = failed ? 'Push service stopped'
         : `Listening ${where}, ${state.clients ?? 0} client${state.clients === 1 ? '' : 's'}`;
     chip.title = failed ? `The push service ended: ${state.failure} Open the Connections panel.` : 'The push service is listening: open the Connections panel';
-    $('#parameterTuningPushService').textContent = pushServiceSentence(state);
-    $('#parameterTuningPushService').classList.toggle('valid', Boolean(state.listening));
-}
-
-// The signals the keys may send, each offered once, with the keys that may send it.
-async function refreshPushSignals() {
-    if (!pushService) return;
-    showPushServiceState(await pushService.state());
-    const bySignal = new Map();
-    for (const key of (await pushService.keys.list()).filter((candidate) => !candidate.revoked)) {
-        for (const signal of key.signals) bySignal.set(signal, [...(bySignal.get(signal) ?? []), key.name]);
-    }
-    renderSignalChoices($('#parameterTuningPushSignals'), [...bySignal].map(([signal, keys]) => ({
-        id: signal, label: signal, detail: `sent with ${keys.map((name) => `"${name}"`).join(', ')}`, usable: true, name: signal
-    })), $('#parameterTuningPushUse'));
-    $('#parameterTuningPushStatus').textContent = bySignal.size ? 'Say which are inputs (what was done) and which are measured, then use them.'
-        : 'No key may send anything yet: make one in the Connections panel.';
-    $('#parameterTuningPushStatus').classList.toggle('valid', bySignal.size > 0);
-}
-
-function usePushSignals() {
-    const { signals, error } = chosenSignals($('#parameterTuningPushSignals'));
-    if (error) {
-        $('#parameterTuningPushStatus').textContent = error;
-        return;
-    }
-    openLiveSource({ kind: 'push', url: 'the push service', signals: signals.map(({ id, ...signal }) => ({ signal: id, ...signal })) }, 'the push service');
 }
 
 if (pushService) {
     pushService.onState(showPushServiceState);
     pushService.state().then(showPushServiceState).catch(() => {});
-    $('#parameterTuningPush').addEventListener('toggle', () => { if ($('#parameterTuningPush').open) refreshPushSignals(); });
-    // Keys made or revoked in the panel are offered as soon as it closes.
-    $('#connectionsDialog').addEventListener('close', () => { if ($('#parameterTuningPush').open) refreshPushSignals(); });
-}
-$('#parameterTuningPushUse').addEventListener('click', () => usePushSignals());
-
-$('#liveTwinStart').addEventListener('click', () => startLiveTwin());
-$('#liveTwinStop').addEventListener('click', () => stopLiveTwin());
-
-// Detaching: a sandbox from the live twin at its latest now, with a control per input to try a value and a button to run ahead.
-async function detachLiveTwin() {
-    const twin = liveTwinState;
-    if (!twin?.running || twin.sandbox) return;
-    const status = $('#liveTwinSandboxStatus');
-    try {
-        const opened = await window.engine.liveTwin.detach();
-        const cycle = twin.cycles.at(-1);
-        twin.sandbox = { startedAt: opened.time, series: null, ranFor: 0, tried: [] };
-        const rows = opened.inputs.map((signal) => {
-            const row = document.createElement('label');
-            row.className = 'editorField';
-            const name = document.createElement('span');
-            name.textContent = `${signal} from now`;
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.step = 'any';
-            input.dataset.signal = signal;
-            input.value = String(cycle.inputs?.[signal] ?? '');
-            row.append(name, input);
-            return row;
-        });
-        $('#liveTwinSandboxInputs').replaceChildren(...rows);
-        $('#liveTwinSandbox').hidden = false;
-        $('#liveTwinNote').textContent = '';
-        status.className = 'equationDiagnostics';
-        status.textContent = `Detached at ${formatDuration(opened.time)}. Change an input and run ahead to see what it would do.`;
-        refreshLiveTwinControls();
-    } catch (error) {
-        status.textContent = `Could not detach: ${error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
-    }
 }
 
-async function runSandboxAhead() {
-    const twin = liveTwinState;
-    if (!twin?.sandbox) return;
-    const status = $('#liveTwinSandboxStatus');
-    const button = $('#liveTwinSandboxRun');
-    button.disabled = true;
-    try {
-        const cycle = twin.cycles.find((item) => item.now === twin.sandbox.startedAt) ?? twin.cycles.at(-1);
-        for (const input of $$('#liveTwinSandboxInputs input')) {
-            const value = Number(input.value);
-            const before = twin.sandbox.tried.filter((step) => step.signal === input.dataset.signal).at(-1)?.value ?? cycle.inputs?.[input.dataset.signal];
-            if (input.value.trim() === '' || !Number.isFinite(value) || value === before) continue;
-            await window.engine.liveTwin.sandboxSetInput(input.dataset.signal, value);
-        }
-        const seconds = Number($('#liveTwinSandboxMinutes').value) * 60;
-        if (!(seconds > 0)) throw new Error('Run ahead for a positive number of minutes.');
-        const result = await window.engine.liveTwin.sandboxRunFor(seconds);
-        twin.sandbox.tried = result.tried;
-        twin.sandbox.ranFor = result.time - twin.sandbox.startedAt;
-        const previous = twin.sandbox.series ?? {};
-        twin.sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, [...(previous[signal] ?? []), ...samples]]));
-        status.className = 'equationDiagnostics valid';
-        status.textContent = `Ran ahead to ${formatDuration(result.time)}${result.tried.length ? ` with ${result.tried.map((step) => `${step.signal} ${step.value}`).join(', ')}` : ' with nothing changed'}.`;
-        await drawLiveTwin();
-    } catch (error) {
-        status.className = 'equationDiagnostics';
-        status.textContent = error.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
-    } finally {
-        button.disabled = false;
-    }
-}
-
-// Back to live: the sandbox is ended and nothing it did reaches the live twin. If something was tried, it is kept as a draft scenario
-// with the project, with no question asked, and the banner says so (the project then has unsaved work, which is why).
-async function returnFromSandbox() {
-    const twin = liveTwinState;
-    if (!twin?.sandbox) return;
-    const sandbox = twin.sandbox;
-    twin.sandbox = null;
-    const closed = await window.engine.liveTwin.sandboxClose().catch(() => null);
-    $('#liveTwinSandbox').hidden = true;
-    const scenario = draftScenario({
-        id: crypto.randomUUID(), logFileName: parameterTuningReplay?.fileName ?? '', startedAt: sandbox.startedAt, ranFor: sandbox.ranFor,
-        settings: { window: twin.settings.window, stride: twin.settings.stride, horizon: twin.settings.horizon }, tried: closed?.tried ?? sandbox.tried, document: twin.settings.document
-    });
-    if (scenario) {
-        const { scenarios, dropped } = withScenario(projectScenarios, scenario);
-        projectScenarios = scenarios;
-        addonDataUnsaved = true;
-        updateHistoryControls();
-        renderLiveTwinScenarios();
-        $('#liveTwinNote').textContent = `Back to live. 1 scenario kept as a draft${dropped ? `; the oldest, "${dropped.name}", made room for it` : ''}.`;
-    } else {
-        $('#liveTwinNote').textContent = 'Back to live. Nothing was tried, so nothing was kept.';
-    }
-    refreshLiveTwinControls();
-    drawLiveTwin();
-}
-
-$('#liveTwinDetach').addEventListener('click', () => detachLiveTwin());
-$('#liveTwinSandboxRun').addEventListener('click', () => runSandboxAhead());
-$('#liveTwinSandboxReturn').addEventListener('click', () => returnFromSandbox());
-
-// The scenarios kept with the project: each can be renamed or deleted; one tried with a model since changed says so.
-function renderLiveTwinScenarios() {
-    const container = $('#liveTwinScenarioRows');
-    $('#liveTwinScenarios').hidden = !projectScenarios.length;
-    const fingerprint = modelFingerprint(serializeProjectDocument());
-    container.replaceChildren(...projectScenarios.map((scenario) => {
-        const row = document.createElement('div');
-        row.className = 'liveTwinScenarioRow';
-        row.dataset.scenarioId = scenario.id;
-        const name = document.createElement('input');
-        name.value = scenario.name;
-        name.setAttribute('aria-label', 'Scenario name');
-        name.addEventListener('change', () => {
-            const value = name.value.trim();
-            if (!value || value === scenario.name) return;
-            projectScenarios = projectScenarios.map((item) => (item.id === scenario.id ? { ...item, name: value } : item));
-            addonDataUnsaved = true;
-            updateHistoryControls();
-        });
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.textContent = 'Delete';
-        remove.addEventListener('click', () => {
-            projectScenarios = projectScenarios.filter((item) => item.id !== scenario.id);
-            addonDataUnsaved = true;
-            updateHistoryControls();
-            renderLiveTwinScenarios();
-        });
-        const details = document.createElement('small');
-        details.textContent = `From ${formatDuration(scenario.startedAt)} into ${scenario.logFileName || 'the log'}, run ahead ${formatDuration(scenario.ranFor)}`
-            + (scenario.modelFingerprint && scenario.modelFingerprint !== fingerprint ? '. The model has changed since this was tried.' : '.');
-        row.append(name, remove, details);
-        return row;
-    }));
-}
+// The replay's log run as a live twin: in the twin's own window, which reads the same log.
+$('#replayLiveTwin').addEventListener('click', () => {
+    const replay = parameterTuningReplay;
+    // Another logger's table goes as the card read it, in Konjugate's own form, with the columns, units and values it was told.
+    const content = replay?.source?.kind === 'logger' ? formatDataLog(replay.log) : replay?.content;
+    openTwinWindow(content ? { content, fileName: replay.fileName, path: replay.source?.kind === 'logger' ? null : replay.path ?? null } : null);
+});
+$('#replayLiveTwin').hidden = !window.engine.liveTwin?.available;
 
 // Reading another logger's file (src/loggerCsv.mjs): the card offers what the file seems to be, the person says once how to read
 // it, and the settings are kept with the project's replay setup, so the same logger's next file is read the same way.
@@ -10479,7 +9685,6 @@ function readLoggerFile() {
     $('#parameterTuningLoggerSection').hidden = false;
     status.className = 'equationDiagnostics valid';
     status.textContent = `Read: ${told.join('; ')}.`;
-    refreshLiveTwinControls();
 }
 $('#loggerRead').addEventListener('click', () => readLoggerFile());
 
@@ -10490,7 +9695,7 @@ let replayCalibration = null;
 async function calibrateOnStretch() {
     const replay = parameterTuningReplay;
     const status = $('#replayCalibrateStatus');
-    if (!replay || followedLiveSource(replay.source)) return;
+    if (!replay) return;
     const hours = (selector) => { const text = $(selector).value.trim(); return text === '' ? null : Number(text) * 3600; };
     const tunable = findTunableParametersInModel();
     status.className = 'equationDiagnostics';
@@ -10658,7 +9863,6 @@ $('#parameterTuningProgramEditor').addEventListener('click', () => {
 // Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
 // driven by this app's interaction-test harness.
 window.__debugParameterTuning = {
-    liveTwin: () => (liveTwinState ? { running: liveTwinState.running, ended: liveTwinState.ended, cycles: liveTwinState.cycles.length, last: structuredClone(liveTwinState.cycles.at(-1) ?? null), sandbox: Boolean(liveTwinState.sandbox) } : null),
     scenarios: () => structuredClone(projectScenarios),
     loadCsv: (content, fileName) => loadParameterTuningCsv(content, fileName),
     replay: () => (parameterTuningReplay?.outcome ? parameterTuningReplay.outcome.map(({ output, name, comparison, sentence }) => ({
@@ -11134,8 +10338,7 @@ $('#cancelParameterTuning').addEventListener('click', () => {
         window.engine.discardFit?.();
         setParameterTuningRunning(false);
     }
-    // A running live twin goes on with the card closed (its chip in the toolbar brings it back as it was).
-    if (!liveTwinState?.running) resetParameterTuning();
+    resetParameterTuning();
     $('#parameterTuning').classList.add('hidden');
 });
 

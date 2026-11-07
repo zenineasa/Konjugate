@@ -2059,23 +2059,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 #liveTwinButton[hidden], .liveTwinChip[hidden] { display: none; }
 /* In a twin the source tiles stand for the sources below, so each one's part shows only once its tile has been chosen. */
 .liveTwinChip.failed i { background: #e0a14c; box-shadow: 0 0 8px rgb(224 161 76 / 60%); }
-.liveTwinTrack { margin: 8px 0 4px; }
-.liveTwinTrack[hidden] { display: none; }
-.liveTwinTrack > span { color: #b8c7ce; font-size: 8px; font-weight: 600; }
-#liveTwinTrackRows { display: grid; gap: 3px; }
-#liveTwinTrackRows label { display: flex; gap: 6px; align-items: center; color: #9fb2bb; font-size: 8px; }
-#liveTwinTrackRows input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
-#liveTwinTrackRows small { color: #5d717c; }
-.liveTwinEstimate { margin-top: 10px; }
-.liveTwinEstimate[hidden], #liveTwinMembersField[hidden] { display: none; }
-.liveTwinEstimate h4 { margin: 0 0 4px; color: #b8c7ce; font-size: 9px; }
-.liveTwinEstimateRows { display: grid; gap: 4px; }
-.liveTwinEstimateRow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 8px; background: #0a151d; border: 1px solid #22343f; border-radius: 4px; font-size: 8px; }
-.liveTwinEstimateRow > span:first-child { display: grid; gap: 2px; min-width: 0; }
-.liveTwinEstimateRow small { color: #718691; font-size: 7px; }
-.liveTwinEstimateRow strong { color: #c8d6dc; font-weight: 600; }
-.liveTwinEstimateRow label { display: flex; gap: 4px; align-items: center; color: #718691; font-size: 7px; }
-.liveTwinEstimateRow input { width: 72px; height: 22px; }
 .pushServiceChip.failed i { background: #d4707a; box-shadow: 0 0 8px rgb(212 112 122 / 60%); }
 .ownershipDialog .ownershipSaveTimes { margin: 12px 0 0; }
 .ownershipDialog .ownershipSaveTimes:empty { display: none; }
@@ -2085,19 +2068,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .liveTwinActions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .liveTwinActions button { padding: 5px 10px; color: #d6e4ea; background: #13232d; border: 1px solid #2b3d48; border-radius: 4px; font-size: 9px; }
 .liveTwinActions button:disabled { opacity: .5; }
-.liveTwinTrend { margin: 4px 0; color: #b9ccd4; font-size: 10px; line-height: 1.4; }
-.liveTwinTrend.leaning { color: #e0b27d; }
-.liveTwinJumpPlot { width: 100%; height: 160px; margin-top: 6px; }
-.liveTwinJumpPlot[hidden] { display: none; }
-.liveTwinSandbox { margin-top: 8px; padding: 8px; border: 1px solid #3b8f88; border-radius: 5px; background: rgb(66 201 188 / 6%); }
-.liveTwinSandbox[hidden] { display: none; }
-.liveTwinBanner { margin-bottom: 6px; color: #9fe9e1; font-size: 10px; line-height: 1.4; }
-.liveTwinScenarios { margin-top: 12px; padding-top: 10px; border-top: 1px solid #263742; }
-.liveTwinScenarios[hidden] { display: none; }
-.liveTwinScenarioRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid #243640; font-size: 9px; }
-.liveTwinScenarioRow input { min-width: 0; padding: 3px 5px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
-.liveTwinScenarioRow small { grid-column: 1 / -1; color: #7d929c; }
-.liveTwinScenarioRow button { padding: 2px 7px; color: #d6e4ea; background: #13232d; border: 1px solid #2b3d48; border-radius: 3px; }
 .parameterTuningMqtt { margin-top: 8px; font-size: 10px; color: #b8c7ce; }
 .parameterTuningMqtt[hidden] { display: none; }
 .parameterTuningMqtt summary { cursor: pointer; color: #9fb6c0; }

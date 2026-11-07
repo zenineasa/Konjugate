@@ -4631,7 +4631,18 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
-    await run('a data log runs as a live twin: moves, forecasts, jumps, a sandbox and a draft scenario', async () => {
+    // The twin's own window, opened from a project window's Live twin button.
+    const openTwinWindow = async (opened, button = '#liveTwinButton') => {
+        const beforeTwin = driver.allHandles();
+        await evaluate(opened, `document.querySelector('${button}').click()`);
+        const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+        await waitFor(twin, `document.querySelector('#modelSummary').textContent.length > 0`, 'The twin window did not show the model.');
+        return twin;
+    };
+    const twinEvents = (twin) => evaluate(twin, `[...document.querySelectorAll('#eventsList li')].map((item) => item.className + ': ' + item.innerText.replace(/\\s+/g, ' '))`);
+    const setField = (handle, selector, value, kind = 'change') => evaluate(handle, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('${kind}', { bubbles: true })); })()`);
+
+    await run('a data log runs as a live twin in its window: moves, forecasts, jumps, watched, estimated with its band, a sandbox and a draft scenario, and a refit', async () => {
         // Six hours of the rig with no noise: the heater on for two hours, off for one, on for two, then off; a reading a minute.
         const capacitance = 209000, heatLoss = 20, ambient = 293.15;
         const heaterAt = (time) => (time < 7200 || (time >= 10800 && time < 18000) ? 1000 : 0);
@@ -4663,115 +4674,118 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `Boolean(document.querySelector('#nodeEditorStates .editorStateTuning'))`, 'The bounds of a fitted initial value were not offered.');
         assert.deepEqual(await evaluate(opened, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Ambient air').states[0].tuning`), { minimum: 0, maximum: 586.3 }, 'The bounds start as the value give or take its own size.');
         await evaluate(opened, `document.querySelector('#nodeEditor [data-close-card]').click()`);
-        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
-        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
-        await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
-        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(log)}, 'tankRun.csv')`);
-        await waitFor(opened, `!document.querySelector('#liveTwinStart').disabled`, 'The live twin could not be started for a mapped log.');
-        // A log handed over as text has no file on disk to follow.
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed option[value="follow"]').disabled`), true);
-        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
+        const twin = await openTwinWindow(opened);
+        await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(log)}, 'tankRun.csv')`);
+        await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The log\'s signals were not matched by name.');
+        const summary = () => evaluate(twin, `window.__debugTwinWindow.summary()`);
+        const playedThrough = (message, timeout = 120000) => waitFor(twin, `window.__debugTwinWindow.summary()?.ended === 'played'`, message, timeout);
+        // Started again with the engineer's settings: a new twin, played through.
+        const restartAndPlay = async (message, timeout = 120000) => {
+            const { startedAt } = await summary();
+            await evaluate(twin, `document.querySelector('#restartTwin').click()`);
+            await waitFor(twin, `window.__debugTwinWindow.summary()?.startedAt !== ${JSON.stringify(startedAt)} && window.__debugTwinWindow.summary()?.ended === 'played'`, message, timeout);
+        };
 
         // As fast as it can go: every move of the window, then the end.
-        await set('#liveTwinSpeed', 'Infinity');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The live twin did not play the whole log.', 60000);
-        const played = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
-        assert.equal(played.cycles, 31, 'A one-hour window moving every ten minutes over six hours makes 31 moves.');
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed('Infinity')`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await playedThrough('The live twin did not play the whole log.');
+        const played = await summary();
+        assert.equal(played.moves, 31, 'A one-hour window moving every ten minutes over six hours makes 31 moves.');
         assert.equal(played.last.now, 21600);
         assert.ok(Math.abs(played.last.jumps.tankTemperature.jump) < 0.2, `The true model jumps by little: ${played.last.jumps.tankTemperature.jump}.`);
-        await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.length === 3 && document.querySelector('#liveTwinJumpPlot').data?.length === 3`, 'The live twin and its jumps were not drawn.');
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`), /^The whole log has been played: 31 moves/);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /no drift/);
-        assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().goal`), 'replay', 'How the log was replayed is kept with the project.');
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinObserved').textContent`), /^The readings reach Water tank · Water temperature\. The model carries .* alone, unchecked by any reading\.$/, 'The card says which states the data reaches.');
+        assert.deepEqual(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.map((trace) => trace.name)`), ['Measured', 'Model', 'Forecast']);
+        assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^The whole log has been played: 31 moves/);
+        assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').textContent`), 'In step');
+        assert.match(await evaluate(twin, `document.querySelector('#inferredRows').innerText`), /Ambient air · Temperature\s+carried by the model/, 'The room says what the readings do not reach.');
 
         // Watched only: after the first move the model runs on unaided, and the choice is kept with the project.
-        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'watch');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The watched live twin did not play the whole log.', 60000);
-        assert.equal((await evaluate(opened, `window.__debugParameterTuning.liveTwin()`)).last.corrections.tankTemperature.reason, 'watched only');
-        assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().replay.corrections.tankTemperature`), 0);
-        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'nudge');
-        assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="gain"]').hidden`), false, 'A nudge asks how far.');
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        await setField(twin, '#correctionRows select', 'watch');
+        await restartAndPlay('The watched live twin did not play the whole log.');
+        assert.equal((await summary()).last.corrections.tankTemperature.reason, 'watched only');
+        await waitFor(opened, `window.__debugTwin.setup()?.live?.corrections?.tankTemperature?.gain === 0`, 'Watching was not kept with the project.');
+        await setField(twin, '#correctionRows select', 'nudge');
+        assert.equal(await evaluate(twin, `document.querySelector('#correctionRows input:not([data-noise])').hidden`), false, 'A nudge asks how far.');
 
-        // Estimated: the readings weighed against the model by an ensemble of twelve, each state shown with its estimate and spread,
-        // the forecast drawn with its band, the honesty of the spread said, and the choice kept with the project.
-        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'estimate');
-        assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="noise"]').hidden`), false, 'An estimate offers the readings\' noise.');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinMembersField').hidden`), false, 'An estimate offers the ensemble\'s size.');
-        await set('#liveTwinMembers', '12');
-        await set('#liveTwinSpeed', 'Infinity');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The estimated live twin did not play the whole log.', 120000);
-        const estimated = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
-        assert.equal(estimated.cycles, 31);
+        // Estimated: the readings weighed against the model by an ensemble of twelve, the states and the tracked heat loss with their
+        // spreads, the forecast with its band, the honesty of the band said, and the choice kept with the project.
+        await setField(twin, '#correctionRows select', 'estimate');
+        assert.equal(await evaluate(twin, `document.querySelector('#correctionRows input[data-noise]').hidden`), false, 'An estimate offers the readings\' noise.');
+        assert.equal(await evaluate(twin, `document.querySelector('#trackBlock').hidden`), false, 'An estimate offers the ensemble and what to track.');
+        await setField(twin, '#members', '12');
+        await restartAndPlay('The estimated live twin did not play the whole log.', 180000);
+        const estimated = await summary();
+        assert.equal(estimated.moves, 31);
         assert.equal(estimated.last.corrections.tankTemperature.estimate, true);
         assert.equal(estimated.last.estimate.members, 12);
-        await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.some((trace) => trace.name === 'Spread (10–90%)')`, 'The forecast was not drawn with its band.');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinEstimate').hidden`), false);
-        // A row for each state and for each parameter tracked (the rig's heat loss is tunable, so tracked unless unticked).
-        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinEstimateRows .liveTwinEstimateRow').length`), estimated.last.estimate.states.length + estimated.last.estimate.parameters.length);
-        assert.deepEqual(estimated.last.estimate.parameters.map((parameter) => parameter.parameterId), [10]);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinEstimateRows .liveTwinEstimateRow [data-field="estimate"]').textContent`), /^[-\d.e]+ ± [\d.e-]+/);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinHonesty').textContent`), /^\d+ of \d+ readings of tankTemperature \(\d+%\) fell outside the spread the twin expected/);
-        assert.deepEqual(await evaluate(opened, `window.__debugParameterTuning.setup().replay.corrections.tankTemperature`), { estimate: true });
-        assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().replay.live.members`), 12);
-        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'reset');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinMembersField').hidden`), true);
+        assert.deepEqual(estimated.last.estimate.parameters.map((parameter) => parameter.parameterId), [10], 'The rig\'s tunable heat loss is tracked unless unticked.');
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.fill === 'tonexty')`), true, 'The forecast is drawn with its band.');
+        const inferred = await evaluate(twin, `document.querySelector('#inferredRows').innerText`);
+        assert.match(inferred, /Heat loss coefficient\s+a parameter, tracked\s+[\d.]+ W\/K\s*±/);
+        assert.match(inferred, /Ambient air · Temperature\s+estimated\s+[\d.]+ K\s*±/);
+        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .facts').textContent`), /\d+% of readings outside the band \(about 20% is honest\)/);
+        await waitFor(opened, `window.__debugTwin.setup()?.live?.corrections?.tankTemperature?.estimate === true && window.__debugTwin.setup().live.members === 12`, 'The estimate was not kept with the project.');
+        await setField(twin, '#correctionRows select', 'reset');
+        assert.equal(await evaluate(twin, `document.querySelector('#trackBlock').hidden`), true);
+        await restartAndPlay('The reset live twin did not play the whole log.');
 
-        // At an hour a second, detach part way, switch the heater off and run ahead; back to live keeps what was tried as a draft.
-        await set('#liveTwinSpeed', '3600');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.running && window.__debugParameterTuning.liveTwin().cycles >= 3 && !document.querySelector('#liveTwinDetach').disabled`, 'The live twin did not get going.', 30000);
-        await evaluate(opened, `document.querySelector('#liveTwinDetach').click()`);
-        await waitFor(opened, `!document.querySelector('#liveTwinSandbox').hidden`, 'The sandbox did not open.', 15000);
-        await set('#liveTwinSandboxInputs input[data-signal="heaterPower"]', '0');
-        await set('#liveTwinSandboxMinutes', '90');
-        await evaluate(opened, `document.querySelector('#liveTwinSandboxRun').click()`);
-        await waitFor(opened, `/^Ran ahead to .* with heaterPower 0/.test(document.querySelector('#liveTwinSandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
-        await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.length === 4`, 'What was tried was not drawn beside the forecast.');
-        await evaluate(opened, `document.querySelector('#liveTwinSandboxReturn').click()`);
+        // At an hour a second, a sandbox part way: the heater off, run ahead; back to live keeps what was tried as a draft.
+        await evaluate(twin, `window.confirm = () => true; document.querySelector('#roomSetup').click()`);
+        await waitFor(twin, `!document.querySelector('#setup').hidden`, 'The setup did not come back.');
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed(3600)`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The live twin did not get going.', 30000);
+        await evaluate(twin, `document.querySelector('#trySomething').click()`);
+        await waitFor(twin, `!document.querySelector('#sandboxBar').hidden`, 'The sandbox did not open.', 15000);
+        await setField(twin, '#sandboxInputs input[data-signal="heaterPower"]', '0');
+        await setField(twin, '#sandboxMinutes', '90');
+        await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
+        await waitFor(twin, `/^Ran ahead to .* with heaterPower 0/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn beside the forecast.');
+        await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(opened, `window.__debugParameterTuning.scenarios().length === 1`, 'Going back to live did not keep the scenario.', 15000);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinNote').textContent`), /^Back to live\. 1 scenario kept as a draft\.$/, 'The note says so, and the moves do not write over it.');
         const scenarios = await evaluate(opened, `window.__debugParameterTuning.scenarios()`);
-        assert.equal(scenarios.length, 1);
         assert.deepEqual(scenarios[0].tried.map(({ signal, value }) => [signal, value]), [['heaterPower', 0]]);
         assert.equal(scenarios[0].ranFor, 5400);
-        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinScenarioRows .liveTwinScenarioRow').length`), 1);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The live twin did not carry on to the end after the sandbox.', 60000);
-        const afterSandbox = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
-        assert.equal(afterSandbox.cycles, 31, 'The live twin made every move, sandbox or not.');
+        assert.match((await twinEvents(twin))[0], /kept as a draft scenario/);
+        await playedThrough('The live twin did not carry on to the end after the sandbox.', 60000);
+        const afterSandbox = await summary();
+        assert.equal(afterSandbox.moves, 31, 'The live twin made every move, sandbox or not.');
         assert.deepEqual(afterSandbox.last.jumps, played.last.jumps, 'Nothing tried in the sandbox reached the live twin.');
 
-        // Ten minutes a second: the latest window is refitted, the room's value at its anchor found with it, and applied to the twin.
-        await set('#liveTwinSpeed', '600');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.running && window.__debugParameterTuning.liveTwin().cycles >= 1 && !document.querySelector('#liveTwinRefit').disabled`, 'The live twin did not get going for a refit.', 30000);
-        await evaluate(opened, `document.querySelector('#liveTwinRefit').click()`);
-        await waitFor(opened, `/Apply it to run the twin on/.test(document.querySelector('#liveTwinRefitStatus').textContent)`, 'The refit did not finish.', 60000);
-        const refitRow = await evaluate(opened, `document.querySelector('#liveTwinRefitRows').textContent`);
-        // The rig's heat loss is tunable too, so it is refitted beside the room (and found again near its true 20 W/K).
-        const room = refitRow.match(/Ambient air · Temperature at \d[^:]*: 293\.150 → ([\d.]+)/);
-        const refittedLoss = refitRow.match(/Heat loss coefficient: 20\.0000 → ([\d.]+)/);
+        // Ten minutes a second: the latest window refitted, the room's value at its anchor found with it, and applied to the twin.
+        await evaluate(twin, `document.querySelector('#roomSetup').click()`);
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed(600)`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 1 && !document.querySelector('#refitRun').disabled`, 'The live twin did not get going for a refit.', 30000);
+        await evaluate(twin, `document.querySelector('#refitRun').click()`);
+        await waitFor(twin, `!document.querySelector('#refitApply').hidden`, 'The refit did not finish.', 60000);
+        const refitRow = await evaluate(twin, `document.querySelector('#refitRows').textContent`);
+        const room = refitRow.match(/Ambient air · Temperature at [\d.]+ h: 293\.15 → ([\d.]+)/);
+        const refittedLoss = refitRow.match(/Heat loss coefficient: 20 → ([\d.]+) W\/K/);
         assert.ok(refittedLoss && Math.abs(Number(refittedLoss[1]) - 20) < 1, `The heat loss is refitted near the truth: ${refitRow}`);
         assert.ok(room && Math.abs(Number(room[1]) - 293.15) < 0.5, `The room is fitted at the window's anchor, and found again near the truth: ${refitRow}`);
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinRefitKeep').hidden`), false, 'With the heat loss refitted, it can be kept in the model too.');
-        await evaluate(opened, `document.querySelector('#liveTwinRefitApply').click()`);
-        await waitFor(opened, `/^Applied to the twin from the move at /.test(document.querySelector('#liveTwinRefitStatus').textContent)`, 'The refit was not applied.', 15000);
-        await waitFor(opened, `Boolean(window.__debugParameterTuning.liveTwin()?.last?.refit)`, 'The next move did not say a refit was applied.', 30000);
-        await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
-        await waitFor(opened, `!window.__debugParameterTuning.liveTwin()?.running`, 'The live twin did not stop.', 15000);
+        assert.equal(await evaluate(twin, `document.querySelector('#refitKeep').hidden`), false, 'With the heat loss refitted, it can be kept in the model too.');
+        await evaluate(twin, `document.querySelector('#refitApply').click()`);
+        await waitFor(twin, `/^Applied from the move at /.test(document.querySelector('#refitStatus').textContent)`, 'The refit was not applied.', 15000);
+        await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.last?.refit)`, 'The next move did not say a refit was applied.', 30000);
+        await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await waitFor(twin, `window.__debugTwinWindow.summary()?.running === false`, 'The live twin did not stop.', 15000);
 
-        // The scenario is renamed and deleted from the list.
-        await set('#liveTwinScenarioRows .liveTwinScenarioRow input', 'Heater off at the start');
-        assert.equal((await evaluate(opened, `window.__debugParameterTuning.scenarios()`))[0].name, 'Heater off at the start');
-        await evaluate(opened, `document.querySelector('#liveTwinScenarioRows .liveTwinScenarioRow button').click()`);
-        assert.equal((await evaluate(opened, `window.__debugParameterTuning.scenarios()`)).length, 0);
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinScenarios').hidden`), true);
+        // The scenario renamed and deleted from the room's list.
+        await waitFor(twin, `document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'The scenario was not listed.');
+        await evaluate(twin, `document.querySelector('#scenariosToggle').click()`);
+        await setField(twin, '#scenarioList .scenarioRow input', 'Heater off at the start');
+        await waitFor(opened, `window.__debugParameterTuning.scenarios()[0]?.name === 'Heater off at the start'`, 'The scenario was not renamed.');
+        await evaluate(twin, `document.querySelector('#scenarioList .scenarioRow button').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.scenarios().length === 0`, 'The scenario was not deleted.');
+        await waitFor(twin, `document.querySelector('#scenariosToggle').hidden`, 'The list stayed with nothing in it.');
+        await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
-    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
     await run('a tuning objective written as a Python program, from a template, finds the true values', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-program-'));
@@ -4899,15 +4913,22 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `document.querySelector('#runParameterTuningReplay').click()`);
         await waitFor(opened, `(window.__debugParameterTuning.replay()?.[0]?.sentence ?? '').includes('for the whole')`, 'The calibrated model did not stay in step on the stretch it was not calibrated on.', 30000);
 
-        // The whole log as a live twin, as fast as it can go: every move, and the heater's scaling found by the end.
-        await set('#liveTwinSpeed', 'Infinity');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The live twin did not play the logger\'s file through.', 120000);
-        const live = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
-        assert.equal(live.cycles, 43);
-        assert.equal(live.last.trend.direction, 'above', 'By the end the model runs warmer than the vessel: the heater has scaled up.');
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /predicting above the measurements/);
+        // The whole log as a live twin, from the card in one click: the twin's window opens with the logger's file as the card read
+        // it (its columns named, scaled and its words given values), and played as fast as it can go, the heater's scaling found by
+        // the end.
         assert.equal((await evaluate(opened, `window.__debugParameterTuning.setup()`)).replay.logger.time.zone, 'Europe/Berlin', 'How the logger\'s file is read is kept with the project.');
+        const twin = await openTwinWindow(opened, '#replayLiveTwin');
+        await waitFor(twin, `/4 signals in vessel\.csv/.test(document.querySelector('#sourceStatus').textContent)`, 'The card\'s log did not come to the twin\'s window.');
+        await waitFor(twin, `!document.querySelector('#openRoom').disabled`, 'The logger\'s signals were not matched.');
+        assert.match(await evaluate(twin, `document.querySelector('#mappingCount').textContent`), /^4 of 4 signals mapped: 1 measured, 3 inputs\.$/);
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed('Infinity')`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `window.__debugTwinWindow.summary()?.ended === 'played'`, 'The live twin did not play the logger\'s file through.', 120000);
+        const live = await evaluate(twin, `window.__debugTwinWindow.summary()`);
+        assert.equal(live.moves, 43);
+        assert.equal(live.last.trend.direction, 'above', 'By the end the model runs warmer than the vessel: the heater has scaled up.');
+        assert.ok((await twinEvents(twin)).some((text) => /leaning above the readings|drifting past the warning/.test(text)), 'The room says so.');
+        await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
@@ -4935,46 +4956,38 @@ export async function runInteractionTests(driver) {
             await driver.simulateOsFileOpen(projectPath);
             const opened = await driver.waitForNewHandle(before);
             await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
-            await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
-            await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
-            await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
-            assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningOpcUa').hidden`), false, 'The replay goal offers an OPC UA server.');
-            const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-            await set('#parameterTuningOpcUaUrl', server.url);
-            await set('#parameterTuningOpcUaSecurity', 'signAndEncrypt');
+            const twin = await openTwinWindow(opened);
+            await evaluate(twin, `document.querySelector('[data-source="opcua"]').click()`);
+            await setField(twin, '#opcuaUrl', server.url);
+            await setField(twin, '#opcuaSecurity', 'signAndEncrypt');
             // Signed and encrypted: the server's certificate is new to this computer, so the person is asked, and says yes.
-            await evaluate(opened, `(() => { window.__asked = []; window.confirm = (message) => { window.__asked.push(message); return true; }; })()`);
-            await evaluate(opened, `document.querySelector('#parameterTuningOpcUaBrowse').click()`);
-            await waitFor(opened, `/^Found \\d+ tags/.test(document.querySelector('#parameterTuningOpcUaStatus').textContent)`, 'Browsing the server did not find its tags.', 30000);
-            assert.match((await evaluate(opened, `window.__asked`))[0] ?? '', /does not trust yet/, 'The person was asked before the server was trusted.');
-            const tag = (path) => `#parameterTuningOpcUaTags .sourceSignalChoice[data-id="${server.nodeId(path)}"]`;
-            assert.match(await evaluate(opened, `document.querySelector('${tag('TankTemperature')} small').textContent`), / K, 250 to 400/, 'The unit and range the server gives are shown.');
-            assert.equal(await evaluate(opened, `document.querySelector('${tag('TankTemperature')} input[data-field="unit"]').value`), 'K');
-            await set(`${tag('HeaterPower')} select`, 'input');
-            await set(`${tag('HeaterPower')} input[data-field="name"]`, 'heaterPower');
-            await set(`${tag('TankTemperature')} select`, 'output');
-            await set(`${tag('TankTemperature')} input[data-field="name"]`, 'tankTemperature');
-            await evaluate(opened, `document.querySelector('#parameterTuningOpcUaUse').click()`);
-            await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The tags did not set the card up.');
-            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), true, 'A server is followed, not replayed.');
-            assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] select').value`), '2');
-            await set('#parameterTuningReplayTimeStep', '60');
-            await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the server.', 60000);
+            await evaluate(twin, `(() => { window.__asked = []; window.confirm = (message) => { window.__asked.push(message); return true; }; })()`);
+            await evaluate(twin, `document.querySelector('#opcuaBrowse').click()`);
+            await waitFor(twin, `/^Found \\d+ tags/.test(document.querySelector('#sourceStatus').textContent)`, 'Browsing the server did not find its tags.', 30000);
+            assert.match((await evaluate(twin, `window.__asked`))[0] ?? '', /does not trust yet/, 'The person was asked before the server was trusted.');
+            const tag = (path) => `#mappingRows .mappingRow[data-signal="${server.nodeId(path)}"]`;
+            assert.match(await evaluate(twin, `document.querySelector('${tag('TankTemperature')} .signal small').textContent`), / K, 250 to 400/, 'The unit and range the server gives are shown.');
+            // The tags' names and units are matched to the rig's model by the suggestions.
+            await waitFor(twin, `document.querySelector('${tag('TankTemperature')}').classList.contains('confident') && document.querySelector('${tag('HeaterPower')}').classList.contains('confident')`, 'The tags were not matched to the model.');
+            await evaluate(twin, `document.querySelector('#openRoom').click()`);
+            await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The live twin made no moves from the server.', 60000);
             // The twin counts time from its earliest reading, the heater's, set once at the start, while the subscription starts from
             // the temperature as the PLC has it by then: when browsing was slow (a loaded machine, an encrypted handshake) that is
             // already more than a window and two strides later, and the first moves come at once, from the first few readings. So the
             // test waits for twenty readings to have arrived, not for a number of moves.
-            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.last?.window?.tankTemperature?.length ?? 0) >= 20`, 'Twenty readings did not arrive from the server.', 60000);
-            await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
-            await waitFor(opened, `/recorded in .*recordings/.test(document.querySelector('#liveTwinStatus').textContent)`, 'Stopping did not say where the readings were recorded.', 15000);
-            const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
+            const measuredName = await evaluate(twin, `window.__debugTwinWindow.twin().tiles[0].signal`);
+            await waitFor(twin, `(Object.values(window.__debugTwinWindow.summary()?.last?.window ?? {})[0]?.length ?? 0) >= 20`, 'Twenty readings did not arrive from the server.', 60000);
+            await evaluate(twin, `document.querySelector('#roomStop').click()`);
+            await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.recordedTo)`, 'Stopping did not say where the readings were recorded.', 15000);
+            const recordedTo = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).recordedTo;
+            assert.match(await evaluate(twin, `document.querySelector('#roomStatus').textContent`), /recorded in .*recordings/);
             const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
             // The subscription starts with each tag's value as it is then (the PLC ran on while the tags were chosen), and from there
             // every reading is recorded: a minute apart, none missing.
-            const times = recorded.observations.filter((observation) => observation.signal === 'tankTemperature').map((observation) => observation.time);
+            const times = recorded.observations.filter((observation) => observation.signal === measuredName).map((observation) => observation.time);
             assert.ok(times.length >= 20, `The recording holds what arrived: ${times.length} readings.`);
             assert.ok(times.every((time, index) => index === 0 || Math.abs(time - times[index - 1] - 60) < 1e-6), 'Every reading from the first to the last is recorded, a minute apart.');
+            await twin.close();
             await evaluate(opened, `window.confirm = () => true; undefined`);
             await closeWhenValidated(opened);
         } finally {
@@ -5030,41 +5043,6 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
-    await run('in the tuning card\'s live twin, the drift warning says what to do, and tracking the heat loss finds it growing', async () => {
-        const directory = await mkdtemp(join(tmpdir(), 'konjugate-tracking-'));
-        const projectPath = join(directory, 'rig.kjt');
-        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
-        const before = driver.allHandles();
-        await driver.simulateOsFileOpen(projectPath);
-        const opened = await driver.waitForNewHandle(before);
-        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
-        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
-        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
-        await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
-        const drifting = await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8');
-        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(drifting)}, 'simulatedTankRigDrifting.csv')`);
-        await waitFor(opened, `!document.querySelector('#liveTwinStart').disabled`, 'The live twin could not be started.');
-        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinAlertLabel').textContent`), /^Warn when it drifts by \(K a move\)$/);
-        assert.ok(Number(await evaluate(opened, `document.querySelector('#liveTwinAlert').value`)) > 0, 'A warning is set out of the box.');
-        await set('#liveTwinSpeed', 'Infinity');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The twin did not play the drifting recording.', 120000);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /This has passed the warning you set\. Refit on the latest window to find what changed, or set the measured signal to "estimate"/);
-
-        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'estimate');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinTrack').hidden`), false, 'The heat loss is offered to track.');
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrackRows').textContent`), /Heat loss coefficient/);
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinTrackRows input[data-parameter-id="10"]').checked`), true, 'Tracked unless unticked.');
-        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The tracking twin did not play the recording.', 180000);
-        const tracked = (await evaluate(opened, `window.__debugParameterTuning.liveTwin()`)).last.estimate.parameters.find((parameter) => parameter.parameterId === 10);
-        assert.ok(tracked.mean > 24, `The heat loss is found growing from the model's 20: ${tracked.mean}.`);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinEstimateRows').textContent`), /Heat loss coefficient \(tracked\)/);
-        await evaluate(opened, `window.confirm = () => true; undefined`);
-        await closeWhenValidated(opened);
-    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
-
     await run('the twin\'s own window: a plant\'s names matched to the model with their units converted, and the control room running', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-twinwindow-'));
         const projectPath = join(directory, 'rig.kjt');
@@ -5110,6 +5088,98 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
+    await run('the control room\'s engineer: a parameter set and kept, a refit, a model change applied, the warning, a sandbox, the layout, time scrubbed back, and the estimator tracking the heat loss', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-engineer-'));
+        const projectPath = join(directory, 'rig.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        const beforeTwin = driver.allHandles();
+        await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
+        const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+        await waitFor(twin, `/Water temperature/.test(document.querySelector('#modelSummary').textContent)`, 'The twin window did not show the model.');
+        await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
+        await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The rig\'s readings were not matched.');
+        // Slow enough to work in the room while the recording plays: six hours in a little over a minute.
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed(300)`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `window.__debugTwinWindow.twin()?.cycles.length >= 2`, 'The twin made no moves.', 60000);
+        const heatLossOf = async () => evaluate(opened, `window.__debugProject.serialize().edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value`);
+        const events = () => evaluate(twin, `[...document.querySelectorAll('#eventsList li')].map((item) => item.className + ': ' + item.innerText.replace(/\\s+/g, ' '))`);
+
+        // The engineer's view: the heat loss set, applied to the twin and kept in the model.
+        assert.equal(await evaluate(twin, `document.querySelector('#engineer').hidden`), true, 'The operator\'s view by default.');
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        assert.match(await evaluate(twin, `document.querySelector('#tunableRows').textContent`), /Heat loss coefficient/);
+        await evaluate(twin, `(() => { const field = document.querySelector('#tunableRows [data-parameter-id="10"] input[type="number"]'); field.value = '24'; field.dispatchEvent(new Event('change')); })()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /Heat loss coefficient set from 20 to 24/.test(item.textContent) && /kept in the model too/.test(item.textContent))`, 'The heat loss was not set and kept.');
+        assert.equal(await heatLossOf(), 24, 'The model keeps it.');
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        assert.equal(await evaluate(twin, `document.querySelector('#modelBanner').hidden`), true, 'A value kept from here is not offered back as a change.');
+
+        // A refit on the latest window, applied and kept.
+        await evaluate(twin, `document.querySelector('#refitRun').click()`);
+        await waitFor(twin, `!document.querySelector('#refitKeep').hidden`, 'The refit did not finish.', 60000);
+        assert.match(await evaluate(twin, `document.querySelector('#refitRows').textContent`), /Heat loss coefficient: 24 → /);
+        await evaluate(twin, `document.querySelector('#refitKeep').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /A refit was applied to the twin/.test(item.textContent))`, 'The refit was not applied.');
+        const refitted = await heatLossOf();
+        assert.ok(refitted !== 24, `The refit's heat loss is kept in the model: ${refitted}.`);
+
+        // A change made in the project window: offered, and applied from the latest move.
+        await evaluate(opened, `(() => { const model = window.__debugProject.serialize(); model.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value = 30; return window.__debugProject.load(model, 'rig.kjt'); })()`);
+        await waitFor(twin, `!document.querySelector('#modelBanner').hidden`, 'The model\'s change was not offered.');
+        assert.match(await evaluate(twin, `document.querySelector('#modelBannerText').textContent`), /Heat loss coefficient .* → 30 W\/K/);
+        await evaluate(twin, `document.querySelector('#modelApply').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /The model's change was applied to the twin/.test(item.textContent))`, 'The model\'s change was not applied.');
+        assert.equal(await evaluate(twin, `document.querySelector('#modelBanner').hidden`), true);
+
+        // The warning, taken at once.
+        await evaluate(twin, `(() => { const field = document.querySelector('#alertAmount'); field.value = '0.05'; field.dispatchEvent(new Event('change')); })()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /The warning set to 0.05 K a move/.test(item.textContent))`, 'The warning was not set.');
+
+        // Trying something: the heater off for an hour, drawn dotted, and kept as a draft scenario.
+        await evaluate(twin, `document.querySelector('#trySomething').click()`);
+        await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && document.querySelector('#sandboxInputs input') !== null`, 'The sandbox did not open.');
+        await evaluate(twin, `(() => { const field = document.querySelector('#sandboxInputs input'); field.value = '0'; })()`);
+        await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
+        await waitFor(twin, `/Ran ahead to .* with heaterPower 0/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000);
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn on the tile.');
+        await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent)) && document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'What was tried was not kept.');
+
+        // The layout: the tile drawn wide, kept with the project.
+        await evaluate(twin, `document.querySelector('#tiles .tile .tileTools button').click()`);
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('wide')`), true);
+        await waitFor(opened, `JSON.stringify(window.__debugTwin.setup().layout?.wide) === '["tankTemperature"]'`, 'The layout was not kept with the project.');
+
+        // Time scrubbed back to the first move, and following again.
+        await evaluate(twin, `(() => { const scrub = document.querySelector('#timeScrub'); scrub.value = '0'; scrub.dispatchEvent(new Event('input')); })()`);
+        assert.match(await evaluate(twin, `document.querySelector('#timeLabel').textContent`), /^at 1 h of data · \d+ moves? ago$/);
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles').classList.contains('past')`), true);
+        await evaluate(twin, `document.querySelector('#timeFollow').click()`);
+        assert.match(await evaluate(twin, `document.querySelector('#timeLabel').textContent`), /^Following now/);
+
+        // The estimator, tracking the heat loss: started again with the engineer's settings, and the heat loss found rising.
+        await evaluate(twin, `(() => { const choice = document.querySelector('#correctionRows select'); choice.value = 'estimate'; choice.dispatchEvent(new Event('change')); })()`);
+        assert.equal(await evaluate(twin, `document.querySelector('#trackBlock').hidden`), false, 'The tunable parameters are offered to track.');
+        assert.equal(await evaluate(twin, `document.querySelector('#trackRows input[data-parameter-id="10"]').checked`), true);
+        await evaluate(twin, `document.querySelector('#restartTwin').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /started again with the engineer's settings/.test(item.textContent) && /estimating tankTemperature/.test(item.textContent))`, 'The twin was not started again.', 30000);
+        await waitFor(twin, `/The whole log has been played/.test(document.querySelector('#healthTwin').textContent)`, 'The tracking twin did not play the recording.', 240000);
+        const tracked = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' ')).find((text) => /Heat loss coefficient/.test(text))`);
+        assert.match(tracked ?? '', /a parameter, tracked .*±.* rising/, `The heat loss is tracked, rising: ${tracked}`);
+        assert.ok((await events()).length > 10, 'The events from before the restart stay.');
+        await waitFor(opened, `(window.__debugTwin.setup().record?.events.length ?? 0) > 10 && window.__debugTwin.setup().live.corrections.tankTemperature.estimate === true`, 'The record and the settings were not kept with the project.');
+        await twin.close();
+        // Where the room was, kept with the project for the next time it opens (on a second screen, say).
+        await waitFor(opened, `window.__debugTwin.setup().layout?.bounds?.width >= 900 && JSON.stringify(window.__debugTwin.setup().layout.wide) === '["tankTemperature"]'`, 'The room\'s place was not kept with the project.');
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
     await run('a live twin follows an MQTT broker: listening finds the topics, and what arrives is recorded', async () => {
         // A broker in this process, and a gateway publishing the tank's readings as a lab's would: one topic each, JSON with the
         // reading's own time, a minute of the tank every 20 ms, for as long as the test needs.
@@ -5143,40 +5213,30 @@ export async function runInteractionTests(driver) {
             await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
             await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
             await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
-            await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
-            assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningMqtt').hidden`), false, 'The replay goal offers a broker.');
-            const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-            await set('#parameterTuningMqttUrl', url);
-            await evaluate(opened, `document.querySelector('#parameterTuningMqttListen').click()`);
-            await waitFor(opened, `/^Heard 2 topics/.test(document.querySelector('#parameterTuningMqttStatus').textContent)`, 'Listening did not find the two topics.', 15000);
-            const topic = (name) => `#parameterTuningMqttTopics .sourceSignalChoice[data-id="${name}"]`;
-            await set(`${topic('lab/rig/heater/power')} select`, 'input');
-            await set(`${topic('lab/rig/heater/power')} input[data-field="name"]`, 'heaterPower');
-            await set(`${topic('lab/rig/tank/temperature')} select`, 'output');
-            await set(`${topic('lab/rig/tank/temperature')} input[data-field="name"]`, 'tankTemperature');
-            await set(`${topic('lab/rig/tank/temperature')} input[data-field="unit"]`, 'K');
-            await evaluate(opened, `document.querySelector('#parameterTuningMqttUse').click()`);
-            await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The topics did not set the card up.');
-            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), true, 'A broker is followed, not replayed.');
-            const target = (signal) => `document.querySelector('.parameterTuningReplayRow[data-signal="${signal}"] select').value`;
-            assert.equal(await evaluate(opened, target('heaterPower')), '40');
-            assert.equal(await evaluate(opened, target('tankTemperature')), '2');
-            assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed').value`), 'follow');
-            await set('#parameterTuningReplayTimeStep', '60');
-            await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the broker.', 30000);
-            await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
-            await waitFor(opened, `/recorded in .*recordings/.test(document.querySelector('#liveTwinStatus').textContent)`, 'Stopping did not say where the readings were recorded.', 15000);
-            const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
+
+            const twin = await openTwinWindow(opened);
+            await evaluate(twin, `document.querySelector('[data-source="mqtt"]').click()`);
+            await setField(twin, '#mqttUrl', url);
+            await evaluate(twin, `document.querySelector('#mqttListen').click()`);
+            await waitFor(twin, `/^Heard 2 topics/.test(document.querySelector('#sourceStatus').textContent)`, 'Listening did not find the two topics.', 15000);
+            // The topics' words are matched to the rig's model: the heater's power to the shared parameter, the tank's temperature to its state.
+            await evaluate(twin, `document.querySelector('#useAllSuggestions:not([hidden])')?.click()`);
+            await waitFor(twin, `document.querySelector('#mappingCount').textContent === '2 of 2 signals mapped: 1 measured, 1 input.'`, 'The topics were not matched to the model.');
+            assert.match(await evaluate(twin, `document.querySelector('#mappingRows .mappingRow[data-signal="lab/rig/tank/temperature"] select[data-field="target"]').selectedOptions[0].textContent`), /Water temperature/);
+            await evaluate(twin, `document.querySelector('#openRoom').click()`);
+            await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The live twin made no moves from the broker.', 30000);
+            await evaluate(twin, `document.querySelector('#roomStop').click()`);
+            await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.recordedTo)`, 'Stopping did not say where the readings were recorded.', 15000);
+            const recordedTo = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).recordedTo;
             assert.ok(recordedTo.startsWith(join(directory, 'recordings')), `The recording is beside the project: ${recordedTo}.`);
             const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
-            assert.deepEqual(recorded.header.signals.map((signal) => signal.name), ['heaterPower', 'tankTemperature']);
+            assert.equal(recorded.header.signals.length, 2);
             assert.ok(recorded.observations.length >= 61, `The recording holds at least the hour of readings the first move needed: ${recorded.observations.length}.`);
-            // The recording opens again in one click, as the card's data log, from MQTT's broker.
-            assert.equal(await evaluate(opened, `document.querySelector('#liveTwinReplayRecording').hidden`), false, 'A recording can be replayed.');
-            await evaluate(opened, `document.querySelector('#liveTwinReplayRecording').click()`);
-            await waitFor(opened, `/readings over .*from MQTT /.test(document.querySelector('#parameterTuningStatus').textContent)`, 'The recording did not open as the card\'s log.', 15000);
-            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), false, 'A recording is replayed, not followed.');
+            // The recording opens again in one click, as the twin's log, from MQTT's broker.
+            await evaluate(twin, `[...document.querySelectorAll('#eventsList button')].find((button) => button.textContent === 'Replay this recording').click()`);
+            await waitFor(twin, `!document.querySelector('#setup').hidden && /signals in .*\\.csv, \\d+ readings, from MQTT /.test(document.querySelector('#sourceStatus').textContent)`, 'The recording did not open as the twin\'s log.', 15000);
+            await waitFor(twin, `!document.querySelector('#openRoom').disabled`, 'The recording\'s signals were not matched again.');
+            await twin.close();
             await evaluate(opened, `window.confirm = () => true; undefined`);
             await closeWhenValidated(opened);
         } finally {
@@ -5247,28 +5307,14 @@ export async function runInteractionTests(driver) {
                     .then((response) => response.json()).then((answer) => { if (answer.status !== 202 && answer.status !== 503) refused ??= answer; }).catch(() => {});
             }, 20);
 
-            // The card: the signals the key may send, chosen and followed.
-            await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
-            await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
-            await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
-            assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningPush').hidden`), false, 'The replay goal offers the push service.');
-            await evaluate(opened, `document.querySelector('#parameterTuningPush').open = true`);
-            const signal = (name) => `#parameterTuningPushSignals .sourceSignalChoice[data-id="${name}"]`;
-            await waitFor(opened, `document.querySelectorAll('#parameterTuningPushSignals .sourceSignalChoice').length === 2`, 'The signals the key may send were not offered.');
-            assert.match(await evaluate(opened, `document.querySelector('#parameterTuningPushService').textContent`), new RegExp(`^Listening on 127\\.0\\.0\\.1:${port} `));
-            await set(`${signal('heaterPower')} select`, 'input');
-            await set(`${signal('tankTemperature')} select`, 'output');
-            await set(`${signal('tankTemperature')} input[data-field="unit"]`, 'K');
-            await evaluate(opened, `document.querySelector('#parameterTuningPushUse').click()`);
-            await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The signals did not set the card up.');
-            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), true, 'Pushed readings are followed, not replayed.');
-            assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed option[value="follow"]').textContent`), 'As the scripts send them');
-            const target = (name) => `document.querySelector('.parameterTuningReplayRow[data-signal="${name}"] select').value`;
-            assert.equal(await evaluate(opened, target('heaterPower')), '40');
-            assert.equal(await evaluate(opened, target('tankTemperature')), '2');
-            await set('#parameterTuningReplayTimeStep', '60');
-            await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
-            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the pushed readings.', 30000);
+            // The twin's window: the signals the key may send, matched and followed.
+            const twin = await openTwinWindow(opened);
+            await evaluate(twin, `document.querySelector('[data-source="push"]').click()`);
+            await waitFor(twin, `/^The push service is listening/.test(document.querySelector('#pushState').textContent)`, 'The twin window did not say the service is listening.');
+            await evaluate(twin, `document.querySelector('#pushRefresh').click()`);
+            await waitFor(twin, `document.querySelector('#mappingCount').textContent === '2 of 2 signals mapped: 1 measured, 1 input.'`, 'The signals the key may send were not matched.');
+            await evaluate(twin, `document.querySelector('#openRoom').click()`);
+            await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The live twin made no moves from the pushed readings.', 30000);
             assert.equal(refused, null, `A reading was refused: ${refused?.reason}`);
             await waitFor(opened, `/, 1 client/.test(document.querySelector('#pushServiceChipText').textContent)`, 'The chip did not count the script.', 5000);
 
@@ -5280,14 +5326,16 @@ export async function runInteractionTests(driver) {
             await waitFor(opened, `document.querySelector('#pushServiceState').textContent.startsWith('Not listening')`, 'The push service did not stop.', 15000);
             assert.match(await evaluate(opened, `window.__confirmed[0] ?? ''`), /^1 live twin is following/);
             await evaluate(opened, `document.querySelector('#connectionsClose').click()`);
-            await waitFor(opened, `/The push service stopped: Konjugate stopped listening\. What the scripts sent is recorded in /.test(document.querySelector('#liveTwinStatus').textContent)`, 'The twin did not say why it stopped.', 15000);
+            await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.recordedTo)`, 'The twin did not say where the readings are.', 15000);
+            assert.ok((await twinEvents(twin)).some((text) => /^bad: .*The twin stopped .*The push service stopped: Konjugate stopped listening/.test(text)), 'The twin says why it stopped.');
             assert.equal(await evaluate(opened, `document.querySelector('#pushServiceChip').hidden`), true, 'Stopped on purpose, the chip goes.');
-            const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
+            const recordedTo = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).recordedTo;
             assert.ok(recordedTo.startsWith(join(directory, 'recordings', 'pushed ')), `The recording is beside the project: ${recordedTo}.`);
             const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
             assert.equal(recorded.header.source, 'Konjugate push service');
             assert.deepEqual(recorded.header.signals.map((entry) => entry.name), ['heaterPower', 'tankTemperature']);
             assert.ok(recorded.observations.length >= 61, `The recording holds at least the hour the first move needed: ${recorded.observations.length}.`);
+            await twin.close();
             await evaluate(opened, `window.confirm = () => true; undefined`);
             await closeWhenValidated(opened);
         } finally {

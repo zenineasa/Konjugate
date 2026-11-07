@@ -814,16 +814,24 @@ function openTwinWindow(projectWindow, payload) {
         state.twinWindow.focus();
         return true;
     }
+    // Where the room was, kept with the project (on a second screen, say), when this session has not placed it yet; a screen no
+    // longer there is clamped back onto one that is.
+    const saved = payload?.setup?.layout?.bounds ?? null;
     const createdWindow = new BrowserWindow({
         icon: appIconPath,
-        ...auxiliaryWindowBounds(projectWindow, 1280, 820, state.twinBounds, screen),
+        ...auxiliaryWindowBounds(projectWindow, 1280, 820, state.twinBounds ?? (saved ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height } : null), screen),
         ...auxiliaryWindowPresentation(projectWindow),
         minWidth: 900, minHeight: 600, frame: false, backgroundColor: '#08111f', title: 'Live twin',
         webPreferences: { preload: join(currentDir, 'twinWindow', 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false }
     });
     state.twinWindow = createdWindow;
     installCustomWindowState(createdWindow);
-    createdWindow.on('close', () => { state.twinBounds = createdWindow.isDestroyed() ? state.twinBounds : createdWindow.getNormalBounds(); });
+    createdWindow.on('close', () => {
+        if (createdWindow.isDestroyed()) return;
+        state.twinBounds = createdWindow.getNormalBounds();
+        // The room's place and size, handed to the project window to keep with the project.
+        if (!projectWindow.isDestroyed()) projectWindow.webContents.send('twinBoundsChanged', { ...state.twinBounds, maximized: createdWindow.isMaximized() });
+    });
     createdWindow.on('closed', () => {
         if (state.twinWindow === createdWindow) state.twinWindow = null;
         // Its twin ends with it: the project window's chip is told.
@@ -831,7 +839,7 @@ function openTwinWindow(projectWindow, payload) {
     });
     createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('twinContext', state.twinContext); });
     createdWindow.loadFile(join(currentDir, 'twinWindow', 'index.html'));
-    if (!state.twinBounds) createdWindow.maximize();
+    if (state.twinBounds ? false : !saved || saved.maximized) createdWindow.maximize();
     return true;
 }
 
@@ -845,6 +853,33 @@ ipcMain.handle('twinSaveSetup', (event, setup) => {
     if (!projectWindow) throw new Error('This twin\'s project window has closed.');
     projectWindow.webContents.send('twinSetupChanged', setup);
     return true;
+});
+// What the twin window asks of the project window that owns it, and its answer: values kept in the model (an undoable edit there),
+// scenarios kept, renamed or deleted. Each request has its own id; one the project window does not answer in a minute fails.
+const twinRequests = new Map();
+let twinRequestCount = 0;
+ipcMain.handle('twinAskProject', (event, action, payload) => {
+    const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
+    if (!projectWindow || projectWindow.isDestroyed()) throw new Error('This twin\'s project window has closed.');
+    const id = ++twinRequestCount;
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { twinRequests.delete(id); reject(new Error('The project window did not answer.')); }, 60000);
+        twinRequests.set(id, { resolve, reject, timer, owner: projectWindow.webContents.id });
+        projectWindow.webContents.send('twinRequest', { id, action, payload });
+    });
+});
+ipcMain.on('twinReply', (event, id, result, error) => {
+    const request = twinRequests.get(id);
+    if (!request || request.owner !== event.sender.id) return;
+    twinRequests.delete(id);
+    clearTimeout(request.timer);
+    if (error) request.reject(new Error(error));
+    else request.resolve(result);
+});
+// The project's model, changed in the project window: handed to its twin window, which offers to apply it to the running twin.
+ipcMain.on('twinModelChanged', (event, document) => {
+    const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
+    if (twinWindow && !twinWindow.isDestroyed()) twinWindow.webContents.send('twinModelChanged', document);
 });
 // The twin's status (running, its moves, drifting past the warning), for the project window's toolbar chip.
 ipcMain.handle('twinStatus', (event, status) => {
@@ -3067,6 +3102,8 @@ ipcMain.handle('liveTwinStop', async (event) => {
 ipcMain.handle('liveTwinDetach', async (event) => liveTwinFor(event).detach());
 ipcMain.handle('liveTwinRefitPlan', async (event) => liveTwinFor(event).refitPlan());
 ipcMain.handle('liveTwinApplyRefit', async (event, values, cycle) => liveTwinFor(event).applyRefit(values, cycle));
+ipcMain.handle('liveTwinApplyModel', async (event, document) => liveTwinFor(event).applyModel(document));
+ipcMain.handle('liveTwinSetAlert', async (event, alertAt) => liveTwinFor(event).setAlert(alertAt));
 ipcMain.handle('liveTwinSandboxSetInput', async (event, signal, value) => liveTwinFor(event).sandboxSetInput(signal, value));
 ipcMain.handle('liveTwinSandboxRunFor', async (event, seconds) => liveTwinFor(event).sandboxRunFor(seconds));
 ipcMain.handle('liveTwinSandboxClose', async (event) => liveTwins.get(event.sender.id)?.closeSandbox() ?? null);

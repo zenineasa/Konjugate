@@ -9,7 +9,7 @@
 // into the shared handle/driver shape -- not new behavior.
 
 import { app, BrowserWindow, dialog } from 'electron';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -82,10 +82,36 @@ function wrapWindow(win) {
     return handle;
 }
 
+// The operating system's own dialogs (save, open, a message box) cannot be clicked by a test, and one left open stays on the
+// screen for the rest of the run and after it. While the tests run, each is answered as a person backing out would: a save or an
+// open cancelled, a message box with its cancel button. Each is recorded, so the runner can say which test asked for one. A test
+// that needs an answer (captureExport) sets its own for as long as it needs it.
+const nativeDialogs = [];
+function answerNativeDialogs() {
+    const options = (args) => (args[0] && typeof args[0] === 'object' && !('webContents' in args[0]) ? args[0] : args[1]) ?? {};
+    const record = (kind, args) => nativeDialogs.push({ kind, title: options(args).title ?? options(args).message ?? '' });
+    dialog.showSaveDialog = async (...args) => { record('save', args); return { canceled: true, filePath: undefined }; };
+    dialog.showOpenDialog = async (...args) => { record('open', args); return { canceled: true, filePaths: [] }; };
+    dialog.showMessageBox = async (...args) => {
+        record('message', args);
+        const { cancelId, buttons = [] } = options(args);
+        const cancel = cancelId ?? buttons.findIndex((label) => /cancel|^no\b|don.t|keep/i.test(label));
+        return { response: cancel >= 0 ? cancel : 0, checkboxChecked: false };
+    };
+    dialog.showSaveDialogSync = (...args) => { record('save', args); return undefined; };
+    dialog.showOpenDialogSync = (...args) => { record('open', args); return undefined; };
+    dialog.showMessageBoxSync = (...args) => { record('message', args); return options(args).cancelId ?? 0; };
+}
+
 export function createElectronDriver(mainWindow) {
     const mainHandle = wrapWindow(mainWindow);
+    answerNativeDialogs();
 
     return {
+        // The native dialogs asked for since the last call, each answered as cancelled.
+        takeNativeDialogs() {
+            return nativeDialogs.splice(0);
+        },
         kind: 'electron',
         mainHandle,
         allHandles() {
@@ -104,8 +130,11 @@ export function createElectronDriver(mainWindow) {
             }
             throw new Error(`No new window appeared${titleIncludes ? ` with a title including "${titleIncludes}"` : ''} within ${timeoutMs}ms.`);
         },
-        async captureExport(trigger, { extension = 'bin', maxAttempts = 100, intervalMs = 25 } = {}) {
-            const exportPath = join(tmpdir(), `konjugate-interaction-export-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`);
+        // fileName: the file the save dialog is answered with, in a folder of its own (a project is named after its file).
+        async captureExport(trigger, { extension = 'bin', fileName = null, maxAttempts = 100, intervalMs = 25 } = {}) {
+            const exportPath = fileName
+                ? join(await mkdtemp(join(tmpdir(), 'konjugate-interaction-export-')), fileName)
+                : join(tmpdir(), `konjugate-interaction-export-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`);
             const originalShowSaveDialog = dialog.showSaveDialog;
             dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
             try {

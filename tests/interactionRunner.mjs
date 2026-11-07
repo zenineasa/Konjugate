@@ -283,6 +283,8 @@ export async function runInteractionTests(driver) {
             await task();
             passedCount += 1;
             console.log(`✓ ${name}`);
+            // A native dialog the test did not expect was answered for it, not left on the screen: said, so it can be looked at.
+            for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
         } catch (error) {
             // Some errors (Electron's own "Script failed to execute") ignore a changed message, which
             // would leave the failure unnamed: wrap those instead, keeping the original as the cause.
@@ -2543,7 +2545,18 @@ export async function runInteractionTests(driver) {
     });
 
     await run('project title editing applies camel case filenames', async () => {
-        await evaluate(window, `(() => { document.querySelector('.documentTitle').click(); const input = document.querySelector('.documentTitleInput'); input.value = 'My Test Model'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        const rename = () => evaluate(window, `(() => { document.querySelector('.documentTitle').click(); const input = document.querySelector('.documentTitleInput'); input.value = 'My Test Model'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        // An earlier test saved this project, so renaming it saves it under the new name: the save dialog is answered with a file
+        // of the test's own, rather than left open on the screen. A project never saved is only renamed.
+        if (driver.captureExport) {
+            const written = await driver.captureExport(rename, { fileName: 'myTestModel.kjt' }).catch((error) => {
+                if (/did not write a file/.test(error.message)) return null;
+                throw error;
+            });
+            if (written) assert.ok(written.bytes.length > 0, 'The renamed project was written.');
+        } else {
+            await rename();
+        }
         assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'myTestModel');
     });
 
@@ -6822,5 +6835,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.__debugTour.stop()`);
     });
 
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (after the last test, a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

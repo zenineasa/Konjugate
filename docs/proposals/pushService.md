@@ -18,7 +18,7 @@ A lab with a Python or JavaScript script that reads an instrument (a serial ther
 
 ## What a script sends
 
-One reading, or many at once, as JSON. The same message works over HTTP and over a WebSocket.
+One reading, or many at once, in one of three ways that all carry the same message and give the same answers: JSON over HTTP or a WebSocket, protobuf over the same endpoints, or a gRPC stream. JSON is the default, the one the examples lead with, since a script needs nothing installed to write it; protobuf is for a lab that wants the schema as the contract, or sends at a rate where size matters; gRPC is for a client that streams heavily and wants flow control, or is written in a language (C++, Go, Rust, C#) where generated code is easier than calling HTTP by hand.
 
 ```json
 { "readings": [
@@ -28,11 +28,13 @@ One reading, or many at once, as JSON. The same message works over HTTP and over
 ```
 
 - **`signal`** is a name the key is allowed to send (below). **`value`** is a finite number. **`time`** is an ISO 8601 string or seconds since 1970; it may be left out, and the reading is then stamped when it arrives, which is said in the panel since it folds network delay into the measurement. **`quality`** is `good`, `uncertain` or `bad`, as for every other source, and `good` when left out.
-- **HTTP:** `POST /v1/readings` with `Authorization: Bearer <key>`. The answer is `202` with how many readings were taken, `400` with the first thing wrong in the message (a missing value, a time that is not a time), `401` for a key that is unknown or revoked, and `403` naming a signal the key may not send. A message with one bad reading is refused whole, so a script never half-succeeds without knowing.
-- **WebSocket:** `GET /v1/stream` upgraded, with the same header. Each text message is one JSON message as above; each is answered with the same status and reason as a JSON message, so a script can log what was refused. Stopping the service closes the socket with code 1001 and the reason.
-- **What the panel shows,** for a person to copy: the address, a key, and ten lines of Python (`urllib.request`, no package to install) and of JavaScript (`fetch`) that send one reading.
+- **The protobuf message** is `PushReadings` in `protocol/pushReadings.proto`, beside the engine's own: a repeated `Reading` of `signal` (string), `value` (double), `time` (a `google.protobuf.Timestamp`, left unset to be stamped on arrival) and `quality` (an enum, `GOOD` when unset). It is the same message field for field, so a reading means the same whichever way it came, and the checks below are made once, on the decoded readings, not once for each encoding. Its answer, `PushAnswer`, carries the same status, count and reason as the JSON answer. The `.proto` is published with the examples, so a script in any language can generate its code from it.
+- **HTTP:** `POST /v1/readings` with `Authorization: Bearer <key>`, and `Content-Type: application/json` or `application/x-protobuf`; the answer comes in the encoding that was sent. Any other content type is refused with `415`, naming the two. The answer is `202` with how many readings were taken, `400` with the first thing wrong in the message (a missing value, a time that is not a time), `401` for a key that is unknown or revoked, and `403` naming a signal the key may not send. A message with one bad reading is refused whole, so a script never half-succeeds without knowing.
+- **WebSocket:** `GET /v1/stream` upgraded, with the same header. Each text frame is one JSON message and each binary frame one protobuf message, so one connection may carry either; each is answered with the same status and reason in the encoding it came in, so a script can log what was refused. Stopping the service closes the socket with code 1001 and the reason.
+- **gRPC:** the same `.proto` defines `service ReadingPush { rpc Push(stream PushReadings) returns (stream PushAnswer); rpc Check(CheckRequest) returns (CheckAnswer); }`, served on its own port (HTTP/2; by default the HTTP port plus one). The key is sent as `authorization: Bearer <key>` metadata. `Push` takes a stream of messages and answers each one in order, with HTTP/2's flow control slowing a client that sends faster than the readings are taken, instead of letting them pile up in memory; a refused message is answered in the stream with its reason, and only a bad key ends the call (`UNAUTHENTICATED`, or `PERMISSION_DENIED` for a revoked one). `Check` says whether a key is good and which signals it may send, so a client can find out before it starts. Stopping the service ends each call with `UNAVAILABLE` and the reason. The standard gRPC health service is served too, so the usual tools can see whether it is up.
+- **What the panel shows,** for a person to copy: the address, a key, and ten lines of Python (`urllib.request`, no package to install) and of JavaScript (`fetch`) that send one reading as JSON; then, each under its own heading, the `.proto` to save with the command that generates code from it, the same reading sent as protobuf, and a short gRPC client in Python and in C++ streaming readings. JSON comes first, so a person who needs nothing more stops reading there.
 
-The contract is JSON, not protobuf, because it faces other people's scripts ([Live engine session](liveEngineSession.md): what faces other people's tools stays as plain as it can be).
+JSON leads because the service faces other people's scripts ([Live engine session](liveEngineSession.md): what faces other people's tools stays as plain as it can be), and a script needs nothing installed to write it, can be tried with `curl`, and can be read in a log. Protobuf is offered beside it because it costs Konjugate almost nothing (the app already decodes the engine's messages with `protobufjs`) and gives a lab that wants it a typed contract and smaller messages. gRPC is offered from the start, though no lab has asked for it, for what HTTP and a WebSocket lack: flow control for a heavy stream, a defined way to answer and fail each message instead of a small protocol of our own, a service definition from which clients in any language are generated, and the standard health check. What it costs is a second port, a library in the app and a second listener to encrypt on the network; none of it reaches a person who uses JSON.
 
 ## Keys
 
@@ -53,17 +55,17 @@ One `PushService` class in a Node module (`src/pushService.mjs`) with `start({ h
 - **The app** starts it in its own process (Electron's `utilityProcess`), not in the main process, so a flood of messages cannot stall the windows, and watches it: if it ends, the chip turns red and says why, and a twin reading from it stops with that reason. Readings reach the main process over the process's message port and go from there to the live twin host.
 - **`konjugate serve`**, for a lab computer with no screen, runs the same class in the foreground and prints the address, each client as it connects, and the rate. It manages keys with `konjugate serve keys add <name> --signals a,b`, `list` and `revoke <name>`, using the same store.
 
-No new dependency for the server itself: Node's own `http` and `https`, and the `ws` package already installed through `mqtt` (to be made a direct dependency).
+For the server: Node's own `http` and `https`, the `ws` package already installed through `mqtt` (to be made a direct dependency), `protobufjs`, already used for the engine's messages, and one new dependency, `@grpc/grpc-js` (pure JavaScript, no native build), with the `.proto` loaded by `@grpc/proto-loader`. Inside, three front ends (HTTP, WebSocket, gRPC) and a `PushCodec` for each encoding turn what arrives into readings; all three then call the same `PushGate`, which checks the key, the signals it may send and the readings, and hands them on. So there is one place where access is decided and one set of checks, whichever way a reading came, and a front end only translates.
 
 ## On the screen
 
 - **A Connections panel,** opened from the live twin card and from the menu, with one Start / Stop switch, the state (stopped, or listening on an address with the number of clients and readings a second), the keys with Add, Revoke and last used, and the examples. Opening a project never starts it.
-- **A toolbar chip** while it is on, like the one for a running tuning: "Listening on 127.0.0.1:8737, 2 clients". Clicking it opens the panel.
+- **A toolbar chip** while it is on, like the one for a running tuning: "Listening on 127.0.0.1:8737, 2 clients" (the clients of every front end together; the panel shows both ports and the clients of each). Clicking it opens the panel.
 
 ## Local or on the network
 
 - **Loopback by default** (`127.0.0.1`), which is right when the script runs on the same computer, and needs no encryption since nothing leaves it.
-- **On the network** is a separate choice with a warning, and offered only encrypted: keys sent over plain HTTP on a lab network can be read by anyone on it. The service then listens with HTTPS and secure WebSockets, on a certificate Konjugate makes the first time (self-signed, kept in the settings folder, made with the OPC UA certificate manager already installed) or one the person chooses. The panel shows the certificate's fingerprint, and the examples show how a script trusts that certificate rather than turning checking off.
+- **On the network** is a separate choice with a warning, and offered only encrypted: keys sent over plain HTTP on a lab network can be read by anyone on it. The service then listens with HTTPS, secure WebSockets and gRPC over TLS, all on one certificate Konjugate makes the first time (self-signed, kept in the settings folder, made with the OPC UA certificate manager already installed) or one the person chooses. The panel shows the certificate's fingerprint, and the examples show how a script trusts that certificate rather than turning checking off.
 - Every connection is logged with its key's name and address. A key that fails ten times a minute from one address is refused from that address for a minute.
 
 ## Stopping
@@ -76,7 +78,7 @@ A web page cannot listen on a port. The web edition's live twin card does not of
 
 ## Order of work
 
-1. **The service and its contract,** with keys: `PushService`, `PushKeyStore`, the message checks, HTTP and WebSocket, and unit tests of every refusal (malformed JSON, a bad time, an unknown key, a signal not granted, a revoked key, the rate limit), plus a test that starts it on a free port, sends from a real HTTP client and a real WebSocket, and stops it cleanly.
+1. **The service and its contract,** with keys: `PushService`, `PushKeyStore`, `PushGate`, the two codecs and `protocol/pushReadings.proto` with its messages and the `ReadingPush` service, and the HTTP, WebSocket and gRPC front ends. Unit tests of every refusal (malformed JSON, a protobuf body that does not decode, an unsupported content type, a bad time, an unknown key, a signal not granted, a revoked key, the rate limit), written once and run against each front end, so the three are held to the same answers; a test that the same readings are taken identically whichever way they came; a test that a gRPC client sending faster than the readings are taken is slowed rather than buffered without limit; and a test that starts the service on free ports, sends from a real HTTP client, a real WebSocket in both encodings and a real gRPC client, and stops it cleanly, each client told why.
 2. **The live twin source,** `kind: 'push'`, with its recording, and an engine-backed test like the MQTT one: readings pushed over a minute of model time, the twin's moves the same as replaying the recording it wrote.
 3. **The app:** the utility process, the Connections panel, the chip, the source in the live twin card, and interaction tests for starting, adding a key, a twin following pushed readings, and stopping with a twin attached.
 4. **`konjugate serve`** and its key commands.
@@ -84,6 +86,6 @@ A web page cannot listen on a port. The web edition's live twin card does not of
 
 ## Open decisions
 
-1. **The default port.** Proposed 8737, unassigned and easy to say; any port can be chosen.
+1. **The default ports.** Proposed 8737 for HTTP and the WebSocket and 8738 for gRPC, unassigned and easy to say; any can be chosen.
 2. **A reading with no time:** stamped on arrival (proposed, said in the panel) or refused.
 3. **Whether step 5 is built** before a lab asks to push from another computer. Proposed: not until then, since loopback covers a script on the same computer and a broker covers the rest.

@@ -1747,6 +1747,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .parameterTuningConstraintRow .parameterTuningConstraintBound { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
 .parameterTuningConstraintRow select, .parameterTuningConstraintRow input { padding: 4px 6px; color: #d6e4ea; background: #0b1820; border: 1px solid #243640; border-radius: 3px; font-size: 9px; }
 .parameterTuningConstraintRow input[data-field="limit"] { width: 90px; }
+.parameterTuningConstraintRow select[data-field="limitKind"], .parameterTuningConstraintRow input[data-field="report"] { display: block; width: 100%; margin-bottom: 5px; }
+.parameterTuningConstraintRow [hidden], .parameterTuningConstraintRow .limitFormulaHidden { display: none !important; }
 .parameterTuningConstraintRow .parameterTuningConstraintBound button { margin-left: auto; color: #8297a1; background: transparent; border: 0; font-size: 12px; }
 .parameterTuningGoal { display: flex; gap: 0; margin: 0 0 8px; }
 .parameterTuningGoal button { flex: 1; padding: 6px 8px; color: #8297a1; background: #111f28; border: 1px solid #243640; font-size: 9px; }

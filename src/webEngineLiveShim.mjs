@@ -29,6 +29,7 @@ import { encodeEngineCommand } from './engineProtocol.mjs';
 import { nearestResultSample, rendererResultProjection, resultSignalSeries } from './resultSession.mjs';
 import { createStdinRingBuffer, pushStdinBytes } from './webEngineStdinBuffer.mjs';
 import { liveControlParameterIds } from './sharedParameters.mjs';
+import { parameterScheduleCommand } from './parameterSchedule.mjs';
 
 const jobs = new Map(); // jobId -> the raw decodeResultFile()-shaped result (full precision, not projected)
 const liveJobs = new Map(); // jobId -> { worker, stdinRing, commandSequence, liveParameterIds } -- real live jobs only, see startRealLiveRun()
@@ -199,6 +200,16 @@ export async function setWebEngineLiveParameterValue(jobId, parameterId, value) 
     if (!Number.isFinite(numericValue)) throw new Error('A live parameter value must be finite.');
     sendLiveCommand(job, { type: 'setParameterValue', parameterId, value: numericValue });
     return { parameterId, value: numericValue };
+}
+
+// A schedule on a live parameter (a ramp, a pulse, a waveform...), started during a run: the same command, checked the same way, as the
+// desktop's (parameterScheduleCommand in src/parameterSchedule.mjs).
+export async function scheduleWebEngineLiveParameterValue(jobId, parameterId, schedule) {
+    const job = liveJobs.get(jobId);
+    if (!job) throw new Error("Live parameter control isn't available in the web edition's batch-run mode.");
+    if (!job.liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
+    sendLiveCommand(job, parameterScheduleCommand(parameterId, schedule));
+    return { parameterId, ...schedule };
 }
 
 export async function readWebEngineResultSeries(jobId, signalIds, options) {

@@ -69,6 +69,9 @@ std::vector<FittingSignalMapping> autoMapColumnsToStates(const std::vector<std::
 // relative to the limit, and is large against the starting objective, so the search settles inside the limit when it can.
 struct FittingConstraint {
     std::string expression;
+    // In place of an expression: the name of a number the objective program reports beside its own (run.report("peak", ...)), read
+    // from the same trial's run. Only for an objective that is a program.
+    std::string report;
     bool atMost = true;
     double limit = 0.0;
 };

@@ -90,7 +90,8 @@ function describe(expression, labels) {
     const argument = (operand) => (Array.isArray(operand) && operand[0] === 'Add' ? `(${describe(operand, labels)})` : describe(operand, labels));
     switch (operator) {
     case 'Add': {
-        const compound = operands.some((operand) => !isSimple(operand));
+        // A comma between terms only when one of them is more than a name or a number, minus or not.
+        const compound = operands.some((operand) => !isSimple(isNegative(operand) ? positive(operand) : operand));
         // A sum reads from a term that is added, when there is one: "a, minus b" rather than "minus b, plus a".
         const first = operands.findIndex((operand) => !isNegative(operand));
         const ordered = first > 0 ? [operands[first], ...operands.filter((_, index) => index !== first)] : operands;
@@ -107,8 +108,10 @@ function describe(expression, labels) {
     case 'Negate': return `minus ${argument(operands[0])}`;
     case 'Power': {
         const [base, exponent] = operands;
-        if (exponent === 2 && Array.isArray(base) && base[0] === 'Add' && base.length === 3 && isNegative(base[2])) {
-            return `the squared difference between ${argument(base[1])} and ${argument(positive(base[2]))}`;
+        // (a − b)², whichever order the parser put the two in.
+        if (exponent === 2 && Array.isArray(base) && base[0] === 'Add' && base.length === 3 && isNegative(base[1]) !== isNegative(base[2])) {
+            const [added, taken] = isNegative(base[2]) ? [base[1], base[2]] : [base[2], base[1]];
+            return `the squared difference between ${argument(added)} and ${argument(positive(taken))}`;
         }
         // k², but not "Heater · gain²", where the square would seem to belong to the last word only.
         if (superscripts[exponent] && isSimple(base) && !(typeof base === 'number' && base < 0) && !describe(base, labels).includes(' ')) return `${describe(base, labels)}${superscripts[exponent]}`;

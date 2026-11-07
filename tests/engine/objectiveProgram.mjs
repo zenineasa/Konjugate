@@ -7,6 +7,9 @@
 //   - A program that crashes on its first trial fails that trial only: it is started again and the fit goes on.
 //   - A program that hangs past its time limit fails that trial only, the same way.
 //   - A C++ program that does not compile stops the fit before any simulation, in the compiler's words.
+//   - A limit can be a number the program reports beside its objective: held to it, the fit settles on the limit, away from the
+//     unlimited best; a name the program never reports fails the trials, saying what it did report; and a reported number cannot
+//     be limited when the objective is not a program.
 //
 // Run manually (after `npm run build:engine`):
 //   node tests/engine/objectiveProgram.mjs [path/to/konjugateEngine]
@@ -121,9 +124,27 @@ double objective(const konjugate::Run& run) {
         }
     }
 
+    // A limit on a number the program reports: the tank's final temperature, about 340.3 K at the best fit, held to at most 338 K.
+    const reporting = cppSource.replace('run.report("rows", static_cast<double>(simulated.size()));', 'run.report("final", simulated.back());');
+    const limited = await fit({ language: 'cpp', source: reporting }, { constraints: [{ report: 'final', relation: '<=', limit: 338 }] });
+    assert.equal(limited.report.failedTrials, 0);
+    // The same as the same limit written as an expression: a reported number is limited exactly as a formula is (a penalty, so the fit
+    // settles close to the bound rather than on it: here 0.3 % over).
+    const asExpression = await fit({ language: 'cpp', source: reporting }, { variables: [{ name: 'tank', kind: 'state', id: 2 }], constraints: [{ expression: 'final(tank)', relation: '<=', limit: 338 }] });
+    assert.deepEqual(limited.report.finalParameters, asExpression.report.finalParameters, 'A reported limit and the same limit as an expression give the same fit.');
+    assert.ok(limited.report.finalViolation < 0.005, `The fit keeps close to the reported limit: violation ${limited.report.finalViolation}.`);
+    const heatLoss = limited.report.finalParameters.find((entry) => entry.parameterId === 10).value;
+    assert.ok(heatLoss > truth.heatLoss * 1.02, `Held to a lower final temperature, the tank must lose heat faster than the truth: ${heatLoss} W/K.`);
+    const misspelt = await fit({ language: 'cpp', source: reporting }, { constraints: [{ report: 'finale', relation: '<=', limit: 338 }] }).catch((error) => ({ error }));
+    assert.ok(misspelt.error ? /finale/.test(misspelt.error.message) : misspelt.report.failedTrials === misspelt.report.evaluations, 'A name the program never reports fails every trial.');
+    await assert.rejects(fitWithEngine(project, csv, {
+        backend: 'nlopt-bobyqa', maxIterations: 4,
+        objective: { expression: 'final(waterTankTankTemperature)', direction: 'minimise', targetTime, timeStep, variables: [{ name: 'waterTankTankTemperature', kind: 'state', id: 2 }], constraints: [{ report: 'final', relation: '<=', limit: 338 }] }
+    }, engineOptions), /needs the objective to be that program/, 'Only a program reports numbers to limit.');
+
     await assert.rejects(fit({ language: 'cpp', source: 'double objective(const konjugate::Run& run) { return run.nonsense(); }' }),
         (error) => /objective/.test(error.message) && /error/.test(error.message), 'A program that does not compile is refused in the compiler\'s words.');
-    console.log(`Objective programs: the Python and the C++ objective each find ${truth.capacitance} J/K and ${truth.heatLoss} W/K; a crash and a hang each fail one trial; a compile error is reported before the fit.`);
+    console.log(`Objective programs: the Python and the C++ objective each find ${truth.capacitance} J/K and ${truth.heatLoss} W/K; a crash and a hang each fail one trial; a compile error is reported before the fit; a limit on a reported number holds (heat loss ${heatLoss.toFixed(2)} W/K to keep the tank at most 338 K).`);
 } finally {
     await rm(directory, { recursive: true, force: true });
 }

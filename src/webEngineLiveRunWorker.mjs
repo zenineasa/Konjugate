@@ -84,7 +84,8 @@ self.onmessage = async (startEvent) => {
                 return; // Mid-write partial content decoded before the engine's next atomic rewrite -- try again on the next event.
             }
             if (snapshot.snapshotMode === 'live') snapshot = { ...snapshot, samples: latestSamples };
-            const key = `${snapshot.lifecycle}:${snapshot.samples?.at(-1)?.time ?? snapshot.availableResultTime}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
+            // As the desktop's (src/engineAdapter.mjs): a change applied while the run is held moves no time, so its count is in the key.
+            const key = `${snapshot.lifecycle}:${snapshot.samples?.at(-1)?.time ?? snapshot.availableResultTime}:${snapshot.interventions?.length ?? 0}:${snapshot.pacing?.mode}:${snapshot.pacing?.simulationSecondsPerWallSecond}`;
             if (key === lastSnapshotKey) return;
             lastSnapshotKey = key;
             post({ type: 'update', result: snapshot });

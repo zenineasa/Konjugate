@@ -37,3 +37,8 @@ test('saved limits keep their relation and number, and a limit without a usable 
     assert.deepEqual(setup.objective.constraints, [{ expression: 'max(a)', relation: '>=', limit: 2 }]);
     assert.equal(normalizeTuningSetup({ goal: 'objective', objective: { expression: 'a', latex: '\\mathrm{a}', constraints: [{ expression: 'b', latex: 'b', limit: 1 }] } }).objective.latex, '\\mathrm{a}', 'the LaTeX the objective was written in is kept to show it again');
 });
+
+test('a limit on a number the objective program reports is kept by its name', () => {
+    const setup = normalizeTuningSetup({ goal: 'objective', objective: { expression: '', direction: 'minimise', program: { language: 'python', source: 'x', bindings: [] }, constraints: [{ report: ' peak ', relation: '<=', limit: '3' }, { report: '', limit: 1 }] } });
+    assert.deepEqual(setup.objective.constraints, [{ report: 'peak', relation: '<=', limit: 3 }], 'a limit with no name is dropped');
+});

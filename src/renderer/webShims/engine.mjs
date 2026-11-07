@@ -12,7 +12,7 @@ import {
 import {
     cancelWebEngineRun, onWebEngineComplete, onWebEngineError, onWebEngineUpdate,
     readWebEngineResultSample, readWebEngineResultSeries, releaseWebEngineResult,
-    setWebEngineLiveExecutionState, setWebEngineLivePacing, setWebEngineLiveParameterValue,
+    setWebEngineLiveExecutionState, setWebEngineLivePacing, setWebEngineLiveParameterValue, scheduleWebEngineLiveParameterValue,
     startWebEngineLiveRun
 } from '../../webEngineLiveShim.mjs';
 
@@ -42,6 +42,7 @@ export default {
     setPacing: (jobId, pacing) => setWebEngineLivePacing(jobId, pacing),
     setExecutionState: (jobId, executionState) => setWebEngineLiveExecutionState(jobId, executionState),
     setParameterValue: (jobId, parameterId, value) => setWebEngineLiveParameterValue(jobId, parameterId, value),
+    scheduleParameterValue: (jobId, parameterId, schedule) => scheduleWebEngineLiveParameterValue(jobId, parameterId, schedule),
     readResultSeries: (jobId, signalIds, options) => readWebEngineResultSeries(jobId, signalIds, options),
     readResultSample: (jobId, time) => readWebEngineResultSample(jobId, time),
     releaseResult: (jobId) => releaseWebEngineResult(jobId),

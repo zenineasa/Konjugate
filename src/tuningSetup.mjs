@@ -29,9 +29,13 @@ export function normalizeTuningSetup(raw) {
         const timeStep = finitePositive(raw.objective.timeStep);
         if (targetTime) setup.objective.targetTime = targetTime;
         if (timeStep) setup.objective.timeStep = timeStep;
+        // A limit is an expression, or the name of a number the objective program reports.
         const constraints = (Array.isArray(raw.objective.constraints) ? raw.objective.constraints : [])
-            .filter((entry) => entry && typeof entry.expression === 'string' && entry.expression.trim() && Number.isFinite(Number(entry.limit)))
-            .map((entry) => ({ expression: entry.expression, ...(typeof entry.latex === 'string' && entry.latex ? { latex: entry.latex } : {}), relation: entry.relation === '>=' ? '>=' : '<=', limit: Number(entry.limit) }));
+            .filter((entry) => entry && ((typeof entry.expression === 'string' && entry.expression.trim()) || (typeof entry.report === 'string' && entry.report.trim())) && Number.isFinite(Number(entry.limit)))
+            .map((entry) => ({
+                ...(typeof entry.report === 'string' && entry.report.trim() ? { report: entry.report.trim() } : { expression: entry.expression, ...(typeof entry.latex === 'string' && entry.latex ? { latex: entry.latex } : {}) }),
+                relation: entry.relation === '>=' ? '>=' : '<=', limit: Number(entry.limit)
+            }));
         if (constraints.length) setup.objective.constraints = constraints;
     }
     if (goal === 'replay' && raw.replay && typeof raw.replay === 'object') setup.replay = normalizeReplaySetup(raw.replay);

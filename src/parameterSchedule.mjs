@@ -128,3 +128,31 @@ export function scheduleSummary(schedule) {
     const how = schedule.interpolation === 'hold' ? 'each value held until the next sample' : 'linearly interpolated';
     return `${samples.length} sample${samples.length === 1 ? '' : 's'}, ${how}, from t = ${samples[0][0]} to ${samples.at(-1)[0]}, values ${Math.min(...values)} to ${Math.max(...values)}; before the first and after the last, the nearest sample's value holds.`;
 }
+
+// The engine command that starts a schedule on a live parameter during a run, checked first: the same for the desktop's engine process
+// (src/engineAdapter.mjs) and the web edition's (src/webEngineLiveShim.mjs), so a schedule one refuses the other refuses too.
+export function parameterScheduleCommand(parameterId, schedule) {
+    if (!(schedule?.mode in scheduleModeNumbers)) throw new Error('Unsupported parameter schedule mode.');
+    const startTime = Number(schedule.startTime ?? 0);
+    const duration = Number(schedule.duration ?? 0);
+    const targetValue = Number(schedule.targetValue ?? 0);
+    const baseValue = Number(schedule.baseValue ?? 0);
+    if (![startTime, duration, targetValue, baseValue].every(Number.isFinite)) {
+        throw new Error('A parameter schedule requires finite numeric fields.');
+    }
+    const samples = schedule.mode === 'piecewise' ? (schedule.samples ?? []).map((sample) => ({
+        time: Number(sample.time), value: Number(sample.value)
+    })) : undefined;
+    if (schedule.mode === 'piecewise') {
+        if (samples.length < 2) throw new Error('A piecewise parameter schedule requires at least two samples.');
+        if (!samples.every((sample) => Number.isFinite(sample.time) && Number.isFinite(sample.value))) {
+            throw new Error('A piecewise parameter schedule requires finite numeric samples.');
+        }
+    }
+    const waveform = schedule.mode === 'waveform' ? schedule.waveform : undefined;
+    if (schedule.mode === 'waveform') {
+        const problem = waveformProblem({ ...waveform, duration });
+        if (problem) throw new Error(problem);
+    }
+    return { type: 'scheduleParameterValue', parameterId, mode: schedule.mode, startTime, duration, targetValue, baseValue, samples, waveform };
+}

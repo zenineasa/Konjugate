@@ -66,22 +66,47 @@ export function objectiveVocabulary(document, measuredColumns = []) {
     return { variables, states, parameters, measured };
 }
 
+// "Match measured data" written as an objective (docs/proposals/tuningEditorsAndPrograms.md, step 3): for each column matched to a
+// state, the mean over the run of the squared difference between the two, added up. The engine's own fit adds up the squared
+// differences at every row instead; that is this times the number of rows, so the same values are best for both, and the mean is a
+// number people can read (the mean squared error, in the state's unit squared). `matched` is [{ columnName, stateId }]; `vocabulary`
+// is objectiveVocabulary's for the same document and columns. Returns the LaTeX, or null when nothing is matched.
+export function measuredDataObjectiveLatex(matched, vocabulary, nameLatex) {
+    const terms = matched.flatMap(({ columnName, stateId }) => {
+        const state = vocabulary.variables.find((variable) => variable.kind === 'state' && variable.id === stateId);
+        const column = vocabulary.variables.find((variable) => variable.kind === 'measured' && variable.column === columnName);
+        return state && column ? [`\\operatorname{mean}\\left(\\left(${nameLatex(state.name)}-${nameLatex(column.name)}\\right)^{2}\\right)`] : [];
+    });
+    return terms.length ? terms.join('+') : null;
+}
+
 // What `window.engine.fit` is given as `config.objective` (see fitWithEngine in src/engineAdapter.mjs).
 // `latex` is how the objective is written in the editor, kept so it can be shown again; the engine reads `expression`, its text form.
 export function objectivePayload({ expression = '', latex = '', direction, targetTime, timeStep, variables, constraints = [], program = null }) {
     return {
         ...(program ? { program: { language: program.language, source: program.source, bindings: program.bindings.map((binding) => ({ ...binding })) } } : {}),
         expression: expression.trim(), latex, direction: direction === 'maximise' ? 'maximise' : 'minimise', targetTime, timeStep, variables,
-        constraints: constraints.map(({ expression: limited, latex = '', relation, limit }) => ({ expression: limited.trim(), latex, relation: relation === '>=' ? '>=' : '<=', limit: Number(limit) }))
+        constraints: constraints.map(({ expression: limited = '', latex = '', report = '', relation, limit }) => ({
+            ...(report ? { report } : { expression: limited.trim(), latex }), relation: relation === '>=' ? '>=' : '<=', limit: Number(limit)
+        }))
     };
 }
 
 // The limit rows a person has filled in, or why one is not usable. A row is { expression, latex, relation, limit, problem }: `expression` is
 // the objective editor's text for it (empty while the formula does not read) and `problem` what is wrong with it then. A row left entirely
-// empty is just ignored.
+// empty is just ignored. A row with `report` (a string, possibly empty) limits a number the objective program reports by that name.
 export function constraintRows(rows) {
     const constraints = [];
     for (const [index, row] of rows.entries()) {
+        if (typeof row.report === 'string') {
+            const report = row.report.trim();
+            const bound = String(row.limit ?? '').trim();
+            if (!report && !bound) continue;
+            if (!report) return { error: `Limit ${index + 1} needs the name of a number the program reports.`, constraints: [] };
+            if (!bound || !Number.isFinite(Number(bound))) return { error: `Limit ${index + 1} needs a number to stay within.`, constraints: [] };
+            constraints.push({ report, relation: row.relation === '>=' ? '>=' : '<=', limit: Number(bound) });
+            continue;
+        }
         const expression = String(row.expression ?? '').trim();
         const limit = String(row.limit ?? '').trim();
         const written = String(row.latex ?? '').trim() !== '' || expression !== '';
@@ -93,6 +118,11 @@ export function constraintRows(rows) {
         constraints.push({ expression, latex: String(row.latex ?? ''), relation: row.relation === '>=' ? '>=' : '<=', limit: Number(limit) });
     }
     return { error: '', constraints };
+}
+
+// The names a program reports numbers by, as its source writes them: run.report("peak", ...) in either language.
+export function reportedNames(source) {
+    return [...new Set([...String(source ?? '').matchAll(/\breport\(\s*["']([^"'\n]+)["']/g)].map((match) => match[1]))];
 }
 
 // Why a run length and step cannot be used, or '' when they can.

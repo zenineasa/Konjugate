@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { constraintRows, objectivePayload, objectiveVocabulary, runSettingsError } from '../src/renderer/tuningObjective.mjs';
+import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from '../src/renderer/tuningObjective.mjs';
+import { latexToObjectiveText, objectiveNameLatex } from '../src/objectiveText.mjs';
 
 const document = {
     sharedParameters: [{ id: 20, name: 'Capacitance', symbol: 'capacitance', value: 3e5, tuning: { minimum: 1, maximum: 9 } }],
@@ -46,4 +47,23 @@ test('limit rows: empty ones are ignored, unreadable and half-filled ones say wh
     assert.match(constraintRows([{ expression: '', latex: '', limit: '4' }]).error, /Limit 1 needs something to limit/);
     assert.match(constraintRows([{ expression: '', latex: 'k+', problem: 'It could not be parsed.', limit: '4' }]).error, /Limit 1: It could not be parsed/);
     assert.deepEqual(objectivePayload({ expression: 'x', direction: 'minimise', targetTime: 1, timeStep: 1, variables: [], constraints: [{ expression: ' a ', relation: 'weird', limit: '2' }] }).constraints, [{ expression: 'a', latex: '', relation: '<=', limit: 2 }]);
+});
+
+test('matching measured data is written as an objective: the mean squared difference of each matched state and its column, added up', () => {
+    const vocabulary = objectiveVocabulary(document, ['tankTemperature', 'air']);
+    const latex = measuredDataObjectiveLatex([{ columnName: 'tankTemperature', stateId: 2 }, { columnName: 'air', stateId: 4 }, { columnName: 'gone', stateId: 99 }], vocabulary, objectiveNameLatex);
+    const result = latexToObjectiveText(latex, vocabulary.variables.map((variable) => variable.name));
+    assert.ok(result.valid, result.errors.join(' '));
+    assert.equal(result.text, 'mean(((ambientAirTemperature + (-measuredAir)) ^ 2)) + mean((((-measuredTankTemperature) + waterTankTankTemperature) ^ 2))', 'a pair that no longer exists is left out');
+    assert.equal(result.sentence, 'the average of the squared difference between ambientAirTemperature and measuredAir over the run, plus the average of the squared difference between waterTankTankTemperature and measuredTankTemperature over the run');
+    assert.equal(measuredDataObjectiveLatex([], vocabulary, objectiveNameLatex), null, 'nothing matched, nothing to write');
+});
+
+test('a limit can be a number the objective program reports, by its name', () => {
+    assert.deepEqual(constraintRows([{ report: ' peak ', relation: '<=', limit: '3' }, { report: '', limit: '' }]), { error: '', constraints: [{ report: 'peak', relation: '<=', limit: 3 }] }, 'an empty reported row is ignored');
+    assert.match(constraintRows([{ report: '', limit: '2' }]).error, /Limit 1 needs the name of a number the program reports/);
+    assert.match(constraintRows([{ report: 'peak', limit: 'x' }]).error, /needs a number to stay within/);
+    const payload = objectivePayload({ expression: '', direction: 'minimise', targetTime: 1, timeStep: 1, variables: [], constraints: [{ report: 'peak', relation: '>=', limit: 2 }, { expression: ' max(a) ', latex: 'L', relation: '<=', limit: 1 }] });
+    assert.deepEqual(payload.constraints, [{ report: 'peak', relation: '>=', limit: 2 }, { expression: 'max(a)', latex: 'L', relation: '<=', limit: 1 }]);
+    assert.deepEqual(reportedNames('run.report("peak", peak)\n    run.report( \'final\' , x);\nrun.report("peak", 2)\nreporter("no", 1)'), ['peak', 'final'], 'each name once, in either language, quotes of either kind');
 });

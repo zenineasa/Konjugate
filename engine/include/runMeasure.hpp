@@ -96,6 +96,20 @@ private:
     mutable std::vector<std::pair<std::string, double>> reports_;
 };
 
+// A limit on a number the objective program reports beside its own (docs/proposals/tuningEditorsAndPrograms.md, "An objective that is
+// a program"): read from what the program said about the same trial, which the objective has been asked for first. A trial whose
+// program did not report it fails, with the names it did report.
+class ReportMeasure final : public RunMeasure {
+public:
+    ReportMeasure(const ProgramMeasure& program, std::string name) : program_(program), name_(std::move(name)) {}
+    RunLength runLength() const override { return program_.runLength(); }
+    double evaluate(const TrialRun& run) const override;
+
+private:
+    const ProgramMeasure& program_;
+    std::string name_;
+};
+
 // What a fit scores with, made once for the whole fit: the objective (as written; the caller negates it when maximising) and each
 // limit with the measure of what it limits.
 struct FittingMeasures {

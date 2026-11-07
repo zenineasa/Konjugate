@@ -269,7 +269,8 @@ void loadFittingObjective(const std::filesystem::path& path, FittingProblem& pro
     problem.timeStep = objective.get<double>("timeStep", 0.0);
     if (const auto constraints = objective.get_child_optional("constraints")) for (const auto& entry : *constraints) {
         FittingConstraint constraint;
-        constraint.expression = entry.second.get<std::string>("expression");
+        constraint.report = entry.second.get<std::string>("report", "");
+        constraint.expression = constraint.report.empty() ? entry.second.get<std::string>("expression") : entry.second.get<std::string>("expression", "");
         constraint.atMost = entry.second.get<std::string>("relation", "<=") != ">=";
         constraint.limit = entry.second.get<double>("limit");
         problem.constraints.push_back(std::move(constraint));
@@ -292,8 +293,11 @@ void checkFittingObjective(const FittingProblem& problem) {
     // first trial, with the compiler's own words.
     if (problem.program) {
         ProgramMeasure check(problem, *problem.program);
-        for (const auto& constraint : problem.constraints) FittingObjective(constraint.expression, problem.objectiveVariables);
+        for (const auto& constraint : problem.constraints) if (constraint.report.empty()) FittingObjective(constraint.expression, problem.objectiveVariables);
         return;
+    }
+    for (const auto& constraint : problem.constraints) {
+        if (!constraint.report.empty()) throw std::invalid_argument("A limit on \"" + constraint.report + "\", a number a program reports, needs the objective to be that program.");
     }
     if (problem.objective.empty()) return;
     FittingObjective(problem.objective, problem.objectiveVariables);

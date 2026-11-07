@@ -11,12 +11,13 @@ import { DocumentController } from './documentController.mjs';
 import { createTour } from './tour.mjs';
 import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEditor.mjs';
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
-import { objectiveSummaries } from '../objectiveText.mjs';
+import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
+import { ProgramSourceSection } from './programSourceSection.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editOwnershipDefaults, editProjectProperties, editSaveOwnership } from './ownershipEditor.mjs';
-import { constraintRows, objectivePayload, objectiveVocabulary, runSettingsError } from './tuningObjective.mjs';
+import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
@@ -95,6 +96,30 @@ import {
     CSS2DObject,
     CSS2DRenderer
 } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// The program sections of the four editors that can write a relationship as a program (src/renderer/programSourceSection.mjs), drawn
+// before anything looks for their parts by id.
+const relationshipPluginHint = 'A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.';
+const termProgramSection = new ProgramSourceSection({
+    container: document.querySelector('#termProviderSection'),
+    ids: { code: 'termProviderCode', open: 'termOpenProviderEditor', reset: 'termInsertProviderTemplate', source: 'termProviderSource', pluginFields: 'termPluginProviderFields', pluginSelect: 'termPluginProvider', addBinding: 'termAddProviderBinding', bindings: 'termProviderBindings', outputKey: 'termProviderOutputKey' },
+    bindingHint: 'Each binding exposes one state of this node to the provider under a stable key.', pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. rateGradient'
+});
+const edgeProgramSection = new ProgramSourceSection({
+    container: document.querySelector('#editEdgeProviderSection'),
+    ids: { code: 'editEdgeProviderCode', open: 'editOpenProviderEditor', reset: 'editInsertProviderTemplate', source: 'editEdgeProviderSource', pluginFields: 'editEdgePluginProviderFields', pluginSelect: 'editEdgePluginProvider', addBinding: 'editAddProviderBinding', bindings: 'editEdgeProviderBindings', outputKey: 'editProviderOutputKey' },
+    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. targetTemperatureGradient'
+});
+const groupProgramSection = new ProgramSourceSection({
+    container: document.querySelector('#groupProviderSection'), rows: 10, bindingsClass: 'builderRows',
+    ids: { code: 'groupProviderCode', open: 'groupOpenProviderEditor', reset: 'groupInsertProviderTemplate', source: 'groupProviderSource', pluginFields: 'groupPluginProviderFields', pluginSelect: 'groupPluginProvider', addBinding: 'groupAddProviderBinding', bindings: 'groupProviderBindingRows', outputKey: 'groupProviderOutputKey' },
+    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: 'A relationship provider an installed plugin contributes, pinned to that installed version, used on every edge of the group.', outputPlaceholder: 'e.g. targetTemperatureGradient'
+});
+const builderProgramSection = new ProgramSourceSection({
+    container: document.querySelector('#edgeProviderSection'), rows: 10, bindingsClass: 'builderRows',
+    ids: { open: 'openProviderEditor', reset: 'insertProviderTemplate', source: 'edgeProviderSource', addBinding: 'addProviderBinding', bindings: 'providerBindingRows', outputKey: 'providerOutputKey' },
+    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', outputPlaceholder: 'e.g. targetTemperatureGradient'
+});
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -2470,12 +2495,10 @@ function renderSourceTermEditor(node, term) {
         sourceTermEquation.show(false);
         output.value = term.implementation.output?.stateId ?? '';
         const fromPlugin = implementationKind === 'plugin';
-        $('#termProviderCode').hidden = fromPlugin;
-        $('#termPluginProviderFields').hidden = !fromPlugin;
+        termProgramSection.showPlugin(fromPlugin);
         if (fromPlugin) fillPluginProviders($('#termPluginProvider'), term.implementation);
-        $('#termProviderSource').value = term.implementation.source ?? '';
-        $('#termInsertProviderTemplate').hidden = !term.implementation.source?.trim();
-        $('#termProviderOutputKey').value = term.implementation.output?.key ?? '';
+        termProgramSection.source = term.implementation.source;
+        termProgramSection.outputKey = term.implementation.output?.key;
         renderSourceTermProviderBindingRows(node, term);
     }
 }
@@ -2514,7 +2537,7 @@ function previewSourceTermProviderSource(source) {
     if (!term) return;
     beginEquationEditSession(`sourceTerm:${term.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
     term.implementation = { ...term.implementation, source };
-    $('#termInsertProviderTemplate').hidden = !source.trim();
+    termProgramSection.refreshReset();
     updateValidationStatus();
 }
 
@@ -2980,13 +3003,11 @@ function renderEdgeEditor(definition) {
     } else {
         edgeEquation.show(false);
         const fromPlugin = implementationKind === 'plugin';
-        $('#editEdgeProviderCode').hidden = fromPlugin;
-        $('#editEdgePluginProviderFields').hidden = !fromPlugin;
+        edgeProgramSection.showPlugin(fromPlugin);
         if (fromPlugin) fillPluginProviders($('#editEdgePluginProvider'), definition.implementation);
         output.value = equationOutputValue(definition.implementation.output?.role ?? 'target', definition.implementation.output?.stateId);
-        $('#editEdgeProviderSource').value = definition.implementation.source ?? '';
-        $('#editInsertProviderTemplate').hidden = !definition.implementation.source?.trim();
-        $('#editProviderOutputKey').value = definition.implementation.output?.key ?? '';
+        edgeProgramSection.source = definition.implementation.source;
+        edgeProgramSection.outputKey = definition.implementation.output?.key;
         renderProviderBindingRows(definition);
     }
 }
@@ -8649,9 +8670,23 @@ const activeParameterTuningEditor = () => (parameterTuningEditor === parameterTu
     ? parameterTuningEditor : parameterTuningObjective);
 
 // One limit: a formula for a number from the run, whether it must stay at most or at least, and the bound.
-function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = '' } = {}) {
+function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = '', report = null } = {}) {
     const row = document.createElement('div');
     row.className = 'parameterTuningConstraintRow';
+    // With an objective program, a limit can be a number the program reports in place of a formula.
+    const kindSelect = document.createElement('select');
+    kindSelect.dataset.field = 'limitKind';
+    kindSelect.setAttribute('aria-label', 'What is limited');
+    kindSelect.append(new Option('A formula of the run', 'formula'), new Option('A number the program reports', 'report'));
+    kindSelect.value = report !== null ? 'report' : 'formula';
+    const reportInput = document.createElement('input');
+    reportInput.type = 'text';
+    reportInput.dataset.field = 'report';
+    reportInput.spellcheck = false;
+    reportInput.placeholder = 'its name, as run.report gives it';
+    reportInput.setAttribute('list', 'parameterTuningReportNames');
+    reportInput.setAttribute('aria-label', 'The name of the number the program reports');
+    reportInput.value = report ?? '';
     const mathField = document.createElement('math-field');
     mathField.className = 'equationMathField';
     mathField.setAttribute('aria-label', 'What to limit');
@@ -8682,7 +8717,7 @@ function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = 
     remove.textContent = '×';
     remove.title = 'Remove this limit';
     bound.append(relationSelect, limitInput, remove);
-    row.append(mathField, source, diagnostics, bound);
+    row.append(kindSelect, reportInput, mathField, source, diagnostics, bound);
     $('#parameterTuningConstraintRows').append(row);
     const editor = new LimitEditor({
         mathField, source, diagnostics, canEdit: () => !parameterTuningRun, checkWithEngine: checkParameterTuningText,
@@ -8691,8 +8726,10 @@ function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = 
     editor.setNames(parameterTuningState?.vocabulary?.variables.map((variable) => variable.name) ?? [], objectiveNameLabels(parameterTuningState?.vocabulary));
     editor.setMode(parameterTuningObjective.mode);
     for (const field of [mathField, source]) field.addEventListener('focusin', () => { parameterTuningEditor = editor; });
-    const entry = { row, editor, relationSelect, limitInput };
+    const entry = { row, editor, relationSelect, limitInput, kindSelect, reportInput };
     parameterTuningLimits.push(entry);
+    kindSelect.addEventListener('change', () => refreshParameterTuningRunnable());
+    reportInput.addEventListener('input', () => refreshParameterTuningRunnable());
     remove.addEventListener('click', () => {
         parameterTuningLimits.splice(parameterTuningLimits.indexOf(entry), 1);
         row.remove();
@@ -8702,7 +8739,24 @@ function addParameterTuningConstraintRow({ latex = '', relation = '<=', limit = 
         editor.load(latex);
         editor.diagnose();
     }
+    refreshParameterTuningLimitKinds();
     return entry;
+}
+
+// Whether a limit row is about a reported number: only while the objective is a program, which is what reports them.
+const limitIsReported = (limit) => Boolean(parameterTuningProgram.language) && limit.kindSelect.value === 'report';
+
+// Shows each limit row as a formula or as a reported number, and offers the names the program's source reports.
+function refreshParameterTuningLimitKinds() {
+    const program = Boolean(parameterTuningProgram.language);
+    for (const limit of parameterTuningLimits) {
+        const reported = limitIsReported(limit);
+        limit.kindSelect.hidden = !program;
+        limit.reportInput.hidden = !reported;
+        for (const element of [limit.editor.mathField, limit.editor.source, limit.editor.diagnostics]) element.classList.toggle('limitFormulaHidden', reported);
+    }
+    const names = program ? reportedNames($('#parameterTuningProgramSource').value) : [];
+    $('#parameterTuningReportNames').replaceChildren(...names.map((name) => new Option(name, name)));
 }
 $('#addParameterTuningConstraint').addEventListener('click', () => addParameterTuningConstraintRow().editor.focus());
 const clearParameterTuningConstraintRows = () => {
@@ -8710,7 +8764,9 @@ const clearParameterTuningConstraintRows = () => {
     $('#parameterTuningConstraintRows').replaceChildren();
 };
 // What each limit row holds, in the shape constraintRows() reads.
-const parameterTuningConstraintInputs = () => parameterTuningLimits.map(({ editor, relationSelect, limitInput }) => {
+const parameterTuningConstraintInputs = () => parameterTuningLimits.map((limit) => {
+    const { editor, relationSelect, limitInput, reportInput } = limit;
+    if (limitIsReported(limit)) return { report: reportInput.value, relation: relationSelect.value, limit: limitInput.value };
     const validation = editor.diagnose();
     return { expression: validation.valid ? editor.text : '', latex: editor.latex, problem: validation.errors.join(' '), relation: relationSelect.value, limit: limitInput.value };
 });
@@ -8866,7 +8922,26 @@ function renderParameterTuningMapping() {
         row.append(label, target);
         container.append(row);
     });
+    $('#parameterTuningEditAsObjective').hidden = !parameterTuningState.mapping.some((entry) => entry.stateId !== null);
 }
+
+// "Match measured data" as an objective you can change: the card moves to the objective goal with the same data, and the objective it
+// would have fitted is written into the editor, to be left as it is, weighted, or added to.
+function editMeasuredDataAsObjective() {
+    if (parameterTuningGoal !== 'data' || !parameterTuningState?.csvContent) return;
+    const matched = parameterTuningState.mapping.filter((entry) => entry.stateId !== null).map(({ columnName, stateId }) => ({ columnName, stateId }));
+    switchParameterTuningGoal('objective');
+    const latex = parameterTuningState?.vocabulary ? measuredDataObjectiveLatex(matched, parameterTuningState.vocabulary, objectiveNameLatex) : null;
+    if (!latex) return;
+    $('#parameterTuningDirection').value = 'minimise';
+    parameterTuningObjective.load(latex);
+    parameterTuningObjective.diagnose();
+    refreshParameterTuningRunnable();
+    const status = $('#parameterTuningStatus');
+    status.className = 'equationDiagnostics valid';
+    status.textContent = `The fit to ${matched.length === 1 ? 'its column' : `its ${matched.length} columns`} is written as an objective below: the mean squared difference between each state and its column. Change it as you like.`;
+}
+$('#parameterTuningEditAsObjective').addEventListener('click', () => editMeasuredDataAsObjective());
 
 // Every parameter the person can tune, in one table: a Tune box, and its bounds when it is ticked. This edits the same `tuning` field the
 // Parameters table and a relationship's own editor do (one undo step each), so there is still one place the truth lives; the card only
@@ -8896,7 +8971,7 @@ function parameterTuningNotReady() {
         if (!$('#parameterTuningProgramSource').value.trim()) return 'Write the objective program, or start from one of the templates.';
         const problem = programBindingsProblem(parameterTuningProgram.bindings);
         if (problem) return problem;
-        if (parameterTuningLimits.some((limit) => limit.editor.latex.trim() && !limit.editor.valid)) return 'A limit cannot be read yet: the line under it says why.';
+        if (parameterTuningLimits.some((limit) => !limitIsReported(limit) && limit.editor.latex.trim() && !limit.editor.valid)) return 'A limit cannot be read yet: the line under it says why.';
         return '';
     }
     if (!parameterTuningObjective.valid) return parameterTuningObjective.latex.trim() ? 'The objective cannot be run yet: the line under it says why.' : 'Write an objective to run.';
@@ -8905,6 +8980,7 @@ function parameterTuningNotReady() {
 }
 
 function refreshParameterTuningRunnable() {
+    refreshParameterTuningLimitKinds();
     const run = $('#runParameterTuning');
     const reason = parameterTuningNotReady();
     run.hidden = !parameterTuningState;
@@ -11244,9 +11320,8 @@ function openEdgeBuilder(clientX, clientY) {
     $('#builderEquationDiagnostics').hidden = false;
     $('#edgeReferencePicker').hidden = false;
     $('#edgeProviderSection').hidden = true;
-    $('#edgeProviderSource').value = '';
-    $('#insertProviderTemplate').hidden = true;
-    $('#providerOutputKey').value = '';
+    builderProgramSection.source = '';
+    builderProgramSection.outputKey = '';
     $('#providerBindingRows').replaceChildren();
     builderEquation.setMode('visual');
     $('#edgeParameterRows').replaceChildren();
@@ -11853,7 +11928,7 @@ function previewProviderSource(source) {
     const definition = selectedRelationship;
     beginEquationEditSession(`edge:${definition.id}`, () => captureEdgeModel(definition), (snapshot) => applyEdgeModel(definition, snapshot));
     definition.implementation = { ...definition.implementation, source };
-    $('#editInsertProviderTemplate').hidden = !source.trim();
+    edgeProgramSection.refreshReset();
     updateValidationStatus();
 }
 
@@ -11921,20 +11996,20 @@ $('#editEdgeImplementationKind').addEventListener('change', (event) => {
         snapshot.implementation = pluginOrProgram(kind, snapshot.implementation, bindings, output, snapshot.title);
     });
 });
-$('#editInsertProviderTemplate').addEventListener('click', () => {
+edgeProgramSection.onReset(() => {
     if (!selectedRelationship?.implementation) return;
     const { kind, bindings, output } = selectedRelationship.implementation;
-    if ($('#editEdgeProviderSource').value.trim() &&
+    if (edgeProgramSection.source.trim() &&
         !window.confirm('Replace the current provider source with a freshly generated template?')) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title);
     });
 });
-$('#editOpenProviderEditor').addEventListener('click', () => {
+edgeProgramSection.onOpenEditor(() => {
     if (!selectedRelationship?.implementation) return;
     providerEditTarget = { type: 'editor', relationshipId: selectedRelationship.id };
     window.providerEditor.openWindow({
-        source: $('#editEdgeProviderSource').value,
+        source: edgeProgramSection.source,
         kind: selectedRelationship.implementation.kind,
         title: selectedRelationship.title
     });
@@ -11960,8 +12035,7 @@ window.providerEditor.onApplied(({ source }) => {
     }
     if (providerEditTarget.type === 'builder') {
         if ($('#edgeBuilder').classList.contains('hidden')) return fail('The relationship builder was closed.');
-        $('#edgeProviderSource').value = source;
-        $('#insertProviderTemplate').hidden = !source.trim();
+        builderProgramSection.source = source;
         return succeed();
     }
     if (providerEditTarget.type === 'sourceTerm') {
@@ -11996,19 +12070,19 @@ window.providerEditor.onApplied(({ source }) => {
     }
     return fail('Unknown edit target.');
 });
-$('#editEdgeProviderSource').addEventListener('input', (event) => {
+edgeProgramSection.sourceField.addEventListener('input', (event) => {
     previewProviderSource(event.target.value);
 });
-$('#editEdgeProviderSource').addEventListener('change', () => {
+edgeProgramSection.sourceField.addEventListener('change', () => {
     finishEquationEdit();
 });
-$('#editProviderOutputKey').addEventListener('change', (event) => {
+edgeProgramSection.onOutputKeyChange((event) => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.implementation.output = { ...snapshot.implementation.output, key: event.target.value.trim() };
     });
 });
-$('#editAddProviderBinding').addEventListener('click', () => {
+edgeProgramSection.onAddBinding(() => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         const candidates = providerReferenceCandidates(snapshot);
@@ -12070,12 +12144,12 @@ $('#termSetsValue').addEventListener('change', (event) => {
         else delete term.setsValue;
     });
 });
-$('#termInsertProviderTemplate').addEventListener('click', () => {
+termProgramSection.onReset(() => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
     const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
     if (!term?.implementation) return;
-    if ($('#termProviderSource').value.trim() &&
+    if (termProgramSection.source.trim() &&
         !window.confirm('Replace the current provider source with a freshly generated template?')) return;
     changeSourceTermModel(node, selectedSourceTermId, (snapshotTerm) => {
         snapshotTerm.implementation.source = defaultProviderSource(
@@ -12083,7 +12157,7 @@ $('#termInsertProviderTemplate').addEventListener('click', () => {
             snapshotTerm.implementation.output?.key, node.userData.definition.title);
     });
 });
-$('#termAddProviderBinding').addEventListener('click', () => {
+termProgramSection.onAddBinding(() => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
     changeSourceTermModel(node, selectedSourceTermId, (term) => {
@@ -12093,7 +12167,7 @@ $('#termAddProviderBinding').addEventListener('click', () => {
             sourceTermReferenceToBinding(`input${term.implementation.bindings.length + 1}`, candidates[0]));
     });
 });
-$('#termOpenProviderEditor').addEventListener('click', () => {
+termProgramSection.onOpenEditor(() => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
     const definition = node.userData.definition;
@@ -12101,18 +12175,18 @@ $('#termOpenProviderEditor').addEventListener('click', () => {
     if (!term?.implementation) return;
     providerEditTarget = { type: 'sourceTerm', nodeId: node.userData.id, termId: term.id };
     window.providerEditor.openWindow({
-        source: $('#termProviderSource').value,
+        source: termProgramSection.source,
         kind: term.implementation.kind,
         title: definition.title
     });
 });
-$('#termProviderSource').addEventListener('input', (event) => {
+termProgramSection.sourceField.addEventListener('input', (event) => {
     previewSourceTermProviderSource(event.target.value);
 });
-$('#termProviderSource').addEventListener('change', () => {
+termProgramSection.sourceField.addEventListener('change', () => {
     finishEquationEdit();
 });
-$('#termProviderOutputKey').addEventListener('change', (event) => {
+termProgramSection.onOutputKeyChange((event) => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
     changeSourceTermModel(node, selectedSourceTermId, (term) => {
@@ -13764,31 +13838,24 @@ $('#edgeImplementationKind').addEventListener('change', (event) => {
     // Visual/LaTeX mode toggle) rather than through a hidden ancestor: MathLive's custom element
     // does not reliably accept focus again once an ancestor of it has been display:none'd.
     builderEquation.show(isEquation);
-    if (!isEquation && !$('#edgeProviderSource').value.trim()) {
-        $('#edgeProviderSource').value = defaultProviderSource(
-            kind, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
+    if (!isEquation && !builderProgramSection.source.trim()) {
+        builderProgramSection.source = defaultProviderSource(kind, builderProviderBindingKeys(), builderProgramSection.outputKey, $('#newEdgeName').value);
     }
-    $('#insertProviderTemplate').hidden = !$('#edgeProviderSource').value.trim();
 });
-$('#insertProviderTemplate').addEventListener('click', () => {
-    if ($('#edgeProviderSource').value.trim() &&
+builderProgramSection.onReset(() => {
+    if (builderProgramSection.source.trim() &&
         !window.confirm('Replace the current provider source with a freshly generated template?')) return;
-    $('#edgeProviderSource').value = defaultProviderSource(
-        $('#edgeImplementationKind').value, builderProviderBindingKeys(), $('#providerOutputKey').value, $('#newEdgeName').value);
-    $('#insertProviderTemplate').hidden = !$('#edgeProviderSource').value.trim();
+    builderProgramSection.source = defaultProviderSource($('#edgeImplementationKind').value, builderProviderBindingKeys(), builderProgramSection.outputKey, $('#newEdgeName').value);
 });
-$('#edgeProviderSource').addEventListener('input', (event) => {
-    $('#insertProviderTemplate').hidden = !event.target.value.trim();
-});
-$('#openProviderEditor').addEventListener('click', () => {
+builderProgramSection.onOpenEditor(() => {
     providerEditTarget = { type: 'builder' };
     window.providerEditor.openWindow({
-        source: $('#edgeProviderSource').value,
+        source: builderProgramSection.source,
         kind: $('#edgeImplementationKind').value,
         title: $('#newEdgeName').value
     });
 });
-$('#addProviderBinding').addEventListener('click', () => addProviderBindingRow());
+builderProgramSection.onAddBinding(() => addProviderBindingRow());
 $('#builderBrowseShapeLibrary').addEventListener('click', () => openShapeLibrary('builder'));
 $('#nodeGeometryFile').addEventListener('change', async (event) => {
     const [file] = event.target.files;
@@ -14014,9 +14081,9 @@ $('#createEdge').addEventListener('click', () => {
         definition.implementation = {
             kind: implementationKind,
             providerApiVersion: 1,
-            source: $('#edgeProviderSource').value,
+            source: builderProgramSection.source,
             bindings,
-            output: { key: $('#providerOutputKey').value.trim(), role: pickedOutput?.role, stateId: pickedOutput?.stateId }
+            output: { key: builderProgramSection.outputKey.trim(), role: pickedOutput?.role, stateId: pickedOutput?.stateId }
         };
     }
 
@@ -14818,12 +14885,10 @@ function renderEdgeGroupEditor(group) {
     } else {
         groupEquation.show(false);
         const fromPlugin = group.definition.implementation?.kind === 'plugin';
-        $('#groupProviderCode').hidden = fromPlugin;
-        $('#groupPluginProviderFields').hidden = !fromPlugin;
+        groupProgramSection.showPlugin(fromPlugin);
         if (fromPlugin) fillPluginProviders($('#groupPluginProvider'), group.definition.implementation);
-        $('#groupProviderSource').value = group.definition.implementation?.source ?? '';
-        $('#groupInsertProviderTemplate').hidden = !group.definition.implementation?.source?.trim();
-        $('#groupProviderOutputKey').value = group.definition.implementation?.output?.key ?? '';
+        groupProgramSection.source = group.definition.implementation?.source;
+        groupProgramSection.outputKey = group.definition.implementation?.output?.key;
         renderGroupProviderBindingRows(group, previewSource, previewTarget);
     }
 }
@@ -14908,7 +14973,7 @@ function previewGroupProviderSource(source) {
     beginEquationEditSession(`group:${group.id}`, () => captureEdgeGroupModel(group), (snapshot) => applyEdgeGroupModel(group, snapshot));
     group.definition.implementation = { ...group.definition.implementation, source };
     applyEdgeGroupModel(group, captureEdgeGroupModel(group), { rerenderEditor: false });
-    $('#groupInsertProviderTemplate').hidden = !source.trim();
+    groupProgramSection.refreshReset();
 }
 
 // The one field whose commit isn't a plain changeEdgeGroupModel call: picking a different
@@ -15318,37 +15383,37 @@ $('#groupImplementationKind').addEventListener('change', (event) => {
         snapshot.definition.implementation = pluginOrProgram(kind, snapshot.definition.implementation, bindings, output, snapshot.name);
     });
 });
-$('#groupInsertProviderTemplate').addEventListener('click', () => {
+groupProgramSection.onReset(() => {
     const group = currentEdgeGroup();
     if (!group?.definition.implementation) return;
     const { kind, bindings, output } = group.definition.implementation;
-    if ($('#groupProviderSource').value.trim() &&
+    if (groupProgramSection.source.trim() &&
         !window.confirm('Replace the current provider source with a freshly generated template?')) return;
     changeEdgeGroupModel(group, (snapshot) => {
         snapshot.definition.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.name);
     });
 });
-$('#groupProviderSource').addEventListener('input', (event) => {
+groupProgramSection.sourceField.addEventListener('input', (event) => {
     previewGroupProviderSource(event.target.value);
 });
-$('#groupProviderSource').addEventListener('change', () => finishEquationEdit());
-$('#groupProviderOutputKey').addEventListener('change', (event) => {
+groupProgramSection.sourceField.addEventListener('change', () => finishEquationEdit());
+groupProgramSection.onOutputKeyChange((event) => {
     const group = currentEdgeGroup();
     if (group) changeEdgeGroupModel(group, (snapshot) => {
         if (snapshot.definition.implementation) snapshot.definition.implementation.output = { key: event.target.value.trim() };
     });
 });
-$('#groupOpenProviderEditor').addEventListener('click', () => {
+groupProgramSection.onOpenEditor(() => {
     const group = currentEdgeGroup();
     if (!group) return;
     providerEditTarget = { type: 'group', groupId: group.id };
     window.providerEditor.openWindow({
-        source: $('#groupProviderSource').value,
+        source: groupProgramSection.source,
         kind: $('#groupImplementationKind').value,
         title: group.name
     });
 });
-$('#groupAddProviderBinding').addEventListener('click', () => {
+groupProgramSection.onAddBinding(() => {
     const group = currentEdgeGroup();
     if (!group) return;
     const [previewSource, previewTarget] = groupPreviewPair(group);

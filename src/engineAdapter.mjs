@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
-import { scheduleModeNumbers, waveformProblem } from './parameterSchedule.mjs';
+import { parameterScheduleCommand } from './parameterSchedule.mjs';
 import { fitArguments } from './fitArguments.mjs';
 import { decodeFittingProgressEvent, decodeFittingReport, decodeInferenceReport, decodeValidationReport, FramedMessageReader } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
@@ -571,29 +571,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         // (and required, at least two) for mode "piecewise".
         scheduleParameterValue: async (parameterId, schedule) => {
             if (!liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
-            if (!(schedule?.mode in scheduleModeNumbers)) throw new Error('Unsupported parameter schedule mode.');
-            const startTime = Number(schedule.startTime ?? 0);
-            const duration = Number(schedule.duration ?? 0);
-            const targetValue = Number(schedule.targetValue ?? 0);
-            const baseValue = Number(schedule.baseValue ?? 0);
-            if (![startTime, duration, targetValue, baseValue].every(Number.isFinite)) {
-                throw new Error('A parameter schedule requires finite numeric fields.');
-            }
-            const samples = schedule.mode === 'piecewise' ? (schedule.samples ?? []).map((sample) => ({
-                time: Number(sample.time), value: Number(sample.value)
-            })) : undefined;
-            if (schedule.mode === 'piecewise') {
-                if (samples.length < 2) throw new Error('A piecewise parameter schedule requires at least two samples.');
-                if (!samples.every((sample) => Number.isFinite(sample.time) && Number.isFinite(sample.value))) {
-                    throw new Error('A piecewise parameter schedule requires finite numeric samples.');
-                }
-            }
-            const waveform = schedule.mode === 'waveform' ? schedule.waveform : undefined;
-            if (schedule.mode === 'waveform') {
-                const problem = waveformProblem({ ...waveform, duration });
-                if (problem) throw new Error(problem);
-            }
-            await sendCommand({ type: 'scheduleParameterValue', parameterId, mode: schedule.mode, startTime, duration, targetValue, baseValue, samples, waveform });
+            await sendCommand(parameterScheduleCommand(parameterId, schedule));
             return { parameterId, ...schedule };
         },
         shutdown,

@@ -153,6 +153,8 @@ RunLength ProgramMeasure::runLength() const {
 }
 
 double ProgramMeasure::evaluate(const TrialRun& run) const {
+    // Nothing from an earlier trial is ever read as this one's.
+    reports_.clear();
     protocol::ObjectiveRunRequest request;
     for (const auto time : run.samples.times) request.add_times(time);
     const auto& data = run.objectiveData();
@@ -189,7 +191,6 @@ double ProgramMeasure::evaluate(const TrialRun& run) const {
             throw std::runtime_error("The objective program answered with something that is not a result.");
         }
         if (!result.ok()) throw std::runtime_error(result.message().empty() ? std::string("The objective program gave no number.") : std::string(result.message()));
-        reports_.clear();
         for (const auto& reported : result.reports()) reports_.emplace_back(reported.key(), reported.value());
         return result.value();
     } catch (const std::runtime_error& error) {
@@ -203,13 +204,25 @@ double ProgramMeasure::evaluate(const TrialRun& run) const {
     }
 }
 
+double ReportMeasure::evaluate(const TrialRun&) const {
+    std::string said;
+    for (const auto& [name, value] : program_.reports()) {
+        if (name == name_) return value;
+        said += (said.empty() ? "" : ", ") + name;
+    }
+    throw std::runtime_error("The objective program reported no number named \"" + name_ + "\"" + (said.empty() ? std::string(" (it reported none).") : " (it reported " + said + ")."));
+}
+
 FittingMeasures makeFittingMeasures(const FittingProblem& problem) {
     FittingMeasures measures;
     if (problem.program) {
-        measures.objective = std::make_unique<ProgramMeasure>(problem, *problem.program);
+        auto program = std::make_unique<ProgramMeasure>(problem, *problem.program);
+        // The objective is asked first in every trial, so a reported number is the same trial's.
         for (const auto& constraint : problem.constraints) {
-            measures.limits.emplace_back(constraint, std::make_unique<ExpressionMeasure>(problem, constraint.expression));
+            if (!constraint.report.empty()) measures.limits.emplace_back(constraint, std::make_unique<ReportMeasure>(*program, constraint.report));
+            else measures.limits.emplace_back(constraint, std::make_unique<ExpressionMeasure>(problem, constraint.expression));
         }
+        measures.objective = std::move(program);
         return measures;
     }
     if (problem.objective.empty()) {

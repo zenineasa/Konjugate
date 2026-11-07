@@ -100,7 +100,9 @@ function wrapPage(page) {
     return handle;
 }
 
-export function createPlaywrightWebDriver(context, initialPage) {
+// currentEngine: the shell carries a web engine built from the current engine sources (scripts/engineFreshness.mjs), so what needs one
+// (waveform schedules, the startPaused run setting and the changes it records) can be tested.
+export function createPlaywrightWebDriver(context, initialPage, { currentEngine = false } = {}) {
     const trackedPages = new Set([initialPage]);
     context.on('page', (page) => trackedPages.add(page));
 
@@ -149,12 +151,10 @@ export function createPlaywrightWebDriver(context, initialPage) {
             aiProviderCredentials: false,
             providerExecutionModeSelector: false,
             cppProviders: false,
-            // Needs a web engine built after waveform schedules were added; the checked-in WebAssembly build predates
-            // them and says so in its capabilities, so the controls rightly do not offer them there. Turn this on
-            // once `npm run build:web:threads` has been run again.
-            parameterWaveforms: false,
-            // Likewise: the `startPaused` run setting is read by the engine, so it needs a web build made after it was added.
-            startPausedRuns: false,
+            // Need a web engine built after waveform schedules, and the `startPaused` run setting, were added: on only when the
+            // shell carries one built from the current engine sources.
+            parameterWaveforms: currentEngine,
+            startPausedRuns: currentEngine,
             // The web engine reports a fit only when it ends (webShims/engine.mjs), with no progress to show and no way to stop one part way.
             fitProgress: false,
             // src/renderer/webShims/projectFiles.mjs's openExampleGuide() opens the raw .md file

@@ -3998,6 +3998,12 @@ export async function runInteractionTests(driver) {
         assert.ok((await evaluate(window, `window.__debugParameterTuning.vocabulary().measured.length`)) >= 1, 'Its columns should be names the objective can use.');
         await evaluate(window, `document.querySelector('#parameterTuningGoalData').click()`);
         await waitFor(window, `!document.querySelector('#parameterTuningMappingSection').hidden`, 'The measured data was dropped on the way back to fitting it.', 5000);
+        // Matching the data, written as an objective to change: the mean squared difference between the state and its column.
+        await waitFor(window, `!document.querySelector('#parameterTuningEditAsObjective').hidden`, 'Matching measured data was not offered as an objective.', 5000);
+        await evaluate(window, `document.querySelector('#parameterTuningEditAsObjective').click()`);
+        await waitFor(window, `document.querySelector('#parameterTuningGoalObjective').getAttribute('aria-pressed') === 'true' && document.querySelector('#parameterTuningObjectiveDiagnostics').textContent.startsWith('Valid objective: ')`, 'The fit was not written as an objective.', 10000);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningObjectiveDiagnostics').textContent`), new RegExp(`^Valid objective: the average of the squared difference between .*${targetState.name} and measured ${targetState.symbol} over the run$`));
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningDirection').value`), 'minimise');
         await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
         await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
         await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'Tuning panel did not reopen.');
@@ -4762,6 +4768,20 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(keys, [['simulated', 'state:2'], ['measured', 'measured:tankTemperature']], 'Each key starts bound to the first thing of its kind.');
         assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuning').disabled`), false, 'A program with every key bound can run.');
 
+        // A limit on a number the program reports: the program is made to report the final temperature, held at most 400 K, which the
+        // truth keeps to.
+        await evaluate(opened, `(() => { const source = document.querySelector('#parameterTuningProgramSource'); source.value = source.value.replace('    return sum(', '    run.report("final", simulated[-1])\\n    return sum('); source.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(opened, `document.querySelector('#addParameterTuningConstraint').click()`);
+        const limitRow = `document.querySelector('#parameterTuningConstraintRows .parameterTuningConstraintRow')`;
+        assert.equal(await evaluate(opened, `${limitRow}.querySelector('[data-field="limitKind"]').hidden`), false, 'With a program, a limit can be a reported number.');
+        await evaluate(opened, `(() => { const kind = ${limitRow}.querySelector('[data-field="limitKind"]'); kind.value = 'report'; kind.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `${limitRow}.querySelector('math-field').classList.contains('limitFormulaHidden')`), true, 'A reported number has no formula.');
+        assert.deepEqual(await evaluate(opened, `[...document.querySelectorAll('#parameterTuningReportNames option')].map((option) => option.value)`), ['final'], 'The names the program reports are offered.');
+        await evaluate(opened, `(() => { const name = ${limitRow}.querySelector('[data-field="report"]'); name.value = 'final'; name.dispatchEvent(new Event('input', { bubbles: true })); ${limitRow}.querySelector('[data-field="limit"]').value = '400'; })()`);
+        await evaluate(opened, `document.querySelector('#parameterTuningObjectiveKind [data-objective-kind="expression"]').click()`);
+        assert.equal(await evaluate(opened, `${limitRow}.querySelector('[data-field="limitKind"]').hidden`), true, 'Without a program, a limit is a formula.');
+        await evaluate(opened, `document.querySelector('#parameterTuningObjectiveKind [data-objective-kind="python"]').click()`);
+
         await evaluate(opened, `(() => { document.querySelector('#parameterTuningMaxSimulations').value = '150'; document.querySelector('#runParameterTuning').click(); })()`);
         await waitFor(opened, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'The program objective did not reach its review.', 120000);
         const report = await evaluate(opened, `window.__debugParameterTuning.report()`);
@@ -4772,6 +4792,7 @@ export async function runInteractionTests(driver) {
         const setup = await evaluate(opened, `window.__debugParameterTuning.setup()`);
         assert.equal(setup.objective.program.language, 'python', 'The program is kept with the project, to run again.');
         assert.deepEqual(setup.objective.program.bindings, [{ key: 'simulated', kind: 'state', id: 2 }, { key: 'measured', kind: 'measured', column: 'tankTemperature' }]);
+        assert.deepEqual(setup.objective.constraints, [{ report: 'final', relation: '<=', limit: 400 }], 'The reported limit is kept with the project.');
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
@@ -5819,7 +5840,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
-    }, { skip: !driver.capabilities.parameterWaveforms && 'needs a web engine built with waveform schedules; the checked-in web build predates them' });
+    }, { skip: !driver.capabilities.parameterWaveforms && 'needs a web engine built with waveform schedules; the engine in the web shell predates them (npm run build:web:threads, then build:webShell:threads)' });
 
     await run('a thermal link joins two bodies with two directed edges sharing one conductance, and one-way conduction leaves a boundary alone', async () => {
         const box = { type: 'primitive', shape: 'box', color: '#888888' };
@@ -5927,7 +5948,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
-    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine built with the startPaused run setting; the checked-in web build predates it' });
+    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine built with the startPaused run setting; the engine in the web shell predates it (npm run build:web:threads, then build:webShell:threads)' });
 
     await run('the changes made to the controls during a run are plotted for each parameter in a panel at the left', async () => {
         const box = { type: 'primitive', shape: 'box', color: '#888888' };
@@ -6011,7 +6032,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
         assert.equal(await visible('#controlHistoryPanel'), false);
         assert.equal(await visible('#controlHistoryButton'), false);
-    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine that records the changes it applies; the checked-in web build predates it' });
+    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine that records the changes it applies; the engine in the web shell predates it (npm run build:web:threads, then build:webShell:threads)' });
 
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();

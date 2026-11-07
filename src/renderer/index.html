@@ -862,24 +862,7 @@
                 <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
                  <p id="termFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
                 <div id="termReferencePicker" class="referencePicker"><span>Available references</span><div id="termStateReferenceChips"></div></div>
-                <div id="termProviderSection" hidden>
-                    <div id="termProviderCode">
-                        <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                            <button id="termOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
-                            <button id="termInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                        </div></div>
-                        <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                        <textarea id="termProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
-                    </div>
-                    <div id="termPluginProviderFields" hidden>
-                        <label class="editorField"><span>Provider</span><select id="termPluginProvider"></select></label>
-                        <p class="builderHint">A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.</p>
-                    </div>
-                    <h3>Bindings <button id="termAddProviderBinding" type="button">＋</button></h3>
-                    <p class="builderHint">Each binding exposes one state of this node to the provider under a stable key.</p>
-                    <div id="termProviderBindings"></div>
-                    <label class="editorField"><span>Output key</span><input id="termProviderOutputKey" autocomplete="off" placeholder="e.g. rateGradient"></label>
-                </div>
+                <div id="termProviderSection" hidden></div>
             </section>
             <footer><button data-delete-source-term type="button">Delete source term</button></footer>
         </div>
@@ -917,24 +900,7 @@
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
                  <p id="edgeFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
                 <div id="editEdgeReferencePicker" class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
-                <div id="editEdgeProviderSection" hidden>
-                    <div id="editEdgeProviderCode">
-                        <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                            <button id="editOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
-                            <button id="editInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                        </div></div>
-                        <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                        <textarea id="editEdgeProviderSource" class="providerSource" rows="12" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
-                    </div>
-                    <div id="editEdgePluginProviderFields" hidden>
-                        <label class="editorField"><span>Provider</span><select id="editEdgePluginProvider"></select></label>
-                        <p class="builderHint">A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.</p>
-                    </div>
-                    <h3>Bindings <button id="editAddProviderBinding" type="button">＋</button></h3>
-                    <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
-                    <div id="editEdgeProviderBindings"></div>
-                    <label class="editorField"><span>Output key</span><input id="editProviderOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
-                </div>
+                <div id="editEdgeProviderSection" hidden></div>
             </section>
             <footer><button data-delete-edge type="button">Delete edge</button><button id="toggleEdgeEnabled" type="button">Disable edge</button></footer>
         </div>
@@ -964,24 +930,7 @@
                 <div id="groupEquationDiagnostics" class="equationDiagnostics" role="status"></div>
                  <p id="groupFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
                 <p id="groupReferenceHint" class="builderHint"></p>
-                <div id="groupProviderSection" hidden>
-                    <div id="groupProviderCode">
-                        <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                            <button id="groupOpenProviderEditor" class="templateButton" type="button">Open code editor</button>
-                            <button id="groupInsertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                        </div></div>
-                        <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                        <textarea id="groupProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
-                    </div>
-                    <div id="groupPluginProviderFields" hidden>
-                        <label class="editorField"><span>Provider</span><select id="groupPluginProvider"></select></label>
-                        <p class="builderHint">A relationship provider an installed plugin contributes, pinned to that installed version, used on every edge of the group.</p>
-                    </div>
-                    <h3>Bindings <button id="groupAddProviderBinding" type="button">＋</button></h3>
-                    <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
-                    <div id="groupProviderBindingRows" class="builderRows"></div>
-                    <label class="editorField"><span>Output key</span><input id="groupProviderOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
-                </div>
+                <div id="groupProviderSection" hidden></div>
             </section>
             <section>
                 <h3>Shared parameters <button id="groupAddParameter" type="button">＋</button></h3>
@@ -1128,6 +1077,7 @@
                 <h3>Limits <button id="addParameterTuningConstraint" type="button" title="Add a limit">＋</button></h3>
                 <p class="builderHint">Keep a number from the run within a bound. Breaking one is penalised, so the search settles inside it when it can.</p>
                 <div id="parameterTuningConstraintRows"></div>
+                <datalist id="parameterTuningReportNames"></datalist>
             </section>
             <section>
                 <h3>Each trial</h3>
@@ -1143,6 +1093,7 @@
                 <h3>Column mapping</h3>
                 <p class="builderHint">Each column is matched to an existing state by exact name -- read-only for now; rename a CSV column or a state's symbol/name to change a match.</p>
                 <div id="parameterTuningMappingRows"></div>
+                <div class="liveTwinActions"><button id="parameterTuningEditAsObjective" type="button" hidden title="Write this fit as an objective you can change: the squared difference between each matched state and its column, averaged over the run">Edit as an objective…</button></div>
             </section>
             <section id="parameterTuningReplaySection" hidden>
                 <h3>Signals</h3>
@@ -1356,18 +1307,7 @@
                 <textarea id="edgeEquation" class="equationSource" rows="3" placeholder="Choose references below, or enter LaTeX" hidden></textarea>
                 <div id="builderEquationDiagnostics" class="equationDiagnostics" role="status"></div>
                 <div id="edgeReferencePicker" class="referencePicker"><span>Available references</span><div id="stateReferenceChips"></div></div>
-                <div id="edgeProviderSection" hidden>
-                    <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
-                        <button id="openProviderEditor" class="templateButton" type="button">Open code editor</button>
-                        <button id="insertProviderTemplate" class="templateButton" type="button" hidden>Reset template</button>
-                    </div></div>
-                    <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-                    <textarea id="edgeProviderSource" class="providerSource" rows="10" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
-                    <h3>Bindings <button id="addProviderBinding" type="button">＋</button></h3>
-                    <p class="builderHint">Each binding exposes one state or parameter to the provider under a stable key.</p>
-                    <div id="providerBindingRows" class="builderRows"></div>
-                    <label class="editorField"><span>Output key</span><input id="providerOutputKey" autocomplete="off" placeholder="e.g. targetTemperatureGradient"></label>
-                </div>
+                <div id="edgeProviderSection" hidden></div>
             </section>
             <section>
                 <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>

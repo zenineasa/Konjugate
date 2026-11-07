@@ -72,11 +72,12 @@ In the development tree (unpackaged), invoke it as `electron . --cli run ...` fr
 
 ```
 konjugate --cli serve [--port 8737] [--grpc-port 8738] [--record <file.csv>] [--inputs <signal,...>]
+                      [--network [--certificate <file.pem> --private-key <file.pem>]]
 konjugate --cli serve keys list
 konjugate --cli serve keys add <name> --signals <signal,...>
 konjugate --cli serve keys revoke <name>
 ```
 
-`serve` runs the push service ([The push service](proposals/pushService.md), implemented in `src/pushCli.mjs`) in the foreground on the loopback address, for a lab computer with no screen: it prints the addresses, each client as it connects and the rate every ten seconds, and writes what arrives to a Konjugate data log as it comes (`pushed <time>.csv` in the current folder unless `--record` names one), with the signals named by `--inputs` as inputs and the rest measured. Ctrl+C stops it, telling each open connection why. The keys are the app's own (kept in its folder as hashes), so a key made here works in the app and the other way round; `keys add` shows the key once. `serve` refuses to start with no keys, since no script could send anything.
+`serve` runs the push service ([The push service](proposals/pushService.md), implemented in `src/pushCli.mjs`) in the foreground on the loopback address, for a lab computer with no screen: it prints the addresses, each client as it connects and the rate every ten seconds, and writes what arrives to a Konjugate data log as it comes (`pushed <time>.csv` in the current folder unless `--record` names one), with the signals named by `--inputs` as inputs and the rest measured. Ctrl+C stops it, telling each open connection why. The keys are the app's own (kept in its folder as hashes), so a key made here works in the app and the other way round; `keys add` shows the key once. `serve` refuses to start with no keys, since no script could send anything. With `--network` it listens on every interface, encrypted (HTTPS, secure WebSockets and gRPC over TLS), with Konjugate's own certificate (the app's, made the first time) or the one given with `--certificate` and `--private-key`, and prints the addresses, the certificate's file and SHA-256 fingerprint to give to the scripts, and the command that runs the simulated rig against it (`examples/dataSources/pushTankRig.py`).
 
 Exit codes for `--cli` are simpler than the low-level table above, not the same values: `0` success, `2` bad usage (missing `--target-time`, an unresolvable `--configuration`, a project with no run configurations, or `validate` finding errors), `1` any runtime failure (the project couldn't be read, the engine was unavailable, the simulation itself failed, or an output path couldn't be written).

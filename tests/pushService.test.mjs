@@ -5,7 +5,8 @@
 // a WebSocket with each, and a gRPC stream.
 
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -17,6 +18,7 @@ import { PushKeyStore } from '../src/pushKeyStore.mjs';
 import { PushGate, PushRefusal } from '../src/pushGate.mjs';
 import { codecForContentType, jsonPushCodec, protobufPushCodec, pushProtoPath } from '../src/pushCodecs.mjs';
 import { PushService } from '../src/pushService.mjs';
+import { ensurePushCertificate, readOwnCertificate } from '../src/pushCertificate.mjs';
 
 const protoRoot = protobuf.loadSync(pushProtoPath);
 const PushReadings = protoRoot.lookupType('konjugate.push.v1.PushReadings');
@@ -355,5 +357,82 @@ describe('push service', () => {
         client.close();
         await assert.rejects(fetch(`http://127.0.0.1:${started.port}/v1/readings`, { method: 'POST' }));
         assert.equal(second.status().listening, false);
+    });
+});
+
+describe('push service on the network', () => {
+    let directory;
+    before(async () => { directory = await mkdtemp(join(tmpdir(), 'konjugatePushTls-')); });
+    after(async () => { await rm(directory, { recursive: true, force: true }); });
+
+    test('Konjugate\'s own certificate: made once, for this computer\'s addresses, its key private, and made again when they change', async () => {
+        const addresses = { ips: ['192.0.2.10'], names: ['labpc', 'labpc.local'] };
+        const first = await ensurePushCertificate(directory, { addresses });
+        assert.equal(first.made, true);
+        assert.match(first.fingerprint, /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+        for (const name of ['localhost', '127.0.0.1', '192.0.2.10', 'labpc', 'labpc.local']) assert.ok(first.names.includes(name), name);
+        if (process.platform !== 'win32') assert.equal((await stat(join(directory, 'pushKey.pem'))).mode & 0o777, 0o600, 'The key is readable by this user only.');
+        const again = await ensurePushCertificate(directory, { addresses });
+        assert.equal(again.made, false);
+        assert.equal(again.fingerprint, first.fingerprint, 'The same certificate is used again, so scripts keep trusting it.');
+        const moved = await ensurePushCertificate(directory, { addresses: { ips: ['192.0.2.99'], names: ['labpc'] } });
+        assert.equal(moved.made, true, 'A new address is not in the old certificate, so a new one is made.');
+        const late = await ensurePushCertificate(directory, { addresses: { ips: ['192.0.2.99'], names: ['labpc'] }, now: Date.now() + 820 * 86400000 });
+        assert.equal(late.made, true, 'A certificate about to run out is made again.');
+
+        const other = await mkdtemp(join(tmpdir(), 'konjugatePushTlsOther-'));
+        const stranger = await ensurePushCertificate(other, { addresses });
+        await assert.rejects(readOwnCertificate(join(directory, 'pushCertificate.pem'), join(other, 'pushKey.pem')), /not the certificate's own/);
+        assert.equal((await readOwnCertificate(join(other, 'pushCertificate.pem'), join(other, 'pushKey.pem'))).fingerprint, stranger.fingerprint);
+        await rm(other, { recursive: true, force: true });
+    });
+
+    test('the network only encrypted; over TLS a script that trusts the certificate is taken every way, and one that does not is refused', async () => {
+        const store = new PushKeyStore(directory);
+        const { key } = await store.add('remote rig', ['level']);
+        const tls = await ensurePushCertificate(directory, { addresses: { ips: [], names: [] } });
+        const refusing = new PushService({ keyStore: store, deliver: () => {} });
+        await assert.rejects(refusing.start({ host: '0.0.0.0', port: 0, grpcPort: 0 }), /only encrypted/);
+
+        const delivered = [];
+        const service = new PushService({ keyStore: store, deliver: (readings) => { delivered.push(...readings); } });
+        const status = await service.start({ host: '127.0.0.1', port: 0, grpcPort: 0, tls });
+        try {
+            assert.equal(status.encrypted, true);
+            const body = JSON.stringify({ readings: [{ signal: 'level', value: 1.5, time: fixed }] });
+            const post = (options) => new Promise((resolve, reject) => {
+                const request = httpsRequest({ host: '127.0.0.1', port: status.port, path: '/v1/readings', method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, ...options }, (response) => {
+                    let text = '';
+                    response.on('data', (chunk) => { text += chunk; });
+                    response.on('end', () => resolve(JSON.parse(text)));
+                });
+                request.on('error', reject);
+                request.end(body);
+            });
+            assert.equal((await post({ ca: tls.certificate })).status, 202, 'HTTPS, trusting the certificate.');
+            await assert.rejects(post({}), (error) => /SELF_SIGNED|DEPTH_ZERO/.test(error.code), 'Not trusting it, the script is refused by its own TLS.');
+            await assert.rejects(fetch(`http://127.0.0.1:${status.port}/v1/readings`, { method: 'POST', body }), 'Plain HTTP is not answered.');
+
+            const socket = new WebSocket(`wss://127.0.0.1:${status.port}/v1/stream`, { headers: { authorization: `Bearer ${key}` }, ca: tls.certificate });
+            await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+            socket.send(body);
+            const [answer] = await new Promise((resolve) => socket.once('message', (...args) => resolve(args)));
+            assert.equal(JSON.parse(answer.toString('utf8')).status, 202, 'A secure WebSocket.');
+            socket.close();
+
+            const secureClient = new ReadingPush(`127.0.0.1:${status.grpcPort}`, grpc.credentials.createSsl(Buffer.from(tls.certificate)));
+            const metadata = new grpc.Metadata();
+            metadata.set('authorization', `Bearer ${key}`);
+            const checked = await new Promise((resolve, reject) => secureClient.Check({}, metadata, (error, value) => (error ? reject(error) : resolve(value))));
+            assert.deepEqual(checked, { name: 'remote rig', signals: ['level'] }, 'gRPC over TLS.');
+            secureClient.close();
+            const untrusting = new ReadingPush(`127.0.0.1:${status.grpcPort}`, grpc.credentials.createSsl());
+            const refused = await new Promise((resolve) => untrusting.Check({}, metadata, { deadline: Date.now() + 5000 }, (error) => resolve(error)));
+            assert.equal(refused.code, grpc.status.UNAVAILABLE, 'gRPC that does not trust the certificate does not connect.');
+            untrusting.close();
+            assert.equal(delivered.length, 2);
+        } finally {
+            await service.stop();
+        }
     });
 });

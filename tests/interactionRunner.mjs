@@ -8,6 +8,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
 import { createServer } from 'node:net';
+import { request as httpsRequest } from 'node:https';
 import { spawnSync } from 'node:child_process';
 import { Aedes } from 'aedes';
 import mqtt from 'mqtt';
@@ -5150,6 +5151,55 @@ export async function runInteractionTests(driver) {
         } finally {
             clearInterval(sending);
         }
+    }, { skip: !driver.capabilities.multiWindow && 'the push service listens on a port, which a web page cannot; desktop only' });
+
+    await run('the push service on the network: the choice warned of, encrypted with a certificate shown, and a script trusting it taken', async () => {
+        const port = await new Promise((resolve) => {
+            const probe = createServer();
+            probe.listen(0, '127.0.0.1', () => { const { port: found } = probe.address(); probe.close(() => resolve(found)); });
+        });
+        const set = (selector, value) => evaluate(window, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(window, `document.querySelector('#connectionsButton').click()`);
+        await waitFor(window, `document.querySelector('#connectionsDialog').open`, 'The Connections panel did not open.');
+        await set('#pushServicePort', String(port));
+        await evaluate(window, `(() => { const box = document.querySelector('#pushServiceNetwork'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `!document.querySelector('#pushCertificate').hidden`, 'Choosing the network did not show the certificate.', 15000);
+        assert.match(await evaluate(window, `document.querySelector('#pushCertificateText').textContent`), /^Konjugate's own certificate, for .*SHA-256 fingerprint: ([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+        assert.equal(await evaluate(window, `document.querySelector('#pushServiceGrpcPort').textContent`), `HTTPS here, gRPC over TLS on ${port + 1}`);
+        assert.match(await evaluate(window, `document.querySelector('#pushExamples details[data-example="rig"] code').textContent`), new RegExp(`pushTankRig\\.py https://[^ ]+:${port} \\\\\\n    --key YOUR_KEY \\\\\\n    --certificate konjugate-push\\.pem \\\\\\n    --speed 600`), 'The demonstration is given filled in, encrypted.');
+
+        await set('#pushKeyName', 'remote rig');
+        await set('#pushKeySignals', 'level');
+        await evaluate(window, `document.querySelector('#pushKeyAdd').click()`);
+        await waitFor(window, `!document.querySelector('#pushKeyMade').hidden`, 'The key was not shown.');
+        const key = await evaluate(window, `document.querySelector('#pushKeyMadeValue').textContent`);
+        await evaluate(window, `(() => { window.__confirmed = []; window.confirm = (message) => { window.__confirmed.push(message); return true; }; })()`);
+        await evaluate(window, `document.querySelector('#pushServiceToggle').click()`);
+        await waitFor(window, `document.querySelector('#pushServiceState').textContent.startsWith('Listening on the network, encrypted')`, 'The push service did not start on the network.', 15000);
+        assert.match(await evaluate(window, `window.__confirmed[0] ?? ''`), /^Listen on the network\? Any computer that can reach this one/);
+        assert.match(await evaluate(window, `document.querySelector('#pushServiceChipText').textContent`), new RegExp(`^Listening on the network at [^ ]+:${port}, 0 clients$`));
+
+        // A script on the network trusting the certificate the app reports, sending to this computer's address.
+        const state = await evaluate(window, `window.engine.pushService.state()`);
+        const certificate = await evaluate(window, `window.engine.pushService.certificate().then((info) => info.certificate)`);
+        const address = state.addresses.find((ip) => !ip.includes(':')) ?? '127.0.0.1';
+        const answer = await new Promise((resolve, reject) => {
+            const request = httpsRequest({ host: address, port, path: '/v1/readings', method: 'POST', ca: certificate, headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` } }, (response) => {
+                let text = '';
+                response.on('data', (chunk) => { text += chunk; });
+                response.on('end', () => resolve(JSON.parse(text)));
+            });
+            request.on('error', reject);
+            request.end(JSON.stringify({ readings: [{ signal: 'level', value: 1.25 }] }));
+        });
+        assert.equal(answer.status, 202, `A script at ${address} trusting the certificate was taken.`);
+        await waitFor(window, `document.querySelector('#pushServiceState').textContent.includes('1 client')`, 'The panel did not count the script.', 5000);
+
+        await evaluate(window, `document.querySelector('#pushServiceToggle').click()`);
+        await waitFor(window, `document.querySelector('#pushServiceState').textContent.startsWith('Not listening')`, 'The push service did not stop.', 15000);
+        assert.equal(await evaluate(window, `document.querySelector('#pushServiceNetwork').disabled`), false, 'Stopped, the choice can be changed again.');
+        await evaluate(window, `(() => { const box = document.querySelector('#pushServiceNetwork'); box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); window.confirm = () => true; })()`);
+        await evaluate(window, `document.querySelector('#connectionsClose').click()`);
     }, { skip: !driver.capabilities.multiWindow && 'the push service listens on a port, which a web page cannot; desktop only' });
 
     await run('a parameter linked to a shared parameter edits and unlinks through the edge editor', async () => {

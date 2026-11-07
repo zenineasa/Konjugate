@@ -10,11 +10,14 @@
 //
 // The key is sent as "Authorization: Bearer <key>" (gRPC metadata `authorization`). A connection's messages are taken one at a time,
 // the next read only once the last is handed on, so a consumer slower than the sender slows the sender rather than filling memory.
-// It listens on the loopback address unless told otherwise. Stopping refuses new connections, tells each open one why (a WebSocket
+// It listens on the loopback address unless told otherwise, and beyond this computer only encrypted (HTTPS, secure WebSockets and
+// gRPC over TLS, on one certificate: src/pushCertificate.mjs), since a key sent in the clear on a network can be read by anyone on
+// it; the service refuses to listen on the network otherwise, whoever asks. Stopping refuses new connections, tells each open one why (a WebSocket
 // closed with 1001, a gRPC call ended UNAVAILABLE, an HTTP request answered 503), and resolves once all have gone.
 
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { createServer as createSecureServer } from 'node:https';
 import { fileURLToPath } from 'node:url';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
@@ -48,6 +51,8 @@ const grpcStatusFor = (refusal) => {
 };
 const grpcError = (code, details) => Object.assign(new Error(details), { code, details });
 
+const isLoopback = (host) => host === 'localhost' || host === '::1' || /^127\./.test(host);
+
 // The address a request came from, without the IPv4-in-IPv6 prefix.
 const addressOf = (socket) => String(socket?.remoteAddress ?? 'unknown').replace(/^::ffff:/, '');
 const grpcAddressOf = (call) => String(call.getPeer?.() ?? 'unknown').replace(/^ipv[46]:/, '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').replace(/^::ffff:/, '');
@@ -77,11 +82,15 @@ export class PushService {
     get gate() { return this.#gate; }
 
     // Starts the three front ends: HTTP and the WebSocket on `port`, gRPC on `grpcPort` (by default the next one). 0 asks for a free
-    // port. Answers the status.
-    async start({ host = '127.0.0.1', port = defaultPushPort, grpcPort = port === 0 ? 0 : port + 1 } = {}) {
+    // port. tls: { certificate, key } in PEM, for HTTPS, secure WebSockets and gRPC over TLS; required for any host but the loopback.
+    // Answers the status.
+    async start({ host = '127.0.0.1', port = defaultPushPort, grpcPort = port === 0 ? 0 : port + 1, tls = null } = {}) {
         if (this.#listening) throw new Error('The push service is already listening.');
+        if (!isLoopback(host) && !tls) throw new Error('The push service listens on the network only encrypted: a key sent in the clear could be read by anyone on it.');
         this.#stopping = false;
-        const httpServer = createServer((request, response) => { this.#handleHttp(request, response).catch(() => response.destroy()); });
+        const handle = (request, response) => { this.#handleHttp(request, response).catch(() => response.destroy()); };
+        const httpServer = tls ? createSecureServer({ cert: tls.certificate, key: tls.key }, handle) : createServer(handle);
+        // Every connection's own socket (under TLS too, ending it ends the encrypted one), to end any still open a second into stopping.
         httpServer.on('connection', (socket) => {
             this.#sockets.add(socket);
             socket.once('close', () => this.#sockets.delete(socket));
@@ -110,7 +119,10 @@ export class PushService {
         let boundGrpcPort;
         try {
             boundGrpcPort = await new Promise((resolve, reject) => {
-                grpcServer.bindAsync(`${host.includes(':') ? `[${host}]` : host}:${grpcPort}`, grpc.ServerCredentials.createInsecure(), (error, bound) => (error ? reject(error) : resolve(bound)));
+                const credentials = tls
+                    ? grpc.ServerCredentials.createSsl(null, [{ private_key: Buffer.from(tls.key), cert_chain: Buffer.from(tls.certificate) }], false)
+                    : grpc.ServerCredentials.createInsecure();
+                grpcServer.bindAsync(`${host.includes(':') ? `[${host}]` : host}:${grpcPort}`, credentials, (error, bound) => (error ? reject(error) : resolve(bound)));
             });
         } catch (error) {
             await new Promise((resolve) => httpServer.close(resolve));
@@ -119,7 +131,7 @@ export class PushService {
         this.#httpServer = httpServer;
         this.#webSocketServer = webSocketServer;
         this.#grpcServer = grpcServer;
-        this.#listening = { host, port: httpServer.address().port, grpcPort: boundGrpcPort };
+        this.#listening = { host, port: httpServer.address().port, grpcPort: boundGrpcPort, encrypted: Boolean(tls) };
         return this.status();
     }
 
@@ -135,7 +147,7 @@ export class PushService {
         const connections = { webSocket: 0, grpc: 0 };
         for (const open of this.#openClients.values()) for (const [kind, count] of Object.entries(open)) connections[kind] += count;
         return {
-            listening: Boolean(this.#listening), ...(this.#listening ?? { host: null, port: null, grpcPort: null }),
+            listening: Boolean(this.#listening), ...(this.#listening ?? { host: null, port: null, grpcPort: null, encrypted: false }),
             clients: clients.size, connections, ...this.#gate.figures()
         };
     }

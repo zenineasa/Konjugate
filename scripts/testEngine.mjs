@@ -34,6 +34,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'engineSessi
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwin.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinMqtt.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinPush.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinPushNetwork.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinOpcUa.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'labTrial.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowCorrections.mjs'), executable]);

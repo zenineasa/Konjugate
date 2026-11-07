@@ -10014,8 +10014,9 @@ function showPushServiceState(state) {
     const failed = !state.listening && Boolean(state.failure);
     chip.hidden = !state.listening && !failed;
     chip.classList.toggle('failed', failed);
+    const where = state.encrypted ? `on the network${state.addresses?.length ? ` at ${state.addresses.find((address) => !address.includes(':')) ?? state.addresses[0]}:${state.port}` : ''}` : `on ${state.host}:${state.port}`;
     $('#pushServiceChipText').textContent = failed ? 'Push service stopped'
-        : `Listening on ${state.host}:${state.port}, ${state.clients ?? 0} client${state.clients === 1 ? '' : 's'}`;
+        : `Listening ${where}, ${state.clients ?? 0} client${state.clients === 1 ? '' : 's'}`;
     chip.title = failed ? `The push service ended: ${state.failure} Open the Connections panel.` : 'The push service is listening: open the Connections panel';
     $('#parameterTuningPushService').textContent = pushServiceSentence(state);
     $('#parameterTuningPushService').classList.toggle('valid', Boolean(state.listening));

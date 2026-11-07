@@ -59,3 +59,29 @@ test('keys from the command line, and serving records what arrives', async () =>
         await rm(directory, { recursive: true, force: true });
     }
 });
+
+test('serving on the network: encrypted, the certificate said, and a certificate without --network refused', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugatePushCliTls-'));
+    try {
+        const lines = [];
+        const errors = [];
+        const io = { directory, out: (line) => lines.push(line), err: (line) => errors.push(line) };
+        assert.equal(await runPushCli(['keys', 'add', 'rig', '--signals', 'level'], io), 0);
+        assert.equal(await runPushCli(['--port', '0', '--certificate', 'a.pem'], io), 2);
+        assert.match(errors.at(-1), /add --network/);
+        assert.equal(await runPushCli(['--port', '0', '--network', '--certificate', 'a.pem'], io), 2);
+        assert.match(errors.at(-1), /both the certificate and its private key/);
+        lines.length = 0;
+        let stop;
+        const stopped = new Promise((resolve) => { stop = resolve; });
+        const serving = runPushCli(['--port', '0', '--network', '--record', 'pushed.csv'], { ...io, cwd: directory, untilStop: () => stopped });
+        for (let waited = 0; waited < 5000 && !lines.some((line) => line.startsWith('Recording')); waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.match(lines[0], /^Listening on the network, encrypted, at .*: port \d+ for HTTPS and secure WebSockets, \d+ for gRPC over TLS, for level\.$/);
+        assert.match(lines[1], /pushCertificate\.pem \(made just now\), SHA-256 fingerprint ([0-9A-F]{2}:){31}[0-9A-F]{2}\. Give scripts that file to trust\.$/);
+        assert.match(lines[2], /pushTankRig\.py https:\/\//);
+        stop();
+        assert.equal(await serving, 0);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});

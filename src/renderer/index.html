@@ -434,6 +434,17 @@
                     <small id="pushServiceGrpcPort"></small>
                     <button id="pushServiceToggle" type="button" class="doneButton">Start</button>
                 </div>
+                <label class="connectionsNetwork"><input id="pushServiceNetwork" type="checkbox"><span>On the network, encrypted</span></label>
+                <p class="connectionsHint">So a script on another computer can send readings. Offered only encrypted: HTTPS, secure WebSockets and gRPC over TLS, with a certificate Konjugate makes for this computer (or your own). Give the scripts that certificate to trust, so they know they are talking to this Konjugate; nothing is sent in the clear.</p>
+                <div id="pushCertificate" class="connectionsCertificate" hidden>
+                    <span id="pushCertificateText"></span>
+                    <div class="connectionsRow">
+                        <button id="pushCertificateSave" type="button">Save certificate…</button>
+                        <button id="pushCertificateChoose" type="button">Use my own…</button>
+                        <button id="pushCertificateKonjugate" type="button" hidden>Use Konjugate's own</button>
+                    </div>
+                    <p id="pushCertificateStatus" class="assistantConfigurationStatus" role="status"></p>
+                </div>
                 <p id="pushServiceState" class="assistantConfigurationStatus" role="status"></p>
                 <ul id="pushServiceLog" class="connectionsLog"></ul>
             </section>

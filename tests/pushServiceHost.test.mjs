@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -87,6 +88,42 @@ test('a port in use is said, and a service that ends unexpectedly ends the twins
     } finally {
         await host.stop();
         await new Promise((resolve) => blocker.close(resolve));
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('on the network: encrypted with the host\'s certificate, a script trusting it taken at this computer\'s address, and a wrong pair of files refused', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugatePushHostTls-'));
+    const children = [];
+    const host = new PushServiceHost({ directory, fork: forkLikeUtilityProcess(children) });
+    try {
+        const { key } = await host.keys.add('remote rig', ['level']);
+        const info = await host.certificateInfo();
+        assert.equal(info.own, false);
+        assert.equal(info.key, undefined, 'The panel is never handed the key.');
+        const state = await host.start({ port: 0, network: true });
+        assert.equal(state.encrypted, true);
+        assert.equal(state.host, '0.0.0.0');
+        assert.equal(state.certificate.fingerprint, info.fingerprint, 'It listens with the certificate the panel showed.');
+        const address = state.addresses.find((ip) => !ip.includes(':')) ?? '127.0.0.1';
+        const answer = await new Promise((resolve, reject) => {
+            const request = httpsRequest({ host: address, port: state.port, path: '/v1/readings', method: 'POST', ca: info.certificate, headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` } }, (response) => {
+                let text = '';
+                response.on('data', (chunk) => { text += chunk; });
+                response.on('end', () => resolve(JSON.parse(text)));
+            });
+            request.on('error', reject);
+            request.end(JSON.stringify({ readings: [{ signal: 'level', value: 2 }] }));
+        });
+        assert.equal(answer.status, 202, `Taken at ${address}, over TLS.`);
+        await host.stop();
+
+        await assert.rejects(host.useOwnCertificate(join(directory, 'pushCertificate.pem'), join(directory, 'nothing.pem')));
+        assert.equal(await host.ownCertificatePaths(), null, 'A refused choice is not kept.');
+        const back = await host.useKonjugateCertificate();
+        assert.equal(back.fingerprint, info.fingerprint);
+    } finally {
+        await host.stop();
         await rm(directory, { recursive: true, force: true });
     }
 });

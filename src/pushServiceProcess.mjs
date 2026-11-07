@@ -4,7 +4,7 @@
 // src/pushServiceHost.mjs in the main process, so a flood of messages cannot stall the windows. It runs one PushService and talks to
 // the main process over its parent port:
 //
-//   from the main process   { type: 'start', directory, host, port, grpcPort }   { type: 'stop', reason }   { type: 'status' }
+//   from the main process   { type: 'start', directory, host, port, grpcPort, tls }   { type: 'stop', reason }   { type: 'status' }
 //                           { type: 'taken', id }  (the readings sent as `id` are handed on: the client's next message may come)
 //   to the main process     { type: 'started', status }   { type: 'status', status }   { type: 'stopped' }   { type: 'failed', message }
 //                           { type: 'readings', id, readings, client }   { type: 'log', line }
@@ -39,7 +39,7 @@ port.on('message', async ({ data: message }) => {
                 }),
                 log: (line) => post({ type: 'log', line })
             });
-            post({ type: 'started', status: await service.start({ host: message.host, port: message.port, grpcPort: message.grpcPort }) });
+            post({ type: 'started', status: await service.start({ host: message.host, port: message.port, grpcPort: message.grpcPort, tls: message.tls ?? null }) });
         } else if (message.type === 'taken') {
             waiting.get(message.id)?.();
             waiting.delete(message.id);

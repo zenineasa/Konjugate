@@ -6,6 +6,10 @@
 // while it grows (a shared folder) or replay later. The keys are the app's own, managed here with `serve keys`.
 //
 //   konjugate --cli serve [--port 8737] [--grpc-port 8738] [--record <file.csv>] [--inputs a,b]
+//                         [--network [--certificate <file.pem> --private-key <file.pem>]]
+//
+// --network listens on every interface, encrypted, with Konjugate's own certificate (made the first time, kept with the keys) or
+// the one given; it prints the certificate's fingerprint and where its file is, to give to the scripts that will trust it.
 //   konjugate --cli serve keys list
 //   konjugate --cli serve keys add <name> --signals a,b
 //   konjugate --cli serve keys revoke <name>
@@ -15,8 +19,10 @@ import { parseCliFlags } from './cliArgs.mjs';
 import { DataLogWriter } from './dataLogWriter.mjs';
 import { PushKeyStore } from './pushKeyStore.mjs';
 import { PushService, defaultPushPort } from './pushService.mjs';
+import { ensurePushCertificate, networkAddresses, readOwnCertificate } from './pushCertificate.mjs';
 
 export const pushCliUsage = 'Usage: konjugate --cli serve [--port <port>] [--grpc-port <port>] [--record <file.csv>] [--inputs <signal,...>]\n'
+    + '                         [--network [--certificate <file.pem> --private-key <file.pem>]]\n'
     + '       konjugate --cli serve keys list\n'
     + '       konjugate --cli serve keys add <name> --signals <signal,...>\n'
     + '       konjugate --cli serve keys revoke <name>';
@@ -105,6 +111,17 @@ async function serve(keys, flags, { out, err, untilStop, now, cwd, statusEveryMi
         err(`No key may send "${unknownInput}", so it cannot be an input. The keys may send ${names.join(', ')}.`);
         return 2;
     }
+    if ((flags.certificate || flags['private-key']) && !flags.network) {
+        err('A certificate is for listening on the network: add --network.');
+        return 2;
+    }
+    if (Boolean(flags.certificate) !== Boolean(flags['private-key'])) {
+        err('Give both the certificate and its private key: --certificate <file.pem> --private-key <file.pem>.');
+        return 2;
+    }
+    const tls = !flags.network ? null : flags.certificate
+        ? await readOwnCertificate(resolve(cwd, String(flags.certificate)), resolve(cwd, String(flags['private-key'])))
+        : await ensurePushCertificate(keys.directory);
     const epoch = Math.floor(now() / 1000) * 1000;
     const recordTo = resolve(cwd, typeof flags.record === 'string' ? flags.record : join(cwd, `pushed ${stamp(epoch)}.csv`));
     const signals = names.map((name) => ({ name, unit: '', role: inputs.has(name) ? 'input' : 'output' }));
@@ -124,12 +141,19 @@ async function serve(keys, flags, { out, err, untilStop, now, cwd, statusEveryMi
     });
     let status;
     try {
-        status = await service.start({ port, grpcPort });
+        status = await service.start({ port, grpcPort, ...(tls ? { host: '0.0.0.0', tls } : {}) });
     } catch (error) {
         await writer.close();
         throw new Error(`Could not listen: ${error.message}`);
     }
-    out(`Listening on ${status.host}:${status.port} (HTTP and WebSocket) and ${status.host}:${status.grpcPort} (gRPC), for ${names.join(', ')}.`);
+    if (tls) {
+        const at = networkAddresses().ips.filter((ip) => !ip.includes(':'));
+        out(`Listening on the network, encrypted, at ${at.length ? at.join(', ') : 'this computer\'s addresses'}: port ${status.port} for HTTPS and secure WebSockets, ${status.grpcPort} for gRPC over TLS, for ${names.join(', ')}.`);
+        out(`Certificate ${tls.path}${tls.made ? ' (made just now)' : ''}, SHA-256 fingerprint ${tls.fingerprint}. Give scripts that file to trust.`);
+        out(`To try it from another computer: python3 examples/dataSources/pushTankRig.py https://${at[0] ?? '<this computer>'}:${status.port} --key <key> --certificate <that file> --speed 600`);
+    } else {
+        out(`Listening on ${status.host}:${status.port} (HTTP and WebSocket) and ${status.host}:${status.grpcPort} (gRPC), for ${names.join(', ')}.`);
+    }
     out(`Recording to ${recordTo}. Press Ctrl+C to stop.`);
     let lastTaken = 0;
     const timer = setInterval(() => {

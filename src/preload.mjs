@@ -235,7 +235,13 @@ contextBridge.exposeInMainWorld('engine', {
     pushService: {
         available: true,
         state: () => ipcRenderer.invoke('pushServiceState'),
-        start: (port) => ipcRenderer.invoke('pushServiceStart', port),
+        start: (port, network) => ipcRenderer.invoke('pushServiceStart', port, network),
+        // On the network: the certificate (its fingerprint, the addresses it is for, whether it is a person's own), saved for the
+        // scripts that will trust it, or replaced by a person's own.
+        certificate: () => ipcRenderer.invoke('pushServiceCertificate'),
+        saveCertificate: () => ipcRenderer.invoke('pushServiceSaveCertificate'),
+        chooseCertificate: () => ipcRenderer.invoke('pushServiceChooseCertificate'),
+        useKonjugateCertificate: () => ipcRenderer.invoke('pushServiceUseKonjugateCertificate'),
         stop: () => ipcRenderer.invoke('pushServiceStop'),
         onState: (callback) => ipcRenderer.on('pushServiceState', (_event, state) => callback(state)),
         // protocol/pushReadings.proto, for a script to generate its code from.

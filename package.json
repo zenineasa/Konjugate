@@ -93,6 +93,7 @@
         "@cortex-js/compute-engine": "^0.99.0",
         "@grpc/grpc-js": "^1.14.7",
         "@grpc/proto-loader": "^0.8.1",
+        "@peculiar/x509": "^2.2.0",
         "@wasmer/sdk": "^0.13.0",
         "codemirror": "^6.0.2",
         "fast-xml-parser": "^5.11.2",
@@ -105,6 +106,7 @@
         "plotly.js-dist-min": "^3.7.0",
         "protobufjs": "^8.8.1",
         "pyodide": "^314.0.7",
+        "reflect-metadata": "^0.2.2",
         "scrypt-js": "^3.0.1",
         "three": "^0.185.1",
         "ws": "^8.22.1"

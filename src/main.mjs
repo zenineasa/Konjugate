@@ -2886,7 +2886,32 @@ const pushServiceHost = () => (pushServiceHostInstance ??= new PushServiceHost({
 ipcMain.handle('pushServiceState', async () => pushServiceHost().state());
 // The message definition, for the panel to show beside the examples that use it.
 ipcMain.handle('pushServiceProto', async () => readFile(join(currentDir, '..', 'protocol', 'pushReadings.proto'), 'utf8'));
-ipcMain.handle('pushServiceStart', async (_event, port) => pushServiceHost().start(Number.isInteger(port) ? { port } : {}));
+ipcMain.handle('pushServiceStart', async (_event, port, network = false) => pushServiceHost().start({ ...(Number.isInteger(port) ? { port } : {}), network: network === true }));
+// The certificate the service uses on the network (made the first time it is asked for), without its key; saved where a person
+// chooses, to give to the scripts that will trust it; or a person's own chosen instead, or Konjugate's own again.
+ipcMain.handle('pushServiceCertificate', async () => pushServiceHost().certificateInfo());
+ipcMain.handle('pushServiceSaveCertificate', async (event) => {
+    const { certificate } = await pushServiceHost().certificateInfo();
+    const { canceled, filePath } = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
+        title: 'Save the push service\'s certificate', defaultPath: 'konjugate-push.pem', filters: [{ name: 'Certificate', extensions: ['pem', 'crt'] }]
+    });
+    if (canceled || !filePath) return null;
+    await writeFile(filePath, certificate);
+    return filePath;
+});
+ipcMain.handle('pushServiceChooseCertificate', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const pick = async (title, name) => {
+        const { canceled, filePaths } = await dialog.showOpenDialog(owner, { title, properties: ['openFile'], filters: [{ name, extensions: ['pem', 'crt', 'key'] }, { name: 'All files', extensions: ['*'] }] });
+        return canceled ? null : filePaths[0];
+    };
+    const certificate = await pick('Choose the certificate (PEM) for the push service', 'Certificate');
+    if (!certificate) return null;
+    const key = await pick('Choose that certificate\'s private key (PEM)', 'Private key');
+    if (!key) return null;
+    return pushServiceHost().useOwnCertificate(certificate, key);
+});
+ipcMain.handle('pushServiceUseKonjugateCertificate', async () => pushServiceHost().useKonjugateCertificate());
 ipcMain.handle('pushServiceStop', async () => pushServiceHost().stop());
 ipcMain.handle('pushKeysList', async () => pushServiceHost().keys.list());
 ipcMain.handle('pushKeysAdd', async (_event, name, signals) => pushServiceHost().keys.add(name, signals));

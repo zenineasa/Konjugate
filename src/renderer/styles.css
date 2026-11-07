@@ -2030,6 +2030,12 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .connectionsPort input { width: 90px; }
 .connectionsAddKey input { flex: 1 1 160px; min-width: 0; }
 .connectionsHint { margin: 6px 0 8px !important; }
+.passwordDialog .connectionsNetwork { display: flex; gap: 6px; align-items: center; margin-top: 10px; color: #b8c7ce; }
+.connectionsNetwork input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+.connectionsCertificate { padding: 8px; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; }
+.connectionsCertificate[hidden] { display: none; }
+.connectionsCertificate .assistantConfigurationStatus:empty { display: none; }
+.connectionsCertificate > span { display: block; overflow-wrap: anywhere; color: #9fb2bb; font-size: 8px; line-height: 1.5; }
 .connectionsLog { margin: 0; padding: 0; list-style: none; color: #5d717c; font-size: 7px; line-height: 1.6; }
 .connectionsLog:empty { display: none; }
 .connectionsKeys { display: grid; gap: 4px; }

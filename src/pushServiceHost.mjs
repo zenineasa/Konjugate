@@ -8,13 +8,18 @@
 // `fork(modulePath)` starts the process: Electron's utilityProcess.fork in the app. What it returns needs postMessage(message),
 // on('message', handler) and on('exit', handler) and kill(), as a utility process has.
 
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensurePushCertificate, networkAddresses, readOwnCertificate } from './pushCertificate.mjs';
 import { PushKeyStore } from './pushKeyStore.mjs';
 import { defaultPushPort } from './pushService.mjs';
 import { PushHub } from './pushSource.mjs';
 
 const processModule = fileURLToPath(new URL('./pushServiceProcess.mjs', import.meta.url));
 const stoppedReason = 'Konjugate stopped listening';
+// Which certificate the service uses on the network, when a person chose their own: { certificate, key } paths.
+const settingsFileName = 'pushSettings.json';
 
 export class PushServiceHost {
     #fork;
@@ -26,6 +31,7 @@ export class PushServiceHost {
     #poll = null;
     #pending = null;
     #stopping = false;
+    #certificate = null; // what is said about the certificate the service listens with on the network
 
     // directory: where the keys are kept (the app's own folder). onChange(state): every change to what the panel and the chip show.
     constructor({ directory, fork, onChange = () => {} }) {
@@ -41,7 +47,10 @@ export class PushServiceHost {
     state() {
         return {
             ...this.#status, failure: this.#failure, unclaimed: this.hub.unclaimed, followers: this.hub.followers,
-            followedSignals: this.hub.followedSignals, log: [...this.#log], defaultPort: defaultPushPort
+            followedSignals: this.hub.followedSignals, log: [...this.#log], defaultPort: defaultPushPort,
+            // Where a script reaches it: this computer's network addresses when it listens on the network, else the loopback.
+            addresses: this.#status.listening && this.#status.encrypted ? networkAddresses().ips : ['127.0.0.1'],
+            certificate: this.#status.listening && this.#status.encrypted ? this.#certificate : null
         };
     }
 
@@ -52,10 +61,53 @@ export class PushServiceHost {
         if (this.#log.length > 20) this.#log.shift();
     }
 
-    // Starts listening, on the loopback address. Answers the state once it listens, or throws why it could not.
-    async start({ port = defaultPushPort, grpcPort = port === 0 ? 0 : port + 1 } = {}) {
+    // The certificate the service listens with on the network: the one a person chose, or Konjugate's own (made the first time,
+    // and again when this computer's addresses change). { certificate (PEM), key, path, fingerprint, names, notAfter, own, made }.
+    async #networkCertificate() {
+        const chosen = await this.ownCertificatePaths();
+        return chosen ? readOwnCertificate(chosen.certificate, chosen.key) : { ...(await ensurePushCertificate(this.directory)), own: false };
+    }
+
+    // What is said about that certificate, for the panel: everything but the key.
+    async certificateInfo() {
+        const { key: _key, ...shown } = await this.#networkCertificate();
+        return shown;
+    }
+
+    async ownCertificatePaths() {
+        try {
+            const settings = JSON.parse(await readFile(join(this.directory, settingsFileName), 'utf8'));
+            return settings.certificate && settings.key ? { certificate: settings.certificate, key: settings.key } : null;
+        } catch {
+            return null;
+        }
+    }
+
+    // Listens on the network with a person's own certificate from now on; checked first, so a wrong pair is refused here.
+    async useOwnCertificate(certificate, key) {
+        await readOwnCertificate(certificate, key);
+        await writeFile(join(this.directory, settingsFileName), `${JSON.stringify({ certificate, key }, null, 2)}\n`);
+        return this.certificateInfo();
+    }
+
+    // Back to Konjugate's own certificate.
+    async useKonjugateCertificate() {
+        await rm(join(this.directory, settingsFileName), { force: true });
+        return this.certificateInfo();
+    }
+
+    // Starts listening: on the loopback address, or with `network`, on every interface, encrypted. Answers the state once it
+    // listens, or throws why it could not.
+    async start({ port = defaultPushPort, grpcPort = port === 0 ? 0 : port + 1, network = false } = {}) {
         if (this.#child) throw new Error('The push service is already listening.');
         this.#failure = null;
+        let tls = null;
+        if (network) {
+            const certificate = await this.#networkCertificate();
+            tls = { certificate: certificate.certificate, key: certificate.key };
+            const { key: _key, certificate: pem, ...shown } = certificate;
+            this.#certificate = { ...shown, pem };
+        }
         const child = this.#fork(processModule);
         this.#child = child;
         const started = new Promise((resolve, reject) => { this.#pending = { resolve, reject }; });
@@ -75,7 +127,7 @@ export class PushServiceHost {
             }
             this.#changed();
         });
-        child.postMessage({ type: 'start', directory: this.directory, host: '127.0.0.1', port, grpcPort });
+        child.postMessage({ type: 'start', directory: this.directory, host: network ? '0.0.0.0' : '127.0.0.1', port, grpcPort, tls });
         await started;
         // The rate and the clients change without a message: the panel and the chip are kept current every second while it listens.
         this.#poll = setInterval(() => child.postMessage({ type: 'status' }), 1000);
@@ -92,7 +144,9 @@ export class PushServiceHost {
             }
         } else if (message.type === 'started') {
             this.#status = message.status;
-            this.#note(`Listening on ${message.status.host}:${message.status.port}, gRPC on ${message.status.grpcPort}.`);
+            this.#note(message.status.encrypted
+                ? `Listening on the network, encrypted, on port ${message.status.port}, gRPC on ${message.status.grpcPort}; certificate ${this.#certificate?.fingerprint.slice(0, 23)}….`
+                : `Listening on ${message.status.host}:${message.status.port}, gRPC on ${message.status.grpcPort}.`);
             this.#pending?.resolve();
             this.#pending = null;
             this.#changed();

@@ -2068,6 +2068,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .liveTwinSources strong { font-size: 9px; font-weight: 600; }
 .liveTwinSources small { color: #718691; font-size: 7px; line-height: 1.35; }
 .liveTwinChip.failed i { background: #e0a14c; box-shadow: 0 0 8px rgb(224 161 76 / 60%); }
+.liveTwinTrack { margin: 8px 0 4px; }
+.liveTwinTrack[hidden] { display: none; }
+.liveTwinTrack > span { color: #b8c7ce; font-size: 8px; font-weight: 600; }
+#liveTwinTrackRows { display: grid; gap: 3px; }
+#liveTwinTrackRows label { display: flex; gap: 6px; align-items: center; color: #9fb2bb; font-size: 8px; }
+#liveTwinTrackRows input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
+#liveTwinTrackRows small { color: #5d717c; }
 .liveTwinEstimate { margin-top: 10px; }
 .liveTwinEstimate[hidden], #liveTwinMembersField[hidden] { display: none; }
 .liveTwinEstimate h4 { margin: 0 0 4px; color: #b8c7ce; font-size: 9px; }

@@ -4710,7 +4710,9 @@ export async function runInteractionTests(driver) {
         assert.equal(estimated.last.estimate.members, 12);
         await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.some((trace) => trace.name === 'Spread (10–90%)')`, 'The forecast was not drawn with its band.');
         assert.equal(await evaluate(opened, `document.querySelector('#liveTwinEstimate').hidden`), false);
-        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinEstimateRows .liveTwinEstimateRow').length`), estimated.last.estimate.states.length);
+        // A row for each state and for each parameter tracked (the rig's heat loss is tunable, so tracked unless unticked).
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinEstimateRows .liveTwinEstimateRow').length`), estimated.last.estimate.states.length + estimated.last.estimate.parameters.length);
+        assert.deepEqual(estimated.last.estimate.parameters.map((parameter) => parameter.parameterId), [10]);
         assert.match(await evaluate(opened, `document.querySelector('#liveTwinEstimateRows .liveTwinEstimateRow [data-field="estimate"]').textContent`), /^[-\d.e]+ ± [\d.e-]+/);
         assert.match(await evaluate(opened, `document.querySelector('#liveTwinHonesty').textContent`), /^\d+ of \d+ readings of tankTemperature \(\d+%\) fell outside the spread the twin expected/);
         assert.deepEqual(await evaluate(opened, `window.__debugParameterTuning.setup().replay.corrections.tankTemperature`), { estimate: true });
@@ -4749,9 +4751,12 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `document.querySelector('#liveTwinRefit').click()`);
         await waitFor(opened, `/Apply it to run the twin on/.test(document.querySelector('#liveTwinRefitStatus').textContent)`, 'The refit did not finish.', 60000);
         const refitRow = await evaluate(opened, `document.querySelector('#liveTwinRefitRows').textContent`);
-        const room = refitRow.match(/^Ambient air · Temperature at \d.*: 293\.150 → ([\d.]+)$/);
+        // The rig's heat loss is tunable too, so it is refitted beside the room (and found again near its true 20 W/K).
+        const room = refitRow.match(/Ambient air · Temperature at \d[^:]*: 293\.150 → ([\d.]+)/);
+        const refittedLoss = refitRow.match(/Heat loss coefficient: 20\.0000 → ([\d.]+)/);
+        assert.ok(refittedLoss && Math.abs(Number(refittedLoss[1]) - 20) < 1, `The heat loss is refitted near the truth: ${refitRow}`);
         assert.ok(room && Math.abs(Number(room[1]) - 293.15) < 0.5, `The room is fitted at the window's anchor, and found again near the truth: ${refitRow}`);
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinRefitKeep').hidden`), true, 'With no parameter refitted there is nothing to keep in the model.');
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinRefitKeep').hidden`), false, 'With the heat loss refitted, it can be kept in the model too.');
         await evaluate(opened, `document.querySelector('#liveTwinRefitApply').click()`);
         await waitFor(opened, `/^Applied to the twin from the move at /.test(document.querySelector('#liveTwinRefitStatus').textContent)`, 'The refit was not applied.', 15000);
         await waitFor(opened, `Boolean(window.__debugParameterTuning.liveTwin()?.last?.refit)`, 'The next move did not say a refit was applied.', 30000);
@@ -5024,6 +5029,21 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningMqtt').open || getComputedStyle(document.querySelector('#parameterTuningMqtt')).display === 'none'`), true);
         await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
         await waitFor(opened, `document.querySelector('#liveTwinChip').hidden`, 'Stopping did not take the chip away.', 15000);
+
+        // Told what to do about it, the person tracks the drift live: the measured signal estimated, the rig's heat loss offered to
+        // track (ticked), and the twin run again, finding the heat loss growing.
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /set the measured signal to "estimate"/);
+        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'estimate');
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinTrack').hidden`), false, 'The heat loss is offered to track.');
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrackRows').textContent`), /Heat loss coefficient/);
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinTrackRows input[data-parameter-id="10"]').checked`), true, 'Tracked unless unticked.');
+        await set('#liveTwinSpeed', 'Infinity');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The tracking twin did not play the recording.', 180000);
+        const tracked = (await evaluate(opened, `window.__debugParameterTuning.liveTwin()`)).last.estimate.parameters.find((parameter) => parameter.parameterId === 10);
+        assert.ok(tracked.mean > 24, `The heat loss is found growing from the model's 20: ${tracked.mean}.`);
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinEstimateRows').textContent`), /Heat loss coefficient \(tracked\)/);
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });

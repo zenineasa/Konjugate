@@ -71,6 +71,13 @@ test('repeatable to the bit, kept within bounds, and a state that is only read i
     assert.throws(() => analyse(initialEnsemble([1], [0], 5, seededNormal(1)), [{ index: 0, value: 1, noise: 0 }], seededNormal(1)), /no information/);
 });
 
+test('an observation given as each member\'s prediction is the same analysis as one pointing at a state', () => {
+    const members = initialEnsemble([300, 20], [0.5, 2], 50, seededNormal(5));
+    const byIndex = analyse(members, [{ index: 0, value: 300.4, noise: 0.15 }], seededNormal(9)).members;
+    const byPrediction = analyse(members, [{ predictions: members.map((member) => member[0]), value: 300.4, noise: 0.15 }], seededNormal(9)).members;
+    assert.deepEqual(byPrediction, byIndex);
+});
+
 test('a sensor\'s noise is read from its readings, whatever smooth course they follow', () => {
     const normal = seededNormal(11);
     const values = Array.from({ length: 400 }, (_, index) => 300 + 40 * (1 - Math.exp(-index / 80)) + 0.25 * normal());

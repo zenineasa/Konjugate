@@ -15,6 +15,7 @@ import { tankCalibration, tankProject } from './generateTankCalibrationExample.m
 
 const root = join(import.meta.dirname, '..');
 export const heaterPowerParameterId = 40;
+export const heatLossParameterId = 10;
 
 export function tankRigProject() {
     const project = tankProject({ ...tankCalibration.truth, tuned: false });
@@ -37,6 +38,10 @@ export function tankRigProject() {
         mathJson: ['Divide', 'heaterPower', 'waterThermalCapacitance']
     };
     heater.parameters.push({ id: 12, name: 'Heater power', symbol: 'heaterPower', value: tankCalibration.heaterPower, unit: 'W', mode: 'constant', sharedParameterId: heaterPowerParameterId });
+    // The heat loss is what changes on a real rig (insulation getting wet, a lid left open), so it is marked tunable: a live twin's
+    // refit finds it, and its estimator can track it as it goes (the drifting recording's heat loss grows 10% an hour).
+    const loss = project.edges.find((edge) => edge.name === 'Ambient heat loss').parameters.find((parameter) => parameter.id === heatLossParameterId);
+    loss.tuning = { ...tankCalibration.heatLossBounds };
     return project;
 }
 

@@ -74,7 +74,10 @@ function solve(matrix, rhs) {
     return a.map((row, index) => row.slice(size).map((value) => value / row[index]));
 }
 
-// observations: [{ index, value, noise }]: the position of the measured state in a member, the reading, and its standard deviation.
+// observations: [{ index, value, noise }]: the position of the measured state in a member, the reading, and its standard deviation;
+// or [{ predictions, value, noise }], `predictions` being what each member predicted the reading would be (a reading taken before the
+// analysis time, read off each member's own run to then: an asynchronous filter, which uses every reading of a stretch, not only
+// the one at its end).
 // updatable: which positions the analysis may change (a state the model computes from others is read, never set); all by default.
 // bounds: [{ minimum, maximum }] or null per position, which a member is kept within. Answers the members after the analysis and
 // the gain: for each position, how much it moved for one unit of each reading's innovation.
@@ -84,18 +87,21 @@ export function analyse(members, observations, normal, { updatable = null, bound
     const size = members[0].length;
     const { mean } = ensembleStatistics(members);
     const anomalies = members.map((member) => member.map((value, index) => value - mean[index]));
-    const observed = observations.map((observation) => observation.index);
-    // Covariances, from the ensemble: between the readings' states (m×m) and between every state and them (n×m).
-    const between = observed.map((row) => observed.map((column) => anomalies.reduce((sum, anomaly) => sum + anomaly[row] * anomaly[column], 0) / (count - 1)));
-    const across = Array.from({ length: size }, (_, state) => observed.map((column) => anomalies.reduce((sum, anomaly) => sum + anomaly[state] * anomaly[column], 0) / (count - 1)));
+    // What each member predicts for each reading, and how far from the members' mean prediction.
+    const predicted = observations.map((observation) => observation.predictions ?? members.map((member) => member[observation.index]));
+    const predictedMean = predicted.map((values) => values.reduce((sum, value) => sum + value, 0) / count);
+    const predictedAnomalies = predicted.map((values, row) => values.map((value) => value - predictedMean[row]));
+    // Covariances, from the ensemble: between the readings' predictions (m×m) and between every state and them (n×m).
+    const between = predictedAnomalies.map((row) => predictedAnomalies.map((column) => row.reduce((sum, value, member) => sum + value * column[member], 0) / (count - 1)));
+    const across = Array.from({ length: size }, (_, state) => predictedAnomalies.map((column) => anomalies.reduce((sum, anomaly, member) => sum + anomaly[state] * column[member], 0) / (count - 1)));
     const innovationCovariance = between.map((row, i) => row.map((value, j) => value + (i === j ? observations[i].noise ** 2 : 0)));
     // K = across · innovationCovariance⁻¹, found as (innovationCovariance⁻¹ · acrossᵀ)ᵀ since the matrix is symmetric.
-    const solved = solve(innovationCovariance, observed.map((_, i) => across.map((row) => row[i])));
+    const solved = solve(innovationCovariance, observations.map((_, i) => across.map((row) => row[i])));
     const gain = Array.from({ length: size }, (_, state) => observations.map((_, i) => solved[i][state]));
     const canChange = (index) => (updatable ? updatable[index] : true);
-    const updated = members.map((member) => {
+    const updated = members.map((member, memberIndex) => {
         // Each member is moved toward the readings perturbed by their own noise, which keeps the analysis spread honest.
-        const innovation = observations.map((observation) => observation.value + observation.noise * normal() - member[observation.index]);
+        const innovation = observations.map((observation, row) => observation.value + observation.noise * normal() - predicted[row][memberIndex]);
         return member.map((value, index) => {
             if (!canChange(index)) return value;
             let next = value + gain[index].reduce((sum, weight, i) => sum + weight * innovation[i], 0);
@@ -112,12 +118,14 @@ export function analyse(members, observations, normal, { updatable = null, bound
 // (var / (var + noise²)). How "the readings reach" a state the data does not measure is told.
 export function explainedShare(members, stateIndex, observation) {
     const { mean } = ensembleStatistics(members);
+    const predictions = observation.predictions ?? members.map((member) => member[observation.index]);
+    const predictedMean = predictions.reduce((sum, value) => sum + value, 0) / predictions.length;
     let covariance = 0;
     let stateVariance = 0;
     let readingVariance = 0;
-    for (const member of members) {
+    for (const [memberIndex, member] of members.entries()) {
         const a = member[stateIndex] - mean[stateIndex];
-        const b = member[observation.index] - mean[observation.index];
+        const b = predictions[memberIndex] - predictedMean;
         covariance += a * b;
         stateVariance += a * a;
         readingVariance += b * b;
@@ -126,6 +134,32 @@ export function explainedShare(members, stateIndex, observation) {
     const correlationSquared = covariance * covariance / (stateVariance * readingVariance);
     const variance = readingVariance / (members.length - 1);
     return correlationSquared * variance / (variance + observation.noise ** 2);
+}
+
+// The share of a state's uncertainty a set of readings removes together (0 to 1): what the analysis would take off its variance,
+// P_xy (P_yy + R)⁻¹ P_yx, over its variance; for one reading, the same as explainedShare.
+export function explainedShareTogether(members, stateIndex, observations) {
+    if (!observations.length) return 0;
+    const count = members.length;
+    const { mean } = ensembleStatistics(members);
+    const stateAnomaly = members.map((member) => member[stateIndex] - mean[stateIndex]);
+    const variance = stateAnomaly.reduce((sum, value) => sum + value * value, 0) / (count - 1);
+    if (!(variance > 0)) return 0;
+    const predicted = observations.map((observation) => observation.predictions ?? members.map((member) => member[observation.index]));
+    const anomalies = predicted.map((values) => {
+        const average = values.reduce((sum, value) => sum + value, 0) / count;
+        return values.map((value) => value - average);
+    });
+    const across = anomalies.map((row) => row.reduce((sum, value, member) => sum + value * stateAnomaly[member], 0) / (count - 1));
+    const between = anomalies.map((row, i) => anomalies.map((column, j) => row.reduce((sum, value, member) => sum + value * column[member], 0) / (count - 1) + (i === j ? observations[i].noise ** 2 : 0)));
+    let solved;
+    try {
+        solved = solve(between, across.map((value) => [value]));
+    } catch {
+        return 0;
+    }
+    const removed = across.reduce((sum, value, i) => sum + value * solved[i][0], 0);
+    return Math.max(0, Math.min(1, removed / variance));
 }
 
 // A sensor's noise, as a standard deviation, from readings taken in time order: the scatter of their second differences, which a

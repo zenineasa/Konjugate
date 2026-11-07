@@ -7,13 +7,19 @@
 //   - Estimated, the level's readings reach the inflow: it is found, within its spread, and the jumps shrink.
 //   - The same readings and seed give the same estimates to the bit.
 //   - The forecast carries a band, and about one reading in five falls outside its 10th to 90th percentile.
+//   - A parameter estimated with the states: the simulated rig's heat loss, growing 10% an hour in the drifting recording shipped
+//     with the app, is followed up as it grows, from the tank's temperature alone, where reset leaves the jumps leaning.
 //
 // Run manually (after `npm run build:engine`):
 //   node tests/engine/windowEstimator.mjs [path/to/konjugateEngine]
 
 import assert from 'node:assert/strict';
 import { basename, dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { readDataLog } from '../../src/dataLog.mjs';
+import { guessReplayMapping, replayTargets } from '../../src/dataLogReplay.mjs';
 import { seededNormal } from '../../src/stateEstimator.mjs';
+import { heatLossParameterId, tankRigProject } from '../../scripts/generateTankRigModel.mjs';
 import { WindowSession } from '../../src/windowSession.mjs';
 
 const root = join(import.meta.dirname, '..', '..');
@@ -56,7 +62,7 @@ const mapping = [{ signal: 'level', role: 'output', stateId: 2, parameterId: nul
 
 // The real tank's level and inflow follow the model's equation exactly, with nothing wandering of its own, so both are said to drift
 // little (the defaults are cautious, and the share of readings outside the band says so).
-const run = async (corrections, estimator = { drift: { 2: 0.02, 3: 0.0005 } }) => {
+const run = async (corrections, estimator = { drift: { 2: 0.02, 3: 0.0002 } }) => {
     const session = new WindowSession({ document: tank, header, mapping, window: 3600, stride: 600, horizon: 3600, timeStep: 60, tolerances: { level: 0.5 }, engineOptions, corrections, estimator });
     session.push(observations);
     await session.end();
@@ -96,3 +102,31 @@ assert.ok(cautiousOutside < outside, `The cautious default leaves fewer readings
 const again = await run({ level: { estimate: true } });
 assert.deepEqual(again.map((cycle) => cycle.estimate.states), estimated.map((cycle) => cycle.estimate.states), 'The same readings and seed give the same estimates.');
 console.log(`Window estimator: the unmeasured inflow found (${inflow.mean.toFixed(3)} ± ${inflow.spread.toFixed(3)} against ${trueInflow}), the jumps ${meanJump(estimated).toFixed(3)} cm against ${meanJump(reset).toFixed(3)} reset, ${outside} of ${total} readings outside the band, repeatable.`);
+
+// The drifting rig: its heat loss grows from 20 W/K by 10% an hour; the model believes it stays at 20.
+const drifting = readDataLog(await readFile(join(root, 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8'));
+const rig = tankRigProject();
+const rigMapping = guessReplayMapping(drifting.header, replayTargets(rig));
+const runRig = async (corrections, estimator = {}) => {
+    const session = new WindowSession({ document: rig, header: drifting.header, mapping: rigMapping, window: 3600, stride: 600, horizon: 3600, timeStep: 60, tolerances: { tankTemperature: 0.5 }, engineOptions, corrections, estimator });
+    session.push(drifting.observations);
+    await session.end();
+    await session.close();
+    return session.cycles;
+};
+const rigReset = await runRig({});
+const tracked = await runRig({ tankTemperature: { estimate: true } }, { parameters: [heatLossParameterId] });
+const trueLoss = (anchor) => 20 * (1 + 0.1 * anchor / 3600);
+const lossAt = (cycle) => cycle.estimate.parameters.find((parameter) => parameter.parameterId === heatLossParameterId);
+// A filter follows a drifting quantity with a lag set by how far it may wander (20% an hour by default): the heat loss is followed up
+// from the model's 20 and ends within a sixth of the truth; a refit gives the value over a window exactly.
+const early = lossAt(tracked.find((cycle) => cycle.anchor >= 3600));
+const final = lossAt(tracked.at(-1));
+assert.ok(final.mean - early.mean > 4, `The estimate follows the heat loss up: ${early.mean.toFixed(2)} W/K at an hour, ${final.mean.toFixed(2)} at the end.`);
+assert.ok(Math.abs(final.mean - trueLoss(tracked.at(-1).anchor)) / trueLoss(tracked.at(-1).anchor) < 0.15, `It ends near the truth: ${final.mean.toFixed(2)} ± ${final.spread.toFixed(2)} W/K against ${trueLoss(tracked.at(-1).anchor).toFixed(2)}.`);
+assert.ok(lossAt(tracked.at(-1)).mean > 25, 'It has followed the heat loss up from the model\'s 20.');
+assert.ok(tracked.slice(1, 8).some((cycle) => cycle.estimate.throughParameters[heatLossParameterId]?.includes('tankTemperature')), 'The tank\'s readings reached the heat loss.');
+const meanAbsJump = (cycles) => cycles.slice(-10).reduce((sum, cycle) => sum + Math.abs(cycle.jumps.tankTemperature.jump), 0) / 10;
+assert.ok(meanAbsJump(tracked) < meanAbsJump(rigReset) / 1.5, `Tracking it, the jumps shrink (${meanAbsJump(tracked).toFixed(3)} K) where reset keeps leaning (${meanAbsJump(rigReset).toFixed(3)} K).`);
+const lastLoss = lossAt(tracked.at(-1));
+console.log(`Window estimator, a parameter: the drifting rig's heat loss tracked to ${lastLoss.mean.toFixed(2)} ± ${lastLoss.spread.toFixed(2)} W/K against a true ${trueLoss(tracked.at(-1).anchor).toFixed(2)}, the jumps ${meanAbsJump(tracked).toFixed(3)} K against ${meanAbsJump(rigReset).toFixed(3)} reset.`);

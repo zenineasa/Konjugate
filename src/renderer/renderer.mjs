@@ -9292,7 +9292,7 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
     // How the live twin brings each measured state back in step at a move: a gain from 0 (watch only) to 1 (reset to the reading), or
     // an estimate ({ estimate: true, noise }); and, for the estimator, how far a state may drift in an hour (stateId -> value).
     const corrections = new Map(mapping.filter((entry) => entry.role === 'output').map((entry) => [entry.signal, 1]));
-    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, corrections, estimatorDrift: new Map(), lastRun: null, running: false, path: null, source };
+    parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, corrections, estimatorDrift: new Map(), untrackedParameters: new Set(), lastRun: null, running: false, path: null, source };
     defaultLiveTwinAlert(parameterTuningReplay);
     $('#parameterTuningReplayTimeStep').value = String(suggestedReplayTimeStep(document_, log.observations, mapping));
     applySavedReplaySetup(parameterTuningReplay);
@@ -9454,10 +9454,37 @@ function defaultLiveTwinAlert(replay) {
     $('#liveTwinAlert').value = tolerance > 0 ? String(Number((tolerance / 4).toPrecision(2))) : '';
 }
 
-// The estimator's own setting, the ensemble's size, is offered once a signal is estimated.
+// The tunable parameters a twin's estimator can track: not those the readings drive (inputs), nor initial values.
+function trackableParameters(replay) {
+    const inputs = new Set(replay.mapping.filter((entry) => entry.role === 'input').map((entry) => entry.parameterId));
+    return findTunableParametersInModel().filter((parameter) => parameter.kind !== 'state' && !inputs.has(parameter.parameterId));
+}
+
+// The estimator's own settings, offered once a signal is estimated: the ensemble's size, and which tunable parameters to track.
 function refreshEstimatorFields() {
     const replay = parameterTuningReplay;
-    $('#liveTwinMembersField').hidden = !replay || ![...replay.corrections.values()].some((value) => typeof value === 'object');
+    const estimating = Boolean(replay) && [...replay.corrections.values()].some((value) => typeof value === 'object');
+    $('#liveTwinMembersField').hidden = !estimating;
+    const candidates = estimating ? trackableParameters(replay) : [];
+    $('#liveTwinTrack').hidden = !candidates.length;
+    $('#liveTwinTrackRows').replaceChildren(...candidates.map((parameter) => {
+        const row = document.createElement('label');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.dataset.parameterId = String(parameter.parameterId);
+        box.checked = !replay.untrackedParameters.has(parameter.parameterId);
+        box.addEventListener('change', () => {
+            if (box.checked) replay.untrackedParameters.delete(parameter.parameterId);
+            else replay.untrackedParameters.add(parameter.parameterId);
+            rememberReplaySetup();
+        });
+        const name = document.createElement('span');
+        name.textContent = `${parameter.edgeName ?? parameter.ownerName} · ${parameter.name}`;
+        const bounds = document.createElement('small');
+        bounds.textContent = `${parameter.value}, between ${parameter.tuning.minimum} and ${parameter.tuning.maximum}`;
+        row.append(box, name, bounds);
+        return row;
+    }));
 }
 
 function clearParameterTuningReplayOutcome(message = '') {
@@ -9559,7 +9586,8 @@ function rememberReplaySetup() {
             live: {
                 window: Number($('#liveTwinWindow').value), stride: Number($('#liveTwinStride').value), horizon: Number($('#liveTwinHorizon').value), speed: $('#liveTwinSpeed').value,
                 members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift ?? []),
-                alert: $('#liveTwinAlert').value.trim() === '' ? 0 : Number($('#liveTwinAlert').value)
+                alert: $('#liveTwinAlert').value.trim() === '' ? 0 : Number($('#liveTwinAlert').value),
+                untracked: [...(replay.untrackedParameters ?? [])]
             }
         }
     });
@@ -9594,6 +9622,7 @@ function applySavedReplaySetup(replay) {
     if (saved.live?.speed && [...$('#liveTwinSpeed').options].some((option) => option.value === saved.live.speed)) $('#liveTwinSpeed').value = saved.live.speed;
     if (saved.live?.members) $('#liveTwinMembers').value = String(saved.live.members);
     if (saved.live && saved.live.alert !== undefined) $('#liveTwinAlert').value = saved.live.alert > 0 ? String(saved.live.alert) : '';
+    for (const parameterId of saved.live?.untracked ?? []) replay.untrackedParameters.add(parameterId);
     for (const [stateId, drift] of Object.entries(saved.live?.drift ?? {})) {
         if (replay.targets.states.some((state) => state.stateId === Number(stateId))) replay.estimatorDrift.set(Number(stateId), drift);
     }
@@ -9665,16 +9694,21 @@ function renderLiveTwinEstimate(twin, cycle) {
     $('#liveTwinEstimate').hidden = false;
     const rows = $('#liveTwinEstimateRows');
     const editing = rows.contains(document.activeElement);
+    // The parameters tracked come after the states, in the same rows, named as the model names them.
+    const quantities = [
+        ...estimate.states.map((state) => ({ ...state, id: state.stateId, label: label(state.stateId), unit: unitOf(state.stateId), reached: estimate.through[state.stateId] })),
+        ...(estimate.parameters ?? []).map((parameter) => ({ ...parameter, id: parameter.parameterId, label: `${parameter.name} (tracked)`, unit: '', reached: estimate.throughParameters?.[parameter.parameterId] }))
+    ];
     if (!editing) {
-        rows.replaceChildren(...estimate.states.map((state) => {
+        rows.replaceChildren(...quantities.map((state) => {
             const row = document.createElement('div');
             row.className = 'liveTwinEstimateRow';
-            row.dataset.stateId = String(state.stateId);
-            const unit = unitOf(state.stateId) ? ` ${unitOf(state.stateId)}` : '';
-            const reached = estimate.through[state.stateId];
+            row.dataset.stateId = String(state.id);
+            const unit = state.unit ? ` ${state.unit}` : '';
+            const reached = state.reached;
             const name = document.createElement('span');
             name.innerHTML = '<strong></strong><small></small>';
-            name.querySelector('strong').textContent = label(state.stateId);
+            name.querySelector('strong').textContent = state.label;
             name.querySelector('small').textContent = reached ? `reached through ${reached.join(', ')}` : 'carried by the model this move';
             const value = document.createElement('span');
             value.dataset.field = 'estimate';
@@ -9682,14 +9716,14 @@ function renderLiveTwinEstimate(twin, cycle) {
             const drift = document.createElement('label');
             drift.innerHTML = '<span>drifts up to</span><input type="number" min="0" step="any"><span>an hour</span>';
             const input = drift.querySelector('input');
-            input.setAttribute('aria-label', `How far ${label(state.stateId)} may drift in an hour beyond what the model says`);
+            input.setAttribute('aria-label', `How far ${state.label} may drift in an hour beyond what the model says`);
             input.placeholder = shown(state.drift);
-            const given = replay?.estimatorDrift.get(state.stateId);
+            const given = replay?.estimatorDrift.get(state.id);
             input.value = given ? String(given) : '';
             input.addEventListener('change', () => {
                 const amount = Number(input.value);
-                if (input.value.trim() && amount > 0) replay.estimatorDrift.set(state.stateId, amount);
-                else replay.estimatorDrift.delete(state.stateId);
+                if (input.value.trim() && amount > 0) replay.estimatorDrift.set(state.id, amount);
+                else replay.estimatorDrift.delete(state.id);
                 rememberReplaySetup();
             });
             row.append(name, value, drift);
@@ -9819,7 +9853,13 @@ async function startLiveTwin() {
         timeStep: Number($('#parameterTuningReplayTimeStep').value),
         tolerances: Object.fromEntries(replay.tolerances),
         corrections: Object.fromEntries([...replay.corrections].filter(([, value]) => value !== 1).map(([signal, value]) => [signal, typeof value === 'object' ? { ...value } : { gain: value }])),
-        estimator: { members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift) },
+        estimator: {
+            members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift),
+            // The tunable parameters tracked as the twin goes, when it estimates: all those it can, but the ones unticked.
+            parameters: [...replay.corrections.values()].some((value) => typeof value === 'object')
+                ? trackableParameters(replay).map((parameter) => parameter.parameterId).filter((parameterId) => !replay.untrackedParameters.has(parameterId))
+                : []
+        },
         // The warning, given in the first measured signal's unit a move, as the window takes it: a multiple of that signal's tolerance.
         alertAt: (() => {
             const amount = Number($('#liveTwinAlert').value);
@@ -9913,7 +9953,12 @@ window.engine.liveTwin?.onEvent?.((update) => {
             + (stats.recoveries ? ` The engine was restarted ${stats.recoveries} time${stats.recoveries === 1 ? '' : 's'} and carried on.` : '')
             + (stats.skipped ? ` It fell behind the data and skipped ${stats.skipped} move${stats.skipped === 1 ? '' : 's'} to keep up: choose a longer stride or a shorter window if this goes on.` : '');
         const trend = liveTwinTrendText(cycle.trend, twin.outputs[0].unit);
-        $('#liveTwinTrend').textContent = trend.text;
+        // Past the warning, what to do about it: find what changed over the window, or follow it as it goes.
+        const estimating = Object.values(cycle.corrections ?? {}).some((correction) => correction?.estimate);
+        const advice = cycle.trend?.alarm && !estimating
+            ? ' Refit on the latest window to find what changed, or set the measured signal to "estimate" and start again to track it as it goes.'
+            : '';
+        $('#liveTwinTrend').textContent = trend.text + advice;
         $('#liveTwinTrend').classList.toggle('leaning', trend.leaning);
         if (cycle.observed) $('#liveTwinObserved').textContent = liveTwinObservedText(cycle);
         renderLiveTwinEstimate(twin, cycle);

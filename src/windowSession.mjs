@@ -20,7 +20,7 @@
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
 import { interpolate, ReplayError } from './dataLogReplay.mjs';
 import { fitPlanFromLog } from './dataLogFit.mjs';
-import { analyse, ensembleStatistics, explainedShare, initialEnsemble, perturb, quantile, readingNoise, seededNormal } from './stateEstimator.mjs';
+import { analyse, ensembleStatistics, explainedShareTogether, initialEnsemble, perturb, quantile, readingNoise, seededNormal } from './stateEstimator.mjs';
 
 const isWholeMultiple = (value, of) => Math.abs(value / of - Math.round(value / of)) <= 1e-9 * Math.max(1, Math.abs(value / of));
 const median = (values) => {
@@ -79,7 +79,10 @@ export class WindowSession {
     // every state that moves with it, measured or not. estimator: { members (32), seed (1), drift: { stateId: how far the model
     // may drift from the truth in an hour, beyond what it says (an estimated measured state: as far over a stride as its readings'
     // noise; any other: 1% of its value at the first move) }, spread: { stateId:
-    // how unsure its value is at the first move (10% of it; an estimated measured state, its reading's noise) } }.
+    // how unsure its value is at the first move (10% of it; an estimated measured state, its reading's noise) }, parameters: [the ids
+    // of tunable parameters to estimate with the states, as a slowly changing quantity found from the readings: a heat loss that
+    // grows, say] }. A parameter estimated is made live in this twin's copy of the model, within its tuning bounds, so each member can
+    // run with its own value; its drift defaults to 20% of its value an hour, its spread at the first move to 10% of it.
     constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {} }) {
         if (!(timeStep > 0)) throw new Error('The time step must be a positive number of seconds.');
         for (const [name, value] of [['window', window], ['stride', stride], ['horizon', horizon]]) {
@@ -102,9 +105,30 @@ export class WindowSession {
         }
         const members = estimator.members ?? 32;
         if (!(Number.isInteger(members) && members >= 4 && members <= 1000)) throw new Error('The estimator\'s ensemble has from 4 to 1000 members.');
-        this.estimator = { members, seed: estimator.seed ?? 1, drift: estimator.drift ?? {}, spread: estimator.spread ?? {} };
+        this.estimator = { members, seed: estimator.seed ?? 1, drift: estimator.drift ?? {}, spread: estimator.spread ?? {}, parameters: [...new Set(estimator.parameters ?? [])] };
         Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections });
         this.estimated = this.outputs.filter((entry) => corrections[entry.signal]?.estimate);
+        // Parameters estimated with the states: made live in this twin's own copy of the model, within their tuning bounds, so each
+        // member of the ensemble can be given its own value.
+        this.estimatedParameters = [];
+        if (this.estimator.parameters.length) {
+            if (!this.estimated.length) throw new Error('A parameter is estimated from readings: choose "estimate" for at least one measured signal.');
+            this.document = structuredClone(document);
+            const parameters = [
+                ...(this.document.sharedParameters ?? []),
+                ...this.document.edges.flatMap((edge) => edge.parameters ?? []),
+                ...this.document.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+            ];
+            for (const parameterId of this.estimator.parameters) {
+                const parameter = parameters.find((candidate) => candidate.id === parameterId);
+                if (!parameter) throw new Error(`Parameter ${parameterId} is not in the model.`);
+                if (parameter.sharedParameterId) throw new Error(`${parameter.name} takes its value from a shared parameter: estimate that one.`);
+                if (!parameter.tuning) throw new Error(`Mark ${parameter.name} tunable, with bounds, to estimate it.`);
+                parameter.mode = 'live';
+                parameter.control = { minimum: parameter.tuning.minimum, maximum: parameter.tuning.maximum, step: (parameter.tuning.maximum - parameter.tuning.minimum) / 1000 };
+                this.estimatedParameters.push({ parameterId, name: parameter.name, value: parameter.value, bounds: { ...parameter.tuning } });
+            }
+        }
         for (const entry of [...this.inputs, ...this.outputs]) this.#readings.set(entry.signal, new Map());
     }
 
@@ -253,7 +277,7 @@ export class WindowSession {
                 // measured states replaced.
                 if (estimating) analysis = await this.#analyse(anchor, now, previous, corrections);
                 const start = estimating
-                    ? [{ type: 'restoreState', time: anchor, values: analysis.mean, providerStates: previous.restored.providerStates }]
+                    ? [...this.#parameterCommands(analysis.mean), { type: 'restoreState', time: anchor, values: analysis.mean.slice(0, this.#engine.stateIds.length), providerStates: previous.restored.providerStates }]
                     : [...this.#catchUp(index, previous), { type: 'restoreCheckpoint', time: anchor, overrides }];
                 replies = await this.#engine.run([
                     ...this.#inputCommands(now),
@@ -325,22 +349,26 @@ export class WindowSession {
             if (!(noise > 0)) throw new ReplayError(`The noise of ${entry.signal}'s readings could not be read from them: say what it is.`);
             this.#noise[entry.signal] = noise;
         }
-        const values = cycle.restored.values;
+        const values = [...cycle.restored.values, ...this.estimatedParameters.map((parameter) => parameter.value)];
         const scale = (value) => Math.max(Math.abs(value), 1e-6);
         // By default a measured state is trusted over one stride about as much as its sensor (whatever its units or offset), and a
-        // state nobody measures to 1% of its value an hour.
+        // state nobody measures to 1% of its value an hour. When parameters are estimated too, the model's errors are theirs to
+        // explain, so a measured state is trusted ten times more: left as free as its sensor, it would take every disagreement as
+        // its own wandering, and a parameter would learn nothing (a drifting heat loss stayed at the model's value for six hours).
+        // A parameter may wander 20% of its value an hour, enough to follow a real drift (a heat loss growing 10% an hour) closely.
+        const freedom = this.estimatedParameters.length ? 0.1 : 1;
         this.#drift = stateIds.map((stateId, position) => {
             if (computed.has(stateId)) return 0;
             if (this.estimator.drift[stateId] !== undefined) return this.estimator.drift[stateId];
             const measured = this.estimated.find((entry) => entry.stateId === stateId);
-            return measured ? this.#noise[measured.signal] * Math.sqrt(3600 / this.stride) : 0.01 * scale(values[position]);
-        });
+            return measured ? freedom * this.#noise[measured.signal] * Math.sqrt(3600 / this.stride) : 0.01 * scale(values[position]);
+        }).concat(this.estimatedParameters.map((parameter) => this.estimator.drift[parameter.parameterId] ?? 0.2 * scale(parameter.value)));
         const spread = stateIds.map((stateId, position) => {
             if (computed.has(stateId)) return 0;
             if (this.estimator.spread[stateId] !== undefined) return this.estimator.spread[stateId];
             const measured = this.estimated.find((entry) => entry.stateId === stateId);
             return measured ? this.#noise[measured.signal] : 0.1 * scale(values[position]);
-        });
+        }).concat(this.estimatedParameters.map((parameter) => this.estimator.spread[parameter.parameterId] ?? 0.1 * scale(parameter.value)));
         this.#normal = seededNormal(this.estimator.seed);
         this.#ensemble = { anchor: cycle.anchor, members: initialEnsemble(values, spread, this.estimator.members, this.#normal) };
     }
@@ -355,33 +383,54 @@ export class WindowSession {
         const from = this.#ensemble.anchor;
         const commands = [...this.#inputCommands(now)];
         const offset = commands.length;
+        const each = 3 + this.estimatedParameters.length;
         for (const member of this.#ensemble.members) {
             commands.push(
-                { type: 'restoreState', time: from, values: member, providerStates: previous.restored.providerStates },
+                ...this.#parameterCommands(member),
+                { type: 'restoreState', time: from, values: member.slice(0, stateIds.length), providerStates: previous.restored.providerStates },
                 { type: 'advanceTo', time: anchor, takeCheckpoints: true },
                 { type: 'restoreCheckpoint', time: anchor, overrides: [] }
             );
         }
         const replies = await this.#engine.run(commands);
-        const forecast = this.#ensemble.members.map((_, member) => replies[offset + 3 * member + 2].values);
+        // Each member's states where the run left them, with the parameter values it ran with.
+        const forecast = this.#ensemble.members.map((member, index) => [...replies[offset + each * index + each - 1].values, ...member.slice(stateIds.length)]);
         const hours = (anchor - from) / 3600;
         const pushed = perturb(forecast, this.#drift.map((drift) => drift * Math.sqrt(hours)), this.#normal);
+        // Every good reading of an estimated signal since the last anchor, up to this one, each with what every member predicted it
+        // would be, read off the member's own run there (its output samples, from its state at the last anchor): a slowly changing
+        // quantity, such as a parameter, shows in a stretch of readings far more than in the one at its end.
+        const runs = this.#ensemble.members.map((member, index) => replies[offset + each * index + each - 2].samples);
         const observations = this.estimated.flatMap((entry) => {
-            const measured = this.#measurementAt(entry.signal, anchor, now);
-            return measured === null ? [] : [{ index: stateIds.indexOf(entry.stateId), value: measured, noise: this.#noise[entry.signal], signal: entry.signal }];
+            const position = stateIds.indexOf(entry.stateId);
+            const output = this.outputs.indexOf(entry);
+            const series = runs.map((samples, index) => [{ time: from, value: this.#ensemble.members[index][position] }, ...samples.map((sample) => ({ time: sample.time, value: sample.values[output] }))]);
+            return this.#goodReadings(entry.signal, now).filter((reading) => reading.time > from + 1e-9 && reading.time <= anchor + 1e-9).map((reading) => ({
+                value: reading.value, noise: this.#noise[entry.signal], signal: entry.signal, time: reading.time,
+                predictions: series.map((points) => interpolate(points, reading.time))
+            }));
         });
         const bounds = stateIds.map((stateId) => {
             const state = this.document.nodes.flatMap((node) => node.states ?? []).find((candidate) => candidate.id === stateId);
             return state?.tuning ? { minimum: state.tuning.minimum, maximum: state.tuning.maximum } : null;
-        });
-        const { members: analysed } = analyse(pushed, observations, this.#normal, { updatable: stateIds.map((stateId) => !computed.has(stateId)), bounds });
+        }).concat(this.estimatedParameters.map((parameter) => parameter.bounds));
+        const updatable = stateIds.map((stateId) => !computed.has(stateId)).concat(this.estimatedParameters.map(() => true));
+        const { members: analysed } = analyse(pushed, observations, this.#normal, { updatable, bounds });
         // Which states the readings reached this move, and through which signals: those of whose uncertainty a reading removed more
         // than a twentieth.
         const through = {};
+        // A signal reaches a quantity when its readings of the stretch, together, remove more than a twentieth of its uncertainty.
+        const reaching = (position) => this.estimated.map((entry) => entry.signal)
+            .filter((signal) => explainedShareTogether(pushed, position, observations.filter((observation) => observation.signal === signal)) > 0.05);
         stateIds.forEach((stateId, position) => {
             if (computed.has(stateId)) return;
-            const signals = observations.filter((observation) => explainedShare(pushed, position, observation) > 0.05).map((observation) => observation.signal);
+            const signals = reaching(position);
             if (signals.length) through[stateId] = signals;
+        });
+        const throughParameters = {};
+        this.estimatedParameters.forEach((parameter, index) => {
+            const signals = reaching(stateIds.length + index);
+            if (signals.length) throughParameters[parameter.parameterId] = signals;
         });
         // The signals not estimated are corrected in every member as in the twin.
         for (const entry of this.outputs.filter((candidate) => !this.estimated.includes(candidate))) {
@@ -395,12 +444,12 @@ export class WindowSession {
         this.#ensemble = { anchor, members: analysed };
         const { mean } = ensembleStatistics(analysed);
         for (const entry of this.estimated) {
-            const observation = observations.find((candidate) => candidate.signal === entry.signal);
-            corrections[entry.signal] = observation
-                ? { estimate: true, noise: this.#noise[entry.signal], applied: mean[observation.index] }
-                : { estimate: true, applied: null, reason: 'no reading at the anchor' };
+            const readings = observations.filter((candidate) => candidate.signal === entry.signal).length;
+            corrections[entry.signal] = readings
+                ? { estimate: true, noise: this.#noise[entry.signal], readings, applied: mean[stateIds.indexOf(entry.stateId)] }
+                : { estimate: true, applied: null, reason: 'no reading since the last move' };
         }
-        return { mean, through };
+        return { mean, through, throughParameters };
     }
 
     // What a move says about the estimate: each state's mean and spread at the anchor; the forecast as a band, the members'
@@ -413,12 +462,16 @@ export class WindowSession {
         const members = this.#ensemble.members;
         const { mean, spread } = ensembleStatistics(members);
         const end = cycle.now + this.horizon;
+        const each = 2 + this.estimatedParameters.length;
         const commands = members.flatMap((member) => [
-            { type: 'restoreState', time: cycle.anchor, values: member, providerStates: cycle.restored.providerStates },
+            ...this.#parameterCommands(member),
+            { type: 'restoreState', time: cycle.anchor, values: member.slice(0, stateIds.length), providerStates: cycle.restored.providerStates },
             { type: 'advanceTo', time: end }
         ]);
         const replies = await this.#engine.run(commands);
-        const runs = members.map((_, member) => replies[2 * member + 1].samples);
+        const runs = members.map((_, member) => replies[each * member + each - 1].samples);
+        // The twin goes on with the parameters at their estimate, not at the last member's values.
+        await this.#engine.run(this.#parameterCommands(mean));
         const band = {};
         const outside = {};
         this.outputs.forEach((entry, outputIndex) => {
@@ -439,10 +492,23 @@ export class WindowSession {
         return {
             members: members.length,
             states: stateIds.flatMap((stateId, position) => (computed.has(stateId) ? [] : [{ stateId, mean: mean[position], spread: spread[position], drift: this.#drift[position] }])),
+            parameters: this.estimatedParameters.map((parameter, index) => ({
+                parameterId: parameter.parameterId, name: parameter.name, mean: mean[stateIds.length + index], spread: spread[stateIds.length + index], drift: this.#drift[stateIds.length + index]
+            })),
+            throughParameters: analysis?.throughParameters ?? {},
             noise: { ...this.#noise },
             through: analysis?.through ?? {},
             band, outside
         };
+    }
+
+    // The commands giving the engine a member's (or the mean's) values of the estimated parameters, which follow its states in it.
+    #parameterCommands(vector) {
+        const offset = this.#engine.stateIds.length;
+        return this.estimatedParameters.map((parameter, index) => ({
+            type: 'setParameterValue', parameterId: parameter.parameterId,
+            value: Math.min(Math.max(vector[offset + index], parameter.bounds.minimum), parameter.bounds.maximum)
+        }));
     }
 
     // After skipping anchors, the checkpoint at this one was never kept: run to it from the last cycle's logged state (or from the

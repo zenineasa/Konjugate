@@ -2048,6 +2048,17 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .connectionsExample summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; color: #b8c7ce; font-size: 8px; cursor: pointer; }
 .connectionsExample pre { max-height: 260px; margin: 0; padding: 8px; overflow: auto; border-top: 1px solid #1f313b; }
 .connectionsExample code { color: #c8d6dc; font-size: 8px; line-height: 1.5; white-space: pre; }
+/* The live twin's estimate (docs/proposals/stateEstimator.md): each state's estimate and spread, and how far it may drift. */
+.liveTwinEstimate { margin-top: 10px; }
+.liveTwinEstimate[hidden], #liveTwinMembersField[hidden] { display: none; }
+.liveTwinEstimate h4 { margin: 0 0 4px; color: #b8c7ce; font-size: 9px; }
+.liveTwinEstimateRows { display: grid; gap: 4px; }
+.liveTwinEstimateRow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 8px; background: #0a151d; border: 1px solid #22343f; border-radius: 4px; font-size: 8px; }
+.liveTwinEstimateRow > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.liveTwinEstimateRow small { color: #718691; font-size: 7px; }
+.liveTwinEstimateRow strong { color: #c8d6dc; font-weight: 600; }
+.liveTwinEstimateRow label { display: flex; gap: 4px; align-items: center; color: #718691; font-size: 7px; }
+.liveTwinEstimateRow input { width: 72px; height: 22px; }
 .pushServiceChip.failed i { background: #d4707a; box-shadow: 0 0 8px rgb(212 112 122 / 60%); }
 .ownershipDialog .ownershipSaveTimes { margin: 12px 0 0; }
 .ownershipDialog .ownershipSaveTimes:empty { display: none; }

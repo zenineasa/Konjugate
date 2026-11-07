@@ -1175,6 +1175,7 @@
                         <label class="editorField"><span>Window (min)</span><input id="liveTwinWindow" type="number" min="0" step="any" value="60"></label>
                         <label class="editorField"><span>Moves every (min)</span><input id="liveTwinStride" type="number" min="0" step="any" value="10"></label>
                         <label class="editorField"><span>Forecast (min)</span><input id="liveTwinHorizon" type="number" min="0" step="any" value="60"></label>
+                        <label id="liveTwinMembersField" class="editorField" hidden title="How many copies of the model the estimator runs side by side: more is steadier and slower"><span>Ensemble members</span><input id="liveTwinMembers" type="number" min="4" max="1000" step="1" value="32"></label>
                         <label class="editorField"><span>Data arrives</span><select id="liveTwinSpeed">
                             <option value="follow">As the file grows</option>
                             <option value="1">In real time</option>
@@ -1194,6 +1195,12 @@
                     <div id="liveTwinNote" class="equationDiagnostics valid" role="status"></div>
                     <div id="liveTwinTrend" class="liveTwinTrend" role="status"></div>
                     <div id="liveTwinObserved" class="equationDiagnostics valid" role="status"></div>
+                    <section id="liveTwinEstimate" class="liveTwinEstimate" hidden>
+                        <h4>Estimate</h4>
+                        <p class="builderHint">The estimator runs copies of the model from slightly different states and weighs them against the readings, so a reading corrects every state that moves with it, measured or not. Each state's estimate is shown with its spread. How far a state may drift in an hour beyond what the model says sets how much the readings are trusted over the model; a change applies when the twin is next started.</p>
+                        <div id="liveTwinEstimateRows" class="liveTwinEstimateRows"></div>
+                        <div id="liveTwinHonesty" class="equationDiagnostics valid" role="status"></div>
+                    </section>
                     <section id="liveTwinRefitResult" class="liveTwinSandbox" hidden>
                         <div id="liveTwinRefitStatus" class="equationDiagnostics" role="status"></div>
                         <div id="liveTwinRefitRows" class="parameterTuningBestValues"></div>

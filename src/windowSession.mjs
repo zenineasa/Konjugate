@@ -20,6 +20,7 @@
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
 import { interpolate, ReplayError } from './dataLogReplay.mjs';
 import { fitPlanFromLog } from './dataLogFit.mjs';
+import { analyse, ensembleStatistics, explainedShare, initialEnsemble, perturb, quantile, readingNoise, seededNormal } from './stateEstimator.mjs';
 
 const isWholeMultiple = (value, of) => Math.abs(value / of - Math.round(value / of)) <= 1e-9 * Math.max(1, Math.abs(value / of));
 const median = (values) => {
@@ -56,6 +57,10 @@ export class WindowSession {
     #failure = null;
     #refit = null; // what was last applied by a refit, to be recorded on the next move
     #restartFrom = null; // the state a refit restarted the twin from, for a restart before the next move
+    #ensemble = null; // the estimator's members at the last move's anchor: { anchor, members }, each member in stateIds order
+    #noise = {}; // signal -> the standard deviation of an estimated signal's readings
+    #drift = []; // per state position: how far the model may drift from the truth in an hour, beyond what it says
+    #normal = null;
     cycles = [];
 
     // document: the model; header and mapping: the log's description and how its signals map to the model (as replay maps them);
@@ -69,7 +74,13 @@ export class WindowSession {
     // default) resets it to the measurement; 0 corrects nothing, and the model runs on unaided from the first move (the hold policy,
     // to see how long it stays right on its own); between, it is nudged part of the way, which is gentler on noisy readings and on a
     // state a sudden change would put out of balance with the rest. A state the model computes from others is compared, never set.
-    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {} }) {
+    // A correction may instead be { estimate: true, noise } (docs/proposals/stateEstimator.md): the signal's readings, with that
+    // noise (a standard deviation; by default read from the readings' own scatter), go to an ensemble Kalman filter, which moves
+    // every state that moves with it, measured or not. estimator: { members (32), seed (1), drift: { stateId: how far the model
+    // may drift from the truth in an hour, beyond what it says (an estimated measured state: as far over a stride as its readings'
+    // noise; any other: 1% of its value at the first move) }, spread: { stateId:
+    // how unsure its value is at the first move (10% of it; an estimated measured state, its reading's noise) } }.
+    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {} }) {
         if (!(timeStep > 0)) throw new Error('The time step must be a positive number of seconds.');
         for (const [name, value] of [['window', window], ['stride', stride], ['horizon', horizon]]) {
             if (!(value > 0) || !isWholeMultiple(value, timeStep)) throw new Error(`The ${name} must be a whole number of time steps.`);
@@ -83,9 +94,17 @@ export class WindowSession {
         this.outputs = mapping.filter((entry) => entry.role === 'output' && entry.stateId !== null);
         if (!this.outputs.length) throw new Error('Map at least one measured signal to a state, so there is something to compare.');
         for (const [signal, correction] of Object.entries(corrections)) {
-            if (!(correction?.gain >= 0 && correction.gain <= 1)) throw new Error(`The correction for ${signal} is a gain from 0 (none) to 1 (reset to the measurement).`);
+            if (correction?.estimate) {
+                if (correction.noise !== undefined && correction.noise !== null && !(correction.noise > 0)) throw new Error(`The noise of ${signal}'s readings is a positive standard deviation.`);
+                continue;
+            }
+            if (!(correction?.gain >= 0 && correction.gain <= 1)) throw new Error(`The correction for ${signal} is a gain from 0 (none) to 1 (reset to the measurement), or an estimate.`);
         }
+        const members = estimator.members ?? 32;
+        if (!(Number.isInteger(members) && members >= 4 && members <= 1000)) throw new Error('The estimator\'s ensemble has from 4 to 1000 members.');
+        this.estimator = { members, seed: estimator.seed ?? 1, drift: estimator.drift ?? {}, spread: estimator.spread ?? {} };
         Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections });
+        this.estimated = this.outputs.filter((entry) => corrections[entry.signal]?.estimate);
         for (const entry of [...this.inputs, ...this.outputs]) this.#readings.set(entry.signal, new Map());
     }
 
@@ -224,19 +243,27 @@ export class WindowSession {
             corrections[entry.signal] = { gain: Number.isFinite(predicted) ? gain : 1, applied: value };
         }
         const started = performance.now();
+        const estimating = this.estimated.length > 0 && this.#ensemble !== null && previous !== null;
         let replies;
+        let analysis = null;
         for (let attempt = 0; ; attempt += 1) {
             try {
                 if (!this.#engine) await this.#startEngine();
+                // An estimated move starts from the analysis (every state, measured or not), the others from the checkpoint with the
+                // measured states replaced.
+                if (estimating) analysis = await this.#analyse(anchor, now, previous, corrections);
+                const start = estimating
+                    ? [{ type: 'restoreState', time: anchor, values: analysis.mean, providerStates: previous.restored.providerStates }]
+                    : [...this.#catchUp(index, previous), { type: 'restoreCheckpoint', time: anchor, overrides }];
                 replies = await this.#engine.run([
                     ...this.#inputCommands(now),
-                    ...this.#catchUp(index, previous),
-                    { type: 'restoreCheckpoint', time: anchor, overrides },
+                    ...start,
                     // The only checkpoint a cycle needs is the next anchor's, so it is the only one taken.
                     { type: 'advanceTo', time: anchor + this.stride, takeCheckpoints: true },
                     { type: 'advanceTo', time: now },
                     { type: 'advanceTo', time: end },
-                    { type: 'retainCheckpointsFrom', time: anchor + this.stride }
+                    // The estimator's members run the next stride again from this anchor, so they need its input readings.
+                    { type: 'retainCheckpointsFrom', time: this.estimated.length ? anchor : anchor + this.stride }
                 ]);
                 break;
             } catch (error) {
@@ -274,11 +301,148 @@ export class WindowSession {
             observed: this.outputs.map((entry) => entry.stateId),
             unobserved: this.#engine.stateIds.filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId))
         };
+        if (this.estimated.length) {
+            if (!estimating) this.#startEnsemble(cycle);
+            cycle.estimate = await this.#estimateFigures(cycle, analysis);
+        }
         cycle.trend = this.#trend([...this.cycles, cycle]);
         this.#refit = null;
         this.#restartFrom = null;
         this.cycles.push(cycle);
         if (this.onCycle) await this.onCycle(cycle, index);
+    }
+
+    // The estimator's first move: its members are spread about the state the move started from, each by how unsure it is, and the
+    // readings' noise and the model's drift are settled from what is known by then.
+    #startEnsemble(cycle) {
+        const stateIds = this.#engine.stateIds;
+        const computed = new Set(this.#engine.algebraicStateIds);
+        if (cycle.restored.providerStates.length) throw new ReplayError('A node program here keeps a state of its own, which the estimator cannot spread into an ensemble yet.');
+        for (const entry of this.estimated) {
+            const given = this.corrections[entry.signal].noise;
+            const read = readingNoise(this.#goodReadings(entry.signal, cycle.now).map((reading) => reading.value));
+            const noise = given ?? (read > 0 ? read : (this.tolerances[entry.signal] > 0 ? this.tolerances[entry.signal] / 2 : null));
+            if (!(noise > 0)) throw new ReplayError(`The noise of ${entry.signal}'s readings could not be read from them: say what it is.`);
+            this.#noise[entry.signal] = noise;
+        }
+        const values = cycle.restored.values;
+        const scale = (value) => Math.max(Math.abs(value), 1e-6);
+        // By default a measured state is trusted over one stride about as much as its sensor (whatever its units or offset), and a
+        // state nobody measures to 1% of its value an hour.
+        this.#drift = stateIds.map((stateId, position) => {
+            if (computed.has(stateId)) return 0;
+            if (this.estimator.drift[stateId] !== undefined) return this.estimator.drift[stateId];
+            const measured = this.estimated.find((entry) => entry.stateId === stateId);
+            return measured ? this.#noise[measured.signal] * Math.sqrt(3600 / this.stride) : 0.01 * scale(values[position]);
+        });
+        const spread = stateIds.map((stateId, position) => {
+            if (computed.has(stateId)) return 0;
+            if (this.estimator.spread[stateId] !== undefined) return this.estimator.spread[stateId];
+            const measured = this.estimated.find((entry) => entry.stateId === stateId);
+            return measured ? this.#noise[measured.signal] : 0.1 * scale(values[position]);
+        });
+        this.#normal = seededNormal(this.estimator.seed);
+        this.#ensemble = { anchor: cycle.anchor, members: initialEnsemble(values, spread, this.estimator.members, this.#normal) };
+    }
+
+    // The analysis at a move's anchor (docs/proposals/stateEstimator.md, "How it fits the window"): each member runs from the last
+    // anchor to this one on the real inputs, is pushed by the model's own uncertainty over that stretch, and is then moved toward
+    // the estimated readings by the gain the members' spread implies. Signals left on reset, nudge or watch do that to every member.
+    // Answers the members' mean, which the move starts from.
+    async #analyse(anchor, now, previous, corrections) {
+        const stateIds = this.#engine.stateIds;
+        const computed = new Set(this.#engine.algebraicStateIds);
+        const from = this.#ensemble.anchor;
+        const commands = [...this.#inputCommands(now)];
+        const offset = commands.length;
+        for (const member of this.#ensemble.members) {
+            commands.push(
+                { type: 'restoreState', time: from, values: member, providerStates: previous.restored.providerStates },
+                { type: 'advanceTo', time: anchor, takeCheckpoints: true },
+                { type: 'restoreCheckpoint', time: anchor, overrides: [] }
+            );
+        }
+        const replies = await this.#engine.run(commands);
+        const forecast = this.#ensemble.members.map((_, member) => replies[offset + 3 * member + 2].values);
+        const hours = (anchor - from) / 3600;
+        const pushed = perturb(forecast, this.#drift.map((drift) => drift * Math.sqrt(hours)), this.#normal);
+        const observations = this.estimated.flatMap((entry) => {
+            const measured = this.#measurementAt(entry.signal, anchor, now);
+            return measured === null ? [] : [{ index: stateIds.indexOf(entry.stateId), value: measured, noise: this.#noise[entry.signal], signal: entry.signal }];
+        });
+        const bounds = stateIds.map((stateId) => {
+            const state = this.document.nodes.flatMap((node) => node.states ?? []).find((candidate) => candidate.id === stateId);
+            return state?.tuning ? { minimum: state.tuning.minimum, maximum: state.tuning.maximum } : null;
+        });
+        const { members: analysed } = analyse(pushed, observations, this.#normal, { updatable: stateIds.map((stateId) => !computed.has(stateId)), bounds });
+        // Which states the readings reached this move, and through which signals: those of whose uncertainty a reading removed more
+        // than a twentieth.
+        const through = {};
+        stateIds.forEach((stateId, position) => {
+            if (computed.has(stateId)) return;
+            const signals = observations.filter((observation) => explainedShare(pushed, position, observation) > 0.05).map((observation) => observation.signal);
+            if (signals.length) through[stateId] = signals;
+        });
+        // The signals not estimated are corrected in every member as in the twin.
+        for (const entry of this.outputs.filter((candidate) => !this.estimated.includes(candidate))) {
+            const correction = corrections[entry.signal];
+            if (correction?.applied === null || correction?.applied === undefined) continue;
+            const position = stateIds.indexOf(entry.stateId);
+            const measured = this.#measurementAt(entry.signal, anchor, now);
+            const gainFor = this.corrections[entry.signal]?.gain ?? 1;
+            for (const member of analysed) member[position] += gainFor * (measured - member[position]);
+        }
+        this.#ensemble = { anchor, members: analysed };
+        const { mean } = ensembleStatistics(analysed);
+        for (const entry of this.estimated) {
+            const observation = observations.find((candidate) => candidate.signal === entry.signal);
+            corrections[entry.signal] = observation
+                ? { estimate: true, noise: this.#noise[entry.signal], applied: mean[observation.index] }
+                : { estimate: true, applied: null, reason: 'no reading at the anchor' };
+        }
+        return { mean, through };
+    }
+
+    // What a move says about the estimate: each state's mean and spread at the anchor; the forecast as a band, the members'
+    // 10th to 90th percentile, from each member run on to the horizon; and how many of its last stride's readings fell outside the
+    // 10th to 90th percentile of the readings the twin expected (each member's value plus its sensor's noise), which for honest
+    // noise and drift settings is about one in five: far fewer says they are too cautious, far more too sure.
+    async #estimateFigures(cycle, analysis) {
+        const stateIds = this.#engine.stateIds;
+        const computed = new Set(this.#engine.algebraicStateIds);
+        const members = this.#ensemble.members;
+        const { mean, spread } = ensembleStatistics(members);
+        const end = cycle.now + this.horizon;
+        const commands = members.flatMap((member) => [
+            { type: 'restoreState', time: cycle.anchor, values: member, providerStates: cycle.restored.providerStates },
+            { type: 'advanceTo', time: end }
+        ]);
+        const replies = await this.#engine.run(commands);
+        const runs = members.map((_, member) => replies[2 * member + 1].samples);
+        const band = {};
+        const outside = {};
+        this.outputs.forEach((entry, outputIndex) => {
+            band[entry.signal] = runs[0].map((sample, sampleIndex) => {
+                const values = runs.map((samples) => samples[sampleIndex].values[outputIndex]).sort((a, b) => a - b);
+                return { time: sample.time, low: quantile(values, 0.1), high: quantile(values, 0.9) };
+            });
+            // Each reading is judged once, at the move whose last stride it is in: against the band that move ran from its anchor.
+            const readings = this.#goodReadings(entry.signal, cycle.now).filter((reading) => reading.time > cycle.now - this.stride + 1e-9);
+            const readingNoiseOf = this.#noise[entry.signal] ?? 0;
+            const count = readings.filter((reading) => {
+                const expected = runs.map((samples) => interpolate(samples.map((sample) => ({ time: sample.time, value: sample.values[outputIndex] })), reading.time) + readingNoiseOf * this.#normal())
+                    .sort((a, b) => a - b);
+                return reading.value < quantile(expected, 0.1) || reading.value > quantile(expected, 0.9);
+            }).length;
+            outside[entry.signal] = { outside: count, total: readings.length };
+        });
+        return {
+            members: members.length,
+            states: stateIds.flatMap((stateId, position) => (computed.has(stateId) ? [] : [{ stateId, mean: mean[position], spread: spread[position], drift: this.#drift[position] }])),
+            noise: { ...this.#noise },
+            through: analysis?.through ?? {},
+            band, outside
+        };
     }
 
     // After skipping anchors, the checkpoint at this one was never kept: run to it from the last cycle's logged state (or from the

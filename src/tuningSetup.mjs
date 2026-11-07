@@ -64,9 +64,14 @@ function normalizeReplaySetup(raw) {
         .map((entry) => ({ signal: entry.signal, role: entry.role, target: Number.isSafeInteger(entry.target) && entry.target > 0 ? entry.target : null }));
     replay.tolerances = Object.fromEntries(Object.entries(raw.tolerances && typeof raw.tolerances === 'object' ? raw.tolerances : {})
         .filter(([, value]) => finitePositive(value)).map(([signal, value]) => [signal, Number(value)]));
-    // How the live twin brings each measured state back in step: a gain from 0 (watch only) to 1 (reset to the reading).
+    // How the live twin brings each measured state back in step: a gain from 0 (watch only) to 1 (reset to the reading), or an
+    // estimate ({ estimate: true, noise }: the readings, with that noise, weighed against the model by the estimator).
     const corrections = Object.entries(raw.corrections && typeof raw.corrections === 'object' ? raw.corrections : {})
-        .filter(([, value]) => typeof value === 'number' && value >= 0 && value <= 1);
+        .flatMap(([signal, value]) => {
+            if (typeof value === 'number' && value >= 0 && value <= 1) return [[signal, value]];
+            if (value && typeof value === 'object' && value.estimate === true) return [[signal, { estimate: true, ...(finitePositive(value.noise) ? { noise: Number(value.noise) } : {}) }]];
+            return [];
+        });
     if (corrections.length) replay.corrections = Object.fromEntries(corrections);
     // How another logger's file was read (src/loggerCsv.mjs): kept as it was given, and checked when it is used.
     if (raw.logger && typeof raw.logger === 'object' && raw.logger.time && Array.isArray(raw.logger.signals)) replay.logger = structuredClone(raw.logger);
@@ -77,6 +82,11 @@ function normalizeReplaySetup(raw) {
             if (value) live[key] = value;
         }
         if (raw.live.speed === 'follow' || finitePositive(raw.live.speed) || raw.live.speed === 'Infinity') live.speed = String(raw.live.speed);
+        // The estimator's ensemble size, and how far each state may drift in an hour beyond what the model says.
+        if (Number.isInteger(raw.live.members) && raw.live.members >= 4 && raw.live.members <= 1000) live.members = raw.live.members;
+        const drift = Object.entries(raw.live.drift && typeof raw.live.drift === 'object' ? raw.live.drift : {})
+            .filter(([stateId, value]) => /^\d+$/.test(stateId) && finitePositive(value)).map(([stateId, value]) => [stateId, Number(value)]);
+        if (drift.length) live.drift = Object.fromEntries(drift);
         replay.live = live;
     }
     return replay;

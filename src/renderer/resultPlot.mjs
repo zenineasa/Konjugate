@@ -355,6 +355,13 @@ export async function renderLiveTwin(element, view) {
         { type: 'scatter', mode: 'lines', name: 'Model in the window', x: hours(view.window), y: view.window.map((sample) => sample.value), line: { width: 2, color: simulatedColor }, hovertemplate: `Model %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` },
         { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(view.forecast), y: view.forecast.map((sample) => sample.value), line: { width: 2, dash: 'dash', color: simulatedColor }, hovertemplate: `Forecast %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` }
     ];
+    // The estimator's band: the 10th to 90th percentile of its members, over the window and the forecast.
+    if (view.band?.length) {
+        traces.unshift(
+            { type: 'scatter', mode: 'lines', showlegend: false, hoverinfo: 'skip', x: hours(view.band), y: view.band.map((point) => point.low), line: { width: 0 } },
+            { type: 'scatter', mode: 'lines', name: 'Spread (10–90%)', x: hours(view.band), y: view.band.map((point) => point.high), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(57,135,229,.22)', hovertemplate: `Up to %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` }
+        );
+    }
     if (view.sandbox?.length) {
         traces.push({ type: 'scatter', mode: 'lines', name: 'With what you tried', x: hours(view.sandbox), y: view.sandbox.map((sample) => sample.value), line: { width: 2, color: '#42c9bc' }, hovertemplate: `Tried %{y:.4g}${unit}<br>%{x:.3f} h<extra></extra>` });
     }

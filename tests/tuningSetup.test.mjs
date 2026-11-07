@@ -42,3 +42,15 @@ test('a limit on a number the objective program reports is kept by its name', ()
     const setup = normalizeTuningSetup({ goal: 'objective', objective: { expression: '', direction: 'minimise', program: { language: 'python', source: 'x', bindings: [] }, constraints: [{ report: ' peak ', relation: '<=', limit: '3' }, { report: '', limit: 1 }] } });
     assert.deepEqual(setup.objective.constraints, [{ report: 'peak', relation: '<=', limit: 3 }], 'a limit with no name is dropped');
 });
+
+test('a live twin\'s estimate is kept with its noise, and the estimator\'s size and drifts with the live settings', () => {
+    const setup = normalizeTuningSetup({ goal: 'replay', replay: {
+        logFileName: 'rig.csv', mapping: [{ signal: 'level', role: 'output', target: 2 }],
+        corrections: { level: { estimate: true, noise: 0.2 }, flow: { estimate: true, noise: -1 }, other: 0.3, wrong: { estimate: 'yes' } },
+        live: { window: 3600, members: 12, drift: { 3: 0.001, x: 2, 4: -1 } }
+    } });
+    assert.deepEqual(setup.replay.corrections, { level: { estimate: true, noise: 0.2 }, flow: { estimate: true }, other: 0.3 });
+    assert.equal(setup.replay.live.members, 12);
+    assert.deepEqual(setup.replay.live.drift, { 3: 0.001 });
+    assert.equal(normalizeTuningSetup({ goal: 'replay', replay: { logFileName: 'a', mapping: [], live: { members: 2 } } }).replay.live.members, undefined, 'An ensemble too small to estimate with is dropped.');
+});

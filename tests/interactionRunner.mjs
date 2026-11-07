@@ -4693,7 +4693,29 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().replay.corrections.tankTemperature`), 0);
         await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'nudge');
         assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="gain"]').hidden`), false, 'A nudge asks how far.');
+
+        // Estimated: the readings weighed against the model by an ensemble of twelve, each state shown with its estimate and spread,
+        // the forecast drawn with its band, the honesty of the spread said, and the choice kept with the project.
+        await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'estimate');
+        assert.equal(await evaluate(opened, `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="noise"]').hidden`), false, 'An estimate offers the readings\' noise.');
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinMembersField').hidden`), false, 'An estimate offers the ensemble\'s size.');
+        await set('#liveTwinMembers', '12');
+        await set('#liveTwinSpeed', 'Infinity');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The estimated live twin did not play the whole log.', 120000);
+        const estimated = await evaluate(opened, `window.__debugParameterTuning.liveTwin()`);
+        assert.equal(estimated.cycles, 31);
+        assert.equal(estimated.last.corrections.tankTemperature.estimate, true);
+        assert.equal(estimated.last.estimate.members, 12);
+        await waitFor(opened, `document.querySelector('#liveTwinPlot').data?.some((trace) => trace.name === 'Spread (10–90%)')`, 'The forecast was not drawn with its band.');
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinEstimate').hidden`), false);
+        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinEstimateRows .liveTwinEstimateRow').length`), estimated.last.estimate.states.length);
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinEstimateRows .liveTwinEstimateRow [data-field="estimate"]').textContent`), /^[-\d.e]+ ± [\d.e-]+/);
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinHonesty').textContent`), /^\d+ of \d+ readings of tankTemperature \(\d+%\) fell outside the spread the twin expected/);
+        assert.deepEqual(await evaluate(opened, `window.__debugParameterTuning.setup().replay.corrections.tankTemperature`), { estimate: true });
+        assert.equal(await evaluate(opened, `window.__debugParameterTuning.setup().replay.live.members`), 12);
         await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'reset');
+        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinMembersField').hidden`), true);
 
         // At an hour a second, detach part way, switch the heater off and run ahead; back to live keeps what was tried as a draft.
         await set('#liveTwinSpeed', '3600');
@@ -6213,8 +6235,10 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(edge.equationModel.bindings.map(({ symbol }) => symbol).sort(), ['gain', 'sourceSpeed']);
         assert.equal(await engineVerdict('The model with several equations was not validated.'), true, 'The engine should accept the equations written in the canvas.');
 
-        // A reference chip inserts into the field last focused. The chips are rebuilt whenever the native check of the edit
-        // settles, so a click that lands in the middle of a rebuild is lost: focus and click again until it takes.
+        // A reference chip inserts into the equation that has the focus. This window is often not the one in front by now (earlier
+        // tests open others), and a focus event is then held back, so the app asks which field has the focus rather than which one
+        // last said so; this used to insert into the other equation. The chips are also rebuilt whenever the native check of the
+        // edit settles, so a click that lands in the middle of a rebuild is lost: focus and click again until it takes.
         await waitFor(window, `(() => {
             const field = ${rowSelector('output', 0)}.querySelector('textarea');
             if (field.value.endsWith('\\mathrm{twice}')) return true;

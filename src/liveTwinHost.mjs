@@ -87,21 +87,31 @@ export class LiveTwin {
     #onEvent;
     #stopped = false;
 
-    // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt, corrections }; source as above.
+    // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt, corrections, conversions }; source as
+    // above. conversions: { signal: { scale, offset, unit } }, a mapping's unit conversions (docs/proposals/controlRoom.md), applied to
+    // each reading as it reaches the twin, so the twin works in the model's units; a recording keeps what the source sent.
     constructor(settings, source, engineOptions, onEvent) {
         this.settings = settings;
         this.engineOptions = engineOptions;
         this.#onEvent = onEvent;
+        const conversions = settings.conversions ?? {};
+        const converting = Object.keys(conversions).length > 0;
         const onHeader = (header) => {
+            const converted = converting
+                ? { ...header, signals: header.signals.map((signal) => (conversions[signal.name]?.unit !== undefined ? { ...signal, unit: conversions[signal.name].unit } : signal)) }
+                : header;
             this.#session = new WindowSession({
                 // Data that arrives in real time is kept up with; a recording played as fast as it can go gets every move.
-                ...settings, header, engineOptions, keepUp: settings.keepUp ?? (source.kind !== 'recording' || Number.isFinite(source.speed ?? Infinity)),
+                ...settings, header: converted, engineOptions, keepUp: settings.keepUp ?? (source.kind !== 'recording' || Number.isFinite(source.speed ?? Infinity)),
                 onCycle: (cycle) => { this.#onEvent(cycleEvent(cycle, this.#session.stats())); }
             });
         };
         const onObservations = (observations) => {
             try {
-                this.#session?.push(observations);
+                this.#session?.push(converting ? observations.map((observation) => {
+                    const conversion = conversions[observation.signal];
+                    return conversion ? { ...observation, value: observation.value * conversion.scale + conversion.offset } : observation;
+                }) : observations);
             } catch (error) {
                 this.#fail(error);
             }

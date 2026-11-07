@@ -801,6 +801,80 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
     }
 }
 
+// The twin's own window (docs/proposals/controlRoom.md): one for each project window, opened by its Live twin button with the
+// project's model and the twin's saved setup, maximized in the workspace, and free to move to another screen. It runs its twin
+// itself (the live twin's messages are answered to whichever window sends them); what it changes in the setup is handed back to the
+// project window, which keeps it with the project.
+function openTwinWindow(projectWindow, payload) {
+    const state = projectWindowState.get(projectWindow);
+    state.twinContext = payload;
+    if (state.twinWindow && !state.twinWindow.isDestroyed()) {
+        state.twinWindow.webContents.send('twinContext', payload);
+        state.twinWindow.show();
+        state.twinWindow.focus();
+        return true;
+    }
+    const createdWindow = new BrowserWindow({
+        icon: appIconPath,
+        ...auxiliaryWindowBounds(projectWindow, 1280, 820, state.twinBounds, screen),
+        ...auxiliaryWindowPresentation(projectWindow),
+        minWidth: 900, minHeight: 600, frame: false, backgroundColor: '#08111f', title: 'Live twin',
+        webPreferences: { preload: join(currentDir, 'twinWindow', 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false }
+    });
+    state.twinWindow = createdWindow;
+    installCustomWindowState(createdWindow);
+    createdWindow.on('close', () => { state.twinBounds = createdWindow.isDestroyed() ? state.twinBounds : createdWindow.getNormalBounds(); });
+    createdWindow.on('closed', () => { if (state.twinWindow === createdWindow) state.twinWindow = null; });
+    createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('twinContext', state.twinContext); });
+    createdWindow.loadFile(join(currentDir, 'twinWindow', 'index.html'));
+    if (!state.twinBounds) createdWindow.maximize();
+    return true;
+}
+
+ipcMain.handle('twinOpenWindow', (event, payload) => {
+    requireProjectWindow(event, 'Only a project window can open its twin.');
+    return openTwinWindow(getWindowFromEvent(event), payload);
+});
+// The twin window's setup, handed to the project window that owns it, to be kept with the project.
+ipcMain.handle('twinSaveSetup', (event, setup) => {
+    const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
+    if (!projectWindow) throw new Error('This twin\'s project window has closed.');
+    projectWindow.webContents.send('twinSetupChanged', setup);
+    return true;
+});
+// The push service's Connections panel lives in the project window: the twin window asks it to open there.
+ipcMain.handle('twinOpenConnections', (event) => {
+    const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
+    if (!projectWindow) return false;
+    projectWindow.webContents.send('twinOpenConnections');
+    projectWindow.show();
+    projectWindow.focus();
+    return true;
+});
+// A demonstration's model (the simulated rig), opened in the project window for the twin window that asks for it.
+ipcMain.handle('twinOpenDemoModel', (event, variant) => {
+    const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
+    if (!projectWindow) return false;
+    projectWindow.webContents.send('twinLoadDemoModel', variant);
+    return true;
+});
+// Matches confirmed in a twin's setup, remembered across projects (docs/proposals/controlRoom.md, decision 3), in the app's folder.
+const twinMemoryPath = () => join(app.getPath('userData'), 'twin', 'mappingMemory.json');
+ipcMain.handle('twinMemoryGet', async () => {
+    try {
+        const memory = JSON.parse(await readFile(twinMemoryPath(), 'utf8'));
+        return memory && typeof memory === 'object' && !Array.isArray(memory) ? memory : {};
+    } catch {
+        return {};
+    }
+});
+ipcMain.handle('twinMemorySave', async (_event, memory) => {
+    if (!memory || typeof memory !== 'object' || Array.isArray(memory)) throw new Error('A mapping memory is an object.');
+    await mkdir(dirname(twinMemoryPath()), { recursive: true });
+    await writeFile(twinMemoryPath(), `${JSON.stringify(memory, null, 2)}\n`);
+    return true;
+});
+
 function aiRequestKey(sender, requestUuid) {
     return `${sender.id}:${requestUuid}`;
 }
@@ -2887,7 +2961,8 @@ ipcMain.handle('liveTwinListen', async (_event, url, seconds) => listenToBroker(
 // tank, steady or with a heat loss that grows 10% an hour), so a person sees a twin running with one click and no equipment.
 ipcMain.handle('liveTwinDemo', async (_event, variant = 'steady') => {
     const folder = join(examplesDir, 'dataSources');
-    const logFileName = variant === 'drifting' ? 'simulatedTankRigDrifting.csv' : 'simulatedTankRig.csv';
+    // 'plant' is the steady recording as a plant's logger would keep it (instrument tags, kW and °C), for the twin's setup to match.
+    const logFileName = { drifting: 'simulatedTankRigDrifting.csv', plant: 'simulatedTankRigPlant.csv' }[variant] ?? 'simulatedTankRig.csv';
     return {
         project: await decodeProjectForRenderer(await readFile(join(folder, 'simulatedTankRig.kjt'))),
         projectFileName: 'simulatedTankRig.kjt',

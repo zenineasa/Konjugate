@@ -222,6 +222,12 @@ contextBridge.exposeInMainWorld('engine', {
         stop: () => ipcRenderer.invoke('liveTwinStop'),
         // The demonstration: the simulated rig's model and a recording of it ('steady' or 'drifting'), shipped with the app.
         demo: (variant) => ipcRenderer.invoke('liveTwinDemo', variant),
+        // The twin's own window (docs/proposals/controlRoom.md): opened with the project's model and the twin's setup; what it
+        // changes in the setup comes back to be kept with the project; it may ask for the Connections panel, or a demonstration's model.
+        openWindow: (context) => ipcRenderer.invoke('twinOpenWindow', context),
+        onSetupChanged: (callback) => ipcRenderer.on('twinSetupChanged', (_event, setup) => callback(setup)),
+        onOpenConnections: (callback) => ipcRenderer.on('twinOpenConnections', () => callback()),
+        onLoadDemoModel: (callback) => ipcRenderer.on('twinLoadDemoModel', (_event, variant) => callback(variant)),
         // A recording this twin made, read again to replay it, or shown in its folder.
         readRecording: (path) => ipcRenderer.invoke('liveTwinReadRecording', path),
         showRecording: (path) => ipcRenderer.invoke('liveTwinShowRecording', path),

@@ -4983,7 +4983,7 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
-    await run('the Live twin button opens the twin, and one click runs the drifting rig until the twin warns of the drift', async () => {
+    await run('the Live twin button opens the twin\'s window: with another model open, the drifting rig\'s model is one click away, and the room warns of the drift', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-twin-'));
         const projectPath = join(directory, 'vessel.kjt');
         await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'labVessel.kjt')));
@@ -4992,53 +4992,57 @@ export async function runInteractionTests(driver) {
         const opened = await driver.waitForNewHandle(before);
         await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The project did not load.');
 
-        // A button of its own, named for what it is, opening the card as the live twin.
         assert.equal(await evaluate(opened, `document.querySelector('#liveTwinButton').hidden`), false, 'The toolbar offers the live twin.');
+        const beforeTwin = driver.allHandles();
         await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
-        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The live twin did not open.');
-        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningTitle').textContent`), 'Live twin');
-        assert.equal(await evaluate(opened, `getComputedStyle(document.querySelector('#parameterTuningGoal')).display`), 'none', 'The tuning goals are out of the way.');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinIntro').hidden`), false);
-        assert.equal(await evaluate(opened, `document.querySelectorAll('#liveTwinIntro [data-live-source]').length`), 4, 'Four places the readings can come from.');
-        await evaluate(opened, `document.querySelector('[data-live-source="mqtt"]').click()`);
-        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningMqtt').open`), true, 'A tile opens its source.');
-        // The tuning button still opens the card as tuning.
-        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
-        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningTitle').textContent`), 'Parameter tuning');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinIntro').hidden`), true);
-        await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
+        const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+        await waitFor(twin, `document.querySelector('#modelSummary').textContent.length > 0`, 'The twin window did not show the model.');
+        assert.equal(await evaluate(twin, `document.querySelectorAll('.sourceTiles [data-source]').length`), 4, 'Four places the readings can come from.');
 
-        // One click: the rig's model, its drifting recording at 600×, and the twin running, warning once the drift passes the default.
-        await evaluate(opened, `document.querySelector('#liveTwinTryDrifting').click()`);
-        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.running`, 'The demonstration did not start a twin.', 30000);
-        assert.equal(await evaluate(opened, `document.querySelector('.documentTitle').textContent`), 'simulatedTankRig', 'The rig\'s model was opened.');
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed').value`), '600');
+        // The drifting rig's readings against the vessel's model match nothing: its own model is offered, and opened in one click.
+        await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
+        await waitFor(twin, `/Open the rig's model/.test(document.querySelector('#sourceStatus').textContent)`, 'The rig\'s model was not offered.');
+        await evaluate(twin, `[...document.querySelectorAll('#sourceStatus button')].find((button) => button.textContent === "Open the rig's model").click()`);
+        await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'simulatedTankRig'`, 'The rig\'s model did not open in the project window.', 15000);
+        await waitFor(twin, `/Water temperature/.test(document.querySelector('#modelSummary').textContent) && document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The readings were not matched to the rig\'s model.', 15000);
+
+        // The control room warns once the drift passes the default warning, on the health strip and on the tile.
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `document.querySelector('#healthDrift').textContent === 'Drifting past the warning'`, 'The control room did not warn of the drift.', 120000);
+        assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').classList.contains('bad')`), true);
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('bad')`), true, 'The tile says so across the room.');
+        await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
+    await run('in the tuning card\'s live twin, the drift warning says what to do, and tracking the heat loss finds it growing', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-tracking-'));
+        const projectPath = join(directory, 'rig.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+        await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
+        const drifting = await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8');
+        await evaluate(opened, `window.__debugParameterTuning.loadCsv(${JSON.stringify(drifting)}, 'simulatedTankRigDrifting.csv')`);
+        await waitFor(opened, `!document.querySelector('#liveTwinStart').disabled`, 'The live twin could not be started.');
+        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         assert.match(await evaluate(opened, `document.querySelector('#liveTwinAlertLabel').textContent`), /^Warn when it drifts by \(K a move\)$/);
         assert.ok(Number(await evaluate(opened, `document.querySelector('#liveTwinAlert').value`)) > 0, 'A warning is set out of the box.');
-        await waitFor(opened, `!document.querySelector('#liveTwinChip').hidden && /^Live twin · \\d+ move/.test(document.querySelector('#liveTwinChipText').textContent)`, 'The toolbar did not show the twin running.', 15000);
-        await waitFor(opened, `document.querySelector('#liveTwinChipText').textContent === 'Live twin: drifting'`, 'The twin did not warn of the drift.', 120000);
-        assert.equal(await evaluate(opened, `document.querySelector('#liveTwinChip').classList.contains('failed')`), true);
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /This has passed the warning you set\./);
-        // Closed, the twin goes on; its chip brings the card back as it was.
-        assert.equal(await evaluate(opened, `document.querySelector('#cancelParameterTuning').textContent`), 'Close');
-        await evaluate(opened, `document.querySelector('#cancelParameterTuning').click()`);
-        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuning').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(opened, `window.__debugParameterTuning.liveTwin()?.running`), true, 'Closing the card does not stop the twin.');
-        await evaluate(opened, `document.querySelector('#liveTwinChip').click()`);
-        await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden') && !document.querySelector('#liveTwinStop').hidden`, 'The chip did not bring the running twin back.');
-        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningMqtt').open || getComputedStyle(document.querySelector('#parameterTuningMqtt')).display === 'none'`), true);
-        await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
-        await waitFor(opened, `document.querySelector('#liveTwinChip').hidden`, 'Stopping did not take the chip away.', 15000);
+        await set('#liveTwinSpeed', 'Infinity');
+        await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+        await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The twin did not play the drifting recording.', 120000);
+        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /This has passed the warning you set\. Refit on the latest window to find what changed, or set the measured signal to "estimate"/);
 
-        // Told what to do about it, the person tracks the drift live: the measured signal estimated, the rig's heat loss offered to
-        // track (ticked), and the twin run again, finding the heat loss growing.
-        assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrend').textContent`), /set the measured signal to "estimate"/);
-        const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await set('.parameterTuningReplayRow[data-signal="tankTemperature"] select[data-field="correction"]', 'estimate');
         assert.equal(await evaluate(opened, `document.querySelector('#liveTwinTrack').hidden`), false, 'The heat loss is offered to track.');
         assert.match(await evaluate(opened, `document.querySelector('#liveTwinTrackRows').textContent`), /Heat loss coefficient/);
         assert.equal(await evaluate(opened, `document.querySelector('#liveTwinTrackRows input[data-parameter-id="10"]').checked`), true, 'Tracked unless unticked.');
-        await set('#liveTwinSpeed', 'Infinity');
         await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
         await waitFor(opened, `window.__debugParameterTuning.liveTwin()?.ended === 'played'`, 'The tracking twin did not play the recording.', 180000);
         const tracked = (await evaluate(opened, `window.__debugParameterTuning.liveTwin()`)).last.estimate.parameters.find((parameter) => parameter.parameterId === 10);
@@ -5047,6 +5051,51 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('the twin\'s own window: a plant\'s names matched to the model with their units converted, and the control room running', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-twinwindow-'));
+        const projectPath = join(directory, 'rig.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+
+        // The Live twin button opens the twin's own window, with the model summarised.
+        const beforeTwin = driver.allHandles();
+        await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
+        const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+        await waitFor(twin, `/Water temperature/.test(document.querySelector('#modelSummary').textContent)`, 'The twin window did not show the model.');
+        assert.match(await evaluate(twin, `document.querySelector('#modelSummary').textContent`), /Heater power/, 'The shared parameter to drive is offered.');
+
+        // A plant's names: the suggestions fill in the mapping, with the units converted.
+        await evaluate(twin, `document.querySelector('[data-demo="plant"]').click()`);
+        await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow').length === 2`, 'The plant\'s signals were not offered.');
+        const row = (name) => `document.querySelector('#mappingRows .mappingRow[data-signal="${name}"]')`;
+        assert.equal(await evaluate(twin, `${row('TK1_TT101_PV')}.querySelector('[data-field="role"]').value`), 'output');
+        assert.match(await evaluate(twin, `${row('TK1_TT101_PV')}.querySelector('[data-field="target"]').selectedOptions[0].textContent`), /Water tank · Water temperature/);
+        assert.match(await evaluate(twin, `${row('TK1_TT101_PV')}.querySelector('.conversion').textContent`), /°C → K/);
+        assert.equal(await evaluate(twin, `${row('TK1_JI101_PV')}.querySelector('[data-field="role"]').value`), 'input');
+        assert.match(await evaluate(twin, `${row('TK1_JI101_PV')}.querySelector('[data-field="target"]').selectedOptions[0].textContent`), /Heater power/);
+        assert.match(await evaluate(twin, `${row('TK1_JI101_PV')}.querySelector('.why').textContent`), /kW converts to W/);
+        assert.equal(await evaluate(twin, `document.querySelector('#openRoom').disabled`), false);
+
+        // The control room: a tile for the measured signal, the twin moving, and the setup kept with the project.
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `!document.querySelector('#room').hidden && document.querySelectorAll('#tiles .tile').length === 1`, 'The control room did not open with a tile.');
+        await waitFor(twin, `/^Live · \\d+ move/.test(document.querySelector('#healthTwin').textContent)`, 'The twin did not move.', 60000);
+        await waitFor(twin, `Boolean(document.querySelector('#tiles .tile .plot .main-svg'))`, 'The tile was not drawn.', 15000);
+        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), / K$/, 'Shown in the model\'s unit, converted from °C.');
+        const kept = await evaluate(opened, `window.__debugTwin.setup()`);
+        assert.equal(kept.source.kind, 'file');
+        assert.deepEqual(kept.mapping.find((entry) => entry.source === 'TK1_TT101_PV').conversion, { scale: 1, offset: 273.15 });
+        assert.equal(await evaluate(opened, `document.querySelector('#saveButton')?.disabled ?? false`), false, 'The project has a change to save.');
+        await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await waitFor(twin, `/Stopped after|whole log/.test(document.querySelector('#healthTwin').textContent)`, 'The twin did not stop.', 15000);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
     await run('a live twin follows an MQTT broker: listening finds the topics, and what arrives is recorded', async () => {
         // A broker in this process, and a gateway publishing the tank's readings as a lab's would: one topic each, JSON with the

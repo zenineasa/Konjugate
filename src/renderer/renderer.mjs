@@ -16,6 +16,7 @@ import { ProgramSourceSection } from './programSourceSection.mjs';
 import { ConnectionsPanel, pushServiceSentence } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
+import { normalizeTwinSetup } from '../twinSetup.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editOwnershipDefaults, editProjectProperties, editSaveOwnership } from './ownershipEditor.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
@@ -478,6 +479,8 @@ let projectAddonData = {};
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
+// The twin's setup (docs/proposals/controlRoom.md), set in the twin's own window and kept with the project as `twin`.
+let projectTwinSetup = null;
 // Scenarios tried in a live twin's sandbox (src/scenarios.mjs), kept with the project the same way: read on open, written on save,
 // and counted as unsaved work when one is added, renamed or deleted.
 let projectScenarios = [];
@@ -7516,6 +7519,7 @@ async function loadProjectDocument(document, {
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
+    projectTwinSetup = normalizeTwinSetup(document?.twin);
     projectScenarios = normalizeScenarios(document?.scenarios);
     projectOwnership = normalizeOwnership(document?.ownership, document?.copyright);
     ownershipSettled = true;
@@ -8922,6 +8926,30 @@ function setTuningCardMode(mode) {
     if (!parameterTuningRun) $('#cancelParameterTuning').textContent = twin ? 'Close' : 'Cancel';
 }
 
+// The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md).
+function openTwinWindow() {
+    if (activeResult) return;
+    window.engine.liveTwin.openWindow({
+        document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup
+    });
+}
+window.engine.liveTwin?.onSetupChanged?.((setup) => {
+    const normalized = normalizeTwinSetup(setup);
+    if (JSON.stringify(normalized) === JSON.stringify(projectTwinSetup)) return;
+    projectTwinSetup = normalized;
+    addonDataUnsaved = true;
+    updateHistoryControls();
+});
+window.engine.liveTwin?.onOpenConnections?.(() => connectionsPanel?.open());
+// For the interaction tests: the twin setup the project keeps.
+window.__debugTwin = { setup: () => structuredClone(projectTwinSetup) };
+window.engine.liveTwin?.onLoadDemoModel?.(async (variant) => {
+    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
+    const demo = await window.engine.liveTwin.demo(variant);
+    await loadProjectDocument(JSON.parse(demo.project.content), { fileName: demo.projectFileName, saved: false });
+    openTwinWindow();
+});
+
 function openLiveTwin() {
     if (activeResult) return;
     hideCards($('#parameterTuning'));
@@ -8935,7 +8963,7 @@ function openLiveTwin() {
 }
 
 $('#parameterTuningButton').addEventListener('click', openParameterTuning);
-$('#liveTwinButton').addEventListener('click', openLiveTwin);
+$('#liveTwinButton').addEventListener('click', openTwinWindow);
 $('#liveTwinChip').addEventListener('click', openLiveTwin);
 
 // Where the readings come from: a log file is chosen at once; a broker, a server or a script opens its own part of the card.
@@ -12891,7 +12919,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
             fileOwnership = choice.strip ? null : stampOwnership(choice.block, stampOptions);
             if (JSON.stringify(fileOwnership) !== JSON.stringify(savedOwnership)) copyOwnership = fileOwnership;
         }
-        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
+        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
         const activeBranchRecord = branches.get(activeBranchUuid);

@@ -76,6 +76,7 @@
             <button id="assistantButton" class="titleAssistantControl" type="button" aria-label="Model assistant" data-tooltip="Model assistant" aria-expanded="false" aria-controls="assistantPanel">✦</button>
             <button id="parametersButton" class="titleAssistantControl" type="button" aria-label="Parameters table" data-tooltip="Parameters" aria-expanded="false" aria-controls="parametersPanel">☰</button>
             <button id="providerToolchainsButton" class="titleAssistantControl" type="button" aria-label="Provider toolchains" data-tooltip="Provider toolchains" aria-haspopup="dialog">⚒</button>
+            <button id="connectionsButton" class="titleAssistantControl" type="button" aria-label="Connections" data-tooltip="Connections" aria-haspopup="dialog" hidden>⇄</button>
             <button id="diagnosticsButton" class="titleAssistantControl" type="button" aria-label="Diagnostics log" data-tooltip="Diagnostics log" aria-haspopup="dialog">⚠<span id="diagnosticsBadge" class="diagnosticsBadge" hidden></span></button>
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="minimizeButton" type="button" aria-label="Minimize" data-tooltip="Minimize">−</button>
@@ -419,6 +420,43 @@
         </form>
     </dialog>
 
+    <!-- The push service (docs/proposals/pushService.md): the one place Konjugate listens, for a script with nowhere else to put its
+         readings. Drawn and run by src/renderer/connectionsPanel.mjs; desktop only. -->
+    <dialog id="connectionsDialog" class="passwordDialog connectionsDialog" aria-labelledby="connectionsTitle">
+        <form method="dialog">
+            <span class="contextKicker">Connections</span>
+            <strong id="connectionsTitle">Push service</strong>
+            <p>For a script that reads an instrument and has nowhere to put its numbers: it sends them here, and a live twin follows them. Every other source is one Konjugate connects out to; this is the one place it listens, on this computer only, and only while it is on. A script that can append to a file or publish to a broker needs none of this.</p>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">Listening</span>
+                <div class="connectionsRow">
+                    <label class="connectionsPort"><span>Port</span><input id="pushServicePort" type="number" min="1" max="65534" step="1" inputmode="numeric"></label>
+                    <small id="pushServiceGrpcPort"></small>
+                    <button id="pushServiceToggle" type="button" class="doneButton">Start</button>
+                </div>
+                <p id="pushServiceState" class="assistantConfigurationStatus" role="status"></p>
+                <ul id="pushServiceLog" class="connectionsLog"></ul>
+            </section>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">Keys</span>
+                <p class="connectionsHint">One for each rig or script, allowed to send only the signals you give it, and revoked on its own. A key is shown once, when it is made, and kept only as a hash.</p>
+                <div id="pushKeys" class="connectionsKeys"></div>
+                <div class="connectionsRow connectionsAddKey">
+                    <input id="pushKeyName" placeholder="Name, e.g. vessel rig" autocomplete="off" aria-label="Name of the new key">
+                    <input id="pushKeySignals" placeholder="Signals it may send, e.g. vesselTemperature, heaterPower" autocomplete="off" spellcheck="false" aria-label="Signals the new key may send">
+                    <button id="pushKeyAdd" type="button">Make key</button>
+                </div>
+                <div id="pushKeyMade" class="connectionsKeyMade" hidden><span>Copy it into the script now: it is not shown again.</span><code id="pushKeyMadeValue"></code><button id="pushKeyCopy" type="button">Copy</button></div>
+                <p id="pushKeyStatus" class="assistantConfigurationStatus" role="status"></p>
+            </section>
+            <section class="executionConfiguration">
+                <span class="configurationSectionTitle">Sending from a script</span>
+                <div id="pushExamples" class="connectionsExamples"></div>
+            </section>
+            <footer><button id="connectionsClose" type="button" class="doneButton">Done</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="providerToolchainsDialog" class="passwordDialog">
         <form method="dialog">
             <span class="contextKicker">Providers</span>
@@ -613,6 +651,7 @@
             </div>
         </div>
         <div class="toolSpacer"></div>
+        <button id="pushServiceChip" class="simulationReadout tuningChip pushServiceChip" type="button" hidden title="The push service is listening: open the Connections panel"><i></i><span id="pushServiceChipText">Listening</span></button>
         <button id="parameterTuningChip" class="simulationReadout tuningChip" type="button" hidden title="Parameter tuning is running: open it"><i></i><span id="parameterTuningChipText">Tuning</span></button>
         <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
         <div class="labelControls" aria-label="Label detail">
@@ -1016,6 +1055,15 @@
                     <div id="parameterTuningMqttTopics"></div>
                     <div class="liveTwinActions"><button id="parameterTuningMqttUse" type="button" hidden>Use these topics</button></div>
                     <div id="parameterTuningMqttStatus" class="equationDiagnostics" role="status"></div>
+                </details>
+                <details id="parameterTuningPush" class="parameterTuningMqtt" hidden>
+                    <summary>Or take readings a script sends</summary>
+                    <p class="builderHint">For a script with nowhere else to put its readings: it sends them to Konjugate's push service, as JSON, protobuf or gRPC, with a key that may send only the signals it is given. Start the service and make the key in the Connections panel, choose what each signal is, and follow them as a live twin. What arrives is recorded as a data log beside the project.</p>
+                    <div id="parameterTuningPushService" class="equationDiagnostics" role="status"></div>
+                    <div class="liveTwinActions"><button id="parameterTuningPushConnections" type="button">Connections…</button></div>
+                    <div id="parameterTuningPushSignals"></div>
+                    <div class="liveTwinActions"><button id="parameterTuningPushUse" type="button" hidden>Use these signals</button></div>
+                    <div id="parameterTuningPushStatus" class="equationDiagnostics" role="status"></div>
                 </details>
                 <details id="parameterTuningOpcUa" class="parameterTuningMqtt" hidden>
                     <summary>Or follow an OPC UA server</summary>

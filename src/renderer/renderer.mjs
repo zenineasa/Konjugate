@@ -13,6 +13,7 @@ import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEd
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection } from './programSourceSection.mjs';
+import { ConnectionsPanel, pushServiceSentence } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
@@ -8635,6 +8636,7 @@ function setParameterTuningGoalUi(goal) {
     $('#parameterTuningParametersSection').hidden = goal === 'replay';
     $('#parameterTuningMqtt').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
     $('#parameterTuningOpcUa').hidden = goal !== 'replay' || !window.engine.liveTwin?.available;
+    $('#parameterTuningPush').hidden = goal !== 'replay' || !window.engine.liveTwin?.available || !window.engine.pushService?.available;
     $('#parameterTuningObjectiveStatus').textContent = '';
 }
 
@@ -9215,14 +9217,14 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
     const inputs = mapping.filter((entry) => entry.role === 'input');
     status.className = 'equationDiagnostics valid';
     status.textContent = `${note}${log.header.signals.length} signal${log.header.signals.length === 1 ? '' : 's'}`
-        + (source?.kind === 'mqtt' || source?.kind === 'opcua' ? ` from ${source.url}, followed as they arrive` : `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`)
+        + (followedLiveSource(source) ? ` from ${source.url}, followed as they arrive` : `, ${log.observations.length} readings over ${formatDuration(span)}${log.header.source ? `, from ${log.header.source}` : ''}`)
         + `. Matched ${matched} of ${mapping.length} by name; change any below.`
         + (inputs.length && !targets.parameters.length ? ' The model has no shared parameters, so its inputs cannot follow the log: make a parameter shared to drive it from a recording.' : '');
     renderParameterTuningReplayRows();
     $('#parameterTuningReplaySection').hidden = false;
     // A broker's readings are followed, not replayed: there is nothing recorded yet to replay, or to calibrate on.
-    $('#runParameterTuningReplay').hidden = source?.kind === 'mqtt' || source?.kind === 'opcua';
-    $('#replayCalibrate').hidden = source?.kind === 'mqtt' || source?.kind === 'opcua';
+    $('#runParameterTuningReplay').hidden = followedLiveSource(source);
+    $('#replayCalibrate').hidden = followedLiveSource(source);
     refreshParameterTuningReplayRunnable();
     refreshLiveTwinControls();
     renderLiveTwinScenarios();
@@ -9471,13 +9473,18 @@ function applySavedReplaySetup(replay) {
 
 const liveTwinAvailable = () => Boolean(window.engine.liveTwin?.available);
 
+// A source with no file to replay, only followed as its readings arrive: a broker, an OPC UA server, or the push service.
+function followedLiveSource(source) {
+    return ['mqtt', 'opcua', 'push'].includes(source?.kind);
+}
+
 function refreshLiveTwinControls() {
     const replay = parameterTuningReplay;
     const running = Boolean(liveTwinState?.running);
     const follow = $('#liveTwinSpeed option[value="follow"]');
-    const broker = replay?.source?.kind === 'mqtt' || replay?.source?.kind === 'opcua';
+    const broker = followedLiveSource(replay?.source);
     follow.disabled = !replay?.path && !broker;
-    follow.textContent = broker ? (replay.source.kind === 'opcua' ? 'As the server reports them' : 'As they arrive from the broker') : replay?.path ? 'As the file grows' : 'As the file grows (choose the log from disk)';
+    follow.textContent = broker ? ({ opcua: 'As the server reports them', push: 'As the scripts send them' }[replay.source.kind] ?? 'As they arrive from the broker') : replay?.path ? 'As the file grows' : 'As the file grows (choose the log from disk)';
     if (broker) $('#liveTwinSpeed').value = 'follow';
     for (const option of $('#liveTwinSpeed').options) if (option.value !== 'follow') option.disabled = broker;
     if (follow.disabled && $('#liveTwinSpeed').value === 'follow') $('#liveTwinSpeed').value = '3600';
@@ -9620,6 +9627,7 @@ async function startLiveTwin() {
     const logger = replay.source?.kind === 'logger' ? replay.source.settings : undefined;
     const source = replay.source?.kind === 'mqtt' ? { kind: 'mqtt', url: replay.source.url, signals: replay.source.signals }
         : replay.source?.kind === 'opcua' ? { kind: 'opcua', url: replay.source.url, signals: replay.source.signals, security: replay.source.security, trustServer: replay.source.trustServer }
+        : replay.source?.kind === 'push' ? { kind: 'push', url: replay.source.url, signals: replay.source.signals }
         : speedChoice === 'follow' ? { kind: 'file', path: replay.path, logger }
             : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice), logger };
     clearLiveTwinView();
@@ -9627,7 +9635,7 @@ async function startLiveTwin() {
     rememberReplaySetup();
     refreshLiveTwinControls();
     status.className = 'equationDiagnostics';
-    status.textContent = source.kind === 'mqtt' || source.kind === 'opcua' ? `Following ${source.url}: waiting for a window's worth of readings…`
+    status.textContent = followedLiveSource(source) ? `Following ${source.url}: waiting for a window's worth of readings…`
         : speedChoice === 'follow' ? `Following ${replay.fileName} as it grows…` : 'Starting the live twin…';
     try {
         await window.engine.liveTwin.start(settings, source, currentProjectPath);
@@ -9710,8 +9718,11 @@ window.engine.liveTwin?.onEvent?.((update) => {
         twin.ended = update.reason;
         twin.recordedTo = update.recordedTo ?? null;
         if (update.recordedTo) {
-            status.className = 'equationDiagnostics valid';
-            status.textContent = `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}. What the broker sent is recorded in ${update.recordedTo}, to replay later.`;
+            const sender = { opcua: 'the server', push: 'the scripts' }[parameterTuningReplay?.source?.kind] ?? 'the broker';
+            const recorded = `What ${sender} sent is recorded in ${update.recordedTo}, to replay later.`;
+            // A twin its source stopped keeps saying why, with where its readings are.
+            status.className = twin.failure ? 'equationDiagnostics' : 'equationDiagnostics valid';
+            status.textContent = twin.failure ? `The live twin stopped: ${twin.failure} ${recorded}` : `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}. ${recorded}`;
         }
         if (update.reason === 'played') {
             status.className = 'equationDiagnostics valid';
@@ -9721,6 +9732,7 @@ window.engine.liveTwin?.onEvent?.((update) => {
         drawLiveTwin();
     } else if (update.type === 'error') {
         twin.running = false;
+        twin.failure = update.message;
         status.className = 'equationDiagnostics';
         status.textContent = `The live twin stopped: ${update.message}`;
         refreshLiveTwinControls();
@@ -9883,6 +9895,61 @@ $('#parameterTuningOpcUaUse').addEventListener('click', () => useOpcUaTags());
 
 $('#parameterTuningMqttListen').addEventListener('click', () => listenToMqttBroker());
 $('#parameterTuningMqttUse').addEventListener('click', () => useMqttTopics());
+
+// The push service (docs/proposals/pushService.md): the Connections panel to start it and make keys, a chip while it listens (red
+// with the reason if it ended unexpectedly), and in the card, the signals the keys may send, chosen and followed as with a broker.
+const pushService = window.engine.pushService?.available ? window.engine.pushService : null;
+const connectionsPanel = pushService ? new ConnectionsPanel({ dialog: $('#connectionsDialog'), api: pushService }) : null;
+$('#connectionsButton').hidden = !connectionsPanel;
+$('#connectionsButton').addEventListener('click', () => connectionsPanel?.open());
+$('#pushServiceChip').addEventListener('click', () => connectionsPanel?.open());
+$('#parameterTuningPushConnections').addEventListener('click', () => connectionsPanel?.open());
+
+function showPushServiceState(state) {
+    const chip = $('#pushServiceChip');
+    const failed = !state.listening && Boolean(state.failure);
+    chip.hidden = !state.listening && !failed;
+    chip.classList.toggle('failed', failed);
+    $('#pushServiceChipText').textContent = failed ? 'Push service stopped'
+        : `Listening on ${state.host}:${state.port}, ${state.clients ?? 0} client${state.clients === 1 ? '' : 's'}`;
+    chip.title = failed ? `The push service ended: ${state.failure} Open the Connections panel.` : 'The push service is listening: open the Connections panel';
+    $('#parameterTuningPushService').textContent = pushServiceSentence(state);
+    $('#parameterTuningPushService').classList.toggle('valid', Boolean(state.listening));
+}
+
+// The signals the keys may send, each offered once, with the keys that may send it.
+async function refreshPushSignals() {
+    if (!pushService) return;
+    showPushServiceState(await pushService.state());
+    const bySignal = new Map();
+    for (const key of (await pushService.keys.list()).filter((candidate) => !candidate.revoked)) {
+        for (const signal of key.signals) bySignal.set(signal, [...(bySignal.get(signal) ?? []), key.name]);
+    }
+    renderSignalChoices($('#parameterTuningPushSignals'), [...bySignal].map(([signal, keys]) => ({
+        id: signal, label: signal, detail: `sent with ${keys.map((name) => `"${name}"`).join(', ')}`, usable: true, name: signal
+    })), $('#parameterTuningPushUse'));
+    $('#parameterTuningPushStatus').textContent = bySignal.size ? 'Say which are inputs (what was done) and which are measured, then use them.'
+        : 'No key may send anything yet: make one in the Connections panel.';
+    $('#parameterTuningPushStatus').classList.toggle('valid', bySignal.size > 0);
+}
+
+function usePushSignals() {
+    const { signals, error } = chosenSignals($('#parameterTuningPushSignals'));
+    if (error) {
+        $('#parameterTuningPushStatus').textContent = error;
+        return;
+    }
+    openLiveSource({ kind: 'push', url: 'the push service', signals: signals.map(({ id, ...signal }) => ({ signal: id, ...signal })) }, 'the push service');
+}
+
+if (pushService) {
+    pushService.onState(showPushServiceState);
+    pushService.state().then(showPushServiceState).catch(() => {});
+    $('#parameterTuningPush').addEventListener('toggle', () => { if ($('#parameterTuningPush').open) refreshPushSignals(); });
+    // Keys made or revoked in the panel are offered as soon as it closes.
+    $('#connectionsDialog').addEventListener('close', () => { if ($('#parameterTuningPush').open) refreshPushSignals(); });
+}
+$('#parameterTuningPushUse').addEventListener('click', () => usePushSignals());
 
 $('#liveTwinStart').addEventListener('click', () => startLiveTwin());
 $('#liveTwinStop').addEventListener('click', () => stopLiveTwin());
@@ -10160,7 +10227,7 @@ let replayCalibration = null;
 async function calibrateOnStretch() {
     const replay = parameterTuningReplay;
     const status = $('#replayCalibrateStatus');
-    if (!replay || replay.source?.kind === 'mqtt' || replay.source?.kind === 'opcua') return;
+    if (!replay || followedLiveSource(replay.source)) return;
     const hours = (selector) => { const text = $(selector).value.trim(); return text === '' ? null : Number(text) * 3600; };
     const tunable = findTunableParametersInModel();
     status.className = 'equationDiagnostics';

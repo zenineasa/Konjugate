@@ -230,6 +230,22 @@ contextBridge.exposeInMainWorld('engine', {
         // Where a chosen file is on disk, so a log a logger is still writing can be followed.
         pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } }
     },
+    // The push service (desktop only: a web page cannot listen): its state (listening, ports, clients, rate, the readings no twin
+    // followed), started and stopped from the Connections panel, and its keys, each shown once when it is made.
+    pushService: {
+        available: true,
+        state: () => ipcRenderer.invoke('pushServiceState'),
+        start: (port) => ipcRenderer.invoke('pushServiceStart', port),
+        stop: () => ipcRenderer.invoke('pushServiceStop'),
+        onState: (callback) => ipcRenderer.on('pushServiceState', (_event, state) => callback(state)),
+        // protocol/pushReadings.proto, for a script to generate its code from.
+        proto: () => ipcRenderer.invoke('pushServiceProto'),
+        keys: {
+            list: () => ipcRenderer.invoke('pushKeysList'),
+            add: (name, signals) => ipcRenderer.invoke('pushKeysAdd', name, signals),
+            revoke: (name) => ipcRenderer.invoke('pushKeysRevoke', name)
+        }
+    },
     checkSubstepConvergence: (content, runConfiguration, nodeIds) => ipcRenderer.invoke('engineCheckSubstepConvergence', content, runConfiguration, nodeIds),
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),

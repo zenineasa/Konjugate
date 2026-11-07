@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, shell, utilityProcess } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
@@ -46,6 +46,8 @@ import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLife
 import { parseKjtPathFromArgv } from './fileAssociation.mjs';
 import { LiveTwin } from './liveTwinHost.mjs';
 import { listenToBroker } from './mqttSource.mjs';
+import { PushServiceHost } from './pushServiceHost.mjs';
+import { pushCliUsage, runPushCli } from './pushCli.mjs';
 import { browseOpcUa } from './opcuaSource.mjs';
 import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLog.mjs';
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
@@ -954,7 +956,7 @@ function beginApplicationShutdown() {
     if (applicationShutdownPromise) return applicationShutdownPromise;
     abortAIOperations();
     applicationShutdownPromise = (async () => {
-        await Promise.all([shutdownEngineJobs(), shutdownValidationOperations(), shutdownInferenceOperations(), shutdownFittingOperations()]);
+        await Promise.all([shutdownEngineJobs(), shutdownValidationOperations(), shutdownInferenceOperations(), shutdownFittingOperations(), pushServiceHostInstance?.stop()]);
         await closeCompletedEngineResults();
     })();
     return applicationShutdownPromise;
@@ -2629,7 +2631,8 @@ const launcherHost = registerLauncherHandlers({
 
 const cliUsage = 'Usage: konjugate --cli run <project.kjt> --target-time <seconds> '
     + '[--configuration <name-or-id>] [--output-kjt <path>] [--output-csv <path>]\n'
-    + '       konjugate --cli validate <project.kjt>';
+    + '       konjugate --cli validate <project.kjt>\n'
+    + pushCliUsage.replace(/^Usage: /, '       ');
 
 // Runs entirely inside app.whenReady() (see the branch there) -- never creates a BrowserWindow,
 // and always ends in app.exit(code) rather than leaving the process running or calling the
@@ -2637,6 +2640,11 @@ const cliUsage = 'Usage: konjugate --cli run <project.kjt> --target-time <second
 async function runCliMode() {
     const cliArgs = process.argv.slice(process.argv.indexOf('--cli') + 1);
     const [subcommand, inputPath, ...rest] = cliArgs;
+    // The push service in the foreground, for a lab computer with no screen (src/pushCli.mjs), with the app's own keys.
+    if (subcommand === 'serve') {
+        app.exit(await runPushCli(cliArgs.slice(1), { directory: pushKeysDirectory() }));
+        return;
+    }
     if (!subcommand || !inputPath || !['run', 'validate'].includes(subcommand)) {
         console.error(cliUsage);
         app.exit(2);
@@ -2847,7 +2855,7 @@ const liveTwinFor = (event) => {
 async function recordingPathFor(source, projectPath) {
     const folder = projectPath ? join(dirname(projectPath), 'recordings') : join(app.getPath('userData'), 'recordings');
     await mkdir(folder, { recursive: true });
-    const host = (() => { try { return new URL(source.url).hostname || 'broker'; } catch { return 'broker'; } })();
+    const host = source.kind === 'push' ? 'pushed' : (() => { try { return new URL(source.url).hostname || 'broker'; } catch { return 'broker'; } })();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     return join(folder, `${host.replace(/[^A-Za-z0-9-]/g, '-')} ${stamp}.csv`);
 }
@@ -2863,9 +2871,32 @@ ipcMain.handle('liveTwinBrowseOpcUa', async (_event, url, security, trustServer)
         throw error;
     }
 });
+// The push service (docs/proposals/pushService.md): started from the Connections panel in its own process, its keys in the app's own
+// folder, what it takes published on a hub the live twins following pushed readings read from. Every window is told each change, for
+// the panel and the toolbar chip.
+const pushKeysDirectory = () => join(app.getPath('userData'), 'push');
+let pushServiceHostInstance = null;
+const pushServiceHost = () => (pushServiceHostInstance ??= new PushServiceHost({
+    directory: pushKeysDirectory(),
+    fork: (modulePath) => utilityProcess.fork(modulePath, [], { serviceName: 'Konjugate push service' }),
+    onChange: (state) => {
+        for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('pushServiceState', state);
+    }
+}));
+ipcMain.handle('pushServiceState', async () => pushServiceHost().state());
+// The message definition, for the panel to show beside the examples that use it.
+ipcMain.handle('pushServiceProto', async () => readFile(join(currentDir, '..', 'protocol', 'pushReadings.proto'), 'utf8'));
+ipcMain.handle('pushServiceStart', async (_event, port) => pushServiceHost().start(Number.isInteger(port) ? { port } : {}));
+ipcMain.handle('pushServiceStop', async () => pushServiceHost().stop());
+ipcMain.handle('pushKeysList', async () => pushServiceHost().keys.list());
+ipcMain.handle('pushKeysAdd', async (_event, name, signals) => pushServiceHost().keys.add(name, signals));
+ipcMain.handle('pushKeysRevoke', async (_event, name) => pushServiceHost().keys.revoke(name));
+
 ipcMain.handle('liveTwinStart', async (event, settings, source, projectPath = null) => {
     const owner = event.sender;
     await liveTwins.get(owner.id)?.stop();
+    if (source.kind === 'push' && !pushServiceHost().state().listening) throw new Error('The push service is not listening: start it in the Connections panel.');
+    if (source.kind === 'push') source = { kind: 'push', signals: source.signals, hub: pushServiceHost().hub, recordTo: await recordingPathFor(source, projectPath) };
     if (source.kind === 'mqtt' || source.kind === 'opcua') source = { ...source, recordTo: await recordingPathFor(source, projectPath), ...(source.kind === 'opcua' ? { pkiFolder: opcUaPkiFolder() } : {}) };
     const twin = new LiveTwin(settings, source, await engineOptions(), (update) => {
         if (!owner.isDestroyed()) owner.send('liveTwinEvent', update);

@@ -1,0 +1,25 @@
+// The standard gRPC health checking service (https://github.com/grpc/grpc/blob/master/doc/health-checking.md), as grpc.health.v1
+// defines it, served by Konjugate's push service (docs/proposals/pushService.md) so the usual gRPC tools can see whether it is up.
+
+syntax = "proto3";
+
+package grpc.health.v1;
+
+message HealthCheckRequest {
+    string service = 1;
+}
+
+message HealthCheckResponse {
+    enum ServingStatus {
+        UNKNOWN = 0;
+        SERVING = 1;
+        NOT_SERVING = 2;
+        SERVICE_UNKNOWN = 3;
+    }
+    ServingStatus status = 1;
+}
+
+service Health {
+    rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+    rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);
+}

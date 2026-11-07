@@ -1,0 +1,60 @@
+// Copyright © 2026 Zenin Easa Panthakkalakath
+
+// What a lab's own script sends to Konjugate's push service (docs/proposals/pushService.md): readings, as protobuf over HTTP or a
+// WebSocket, or as a gRPC stream. The JSON a script may send instead is this message field for field, so a reading means the same
+// whichever way it came. Save this file beside a script and generate its code from it, for example:
+//
+//   python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. pushReadings.proto
+//
+// Every message is answered with a PushAnswer whose status is the HTTP status the same message would get over HTTP: 202 taken,
+// 400 something wrong in it (the reason says what), 401 an unknown or revoked key, 403 a signal the key may not send, 429 too many
+// failed attempts from one address, 503 the service stopping.
+
+syntax = "proto3";
+
+package konjugate.push.v1;
+
+import "google/protobuf/timestamp.proto";
+
+enum Quality {
+    GOOD = 0;
+    UNCERTAIN = 1;
+    BAD = 2;
+}
+
+message Reading {
+    // A name the key is allowed to send.
+    string signal = 1;
+    // A finite number; a reading without one is refused.
+    optional double value = 2;
+    // When it was measured; left unset, the reading is stamped when it arrives.
+    google.protobuf.Timestamp time = 3;
+    Quality quality = 4;
+}
+
+message PushReadings {
+    repeated Reading readings = 1;
+}
+
+message PushAnswer {
+    uint32 status = 1;
+    // How many readings were taken (all of them, or none: a message with one bad reading is refused whole).
+    uint32 taken = 2;
+    string reason = 3;
+}
+
+message CheckRequest {}
+
+message CheckAnswer {
+    // The key's name, as the person who made it named it, and the signals it may send.
+    string name = 1;
+    repeated string signals = 2;
+}
+
+service ReadingPush {
+    // A stream of messages, each answered in order. A refused message is answered with its reason and the stream goes on; only a
+    // bad key ends the call (UNAUTHENTICATED, or PERMISSION_DENIED for a revoked key). Send the key as `authorization: Bearer <key>`.
+    rpc Push(stream PushReadings) returns (stream PushAnswer);
+    // Whether the key is good, and which signals it may send.
+    rpc Check(CheckRequest) returns (CheckAnswer);
+}

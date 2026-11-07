@@ -5022,6 +5022,114 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    await run('the push service: started in the Connections panel, a key made, a live twin following what a script sends, and stopped with the twin attached', async () => {
+        // A free port for the service (and the one after it for gRPC), found the way any program finds one.
+        const port = await new Promise((resolve) => {
+            const probe = createServer();
+            probe.listen(0, '127.0.0.1', () => { const { port: found } = probe.address(); probe.close(() => resolve(found)); });
+        });
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-push-'));
+        let sending = null;
+        try {
+            const projectPath = join(directory, 'rig.kjt');
+            await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+            const before = driver.allHandles();
+            await driver.simulateOsFileOpen(projectPath);
+            const opened = await driver.waitForNewHandle(before);
+            await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+            const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
+            // The panel: started on the chosen port, gRPC on the next, the chip saying so.
+            assert.equal(await evaluate(opened, `document.querySelector('#connectionsButton').hidden`), false, 'The desktop offers the Connections panel.');
+            await evaluate(opened, `document.querySelector('#connectionsButton').click()`);
+            await waitFor(opened, `document.querySelector('#connectionsDialog').open`, 'The Connections panel did not open.');
+            assert.match(await evaluate(opened, `document.querySelector('#pushServiceState').textContent`), /^Not listening/);
+            assert.match(await evaluate(opened, `document.querySelector('#pushExamples details[open] code').textContent`), /urllib\.request/, 'The first example is plain Python sending JSON.');
+            await set('#pushServicePort', String(port));
+            assert.equal(await evaluate(opened, `document.querySelector('#pushServiceGrpcPort').textContent`), `gRPC on ${port + 1}`);
+            await evaluate(opened, `document.querySelector('#pushServiceToggle').click()`);
+            await waitFor(opened, `document.querySelector('#pushServiceState').textContent.startsWith('Listening on 127.0.0.1:${port} ')`, 'The push service did not start.', 15000);
+            await waitFor(opened, `!document.querySelector('#pushServiceChip').hidden`, 'The chip did not say the service is listening.');
+            assert.equal(await evaluate(opened, `document.querySelector('#pushServiceChipText').textContent`), `Listening on 127.0.0.1:${port}, 0 clients`);
+
+            // A key, shown once, which the examples then use.
+            await set('#pushKeyName', 'simulated rig');
+            await set('#pushKeySignals', 'heaterPower, tankTemperature');
+            await evaluate(opened, `document.querySelector('#pushKeyAdd').click()`);
+            await waitFor(opened, `!document.querySelector('#pushKeyMade').hidden`, 'The key was not shown.');
+            const key = await evaluate(opened, `document.querySelector('#pushKeyMadeValue').textContent`);
+            assert.match(key, /^kjp_/);
+            assert.match(await evaluate(opened, `document.querySelector('#pushExamples details[open] code').textContent`), new RegExp(key));
+            assert.equal(await evaluate(opened, `document.querySelector('#pushKeys .connectionsKey[data-key="simulated rig"] small').textContent`), 'heaterPower, tankTemperature');
+            await evaluate(opened, `document.querySelector('#connectionsClose').click()`);
+            await waitFor(opened, `document.querySelector('#pushKeyMade').hidden`, 'Closing the panel did not put the key away.');
+
+            // A script sending the tank's readings as JSON, a minute of the tank every 20 ms.
+            const epoch = Date.parse('2026-11-06T09:00:00Z') / 1000;
+            const capacitance = 209000, heatLoss = 20, ambient = 293.15;
+            let minute = 0;
+            let temperature = ambient;
+            let refused = null;
+            sending = setInterval(() => {
+                const time = minute * 60;
+                if (minute > 0) {
+                    const settled = ambient + 1000 / heatLoss;
+                    temperature = settled + (temperature - settled) * Math.exp(-heatLoss * 60 / capacitance);
+                }
+                const readings = [{ signal: 'tankTemperature', value: temperature, time: epoch + time }, ...(minute % 30 === 0 ? [{ signal: 'heaterPower', value: 1000, time: epoch + time }] : [])];
+                minute += 1;
+                fetch(`http://127.0.0.1:${port}/v1/readings`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ readings }) })
+                    .then((response) => response.json()).then((answer) => { if (answer.status !== 202 && answer.status !== 503) refused ??= answer; }).catch(() => {});
+            }, 20);
+
+            // The card: the signals the key may send, chosen and followed.
+            await evaluate(opened, `document.querySelector('#parameterTuningButton').click()`);
+            await waitFor(opened, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+            await evaluate(opened, `document.querySelector('#parameterTuningGoalReplay').click()`);
+            assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningPush').hidden`), false, 'The replay goal offers the push service.');
+            await evaluate(opened, `document.querySelector('#parameterTuningPush').open = true`);
+            const signal = (name) => `#parameterTuningPushSignals .sourceSignalChoice[data-id="${name}"]`;
+            await waitFor(opened, `document.querySelectorAll('#parameterTuningPushSignals .sourceSignalChoice').length === 2`, 'The signals the key may send were not offered.');
+            assert.match(await evaluate(opened, `document.querySelector('#parameterTuningPushService').textContent`), new RegExp(`^Listening on 127\\.0\\.0\\.1:${port} `));
+            await set(`${signal('heaterPower')} select`, 'input');
+            await set(`${signal('tankTemperature')} select`, 'output');
+            await set(`${signal('tankTemperature')} input[data-field="unit"]`, 'K');
+            await evaluate(opened, `document.querySelector('#parameterTuningPushUse').click()`);
+            await waitFor(opened, `!document.querySelector('#parameterTuningReplaySection').hidden`, 'The signals did not set the card up.');
+            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), true, 'Pushed readings are followed, not replayed.');
+            assert.equal(await evaluate(opened, `document.querySelector('#liveTwinSpeed option[value="follow"]').textContent`), 'As the scripts send them');
+            const target = (name) => `document.querySelector('.parameterTuningReplayRow[data-signal="${name}"] select').value`;
+            assert.equal(await evaluate(opened, target('heaterPower')), '40');
+            assert.equal(await evaluate(opened, target('tankTemperature')), '2');
+            await set('#parameterTuningReplayTimeStep', '60');
+            await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
+            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the pushed readings.', 30000);
+            assert.equal(refused, null, `A reading was refused: ${refused?.reason}`);
+            await waitFor(opened, `/, 1 client/.test(document.querySelector('#pushServiceChipText').textContent)`, 'The chip did not count the script.', 5000);
+
+            // Stopping with the twin attached asks first, and the twin says why it stopped and where the readings are.
+            await evaluate(opened, `(() => { window.__confirmed = []; window.confirm = (message) => { window.__confirmed.push(message); return true; }; })()`);
+            await evaluate(opened, `document.querySelector('#pushServiceChip').click()`);
+            await waitFor(opened, `document.querySelector('#connectionsDialog').open`, 'The chip did not open the panel.');
+            await evaluate(opened, `document.querySelector('#pushServiceToggle').click()`);
+            await waitFor(opened, `document.querySelector('#pushServiceState').textContent.startsWith('Not listening')`, 'The push service did not stop.', 15000);
+            assert.match(await evaluate(opened, `window.__confirmed[0] ?? ''`), /^1 live twin is following/);
+            await evaluate(opened, `document.querySelector('#connectionsClose').click()`);
+            await waitFor(opened, `/The push service stopped: Konjugate stopped listening\. What the scripts sent is recorded in /.test(document.querySelector('#liveTwinStatus').textContent)`, 'The twin did not say why it stopped.', 15000);
+            assert.equal(await evaluate(opened, `document.querySelector('#pushServiceChip').hidden`), true, 'Stopped on purpose, the chip goes.');
+            const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
+            assert.ok(recordedTo.startsWith(join(directory, 'recordings', 'pushed ')), `The recording is beside the project: ${recordedTo}.`);
+            const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
+            assert.equal(recorded.header.source, 'Konjugate push service');
+            assert.deepEqual(recorded.header.signals.map((entry) => entry.name), ['heaterPower', 'tankTemperature']);
+            assert.ok(recorded.observations.length >= 61, `The recording holds at least the hour the first move needed: ${recorded.observations.length}.`);
+            await evaluate(opened, `window.confirm = () => true; undefined`);
+            await closeWhenValidated(opened);
+        } finally {
+            clearInterval(sending);
+        }
+    }, { skip: !driver.capabilities.multiWindow && 'the push service listens on a port, which a web page cannot; desktop only' });
+
     await run('a parameter linked to a shared parameter edits and unlinks through the edge editor', async () => {
         // Two edges link one parameter to a project-level shared parameter: the linked row shows the
         // shared value (2), not its own stale one (5); editing it changes the shared definition, so

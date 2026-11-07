@@ -2017,6 +2017,38 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 
 /* Project properties, the defaults for new projects and the save-time override (docs/proposals/modelOwnership.md). */
 .passwordDialog.ownershipDialog { width: 420px; max-height: calc(100vh - 32px); overflow-y: auto; }
+/* The Connections panel (src/renderer/connectionsPanel.mjs): the push service's switch, its keys and the examples to copy. */
+.passwordDialog.connectionsDialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
+.connectionsDialog[hidden], #connectionsButton[hidden] { display: none; }
+.connectionsDialog :is(.connectionsRow, .connectionsKey, .connectionsKeyMade, .connectionsExample) button { height: 26px; padding: 0 10px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 8px; font-weight: 500; cursor: pointer; }
+.connectionsDialog .connectionsExample summary button { height: 20px; padding: 0 8px; font-size: 7px; }
+.connectionsDialog .connectionsRow button.doneButton { color: #09201e !important; background: var(--accent) !important; border-color: var(--accent) !important; font-weight: 700; }
+.connectionsDialog .connectionsRow :is(input, select) { height: 28px; font-size: 8px; }
+.connectionsRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-top: 8px; }
+.connectionsRow > small { flex: 1; min-width: 90px; padding-bottom: 8px; color: #718691; font-size: 8px; }
+.passwordDialog .connectionsPort { margin-top: 0; }
+.connectionsPort input { width: 90px; }
+.connectionsAddKey input { flex: 1 1 160px; min-width: 0; }
+.connectionsHint { margin: 6px 0 8px !important; }
+.connectionsLog { margin: 0; padding: 0; list-style: none; color: #5d717c; font-size: 7px; line-height: 1.6; }
+.connectionsLog:empty { display: none; }
+.connectionsKeys { display: grid; gap: 4px; }
+.connectionsKeys > small { color: #5d717c; font-size: 8px; }
+.connectionsKey { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 6px 8px; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; }
+.connectionsKey span { display: grid; gap: 2px; min-width: 0; }
+.connectionsKey strong { margin: 0; font-size: 9px; }
+.connectionsKey small { overflow: hidden; color: #718691; font-size: 7px; text-overflow: ellipsis; }
+.connectionsKey.revoked { opacity: .55; }
+.connectionsKeyMade { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 8px; padding: 8px; background: rgb(66 201 188 / 6%); border: 1px solid #2f5f5b; border-radius: 4px; }
+.connectionsKeyMade[hidden] { display: none; }
+.connectionsKeyMade span { grid-column: 1 / -1; color: #9fd6cf; font-size: 8px; }
+.connectionsKeyMade code { overflow-wrap: anywhere; color: #d8e4e9; font-size: 9px; user-select: all; }
+.connectionsExamples h4 { margin: 10px 0 4px; color: #8aa0aa; font-size: 8px; font-weight: 600; }
+.connectionsExample { margin-top: 4px; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; }
+.connectionsExample summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; color: #b8c7ce; font-size: 8px; cursor: pointer; }
+.connectionsExample pre { max-height: 260px; margin: 0; padding: 8px; overflow: auto; border-top: 1px solid #1f313b; }
+.connectionsExample code { color: #c8d6dc; font-size: 8px; line-height: 1.5; white-space: pre; }
+.pushServiceChip.failed i { background: #d4707a; box-shadow: 0 0 8px rgb(212 112 122 / 60%); }
 .ownershipDialog .ownershipSaveTimes { margin: 12px 0 0; }
 .ownershipDialog .ownershipSaveTimes:empty { display: none; }
 .ownershipDialog .assistantConfigurationStatus[hidden] { display: none; }

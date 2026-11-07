@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // Runs live twins for the app (docs/proposals/digitalTwinConnections.md): the main process holds one per window, and the window sees
-// only the events. A live twin is a WindowSession (src/windowSession.mjs) fed from one of two sources:
+// only the events. A live twin is a WindowSession (src/windowSession.mjs) fed from one of these sources:
 //
 //   { kind: 'file', path }               a data log followed while a logger writes it (src/dataLogFollower.mjs)
 //   { kind: 'recording', content, speed } a finished log played back as if it were arriving, `speed` model seconds a wall second
@@ -10,6 +10,8 @@
 //                                         history, what arrives is also written to a data log at `recordTo`, to replay later
 //   { kind: 'opcua', url, signals, security, pkiFolder, trustServer, recordTo }  tags on an OPC UA server (src/opcuaSource.mjs),
 //                                         recorded the same way
+//   { kind: 'push', hub, signals, recordTo } readings a lab's own script sends to Konjugate's push service (src/pushSource.mjs,
+//                                         docs/proposals/pushService.md), from the service's PushHub, recorded the same way
 //
 // Events, each { type, ... }: 'cycle' with what a cycle found and the session's figures, 'ended' when a recording has been played
 // through or the twin was stopped, 'error' with the reason it stopped. A detached sandbox is reached through the same host.
@@ -20,6 +22,7 @@ import { followDataLog } from './dataLogFollower.mjs';
 import { DataLogWriter } from './dataLogWriter.mjs';
 import { followMqtt } from './mqttSource.mjs';
 import { followOpcUa } from './opcuaSource.mjs';
+import { followPush } from './pushSource.mjs';
 import { WindowSession } from './windowSession.mjs';
 
 // What a window needs of a cycle, kept small: the jumps, the comparison in the window, the forecast and the trend.
@@ -113,17 +116,18 @@ export class LiveTwin {
                         .catch((error) => this.#fail(error));
                 }
             });
-        } else if (source.kind === 'mqtt' || source.kind === 'opcua') {
-            // A broker and an OPC UA server keep no history: what arrives is also written to a data log, to replay later.
+        } else if (source.kind === 'mqtt' || source.kind === 'opcua' || source.kind === 'push') {
+            // A broker, an OPC UA server and the push service keep no history: what arrives is also written to a data log, to replay
+            // later.
             let recording = null;
-            const follow = source.kind === 'mqtt' ? followMqtt : followOpcUa;
-            const label = source.kind === 'mqtt' ? 'MQTT' : 'OPC UA';
+            const follow = { mqtt: followMqtt, opcua: followOpcUa, push: (_url, options) => followPush(source.hub, options) }[source.kind];
+            const label = { mqtt: `MQTT ${source.url}`, opcua: `OPC UA ${source.url}`, push: 'Konjugate push service' }[source.kind];
             this.#source = follow(source.url, {
                 signals: source.signals, options: source.options, security: source.security, pkiFolder: source.pkiFolder, trustServer: source.trustServer,
                 onHeader: (header) => {
                     onHeader(header);
                     if (source.recordTo) {
-                        recording = DataLogWriter.create(source.recordTo, { source: `${label} ${source.url}`, epoch: header.epoch, signals: header.signals }).catch((error) => { this.#fail(error); return null; });
+                        recording = DataLogWriter.create(source.recordTo, { source: label, epoch: header.epoch, signals: header.signals }).catch((error) => { this.#fail(error); return null; });
                         this.#recording = recording;
                     }
                 },
@@ -135,7 +139,7 @@ export class LiveTwin {
             });
             this.recordedTo = source.recordTo ?? null;
         } else {
-            throw new Error('A live twin reads a followed file, a recording, an MQTT broker or an OPC UA server.');
+            throw new Error('A live twin reads a followed file, a recording, an MQTT broker, an OPC UA server or the push service.');
         }
     }
 

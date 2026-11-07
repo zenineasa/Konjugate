@@ -68,4 +68,15 @@ In the development tree (unpackaged), invoke it as `electron . --cli run ...` fr
 - `--output-csv <path>` writes a plain CSV: one `time (s)` column, then one column per state headed `Node — State (unit)`, one row per sample. This is not a separate converter reading the binary segment back out -- it calls the exact same conversion function (`resultSignalsToCsv` in `src/resultExport.mjs`) the in-app "Export CSV" button uses, so CLI and GUI output are guaranteed to agree. Pass either or both flags; if neither is given, the run still executes but nothing is written.
 - `validate` prints the validation report as JSON to stdout, exit code `0` if valid, `2` if it found blocking errors.
 
+### The push service from the command line
+
+```
+konjugate --cli serve [--port 8737] [--grpc-port 8738] [--record <file.csv>] [--inputs <signal,...>]
+konjugate --cli serve keys list
+konjugate --cli serve keys add <name> --signals <signal,...>
+konjugate --cli serve keys revoke <name>
+```
+
+`serve` runs the push service ([The push service](proposals/pushService.md), implemented in `src/pushCli.mjs`) in the foreground on the loopback address, for a lab computer with no screen: it prints the addresses, each client as it connects and the rate every ten seconds, and writes what arrives to a Konjugate data log as it comes (`pushed <time>.csv` in the current folder unless `--record` names one), with the signals named by `--inputs` as inputs and the rest measured. Ctrl+C stops it, telling each open connection why. The keys are the app's own (kept in its folder as hashes), so a key made here works in the app and the other way round; `keys add` shows the key once. `serve` refuses to start with no keys, since no script could send anything.
+
 Exit codes for `--cli` are simpler than the low-level table above, not the same values: `0` success, `2` bad usage (missing `--target-time`, an unresolvable `--configuration`, a project with no run configurations, or `validate` finding errors), `1` any runtime failure (the project couldn't be read, the engine was unavailable, the simulation itself failed, or an output path couldn't be written).

@@ -1,9 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // Writes examples/dataSources/simulatedTankRig.kjt: the model of the simulated rig (examples/dataSources/simulatedTankRig.py), to replay
-// the rig's data logs through. It is the Tank Calibration example's tank with its true values, and one change: the heater's power is a
-// shared parameter, "Heater power", instead of a fixed heat flow, because what the operator does to the rig is an input, and a
-// recording drives an input through a shared parameter's schedule (docs/connectingADataSource.md).
+// the rig's data logs through. It is the Tank Calibration example's tank with its true values, and one change: the heater's heat flow
+// is set from a shared parameter, "Heater power", instead of being fixed, because what the operator does to the rig is an input, and
+// a recording drives an input through a shared parameter's schedule (docs/connectingADataSource.md).
 //
 //   node scripts/generateTankRigModel.mjs
 
@@ -25,19 +25,15 @@ export function tankRigProject() {
     });
     // A day, at the rig's one-minute thermometer interval; a replay sets its own length from the log.
     project.runConfigurations = [{ id: 30, name: 'One day', globalTimeStep: 60, outputInterval: 60 }];
-    // The heater input now reads the shared heater power, not the heater node's fixed heat flow.
-    const heater = project.edges.find((edge) => edge.name === 'Heater input');
-    const latex = '\\frac{\\mathrm{heaterPower}}{\\mathrm{waterThermalCapacitance}}';
-    heater.equation = latex;
-    heater.equationModel = {
-        latex, output: { role: 'target', stateId: 2 },
-        bindings: [
-            { kind: 'parameter', parameterId: 12, symbol: 'heaterPower' },
-            { kind: 'parameter', parameterId: 8, symbol: 'waterThermalCapacitance' }
-        ],
-        mathJson: ['Divide', 'heaterPower', 'waterThermalCapacitance']
-    };
-    heater.parameters.push({ id: 12, name: 'Heater power', symbol: 'heaterPower', value: tankCalibration.heaterPower, unit: 'W', mode: 'constant', sharedParameterId: heaterPowerParameterId });
+    // The heater's heat flow follows the shared heater power: a state the heater node sets from it at every instant, which the
+    // heater input to the tank reads as in the Tank Calibration example. A live twin then shows the heat flow as the heater is
+    // switched, among what it infers, rather than the fixed value it would otherwise carry.
+    const heater = project.nodes.find((node) => node.name === 'Electric heater');
+    heater.sourceTerms = [{
+        id: 13, state: 'qDot', expression: 'heaterPower', setsValue: true,
+        expressionModel: { latex: '\\mathrm{heaterPower}', output: { stateId: 4 }, mathJson: 'heaterPower', bindings: [{ kind: 'parameter', parameterId: 14, symbol: 'heaterPower' }] },
+        parameters: [{ id: 14, name: 'Heater power', symbol: 'heaterPower', value: tankCalibration.heaterPower, unit: 'W', mode: 'constant', sharedParameterId: heaterPowerParameterId }]
+    }];
     // The heat loss is what changes on a real rig (insulation getting wet, a lid left open), so it is marked tunable: a live twin's
     // refit finds it, and its estimator can track it as it goes (the drifting recording's heat loss grows 10% an hour).
     const loss = project.edges.find((edge) => edge.name === 'Ambient heat loss').parameters.find((parameter) => parameter.id === heatLossParameterId);

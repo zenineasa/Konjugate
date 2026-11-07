@@ -56,7 +56,7 @@ function renderModel() {
         ...states.map(chip),
         ...(parameters.length ? [Object.assign(document.createElement('span'), { className: 'hint', textContent: ` and ${parameters.length} shared parameter${parameters.length === 1 ? '' : 's'} to drive with inputs:` }), ...parameters.map(chip)] : [])
     );
-    if (!states.length) summary.append(Object.assign(document.createElement('p'), { className: 'status warning', textContent: 'The model has no states, so there is nothing to compare with readings. Add a node with a state in the project window first.' }));
+    if (!states.length) summary.replaceChildren(Object.assign(document.createElement('p'), { className: 'status warning modelEmpty', textContent: 'The model has no states, so there is nothing to compare with readings. Add a node with a state in the project window, or try the simulated rig below.' }));
 }
 
 // ---- Step 2: the source --------------------------------------------------------------------------------------------------------
@@ -84,6 +84,7 @@ function offerLog(content, { fileName, path = null, speed = '600', demo = false 
         if (!log) return;
     }
     state.log = { content, header: log.header, observations: log.observations, fileName, path, speed, demo, logger };
+    $('#fileName').textContent = demo ? `${fileName} (a demonstration recording)` : fileName;
     state.source = { kind: 'file', fileName };
     const values = (name) => log.observations.filter((observation) => observation.signal === name && observation.quality !== 'bad').slice(0, 60).map((observation) => observation.value);
     offerSignals(log.header.signals.map((signal) => ({ id: signal.name, name: signal.name, unit: signal.unit, role: signal.role, values: values(signal.name) })));
@@ -123,6 +124,7 @@ function readOtherLogger(content, fileName, why) {
     }
 }
 
+$('#fileChoose').addEventListener('click', () => $('#fileInput').click());
 $('#fileInput').addEventListener('change', async () => {
     const file = $('#fileInput').files[0];
     if (!file) return;
@@ -130,21 +132,42 @@ $('#fileInput').addEventListener('change', async () => {
 });
 $('#fileSpeed').addEventListener('change', () => { if (state.log) state.log.speed = $('#fileSpeed').value; });
 
+// The demonstrations, one click from nothing to a twin running: the simulated rig's recording, and, with another model open, the rig's
+// model opened in the project window first (the project asks about unsaved work, as opening any project does). The rig and the rig
+// that drifts go straight into the control room once matched; a plant's names stay on the mapping, which is what they are there to
+// show.
+const rigModelOpen = () => state.candidates.some((candidate) => candidate.label === 'Water tank · Water temperature');
+
+// A demonstration whose readings are matched goes into the control room, unless it is there to show the mapping.
+function continueDemo() {
+    const variant = state.demoPending;
+    if (!variant || !rigModelOpen()) return;
+    state.demoPending = null;
+    if (variant !== 'plant' && state.rows.some((row) => row.target && row.role === 'output')) startTwin();
+}
+
 for (const button of $$('[data-demo]')) {
     button.addEventListener('click', async () => {
         try {
-            const demo = await api.liveTwin.demo(button.dataset.demo);
+            const variant = button.dataset.demo;
+            const demo = await api.liveTwin.demo(variant);
             chooseSourceTile('file');
             $('#fileSpeed').value = '600';
+            state.demoPending = variant;
             offerLog(demo.log.content, { fileName: demo.log.fileName, speed: '600', demo: true });
-            // The rig's readings against another model match nothing: its own model is one click away, opened in the project window.
-            if (!state.candidates.some((candidate) => candidate.label === 'Water tank · Water temperature')) {
-                sourceStatus('These are the simulated rig\'s readings, and this project is another model. Open the rig\'s model to compare them with it.', 'warning');
-                const open = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Open the rig\'s model' });
-                open.addEventListener('click', () => api.openDemoModel(button.dataset.demo));
-                $('#sourceStatus').append(' ', open);
+            if (rigModelOpen()) {
+                continueDemo();
+                return;
             }
+            // The rig's readings against another model match nothing: the rig's model is opened in the project window, and the
+            // readings matched to it when it comes. Should the project decline (unsaved work kept), the button does it again.
+            sourceStatus('These are the simulated rig\'s readings: opening the rig\'s model in the project window to compare them with…', 'warning');
+            const open = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Open the rig\'s model' });
+            open.addEventListener('click', () => api.openDemoModel(variant));
+            $('#sourceStatus').append(' ', open);
+            await api.openDemoModel(variant);
         } catch (error) {
+            state.demoPending = null;
             sourceStatus(`The demonstration could not be opened: ${cleanError(error)}`, 'warning');
         }
     });
@@ -547,6 +570,7 @@ api.onContext(async (context) => {
     if (state.signals.length) {
         offerSignals(state.signals);
         if (state.log) sourceStatus(`${state.log.header.signals.length} signals in ${state.log.fileName}, matched to ${context.projectName || 'the model'}.`, 'good');
+        continueDemo();
         return;
     }
     // A setup kept with the project: its source is chosen again, and its mapping comes back when the source's signals are found.
@@ -568,7 +592,10 @@ api.onModelChanged((model) => {
     state.context = { ...state.context, document: model };
     renderModel();
     if (currentTwin()?.running) modelChanged(model);
-    else if (state.signals.length && $('#room').hidden) offerSignals(state.signals);
+    else if (state.signals.length && $('#room').hidden) {
+        offerSignals(state.signals);
+        continueDemo();
+    }
 });
 
 // For the interaction tests: the chosen log's speed set to one the list does not offer, and the running twin's view.

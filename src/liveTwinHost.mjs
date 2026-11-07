@@ -49,8 +49,13 @@ export function cycleEvent(cycle, stats) {
             inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null])),
             // What was done over the move's window, for the control room's timeline of the inputs.
             inputChanges: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, inputChanges(readings.filter((reading) => reading.time >= cycle.anchor - 1e-9))])),
-            // What the twin infers of the states no sensor measures: each one's course from the anchor to the horizon, thinned.
-            inferred: Object.fromEntries(Object.entries(cycle.inferred ?? {}).map(([stateId, series]) => [stateId, thinned(series)]))
+            // What the twin infers of the states no sensor measures: each one's course from the anchor to the horizon, thinned, the
+            // window and the forecast each on its own so the value at now is sent exactly, not read between two points either side of a
+            // step.
+            inferred: Object.fromEntries(Object.entries(cycle.inferred ?? {}).map(([stateId, series]) => [stateId, [
+                ...thinned(series.filter((point) => point.time <= cycle.now + 1e-9), 50),
+                ...thinned(series.filter((point) => point.time > cycle.now + 1e-9), 30)
+            ]]))
         },
         stats
     };

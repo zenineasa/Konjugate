@@ -10,6 +10,8 @@ import { $, $$, clock, cleanError, dataTime, describeChange, element, plotLayout
 import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
 
 const keptCycles = 1000;
+// A jump or a tolerance to two figures: a difference read at a glance.
+const brief = (value) => (Number.isFinite(value) ? Number(value.toPrecision(2)).toString() : '—');
 let host = null;
 let twin = null;
 
@@ -64,6 +66,13 @@ export function initRoom(given) {
     $('#sandboxRun').addEventListener('click', () => runSandbox());
     $('#sandboxBack').addEventListener('click', () => closeSandbox());
     $('#scenariosToggle').addEventListener('click', () => { $('#scenarioList').hidden = !$('#scenarioList').hidden; });
+    $('#temperatureUnit').addEventListener('click', () => {
+        if (!twin) return;
+        twin.layout.temperature = twin.layout.temperature === 'K' ? 'C' : 'K';
+        refreshTemperatureButton();
+        saveLayout();
+        renderView();
+    });
 }
 
 // run: { settings, source, sourceLabel, logFileName, nameOf(signal) → the setup's name for it, layout, document }
@@ -89,6 +98,7 @@ export function openRoom(run) {
         sandbox: null, scenarios: []
     };
     buildTiles();
+    refreshTemperatureButton();
     $('#healthTwin').className = 'healthItem';
     $('#healthTwin').textContent = 'Starting the twin…';
     $('#healthSource').className = 'healthItem';
@@ -124,6 +134,22 @@ export function abandonRoom() {
 
 function reportStatus() {
     host.reportStatus({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad' });
+}
+
+// ---- How quantities are shown --------------------------------------------------------------------------------------------------
+// The model keeps temperatures in kelvin; a room is read in degrees Celsius unless it is set to kelvin (the °C / K button, kept with
+// the layout). at() converts a value, by() a difference (a jump, a tolerance, a spread), which a change of zero leaves alone.
+function displayOf(unit) {
+    if (unit === 'K' && twin?.layout.temperature !== 'K') return { unit: '°C', at: (value) => value - 273.15, by: (value) => value };
+    return { unit: unit ?? '', at: (value) => value, by: (value) => value };
+}
+
+function refreshTemperatureButton() {
+    const kelvin = twin.layout.temperature === 'K';
+    const any = twin.tiles.some((tile) => tile.target?.unit === 'K') || [...twin.inferred.values()].some((entry) => entry.target?.unit === 'K');
+    $('#temperatureUnit').hidden = !any;
+    $('#temperatureUnit').textContent = kelvin ? 'K' : '°C';
+    $('#temperatureUnit').title = kelvin ? 'Temperatures are shown in kelvin, as the model keeps them: show them in °C' : 'Temperatures are shown in °C: show them in kelvin, as the model keeps them';
 }
 
 // ---- Tiles, and how they are laid out ------------------------------------------------------------------------------------------
@@ -205,9 +231,10 @@ export function moveTile(name, ontoName) {
 function drawTile(tile, cycle, past) {
     if (!tile.element) return;
     const rows = cycle.window[tile.signal] ?? [];
-    const measured = [...tile.measured].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]);
+    const shownAs = displayOf(tile.target?.unit);
+    const measured = [...tile.measured].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([time, value]) => [time, shownAs.at(value)]);
     const latest = measured.at(-1)?.[1];
-    const unit = tile.target?.unit ? ` ${tile.target.unit}` : '';
+    const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
     $('.value', tile.element).textContent = `${shown(latest)}${unit}`;
     const jump = cycle.jumps?.[tile.signal]?.jump;
     const leaning = cycle.trend?.signal === tile.signal && cycle.trend.direction !== 'none';
@@ -218,8 +245,8 @@ function drawTile(tile, cycle, past) {
     const upTo = twin.cycles.filter((item) => item.index <= cycle.index);
     const jumps = upTo.map((item) => item.jumps?.[tile.signal]?.jump).filter(Number.isFinite).slice(-60);
     facts.append(
-        element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${shown(jump)}${unit}` : '—'}`),
-        element('span', { textContent: `tolerance ±${shown(tile.tolerance)}${unit}` }));
+        element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${brief(shownAs.by(jump))}${unit}` : '—'}`),
+        element('span', { textContent: `tolerance ±${brief(shownAs.by(tile.tolerance))}${unit}` }));
     if (alarm) facts.append(element('span', { textContent: 'drifting past the warning' }));
     else if (leaning) facts.append(element('span', { textContent: `leaning ${cycle.trend.direction} the readings` }));
     // An estimated signal: how many readings fell outside the band the twin expected, where about one in five is honest.
@@ -230,14 +257,14 @@ function drawTile(tile, cycle, past) {
     }
     if (!globalThis.Plotly) return;
     const hours = (points) => points.map((point) => point.time / 3600);
-    const window = rows.map((row) => ({ time: row.time, value: row.simulated }));
-    const forecast = cycle.forecast?.[tile.signal] ?? [];
+    const window = rows.map((row) => ({ time: row.time, value: shownAs.at(row.simulated) }));
+    const forecast = (cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }));
     const band = cycle.estimate?.band?.[tile.signal] ?? null;
-    const sandbox = !past ? twin.sandbox?.series?.[tile.signal] ?? null : null;
+    const sandbox = !past ? (twin.sandbox?.series?.[tile.signal] ?? null)?.map((point) => ({ time: point.time, value: shownAs.at(point.value) })) ?? null : null;
     const traces = [
         ...(band ? [
-            { type: 'scatter', mode: 'lines', x: hours(band), y: band.map((point) => point.high), line: { width: 0 }, hoverinfo: 'skip' },
-            { type: 'scatter', mode: 'lines', x: hours(band), y: band.map((point) => point.low), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
+            { type: 'scatter', mode: 'lines', name: 'Band', x: hours(band), y: band.map((point) => shownAs.at(point.high)), line: { width: 0 }, hoverinfo: 'skip', showlegend: false },
+            { type: 'scatter', mode: 'lines', name: 'Band (10–90%)', x: hours(band), y: band.map((point) => shownAs.at(point.low)), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
         ] : []),
         { type: 'scatter', mode: 'markers', name: 'Measured', x: measured.map(([time]) => time / 3600), y: measured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
         { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' } },
@@ -245,8 +272,10 @@ function drawTile(tile, cycle, past) {
         ...(sandbox ? [{ type: 'scatter', mode: 'lines', name: 'Tried', x: hours(sandbox), y: sandbox.map((point) => point.value), line: { width: 2, dash: 'dot', color: '#9b8cf0' } }] : [])
     ];
     globalThis.Plotly.react($('.plot', tile.element), traces, plotLayout({
-        margin: { l: 46, r: 10, t: 6, b: 28 },
+        margin: { l: 52, r: 10, t: 22, b: 28 },
+        showlegend: true, legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', font: { size: 10 }, bgcolor: 'rgba(0,0,0,0)' },
         xaxis: { gridcolor: '#1c2c38', zeroline: false, title: { text: 'hours', standoff: 2 } },
+        yaxis: { gridcolor: '#1c2c38', zeroline: false, title: { text: shownAs.unit, standoff: 4 } },
         shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: cycle.anchor / 3600, x1: cycle.now / 3600, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
     }), { displayModeBar: false, responsive: true });
 }
@@ -269,15 +298,22 @@ function renderInputs() {
 
 function drawInputs(cycle) {
     for (const input of twin.inputs) {
-        const readings = [...input.readings].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]);
-        const unit = input.target?.unit ? ` ${input.target.unit}` : '';
+        const shownAs = displayOf(input.target?.unit);
+        const readings = [...input.readings].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([time, value]) => [time, shownAs.at(value)]);
+        const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
         $('.latest', input.element).textContent = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
         if (!globalThis.Plotly || !readings.length) continue;
         // The last value held up to now, so a step is drawn to the present.
         const x = [...readings.map(([time]) => time / 3600), cycle.now / 3600];
         const y = [...readings.map(([, value]) => value), readings.at(-1)[1]];
+        const low = Math.min(...y);
+        const high = Math.max(...y);
+        const pad = (high - low || Math.abs(high) || 1) * 0.15;
         globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
-            plotLayout({ margin: { l: 40, r: 6, t: 4, b: 16 }, xaxis: { gridcolor: '#1c2c38', zeroline: false, showticklabels: false } }), { displayModeBar: false, responsive: true, staticPlot: true });
+            plotLayout({
+                margin: { l: 46, r: 6, t: 4, b: 16 }, xaxis: { gridcolor: '#1c2c38', zeroline: false, showticklabels: false },
+                yaxis: { gridcolor: '#1c2c38', zeroline: false, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => shown(value)) }
+            }), { displayModeBar: false, responsive: true, staticPlot: true });
     }
 }
 
@@ -315,12 +351,15 @@ function collectInferred(cycle) {
 function drawInferred(cycle) {
     const upTo = (map) => [...map].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]);
     const row = ({ name, kind, unit, history, spreads }) => {
-        const points = upTo(history);
+        const shownAs = displayOf(unit);
+        const raw = upTo(history);
+        const points = raw.map(([time, value]) => [time, shownAs.at(value)]);
         if (!points.length) return null;
         const latest = points.at(-1)[1];
         const spread = upTo(spreads).at(-1)?.[1];
-        const trend = trendOf(points);
-        const units = unit ? ` ${unit}` : '';
+        // Judged in the model's own units, since half a percent of a temperature in °C is not half a percent of it in kelvin.
+        const trend = trendOf(raw);
+        const units = shownAs.unit ? ` ${shownAs.unit}` : '';
         const number = element('div', { className: 'number', textContent: `${shown(latest)}${units}` });
         if (Number.isFinite(spread) && spread > 0) number.append(element('small', { textContent: ` ±${shown(spread)}` }));
         const made = element('div', { className: 'inferredRow' },
@@ -420,8 +459,15 @@ export function handleEvent(update) {
         for (const tile of twin.tiles) for (const row of cycle.window[tile.signal] ?? []) tile.measured.set(row.time, row.measured);
         for (const input of twin.inputs) for (const reading of cycle.inputChanges?.[input.signal] ?? []) input.readings.set(reading.time, reading.value);
         collectInferred(cycle);
-        $('#healthTwin').className = 'healthItem good';
-        $('#healthTwin').textContent = `Live · ${plural(stats.cycles, 'move')}${Number.isFinite(stats.realTimeFactor) ? ` · ${Math.round(stats.realTimeFactor).toLocaleString()}× real time` : ''}${stats.lagSeconds > 0 ? ` · ${Math.round(stats.lagSeconds / 60)} min behind` : ''}`;
+        // How the twin keeps up with the data, in words: the engine's own speed beside the speed the data arrives at reads as a
+        // contradiction, so the exact figure is kept for the tooltip.
+        const arriving = Number.isFinite(twin.run.source.speed) ? twin.run.source.speed : twin.run.source.kind === 'recording' ? Infinity : 1;
+        const headroom = Number.isFinite(stats.realTimeFactor) && Number.isFinite(arriving) ? stats.realTimeFactor / arriving : Infinity;
+        const pace = headroom >= 10 ? 'keeping up easily' : headroom >= 1.5 ? 'keeping up' : 'only just keeping up';
+        const behind = stats.lagSeconds > 2 * twin.settings.stride;
+        $('#healthTwin').textContent = `Live · ${plural(stats.cycles, 'move')} · ${behind ? `${Math.round(stats.lagSeconds / 60)} min behind the data` : pace}`;
+        $('#healthTwin').title = `The model runs ${Number.isFinite(stats.realTimeFactor) ? Math.round(stats.realTimeFactor).toLocaleString() : 'far more'} times faster than real time${Number.isFinite(arriving) ? `, and the data arrives at ${arriving}×` : ''}; a move takes ${(stats.cycleSeconds.median * 1000).toFixed(1)} ms.`;
+        $('#healthTwin').className = `healthItem ${headroom >= 1.5 && !behind ? 'good' : 'lean'}`;
         const alarm = cycle.trend?.alarm;
         $('#healthDrift').className = `healthItem ${alarm ? 'bad' : cycle.trend?.direction !== 'none' ? 'lean' : 'good'}`;
         $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : cycle.trend?.direction !== 'none' ? 'Leaning' : 'In step';

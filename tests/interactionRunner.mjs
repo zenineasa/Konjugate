@@ -4737,7 +4737,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.fill === 'tonexty')`), true, 'The forecast is drawn with its band.');
         const inferred = await evaluate(twin, `document.querySelector('#inferredRows').innerText`);
         assert.match(inferred, /Heat loss coefficient\s+a parameter, tracked\s+[\d.]+ W\/K\s*±/);
-        assert.match(inferred, /Ambient air · Temperature\s+estimated\s+[\d.]+ K\s*±/);
+        assert.match(inferred, /Ambient air · Temperature\s+estimated\s+[\d.]+ °C\s*±/);
         assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .facts').textContent`), /\d+% of readings outside the band \(about 20% is honest\)/);
         await waitFor(opened, `window.__debugTwin.setup()?.live?.corrections?.tankTemperature?.estimate === true && window.__debugTwin.setup().live.members === 12`, 'The estimate was not kept with the project.');
         await setField(twin, '#correctionRows select', 'reset');
@@ -5009,7 +5009,7 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
-    await run('the Live twin button opens the twin\'s window: with another model open, the drifting rig\'s model is one click away, and the room warns of the drift', async () => {
+    await run('the Live twin button opens the twin\'s window: with another model open, one click on the drifting rig opens its model and its control room, which warns of the drift', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-twin-'));
         const projectPath = join(directory, 'vessel.kjt');
         await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'labVessel.kjt')));
@@ -5025,16 +5025,32 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `document.querySelector('#modelSummary').textContent.length > 0`, 'The twin window did not show the model.');
         assert.equal(await evaluate(twin, `document.querySelectorAll('.sourceTiles [data-source]').length`), 4, 'Four places the readings can come from.');
 
-        // The drifting rig's readings against the vessel's model match nothing: its own model is offered, and opened in one click.
+        // The drifting rig's readings against the vessel's model match nothing: one click opens the rig's model in the project window,
+        // matches the readings to it, and goes into the control room.
         await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
-        await waitFor(twin, `/Open the rig's model/.test(document.querySelector('#sourceStatus').textContent)`, 'The rig\'s model was not offered.');
-        await evaluate(twin, `[...document.querySelectorAll('#sourceStatus button')].find((button) => button.textContent === "Open the rig's model").click()`);
         await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'simulatedTankRig'`, 'The rig\'s model did not open in the project window.', 15000);
-        await waitFor(twin, `/Water temperature/.test(document.querySelector('#modelSummary').textContent) && document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The readings were not matched to the rig\'s model.', 15000);
+        await waitFor(twin, `!document.querySelector('#room').hidden`, 'The demonstration did not go into the control room.', 15000);
+        assert.match(await evaluate(twin, `document.querySelector('#fileName').textContent`), /^simulatedTankRigDrifting\.csv \(a demonstration recording\)$/, 'The file field says what is playing.');
 
         // The control room warns once the drift passes the default warning, on the health strip and on the tile.
-        await evaluate(twin, `document.querySelector('#openRoom').click()`);
         await waitFor(twin, `document.querySelector('#healthDrift').textContent === 'Drifting past the warning'`, 'The control room did not warn of the drift.', 120000);
+        // How it keeps up, in words (the engine's own speed is in the tooltip); a legend and a unit on the tile; temperatures in °C,
+        // or in kelvin as the model keeps them.
+        assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^Live · \d+ moves · keeping up easily$/);
+        assert.match(await evaluate(twin, `document.querySelector('#healthTwin').title`), /times faster than real time, and the data arrives at 600×/);
+        const plot = `document.querySelector('#tiles .tile .plot')`;
+        assert.equal(await evaluate(twin, `${plot}.layout.showlegend`), true, 'The tile has a legend.');
+        assert.deepEqual(await evaluate(twin, `${plot}.data.filter((trace) => trace.showlegend !== false).map((trace) => trace.name)`), ['Measured', 'Model', 'Forecast']);
+        assert.equal(await evaluate(twin, `${plot}.layout.yaxis.title.text`), '°C');
+        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), /^\d+(\.\d+)? °C$/);
+        await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
+        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), /^3\d\d(\.\d+)? K$/, 'In kelvin, as the model keeps them.');
+        await waitFor(opened, `window.__debugTwin.setup()?.layout?.temperature === 'K'`, 'The choice was not kept with the project.');
+        await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
+        // The heater's heat flow follows the heater as it is switched, not the value it started at.
+        const heatFlow = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' ')).find((text) => /Heat flow/.test(text))`);
+        const heater = await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`);
+        assert.equal(heatFlow.match(/ ([\d.]+) W /)?.[1], heater.replace(/ W$/, ''), `The heat flow follows the heater: ${heatFlow}, the heater ${heater}.`);
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').classList.contains('bad')`), true);
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('bad')`), true, 'The tile says so across the room.');
         // Under the tiles: the heater's power as it was set, what the twin infers of what no sensor measures, and the events.
@@ -5042,7 +5058,7 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`), /^\d[\d.]* W$/);
         assert.equal(await evaluate(twin, `document.querySelector('#inputRows .inputRow .plot svg') !== null`), true, 'Drawn as a timeline.');
         const inferred = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' '))`);
-        assert.ok(inferred.length > 0 && inferred.every((text) => /carried by the model/.test(text) && /(steady|rising|falling)/.test(text)), 'Each unmeasured state with its value and trend.');
+        assert.ok(inferred.length > 0 && inferred.every((text) => /carried by the model/.test(text) && /(steady|rising|falling|—)/.test(text)), 'Each unmeasured state with its value and trend.');
         const events = await evaluate(twin, `[...document.querySelectorAll('#eventsList li')].map((item) => item.className + ': ' + item.innerText.replace(/\\s+/g, ' '))`);
         assert.match(events.at(-1), /^info: .*The twin started/);
         assert.ok(events.some((text) => /^good: .*The twin is live/.test(text)));
@@ -5089,7 +5105,12 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `!document.querySelector('#room').hidden && document.querySelectorAll('#tiles .tile').length === 1`, 'The control room did not open with a tile.');
         await waitFor(twin, `/^Live · \\d+ move/.test(document.querySelector('#healthTwin').textContent)`, 'The twin did not move.', 60000);
         await waitFor(twin, `Boolean(document.querySelector('#tiles .tile .plot .main-svg'))`, 'The tile was not drawn.', 15000);
-        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), / K$/, 'Shown in the model\'s unit, converted from °C.');
+        // The plant's °C readings reach the twin in kelvin, as the model keeps them, and are shown in °C again: the same reading.
+        const celsius = Number((await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`)).replace(/ °C$/, ''));
+        await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
+        const kelvin = Number((await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`)).replace(/ K$/, ''));
+        assert.ok(Number.isFinite(celsius) && Math.abs(kelvin - celsius - 273.15) < 0.05, `The same reading in both: ${celsius} °C and ${kelvin} K.`);
+        await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
         const kept = await evaluate(opened, `window.__debugTwin.setup()`);
         assert.equal(kept.source.kind, 'file');
         assert.deepEqual(kept.mapping.find((entry) => entry.source === 'TK1_TT101_PV').conversion, { scale: 1, offset: 273.15 });
@@ -5113,7 +5134,9 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
         const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
         await waitFor(twin, `/Water temperature/.test(document.querySelector('#modelSummary').textContent)`, 'The twin window did not show the model.');
-        await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
+        // The drifting rig's recording, handed over as a file would be (the demonstration button goes into the room at 600× at once).
+        const drifting = await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8');
+        await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(drifting)}, 'simulatedTankRigDrifting.csv')`);
         await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The rig\'s readings were not matched.');
         // Slow enough to work in the room while the recording plays: six hours in a little over a minute.
         await evaluate(twin, `window.__debugTwinWindow.setSpeed(300)`);

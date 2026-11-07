@@ -20,12 +20,13 @@ export function pushExamples({ host = '127.0.0.1', port = 8737, grpcPort = port 
     const pythonOpen = encrypted ? 'urllib.request.urlopen(request, context=context)' : 'urllib.request.urlopen(request)';
     return [
         {
-            id: 'rig', title: 'The simulated rig, sending a heated tank\'s readings (from the Konjugate repository)',
-            code: `# A live twin of examples/dataSources/simulatedTankRig.kjt follows it: in its tuning card, choose
-# "Replay a data log", "Or take readings a script sends", give heaterPower the role Input and
+            id: 'rig', title: 'The simulated rig, sending a heated tank\'s readings',
+            code: `# Save the demo scripts (the button above) to a folder and run this there, or run it from
+# examples/dataSources in the Konjugate repository. In Konjugate, open the Live twin on the
+# simulated rig's model, choose "A script sending readings", give heaterPower the role Input and
 # tankTemperature Measured, "Use these signals", then "Start live twin".
 # The key must be allowed to send heaterPower and tankTemperature. --speed 600 runs an hour in six seconds.
-python3 examples/dataSources/pushTankRig.py ${base} \\
+python3 pushTankRig.py ${base} \\
     --key ${key} \\${encrypted ? `
     --certificate ${certificateFile} \\` : ''}
     --speed 600`
@@ -183,13 +184,21 @@ export class ConnectionsPanel {
             port: find('pushServicePort'), grpcPort: find('pushServiceGrpcPort'), toggle: find('pushServiceToggle'), state: find('pushServiceState'),
             log: find('pushServiceLog'), keys: find('pushKeys'), keyName: find('pushKeyName'), keySignals: find('pushKeySignals'), keyAdd: find('pushKeyAdd'),
             made: find('pushKeyMade'), madeValue: find('pushKeyMadeValue'), madeCopy: find('pushKeyCopy'), keyStatus: find('pushKeyStatus'),
-            examples: find('pushExamples'), close: find('connectionsClose'),
+            examples: find('pushExamples'), close: find('connectionsClose'), saveDemo: find('pushSaveDemoScripts'), saveDemoStatus: find('pushSaveDemoStatus'),
             network: find('pushServiceNetwork'), certificate: find('pushCertificate'), certificateText: find('pushCertificateText'),
             certificateSave: find('pushCertificateSave'), certificateChoose: find('pushCertificateChoose'), certificateKonjugate: find('pushCertificateKonjugate'),
             certificateStatus: find('pushCertificateStatus')
         };
         const { port, toggle, keyAdd, madeCopy, close, examples, network, certificateSave, certificateChoose, certificateKonjugate } = this.parts;
         network.addEventListener('change', () => this.#showNetwork());
+        this.parts.saveDemo.addEventListener('click', async () => {
+            try {
+                const folder = await this.#api.saveDemoScripts();
+                if (folder) this.parts.saveDemoStatus.textContent = `Saved pushTankRig.py and simulatedTankRig.py in ${folder}. Run the command under Try it from there.`;
+            } catch (error) {
+                this.parts.saveDemoStatus.textContent = String(error.message).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+            }
+        });
         certificateSave.addEventListener('click', () => this.#certificateAction(() => this.#api.saveCertificate(), (path) => (path ? `Saved to ${path}. Give that file to the scripts that will send readings.` : '')));
         certificateChoose.addEventListener('click', () => this.#certificateAction(() => this.#api.chooseCertificate(), (info) => (info ? 'Your own certificate is used from the next start.' : ''), true));
         certificateKonjugate.addEventListener('click', () => this.#certificateAction(() => this.#api.useKonjugateCertificate(), () => 'Konjugate\'s own certificate is used from the next start.', true));

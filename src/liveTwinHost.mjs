@@ -138,6 +138,13 @@ export class LiveTwin {
                 onError: (error) => this.#fail(error)
             });
             this.recordedTo = source.recordTo ?? null;
+            // What an OPC UA server granted: the limit on how fast a change can be seen, said once the server has answered.
+            this.#source.sampling?.then((intervals) => {
+                const slowest = Math.max(...Object.values(intervals).filter((interval) => interval > 0));
+                if (!this.#stopped && Number.isFinite(slowest)) {
+                    this.#onEvent({ type: 'note', message: `The server samples these tags every ${slowest} ms or faster: a change quicker than that is not seen by any client.` });
+                }
+            });
         } else {
             throw new Error('A live twin reads a followed file, a recording, an MQTT broker, an OPC UA server or the push service.');
         }
@@ -160,10 +167,13 @@ export class LiveTwin {
             // a source that fails while stopping has nothing more to say
         }
         await this.closeSandbox();
-        await (await this.#recording)?.close().catch(() => {});
+        const writer = await this.#recording;
+        await writer?.close().catch(() => {});
         const stats = this.#session?.stats() ?? null;
         await this.#session?.close();
-        this.#onEvent({ type: 'ended', stats, reason: 'stopped', recordedTo: this.recordedTo ?? null });
+        // Readings that came after a later one (a source sending what it buffered) reached the twin, but a log's rows only go
+        // forward, so the recording could not hold them: said, not lost in silence.
+        this.#onEvent({ type: 'ended', stats, reason: 'stopped', recordedTo: this.recordedTo ?? null, recordingLate: writer?.late ?? 0 });
     }
 
     // A refit over the latest window (src/windowSession.mjs, refitPlan): the plan for the engine's fit, which the window runs.

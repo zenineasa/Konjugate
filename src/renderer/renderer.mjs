@@ -9647,6 +9647,8 @@ function clearLiveTwinView() {
     $('#liveTwinRefitResult').hidden = true;
     $('#liveTwinEstimate').hidden = true;
     $('#liveTwinEstimateRows').replaceChildren();
+    $('#liveTwinReplayRecording').hidden = true;
+    $('#liveTwinShowRecording').hidden = true;
     $('#liveTwinHonesty').textContent = '';
 }
 
@@ -9918,14 +9920,24 @@ window.engine.liveTwin?.onEvent?.((update) => {
         refreshLiveTwinChip();
         refreshLiveTwinControls();
         scheduleLiveTwinDraw();
+    } else if (update.type === 'note') {
+        // Something about the source worth knowing, such as how often an OPC UA server samples its tags.
+        twin.sourceNote = update.message;
+        $('#liveTwinNote').textContent = update.message;
     } else if (update.type === 'ended') {
         twin.running = false;
         refreshLiveTwinChip();
         twin.ended = update.reason;
         twin.recordedTo = update.recordedTo ?? null;
+        // What a broker, a server or a script sent is a data log now: one click opens it again, or shows where it is.
+        $('#liveTwinReplayRecording').hidden = !twin.recordedTo;
+        $('#liveTwinShowRecording').hidden = !twin.recordedTo;
         if (update.recordedTo) {
             const sender = { opcua: 'the server', push: 'the scripts' }[parameterTuningReplay?.source?.kind] ?? 'the broker';
-            const recorded = `What ${sender} sent is recorded in ${update.recordedTo}, to replay later.`;
+            const late = update.recordingLate
+                ? ` ${update.recordingLate} reading${update.recordingLate === 1 ? '' : 's'} came after a later one (the source sent ${update.recordingLate === 1 ? 'it' : 'them'} out of time order); the twin used ${update.recordingLate === 1 ? 'it' : 'them'}, but a log's rows only go forward, so ${update.recordingLate === 1 ? 'it is' : 'they are'} not in the recording.`
+                : '';
+            const recorded = `What ${sender} sent is recorded in ${update.recordedTo}, to replay later.${late}`;
             // A twin its source stopped keeps saying why, with where its readings are.
             status.className = twin.failure ? 'equationDiagnostics' : 'equationDiagnostics valid';
             status.textContent = twin.failure ? `The live twin stopped: ${twin.failure} ${recorded}` : `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}. ${recorded}`;
@@ -9945,6 +9957,27 @@ window.engine.liveTwin?.onEvent?.((update) => {
         refreshLiveTwinControls();
     }
 });
+
+// Opens a recording the twin made as the card's data log: replayed, calibrated on, or run as a twin again, like any other log.
+async function replayLiveTwinRecording() {
+    const path = liveTwinState?.recordedTo;
+    if (!path) return;
+    const status = $('#liveTwinStatus');
+    try {
+        const content = await window.engine.liveTwin.readRecording(path);
+        const fileName = path.split(/[\\/]/).pop();
+        await loadParameterTuningCsv(content, fileName);
+        if (parameterTuningReplay) {
+            parameterTuningReplay.path = path;
+            refreshLiveTwinControls();
+        }
+        $('#parameterTuningReplaySection').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    } catch (error) {
+        status.textContent = `The recording could not be opened: ${String(error.message).replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+    }
+}
+$('#liveTwinReplayRecording').addEventListener('click', () => replayLiveTwinRecording());
+$('#liveTwinShowRecording').addEventListener('click', () => { if (liveTwinState?.recordedTo) window.engine.liveTwin.showRecording(liveTwinState.recordedTo); });
 
 async function stopLiveTwin() {
     if (!liveTwinState) return;

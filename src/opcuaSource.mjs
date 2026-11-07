@@ -16,8 +16,10 @@
 //   - subscribing to changes and reconnecting by itself when the PLC restarts: the client's own reconnection.
 //
 // A subscription reports what the server samples, at the sampling interval it grants (often 50 to 1000 ms), not every change: a tag
-// that changes faster than that has changes no client sees. A lab's sensors read once a second or slower are sampled whole. Within
-// one notification a server groups readings by tag, not by time, so each batch is put back in time order before it is handed on.
+// that changes faster than that has changes no client sees. A lab's sensors read once a second or slower are sampled whole. The
+// interval each tag was granted is read back (`sampling`), so a person can be told the limit (tests/opcuaSource.test.mjs measures
+// it: changes 20 ms apart on a server sampling every 50 ms arrive as 18 of 40, every one from 50 ms apart). Within one notification
+// a server groups readings by tag, not by time, so each batch is put back in time order before it is handed on.
 //
 // Options: { security: 'none' | 'sign' | 'signAndEncrypt', pkiFolder, trustServer }.
 
@@ -117,7 +119,8 @@ export async function browseOpcUa(url, { maxTags = 500, maxDepth = 6, ...options
 
 // Follows tags as signals: [{ nodeId, name, role, unit, scale = 1, offset = 0 }]. A reading is timed by the server's source timestamp
 // (when the value was measured), else its server timestamp, else when it arrived; times are counted from when following began. A
-// true or false tag reads as 1 or 0. onHeader is called at once; onObservations with each batch; onError if it cannot connect.
+// true or false tag reads as 1 or 0. onHeader is called at once; onObservations with each batch; onError if it cannot connect. The
+// follower's `sampling` resolves, once the server has answered for every tag, to { signal name: the sampling interval in ms it granted }.
 export function followOpcUa(url, { signals, samplingInterval = 0, batchMilliseconds = 20, now = () => Date.now(), onHeader = () => {}, onObservations = () => {}, onError = () => {}, ...options }) {
     // On a whole second, so readings stamped on whole seconds come out as exact times, not 60.0000000000018.
     const epoch = Math.floor(now() / 1000) * 1000;
@@ -129,6 +132,8 @@ export function followOpcUa(url, { signals, samplingInterval = 0, batchMilliseco
     let client = null;
     let session = null;
     let subscription = null;
+    let granted;
+    const sampling = new Promise((resolve) => { granted = resolve; });
     const flush = () => {
         timer = null;
         if (!pending.length) return;
@@ -147,6 +152,11 @@ export function followOpcUa(url, { signals, samplingInterval = 0, batchMilliseco
             if (options.security && options.security !== 'none' && !options.trustServer && untrusted(error)) throw new OpcUaUntrustedError(url);
             throw error;
         }
+        const intervals = {};
+        const answered = (signal, item) => {
+            intervals[signal.name] = item.monitoringParameters?.samplingInterval ?? null;
+            if (Object.keys(intervals).length === signals.length) granted(intervals);
+        };
         subscription = ClientSubscription.create(session, { requestedPublishingInterval: 50, requestedLifetimeCount: 600, requestedMaxKeepAliveCount: 20, maxNotificationsPerPublish: 0, publishingEnabled: true, priority: 10 });
         for (const signal of signals) {
             // A reading that repeats the last value is still a reading: by default a server reports only a changed value or status,
@@ -154,10 +164,13 @@ export function followOpcUa(url, { signals, samplingInterval = 0, batchMilliseco
             const filter = new DataChangeFilter({ trigger: DataChangeTrigger.StatusValueTimestamp, deadbandType: DeadbandType.None, deadbandValue: 0 });
             const item = ClientMonitoredItem.create(subscription, { nodeId: signal.nodeId, attributeId: AttributeIds.Value },
                 { samplingInterval, queueSize: 10000, discardOldest: false, filter }, TimestampsToReturn.Both);
+            item.once('initialized', () => answered(signal, item));
+            item.once('err', () => answered(signal, item));
             item.on('changed', (dataValue) => {
                 const raw = dataValue.value?.value;
-                const number = typeof raw === 'boolean' ? (raw ? 1 : 0) : Number(raw);
-                if (raw === null || raw === undefined || !Number.isFinite(number)) return;
+                // Only a number or a true/false is a reading: text is not, even text that looks like a number ("" would be 0).
+                const number = typeof raw === 'boolean' ? (raw ? 1 : 0) : typeof raw === 'number' ? raw : NaN;
+                if (!Number.isFinite(number)) return;
                 const stamp = dataValue.sourceTimestamp ?? dataValue.serverTimestamp ?? new Date(now());
                 pending.push({
                     time: (stamp.getTime() - epoch) / 1000, signal: signal.name, value: number * (signal.scale ?? 1) + (signal.offset ?? 0),
@@ -171,6 +184,7 @@ export function followOpcUa(url, { signals, samplingInterval = 0, batchMilliseco
     return {
         header,
         ready: connected,
+        sampling,
         async stop() {
             await connected;
             if (timer) clearTimeout(timer);

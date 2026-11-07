@@ -462,6 +462,7 @@
             </section>
             <section class="executionConfiguration">
                 <span class="configurationSectionTitle">Sending from a script</span>
+                <div class="connectionsRow"><button id="pushSaveDemoScripts" type="button">Save the demo scripts…</button><small id="pushSaveDemoStatus">The simulated rig, to try the service without equipment: run it with the command under Try it.</small></div>
                 <div id="pushExamples" class="connectionsExamples"></div>
             </section>
             <footer><button id="connectionsClose" type="button" class="doneButton">Done</button></footer>
@@ -1223,6 +1224,8 @@
                         <button id="liveTwinStop" type="button" hidden>Stop</button>
                         <button id="liveTwinDetach" type="button" hidden title="Try your own inputs on a copy of the twin, ahead of real time">Detach and try…</button>
                         <button id="liveTwinRefit" type="button" hidden title="Fit the tunable parameters, and the tunable initial values, to the latest window">Refit on the latest window</button>
+                        <button id="liveTwinReplayRecording" type="button" hidden title="Open what the source sent as a data log, to replay it, calibrate on it or run it as a twin again">Replay this recording</button>
+                        <button id="liveTwinShowRecording" type="button" hidden>Show in folder</button>
                     </div>
                     <div id="liveTwinStatus" class="equationDiagnostics" role="status"></div>
                     <div id="liveTwinNote" class="equationDiagnostics valid" role="status"></div>

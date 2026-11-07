@@ -222,6 +222,9 @@ contextBridge.exposeInMainWorld('engine', {
         stop: () => ipcRenderer.invoke('liveTwinStop'),
         // The demonstration: the simulated rig's model and a recording of it ('steady' or 'drifting'), shipped with the app.
         demo: (variant) => ipcRenderer.invoke('liveTwinDemo', variant),
+        // A recording this twin made, read again to replay it, or shown in its folder.
+        readRecording: (path) => ipcRenderer.invoke('liveTwinReadRecording', path),
+        showRecording: (path) => ipcRenderer.invoke('liveTwinShowRecording', path),
         onEvent: (callback) => ipcRenderer.on('liveTwinEvent', (_event, update) => callback(update)),
         detach: () => ipcRenderer.invoke('liveTwinDetach'),
         refitPlan: () => ipcRenderer.invoke('liveTwinRefitPlan'),
@@ -244,6 +247,8 @@ contextBridge.exposeInMainWorld('engine', {
         saveCertificate: () => ipcRenderer.invoke('pushServiceSaveCertificate'),
         chooseCertificate: () => ipcRenderer.invoke('pushServiceChooseCertificate'),
         useKonjugateCertificate: () => ipcRenderer.invoke('pushServiceUseKonjugateCertificate'),
+        // The simulated rig's scripts, saved to a folder a person chooses, for the panel's "Try it" command.
+        saveDemoScripts: () => ipcRenderer.invoke('pushServiceSaveDemoScripts'),
         stop: () => ipcRenderer.invoke('pushServiceStop'),
         onState: (callback) => ipcRenderer.on('pushServiceState', (_event, state) => callback(state)),
         // protocol/pushReadings.proto, for a script to generate its code from.

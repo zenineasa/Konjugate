@@ -2857,8 +2857,30 @@ async function recordingPathFor(source, projectPath) {
     await mkdir(folder, { recursive: true });
     const host = source.kind === 'push' ? 'pushed' : (() => { try { return new URL(source.url).hostname || 'broker'; } catch { return 'broker'; } })();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    return join(folder, `${host.replace(/[^A-Za-z0-9-]/g, '-')} ${stamp}.csv`);
+    const path = join(folder, `${host.replace(/[^A-Za-z0-9-]/g, '-')} ${stamp}.csv`);
+    madeRecordings.add(path);
+    return path;
 }
+// The recordings this app made, which a window may open again or show in their folder; no other path is read this way.
+const madeRecordings = new Set();
+const madeRecording = (path) => {
+    if (!madeRecordings.has(path)) throw new Error('That is not a recording this live twin made.');
+    return path;
+};
+ipcMain.handle('liveTwinReadRecording', async (_event, path) => readFile(madeRecording(path), 'utf8'));
+ipcMain.handle('liveTwinShowRecording', async (_event, path) => { shell.showItemInFolder(madeRecording(path)); return true; });
+// The push service's demonstration scripts (the simulated rig, sending its readings), saved where a person chooses, so the panel's
+// command runs for someone with the installed app as well as from the repository.
+ipcMain.handle('pushServiceSaveDemoScripts', async (event) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+        title: 'Choose a folder for the demonstration scripts', properties: ['openDirectory', 'createDirectory'], buttonLabel: 'Save here'
+    });
+    if (canceled || !filePaths[0]) return null;
+    for (const name of ['pushTankRig.py', 'simulatedTankRig.py']) {
+        await writeFile(join(filePaths[0], name), await readFile(join(examplesDir, 'dataSources', name)));
+    }
+    return filePaths[0];
+});
 
 ipcMain.handle('liveTwinListen', async (_event, url, seconds) => listenToBroker(url, { seconds }));
 // The live twin's demonstration: the simulated rig's model and one of its recordings shipped with the app (six hours of a heated

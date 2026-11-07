@@ -4956,6 +4956,11 @@ export async function runInteractionTests(driver) {
             await set('#parameterTuningReplayTimeStep', '60');
             await evaluate(opened, `document.querySelector('#liveTwinStart').click()`);
             await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.cycles ?? 0) >= 3`, 'The live twin made no moves from the server.', 60000);
+            // The twin counts time from its earliest reading, the heater's, set once at the start, while the subscription starts from
+            // the temperature as the PLC has it by then: when browsing was slow (a loaded machine, an encrypted handshake) that is
+            // already more than a window and two strides later, and the first moves come at once, from the first few readings. So the
+            // test waits for twenty readings to have arrived, not for a number of moves.
+            await waitFor(opened, `(window.__debugParameterTuning.liveTwin()?.last?.window?.tankTemperature?.length ?? 0) >= 20`, 'Twenty readings did not arrive from the server.', 60000);
             await evaluate(opened, `document.querySelector('#liveTwinStop').click()`);
             await waitFor(opened, `/recorded in .*recordings/.test(document.querySelector('#liveTwinStatus').textContent)`, 'Stopping did not say where the readings were recorded.', 15000);
             const recordedTo = (await evaluate(opened, `document.querySelector('#liveTwinStatus').textContent`)).match(/recorded in (.*\.csv), to replay later/)[1];
@@ -5085,6 +5090,11 @@ export async function runInteractionTests(driver) {
             const recorded = readDataLog(await readFile(recordedTo, 'utf8'));
             assert.deepEqual(recorded.header.signals.map((signal) => signal.name), ['heaterPower', 'tankTemperature']);
             assert.ok(recorded.observations.length >= 61, `The recording holds at least the hour of readings the first move needed: ${recorded.observations.length}.`);
+            // The recording opens again in one click, as the card's data log, from MQTT's broker.
+            assert.equal(await evaluate(opened, `document.querySelector('#liveTwinReplayRecording').hidden`), false, 'A recording can be replayed.');
+            await evaluate(opened, `document.querySelector('#liveTwinReplayRecording').click()`);
+            await waitFor(opened, `/readings over .*from MQTT /.test(document.querySelector('#parameterTuningStatus').textContent)`, 'The recording did not open as the card\'s log.', 15000);
+            assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').hidden`), false, 'A recording is replayed, not followed.');
             await evaluate(opened, `window.confirm = () => true; undefined`);
             await closeWhenValidated(opened);
         } finally {

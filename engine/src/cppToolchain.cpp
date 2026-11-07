@@ -16,6 +16,9 @@
 #include <system_error>
 #include <vector>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 using ssize_t = intptr_t;
 using pid_t = int;

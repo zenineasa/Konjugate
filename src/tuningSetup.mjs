@@ -84,6 +84,8 @@ function normalizeReplaySetup(raw) {
         if (raw.live.speed === 'follow' || finitePositive(raw.live.speed) || raw.live.speed === 'Infinity') live.speed = String(raw.live.speed);
         // The estimator's ensemble size, and how far each state may drift in an hour beyond what the model says.
         if (Number.isInteger(raw.live.members) && raw.live.members >= 4 && raw.live.members <= 1000) live.members = raw.live.members;
+        // The drift warning, in the first measured signal's unit a move; 0 for none.
+        if (typeof raw.live.alert === 'number' && Number.isFinite(raw.live.alert) && raw.live.alert >= 0) live.alert = raw.live.alert;
         const drift = Object.entries(raw.live.drift && typeof raw.live.drift === 'object' ? raw.live.drift : {})
             .filter(([stateId, value]) => /^\d+$/.test(stateId) && finitePositive(value)).map(([stateId, value]) => [stateId, Number(value)]);
         if (drift.length) live.drift = Object.fromEntries(drift);

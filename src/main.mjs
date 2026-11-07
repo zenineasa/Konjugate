@@ -2861,6 +2861,17 @@ async function recordingPathFor(source, projectPath) {
 }
 
 ipcMain.handle('liveTwinListen', async (_event, url, seconds) => listenToBroker(url, { seconds }));
+// The live twin's demonstration: the simulated rig's model and one of its recordings shipped with the app (six hours of a heated
+// tank, steady or with a heat loss that grows 10% an hour), so a person sees a twin running with one click and no equipment.
+ipcMain.handle('liveTwinDemo', async (_event, variant = 'steady') => {
+    const folder = join(examplesDir, 'dataSources');
+    const logFileName = variant === 'drifting' ? 'simulatedTankRigDrifting.csv' : 'simulatedTankRig.csv';
+    return {
+        project: await decodeProjectForRenderer(await readFile(join(folder, 'simulatedTankRig.kjt'))),
+        projectFileName: 'simulatedTankRig.kjt',
+        log: { content: await readFile(join(folder, logFileName), 'utf8'), fileName: logFileName }
+    };
+});
 // Konjugate's own OPC UA certificate, and the servers it has been told to trust, in the app's own folder.
 const opcUaPkiFolder = () => join(app.getPath('userData'), 'opcua-pki');
 ipcMain.handle('liveTwinBrowseOpcUa', async (_event, url, security, trustServer) => {

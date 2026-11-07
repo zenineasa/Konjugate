@@ -2055,6 +2055,19 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .connectionsExample pre { max-height: 260px; margin: 0; padding: 8px; overflow: auto; border-top: 1px solid #1f313b; }
 .connectionsExample code { color: #c8d6dc; font-size: 8px; line-height: 1.5; white-space: pre; }
 /* The live twin's estimate (docs/proposals/stateEstimator.md): each state's estimate and spread, and how far it may drift. */
+/* The tuning card opened as a live twin: the tuning goals give way to what a twin is, a try with the simulated rig, and the sources. */
+.parameterTuning.liveTwinMode #parameterTuningGoal, .parameterTuning.liveTwinMode #parameterTuningGoalHint, .parameterTuning.liveTwinMode .geometrySourceButton { display: none; }
+.liveTwinIntro[hidden], #liveTwinButton[hidden], .liveTwinChip[hidden] { display: none; }
+/* In a twin the source tiles stand for the sources below, so each one's part shows only once its tile has been chosen. */
+.parameterTuning.liveTwinMode .parameterTuningMqtt:not([open]) { display: none; }
+.liveTwinTry { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.liveTwinTry button { height: 30px; padding: 0 12px; border-radius: 5px; font-size: 9px; }
+.liveTwinSources { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin-top: 6px; }
+.liveTwinSources button { display: grid; gap: 3px; padding: 9px 10px; color: #c8d6dc; text-align: left; background: #0b171f; border: 1px solid #2c404b; border-radius: 5px; cursor: pointer; }
+.liveTwinSources button:hover, .liveTwinSources button[aria-pressed="true"] { background: rgb(66 201 188 / 7%); border-color: #47736f; }
+.liveTwinSources strong { font-size: 9px; font-weight: 600; }
+.liveTwinSources small { color: #718691; font-size: 7px; line-height: 1.35; }
+.liveTwinChip.failed i { background: #e0a14c; box-shadow: 0 0 8px rgb(224 161 76 / 60%); }
 .liveTwinEstimate { margin-top: 10px; }
 .liveTwinEstimate[hidden], #liveTwinMembersField[hidden] { display: none; }
 .liveTwinEstimate h4 { margin: 0 0 4px; color: #b8c7ce; font-size: 9px; }

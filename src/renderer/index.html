@@ -634,6 +634,9 @@
                 <button id="causalInferenceButton" class="squareTool" type="button" aria-controls="causalInference" aria-label="Causal inference" data-tooltip="Causal inference">
                     <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="4" cy="11.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="4.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.6 10l4.8-4.2M7.2 5.6l3.3.2-.3 3.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
+                <button id="liveTwinButton" class="squareTool" type="button" aria-controls="parameterTuning" aria-label="Live twin: keep this model in step with a real system's readings" data-tooltip="Live twin" hidden>
+                    <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 8.5h3l1.5-4 2.5 8 2-6 1 2h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
                 <button id="parameterTuningButton" class="squareTool" type="button" aria-controls="parameterTuning" aria-label="Parameter tuning" data-tooltip="Parameter tuning">
                     <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 5h3m3 0h5M2.5 11h6m3 0h2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="5" r="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
                 </button>
@@ -662,6 +665,7 @@
             </div>
         </div>
         <div class="toolSpacer"></div>
+        <button id="liveTwinChip" class="simulationReadout tuningChip liveTwinChip" type="button" hidden title="A live twin is running: open it"><i></i><span id="liveTwinChipText">Live twin</span></button>
         <button id="pushServiceChip" class="simulationReadout tuningChip pushServiceChip" type="button" hidden title="The push service is listening: open the Connections panel"><i></i><span id="pushServiceChipText">Listening</span></button>
         <button id="parameterTuningChip" class="simulationReadout tuningChip" type="button" hidden title="Parameter tuning is running: open it"><i></i><span id="parameterTuningChipText">Tuning</span></button>
         <button id="validationSummary" class="simulationReadout" type="button" aria-expanded="false" aria-controls="validationPanel"><i></i><span id="statusText">Model ready</span></button>
@@ -1044,8 +1048,25 @@
         </div>
 
         <div id="parameterTuning" class="contextCard editorCard parameterTuning hidden">
-            <header><div><span class="contextKicker">Analysis</span><strong>Parameter tuning</strong></div><button data-close-card type="button">×</button></header>
+            <header><div><span id="parameterTuningKicker" class="contextKicker">Analysis</span><strong id="parameterTuningTitle">Parameter tuning</strong></div><button data-close-card type="button">×</button></header>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <!-- The card opened as a live twin (the Live twin button): what it is, a one-click try with the simulated rig, and where the
+                 readings can come from, each tile leading to that source below. -->
+            <section id="liveTwinIntro" class="liveTwinIntro" hidden>
+                <p class="builderHint">A live twin keeps this model in step with a real system as its readings arrive. At every move it corrects the model to the latest readings, forecasts what comes next, and tells you when the real system starts drifting away from the model.</p>
+                <div class="liveTwinTry">
+                    <button id="liveTwinTryDemo" type="button" class="doneButton">▶ Try it with the simulated rig</button>
+                    <button id="liveTwinTryDrifting" type="button" title="The same rig, but its heat loss grows 10% an hour: watch the twin notice">Try a rig that drifts</button>
+                </div>
+                <p class="builderHint">Opens a heated-tank model and plays six hours of its recorded readings in about a minute. Nothing to install; your current project is asked about first if it has unsaved changes.</p>
+                <h3>Or connect your own readings</h3>
+                <div class="liveTwinSources" role="group" aria-label="Where the readings come from">
+                    <button type="button" data-live-source="file"><strong>A log file</strong><small>one a logger is writing, or a finished recording</small></button>
+                    <button type="button" data-live-source="mqtt"><strong>An MQTT broker</strong><small>topics your instruments publish to</small></button>
+                    <button type="button" data-live-source="opcua"><strong>An OPC UA server</strong><small>a PLC, or the gateway in front of your instruments</small></button>
+                    <button type="button" data-live-source="push"><strong>A script sending readings</strong><small>from this computer or over the network, encrypted</small></button>
+                </div>
+            </section>
             <section>
                 <div id="parameterTuningGoal" class="parameterTuningGoal" role="group" aria-label="What to tune for">
                     <button id="parameterTuningGoalData" type="button" aria-pressed="true">Match measured data</button>
@@ -1186,6 +1207,7 @@
                         <label class="editorField"><span>Window (min)</span><input id="liveTwinWindow" type="number" min="0" step="any" value="60"></label>
                         <label class="editorField"><span>Moves every (min)</span><input id="liveTwinStride" type="number" min="0" step="any" value="10"></label>
                         <label class="editorField"><span>Forecast (min)</span><input id="liveTwinHorizon" type="number" min="0" step="any" value="60"></label>
+                        <label class="editorField" title="When the model's corrections keep to one side by more than this on average, the real system is drifting away from the model: the twin warns you, on the card and on its chip in the toolbar. Empty for no warning."><span id="liveTwinAlertLabel">Warn when it drifts by (a move)</span><input id="liveTwinAlert" type="number" min="0" step="any" placeholder="no warning"></label>
                         <label id="liveTwinMembersField" class="editorField" hidden title="How many copies of the model the estimator runs side by side: more is steadier and slower"><span>Ensemble members</span><input id="liveTwinMembers" type="number" min="4" max="1000" step="1" value="32"></label>
                         <label class="editorField"><span>Data arrives</span><select id="liveTwinSpeed">
                             <option value="follow">As the file grows</option>

@@ -220,6 +220,8 @@ contextBridge.exposeInMainWorld('engine', {
         // An OPC UA server's tags, or { untrusted, message } for a server whose certificate is not trusted yet.
         browseOpcUa: (url, security, trustServer) => ipcRenderer.invoke('liveTwinBrowseOpcUa', url, security, trustServer),
         stop: () => ipcRenderer.invoke('liveTwinStop'),
+        // The demonstration: the simulated rig's model and a recording of it ('steady' or 'drifting'), shipped with the app.
+        demo: (variant) => ipcRenderer.invoke('liveTwinDemo', variant),
         onEvent: (callback) => ipcRenderer.on('liveTwinEvent', (_event, update) => callback(update)),
         detach: () => ipcRenderer.invoke('liveTwinDetach'),
         refitPlan: () => ipcRenderer.invoke('liveTwinRefitPlan'),

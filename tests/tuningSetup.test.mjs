@@ -54,3 +54,11 @@ test('a live twin\'s estimate is kept with its noise, and the estimator\'s size 
     assert.deepEqual(setup.replay.live.drift, { 3: 0.001 });
     assert.equal(normalizeTuningSetup({ goal: 'replay', replay: { logFileName: 'a', mapping: [], live: { members: 2 } } }).replay.live.members, undefined, 'An ensemble too small to estimate with is dropped.');
 });
+
+test('a live twin\'s drift warning is kept in its signal\'s unit, none as 0, and a value that is not one dropped', () => {
+    const kept = (alert) => normalizeTuningSetup({ goal: 'replay', replay: { logFileName: 'a', mapping: [], live: { alert } } }).replay.live.alert;
+    assert.equal(kept(0.35), 0.35);
+    assert.equal(kept(0), 0, 'No warning is a choice, kept as 0.');
+    assert.equal(kept(-1), undefined);
+    assert.equal(kept('0.3'), undefined);
+});

@@ -8901,14 +8901,95 @@ function openParameterTuning() {
     if (activeResult) return;
     hideCards($('#parameterTuning'));
     // A fit still running keeps its card as it was; only a fresh one starts from nothing.
-    if (!parameterTuningRun) {
+    if (!parameterTuningRun && !liveTwinState?.running) {
         resetParameterTuning();
         applySavedTuningSetup();
     }
+    setTuningCardMode('tuning');
+    $('#parameterTuning').classList.remove('hidden');
+}
+
+// The card serves two things a person looks for by different names: tuning a model's parameters, and running it as a live twin.
+// Opened as a live twin (its own button), it is titled so, the tuning goals give way to what a twin is, a one-click try with the
+// simulated rig, and the places readings can come from; underneath it is the replay goal, which is what a twin runs on.
+function setTuningCardMode(mode) {
+    const twin = mode === 'twin';
+    $('#parameterTuning').classList.toggle('liveTwinMode', twin);
+    $('#liveTwinIntro').hidden = !twin;
+    $('#parameterTuningKicker').textContent = twin ? 'Digital twin' : 'Analysis';
+    $('#parameterTuningTitle').textContent = twin ? 'Live twin' : 'Parameter tuning';
+    // Nothing is being set up to cancel in a twin: the card is only closed (a running twin goes on, its chip in the toolbar).
+    if (!parameterTuningRun) $('#cancelParameterTuning').textContent = twin ? 'Close' : 'Cancel';
+}
+
+function openLiveTwin() {
+    if (activeResult) return;
+    hideCards($('#parameterTuning'));
+    if (!parameterTuningRun && !liveTwinState?.running) {
+        resetParameterTuning();
+        applySavedTuningSetup();
+    }
+    setTuningCardMode('twin');
+    if (parameterTuningGoal !== 'replay') switchParameterTuningGoal('replay');
     $('#parameterTuning').classList.remove('hidden');
 }
 
 $('#parameterTuningButton').addEventListener('click', openParameterTuning);
+$('#liveTwinButton').addEventListener('click', openLiveTwin);
+$('#liveTwinChip').addEventListener('click', openLiveTwin);
+
+// Where the readings come from: a log file is chosen at once; a broker, a server or a script opens its own part of the card.
+for (const tile of $$('[data-live-source]')) {
+    tile.addEventListener('click', () => {
+        for (const other of $$('[data-live-source]')) other.setAttribute('aria-pressed', String(other === tile));
+        const kind = tile.dataset.liveSource;
+        if (kind === 'file') {
+            $('#parameterTuningFile').click();
+            return;
+        }
+        const sections = { mqtt: '#parameterTuningMqtt', opcua: '#parameterTuningOpcUa', push: '#parameterTuningPush' };
+        for (const [name, selector] of Object.entries(sections)) $(selector).open = name === kind;
+        $(sections[kind]).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+}
+
+// The demonstration (docs/connectingADataSource.md, "Running a log as a live twin"): the simulated rig's model, and six hours of its
+// recorded readings played at 600× (about a minute), steady or with a heat loss that grows; one click from nothing to a twin running.
+async function runLiveTwinDemo(variant) {
+    if (simulationRunning || !liveTwinAvailable()) return;
+    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
+    const status = $('#liveTwinStatus');
+    try {
+        if (liveTwinState?.running) await stopLiveTwin();
+        const demo = await window.engine.liveTwin.demo(variant);
+        await loadProjectDocument(JSON.parse(demo.project.content), { fileName: demo.projectFileName, saved: false });
+        openLiveTwin();
+        await loadParameterTuningCsv(demo.log.content, demo.log.fileName);
+        $('#liveTwinSpeed').value = '600';
+        await startLiveTwin();
+        $('#liveTwin').scrollIntoView({ block: 'start', behavior: 'smooth' });
+        $('#statusText').textContent = variant === 'drifting' ? 'Live twin demonstration: a rig that drifts' : 'Live twin demonstration: the simulated rig';
+    } catch (error) {
+        status.className = 'equationDiagnostics';
+        status.textContent = `The demonstration could not start: ${String(error.message).replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+    }
+}
+$('#liveTwinTryDemo').addEventListener('click', () => runLiveTwinDemo('steady'));
+$('#liveTwinTryDrifting').addEventListener('click', () => runLiveTwinDemo('drifting'));
+$('#liveTwinButton').hidden = !window.engine.liveTwin?.available;
+
+// The twin's chip in the toolbar while it runs, so a person sees it is alive with the card closed, and sees at once when the real
+// system drifts past the warning they set.
+function refreshLiveTwinChip() {
+    const twin = liveTwinState;
+    const chip = $('#liveTwinChip');
+    chip.hidden = !twin?.running;
+    if (!twin?.running) return;
+    const alarm = Boolean(twin.cycles.at(-1)?.trend?.alarm);
+    chip.classList.toggle('failed', alarm);
+    $('#liveTwinChipText').textContent = alarm ? 'Live twin: drifting' : `Live twin · ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}`;
+    chip.title = alarm ? 'The real system is drifting away from the model past the warning you set: open the live twin' : 'A live twin is running: open it';
+}
 
 function renderParameterTuningMapping() {
     const container = $('#parameterTuningMappingRows');
@@ -9212,6 +9293,7 @@ function openParameterTuningReplay(log, { content = null, fileName = '', note = 
     // an estimate ({ estimate: true, noise }); and, for the estimator, how far a state may drift in an hour (stateId -> value).
     const corrections = new Map(mapping.filter((entry) => entry.role === 'output').map((entry) => [entry.signal, 1]));
     parameterTuningReplay = { content, fileName, log, targets, mapping, tolerances, corrections, estimatorDrift: new Map(), lastRun: null, running: false, path: null, source };
+    defaultLiveTwinAlert(parameterTuningReplay);
     $('#parameterTuningReplayTimeStep').value = String(suggestedReplayTimeStep(document_, log.observations, mapping));
     applySavedReplaySetup(parameterTuningReplay);
     // Not first and last: a correction comes later in the file than the row it corrects.
@@ -9363,6 +9445,15 @@ function correctionChoice(replay, entry) {
     return label;
 }
 
+// The drift warning starts at a quarter of the first measured signal's tolerance a move, in its unit, so a twin warns out of the box;
+// a saved setup's own value (or none) is put back after this.
+function defaultLiveTwinAlert(replay) {
+    const first = replay.mapping.find((entry) => entry.role === 'output');
+    const tolerance = first ? replay.tolerances.get(first.signal) : null;
+    $('#liveTwinAlertLabel').textContent = `Warn when it drifts by (${first?.unit ? `${first.unit} ` : ''}a move)`;
+    $('#liveTwinAlert').value = tolerance > 0 ? String(Number((tolerance / 4).toPrecision(2))) : '';
+}
+
 // The estimator's own setting, the ensemble's size, is offered once a signal is estimated.
 function refreshEstimatorFields() {
     const replay = parameterTuningReplay;
@@ -9467,7 +9558,8 @@ function rememberReplaySetup() {
             corrections: Object.fromEntries(replay.corrections),
             live: {
                 window: Number($('#liveTwinWindow').value), stride: Number($('#liveTwinStride').value), horizon: Number($('#liveTwinHorizon').value), speed: $('#liveTwinSpeed').value,
-                members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift ?? [])
+                members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift ?? []),
+                alert: $('#liveTwinAlert').value.trim() === '' ? 0 : Number($('#liveTwinAlert').value)
             }
         }
     });
@@ -9501,6 +9593,7 @@ function applySavedReplaySetup(replay) {
     if (saved.live?.horizon) $('#liveTwinHorizon').value = String(saved.live.horizon);
     if (saved.live?.speed && [...$('#liveTwinSpeed').options].some((option) => option.value === saved.live.speed)) $('#liveTwinSpeed').value = saved.live.speed;
     if (saved.live?.members) $('#liveTwinMembers').value = String(saved.live.members);
+    if (saved.live && saved.live.alert !== undefined) $('#liveTwinAlert').value = saved.live.alert > 0 ? String(saved.live.alert) : '';
     for (const [stateId, drift] of Object.entries(saved.live?.drift ?? {})) {
         if (replay.targets.states.some((state) => state.stateId === Number(stateId))) replay.estimatorDrift.set(Number(stateId), drift);
     }
@@ -9724,7 +9817,13 @@ async function startLiveTwin() {
         timeStep: Number($('#parameterTuningReplayTimeStep').value),
         tolerances: Object.fromEntries(replay.tolerances),
         corrections: Object.fromEntries([...replay.corrections].filter(([, value]) => value !== 1).map(([signal, value]) => [signal, typeof value === 'object' ? { ...value } : { gain: value }])),
-        estimator: { members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift) }
+        estimator: { members: Number($('#liveTwinMembers').value), drift: Object.fromEntries(replay.estimatorDrift) },
+        // The warning, given in the first measured signal's unit a move, as the window takes it: a multiple of that signal's tolerance.
+        alertAt: (() => {
+            const amount = Number($('#liveTwinAlert').value);
+            const tolerance = replay.tolerances.get(outputs[0]?.signal);
+            return $('#liveTwinAlert').value.trim() !== '' && amount > 0 && tolerance > 0 ? amount / tolerance : null;
+        })()
     };
     const logger = replay.source?.kind === 'logger' ? replay.source.settings : undefined;
     const source = replay.source?.kind === 'mqtt' ? { kind: 'mqtt', url: replay.source.url, signals: replay.source.signals }
@@ -9734,6 +9833,7 @@ async function startLiveTwin() {
             : { kind: 'recording', content: replay.content, speed: speedChoice === 'Infinity' ? Infinity : Number(speedChoice), logger };
     clearLiveTwinView();
     liveTwinState = { running: true, cycles: [], measured: new Map(outputs.map((entry) => [entry.signal, new Map()])), outputs, settings, sandbox: null, lastDrawAt: 0, drawTimer: null, ended: null };
+    refreshLiveTwinChip();
     rememberReplaySetup();
     refreshLiveTwinControls();
     status.className = 'equationDiagnostics';
@@ -9754,7 +9854,7 @@ function liveTwinTrendText(trend, unit) {
     return {
         text: `The model has lately been predicting ${trend.direction === 'above' ? 'above' : 'below'} the measurements, by ${amount} a move on average`
             + ` (changing by ${trend.slopePerHour.toPrecision(2)}${unit ? ` ${unit}` : ''} an hour). Something in the real system may be drifting away from the model.`
-            + (trend.alarm ? ' This has passed the alert you set.' : ''),
+            + (trend.alarm ? ' This has passed the warning you set.' : ''),
         leaning: true
     };
 }
@@ -9815,10 +9915,12 @@ window.engine.liveTwin?.onEvent?.((update) => {
         $('#liveTwinTrend').classList.toggle('leaning', trend.leaning);
         if (cycle.observed) $('#liveTwinObserved').textContent = liveTwinObservedText(cycle);
         renderLiveTwinEstimate(twin, cycle);
+        refreshLiveTwinChip();
         refreshLiveTwinControls();
         scheduleLiveTwinDraw();
     } else if (update.type === 'ended') {
         twin.running = false;
+        refreshLiveTwinChip();
         twin.ended = update.reason;
         twin.recordedTo = update.recordedTo ?? null;
         if (update.recordedTo) {
@@ -9837,6 +9939,7 @@ window.engine.liveTwin?.onEvent?.((update) => {
     } else if (update.type === 'error') {
         twin.running = false;
         twin.failure = update.message;
+        refreshLiveTwinChip();
         status.className = 'equationDiagnostics';
         status.textContent = `The live twin stopped: ${update.message}`;
         refreshLiveTwinControls();
@@ -9849,6 +9952,7 @@ async function stopLiveTwin() {
     if (twin.sandbox) await returnFromSandbox();
     if (twin.running) await window.engine.liveTwin.stop();
     twin.running = false;
+    refreshLiveTwinChip();
     if (liveTwinState === twin) {
         $('#liveTwinStatus').textContent = `Stopped after ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}.`
             + (twin.recordedTo ? ` What the broker sent is recorded in ${twin.recordedTo}, to replay later.` : '');
@@ -10703,7 +10807,7 @@ function setParameterTuningRunning(running) {
     $('#stopParameterTuning').disabled = false;
     $('#applyBestParameterTuning').disabled = false;
     $('#stopParameterTuning').textContent = 'Stop and use best so far';
-    $('#cancelParameterTuning').textContent = running ? 'Discard' : 'Cancel';
+    $('#cancelParameterTuning').textContent = running ? 'Discard' : $('#parameterTuning').classList.contains('liveTwinMode') ? 'Close' : 'Cancel';
     $('#cancelParameterTuning').title = running ? 'End the search and keep nothing' : '';
     $('#parameterTuningChip').hidden = !running;
     $('#parameterTuningProgressTitle').textContent = running ? 'Fitting…' : 'Fit';
@@ -10976,7 +11080,8 @@ $('#cancelParameterTuning').addEventListener('click', () => {
         window.engine.discardFit?.();
         setParameterTuningRunning(false);
     }
-    resetParameterTuning();
+    // A running live twin goes on with the card closed (its chip in the toolbar brings it back as it was).
+    if (!liveTwinState?.running) resetParameterTuning();
     $('#parameterTuning').classList.add('hidden');
 });
 

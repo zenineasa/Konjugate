@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { playRecording } from '../src/liveTwinHost.mjs';
+import { inputChanges, playRecording, thinned } from '../src/liveTwinHost.mjs';
 
 const log = [
     '# konjugate data log: 1', '# time: seconds since start', '# inputs: u', '# outputs: y', 'time,u [-],y [-]',
@@ -41,4 +41,18 @@ test('as fast as it can go, the whole recording arrives at once', () => {
     playRecording(log, Infinity, { onHeader: () => {}, onObservations: (observations) => arrived.push(observations.length), onEnd: () => { ended = true; } });
     assert.deepEqual(arrived, [6]);
     assert.equal(ended, true);
+});
+
+test('a series sent to the control room is thinned, its first and last points kept', () => {
+    const series = Array.from({ length: 1000 }, (_, index) => ({ time: index, value: index * 2 }));
+    const few = thinned(series, 80);
+    assert.equal(few.length, 80);
+    assert.deepEqual([few[0], few.at(-1)], [series[0], series.at(-1)]);
+    assert.equal(thinned(series.slice(0, 5), 80).length, 5, 'A short series is sent whole.');
+});
+
+test('an input is sent as its changes: each step\'s first reading', () => {
+    const readings = [0, 0, 0, 5, 5, 2, 2, 2].map((value, time) => ({ time, value }));
+    assert.deepEqual(inputChanges(readings), [{ time: 0, value: 0 }, { time: 3, value: 5 }, { time: 5, value: 2 }]);
+    assert.deepEqual(inputChanges([]), []);
 });

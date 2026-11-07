@@ -68,4 +68,17 @@ for (const [index, cycle] of planted.entries()) {
     largest = Math.max(largest, ...cycle.restored.values.map((value, position) => Math.abs(value - other.restored.values[position])));
 }
 assert.ok(largest < 1e-9, `The twin's states agree with the rig's own recording's to ${largest}.`);
+// What the twin infers: every state no sensor measures, from its anchor to the horizon, in each move and in the event the room reads.
+const unmeasured = replayTargets(document).states.filter((state) => !mapping.some((entry) => entry.stateId === state.stateId));
+assert.ok(unmeasured.length > 0, 'The rig has states no sensor measures.');
+const lastCycle = planted.at(-1);
+for (const state of unmeasured) {
+    const series = lastCycle.inferred[state.stateId];
+    assert.equal(series[0].time, lastCycle.anchor);
+    assert.ok(series.at(-1).time >= lastCycle.now + 3600 - 1e-9 && series.every((point) => Number.isFinite(point.value)), `${state.label} is followed to the horizon.`);
+}
+const sent = events.filter((event) => event.type === 'cycle').at(-1).cycle;
+assert.deepEqual(Object.keys(sent.inferred).map(Number).sort(), unmeasured.map((state) => state.stateId).sort(), 'The room is sent each of them.');
+assert.ok(Object.values(sent.inferred).every((series) => series.length <= 80), 'Thinned for sending.');
+assert.ok(sent.inputChanges.TK1_JI101_PV.length > 0 && sent.inputChanges.TK1_JI101_PV.every((reading, index, all) => index === 0 || reading.value !== all[index - 1].value), 'The heater\'s power is sent as its changes.');
 console.log(`A twin set up from a plant's names: TK1_TT101_PV (°C) and TK1_JI101_PV (kW) matched by the suggestions with their conversions, ${planted.length} moves, the same as from the rig's own recording (largest difference ${largest.toExponential(1)}).`);

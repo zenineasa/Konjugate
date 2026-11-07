@@ -26,6 +26,19 @@ import { followPush } from './pushSource.mjs';
 import { WindowSession } from './windowSession.mjs';
 
 // What a window needs of a cycle, kept small: the jumps, the comparison in the window, the forecast and the trend.
+// A series cut down to at most `most` points, its first and last kept: enough to draw, light enough to send at every move.
+export function thinned(series, most = 80) {
+    if (series.length <= most) return series;
+    const step = (series.length - 1) / (most - 1);
+    return Array.from({ length: most }, (_, index) => series[Math.round(index * step)]);
+}
+
+// An input's readings where its value changes (what was done, and when), each step's first reading kept; at most `most` of them.
+export function inputChanges(readings, most = 400) {
+    const changes = readings.filter((reading, index) => index === 0 || reading.value !== readings[index - 1].value);
+    return thinned(changes, most);
+}
+
 export function cycleEvent(cycle, stats) {
     return {
         type: 'cycle',
@@ -33,7 +46,11 @@ export function cycleEvent(cycle, stats) {
             index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, wallSeconds: cycle.wallSeconds,
             corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null, estimate: cycle.estimate ?? null,
             // Each input's last reading up to now, for a sandbox to start its controls from.
-            inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null]))
+            inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null])),
+            // What was done over the move's window, for the control room's timeline of the inputs.
+            inputChanges: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, inputChanges(readings.filter((reading) => reading.time >= cycle.anchor - 1e-9))])),
+            // What the twin infers of the states no sensor measures: each one's course from the anchor to the horizon, thinned.
+            inferred: Object.fromEntries(Object.entries(cycle.inferred ?? {}).map(([stateId, series]) => [stateId, thinned(series)]))
         },
         stats
     };

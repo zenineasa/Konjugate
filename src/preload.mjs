@@ -226,6 +226,9 @@ contextBridge.exposeInMainWorld('engine', {
         // changes in the setup comes back to be kept with the project; it may ask for the Connections panel, or a demonstration's model.
         openWindow: (context) => ipcRenderer.invoke('twinOpenWindow', context),
         onSetupChanged: (callback) => ipcRenderer.on('twinSetupChanged', (_event, setup) => callback(setup)),
+        // The twin window's own twin: its status for the toolbar chip, and the window brought to the front.
+        onStatusChanged: (callback) => ipcRenderer.on('twinStatusChanged', (_event, status) => callback(status)),
+        focusWindow: () => ipcRenderer.invoke('twinFocusWindow'),
         onOpenConnections: (callback) => ipcRenderer.on('twinOpenConnections', () => callback()),
         onLoadDemoModel: (callback) => ipcRenderer.on('twinLoadDemoModel', (_event, variant) => callback(variant)),
         // A recording this twin made, read again to replay it, or shown in its folder.

@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('twin', Object.freeze({
     // The setup, handed to the project window to be kept with the project.
     saveSetup: (setup) => ipcRenderer.invoke('twinSaveSetup', setup),
     openConnections: () => ipcRenderer.invoke('twinOpenConnections'),
+    // The twin's status, for the project window's toolbar chip.
+    reportStatus: (status) => ipcRenderer.invoke('twinStatus', status),
     // The simulated rig's model opened in the project window, for a demonstration; the window's context follows.
     openDemoModel: (variant) => ipcRenderer.invoke('twinOpenDemoModel', variant),
     memory: Object.freeze({

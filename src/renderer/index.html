@@ -1051,23 +1051,6 @@
         <div id="parameterTuning" class="contextCard editorCard parameterTuning hidden">
             <header><div><span id="parameterTuningKicker" class="contextKicker">Analysis</span><strong id="parameterTuningTitle">Parameter tuning</strong></div><button data-close-card type="button">×</button></header>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
-            <!-- The card opened as a live twin (the Live twin button): what it is, a one-click try with the simulated rig, and where the
-                 readings can come from, each tile leading to that source below. -->
-            <section id="liveTwinIntro" class="liveTwinIntro" hidden>
-                <p class="builderHint">A live twin keeps this model in step with a real system as its readings arrive. At every move it corrects the model to the latest readings, forecasts what comes next, and tells you when the real system starts drifting away from the model.</p>
-                <div class="liveTwinTry">
-                    <button id="liveTwinTryDemo" type="button" class="doneButton">▶ Try it with the simulated rig</button>
-                    <button id="liveTwinTryDrifting" type="button" title="The same rig, but its heat loss grows 10% an hour: watch the twin notice">Try a rig that drifts</button>
-                </div>
-                <p class="builderHint">Opens a heated-tank model and plays six hours of its recorded readings in about a minute. Nothing to install; your current project is asked about first if it has unsaved changes.</p>
-                <h3>Or connect your own readings</h3>
-                <div class="liveTwinSources" role="group" aria-label="Where the readings come from">
-                    <button type="button" data-live-source="file"><strong>A log file</strong><small>one a logger is writing, or a finished recording</small></button>
-                    <button type="button" data-live-source="mqtt"><strong>An MQTT broker</strong><small>topics your instruments publish to</small></button>
-                    <button type="button" data-live-source="opcua"><strong>An OPC UA server</strong><small>a PLC, or the gateway in front of your instruments</small></button>
-                    <button type="button" data-live-source="push"><strong>A script sending readings</strong><small>from this computer or over the network, encrypted</small></button>
-                </div>
-            </section>
             <section>
                 <div id="parameterTuningGoal" class="parameterTuningGoal" role="group" aria-label="What to tune for">
                     <button id="parameterTuningGoalData" type="button" aria-pressed="true">Match measured data</button>

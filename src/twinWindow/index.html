@@ -96,6 +96,21 @@
             <button id="roomStop" type="button">Stop</button>
         </div>
         <div id="tiles" class="tiles"></div>
+        <!-- Under the tiles: what was done to the real system, what the twin infers of what no sensor measures, and what happened. -->
+        <div class="roomLower">
+            <section class="panel" id="inputsPanel" aria-label="Inputs">
+                <h3>Inputs <small>what was done, as the twin received it</small></h3>
+                <div id="inputRows" class="inputRows"></div>
+            </section>
+            <section class="panel" id="inferredPanel" aria-label="What the twin infers">
+                <h3>What the twin infers <small>what no sensor measures</small></h3>
+                <div id="inferredRows" class="inferredRows" role="table"></div>
+            </section>
+            <section class="panel" id="eventsPanel" aria-label="Events">
+                <h3>Events</h3>
+                <ol id="eventsList" class="eventsList"></ol>
+            </section>
+        </div>
         <p id="roomStatus" class="status" role="status"></p>
     </main>
 </body>

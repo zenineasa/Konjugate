@@ -8909,21 +8909,7 @@ function openParameterTuning() {
         resetParameterTuning();
         applySavedTuningSetup();
     }
-    setTuningCardMode('tuning');
     $('#parameterTuning').classList.remove('hidden');
-}
-
-// The card serves two things a person looks for by different names: tuning a model's parameters, and running it as a live twin.
-// Opened as a live twin (its own button), it is titled so, the tuning goals give way to what a twin is, a one-click try with the
-// simulated rig, and the places readings can come from; underneath it is the replay goal, which is what a twin runs on.
-function setTuningCardMode(mode) {
-    const twin = mode === 'twin';
-    $('#parameterTuning').classList.toggle('liveTwinMode', twin);
-    $('#liveTwinIntro').hidden = !twin;
-    $('#parameterTuningKicker').textContent = twin ? 'Digital twin' : 'Analysis';
-    $('#parameterTuningTitle').textContent = twin ? 'Live twin' : 'Parameter tuning';
-    // Nothing is being set up to cancel in a twin: the card is only closed (a running twin goes on, its chip in the toolbar).
-    if (!parameterTuningRun) $('#cancelParameterTuning').textContent = twin ? 'Close' : 'Cancel';
 }
 
 // The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md).
@@ -8950,74 +8936,36 @@ window.engine.liveTwin?.onLoadDemoModel?.(async (variant) => {
     openTwinWindow();
 });
 
-function openLiveTwin() {
-    if (activeResult) return;
-    hideCards($('#parameterTuning'));
-    if (!parameterTuningRun && !liveTwinState?.running) {
-        resetParameterTuning();
-        applySavedTuningSetup();
-    }
-    setTuningCardMode('twin');
-    if (parameterTuningGoal !== 'replay') switchParameterTuningGoal('replay');
-    $('#parameterTuning').classList.remove('hidden');
-}
-
 $('#parameterTuningButton').addEventListener('click', openParameterTuning);
 $('#liveTwinButton').addEventListener('click', openTwinWindow);
-$('#liveTwinChip').addEventListener('click', openLiveTwin);
 
-// Where the readings come from: a log file is chosen at once; a broker, a server or a script opens its own part of the card.
-for (const tile of $$('[data-live-source]')) {
-    tile.addEventListener('click', () => {
-        for (const other of $$('[data-live-source]')) other.setAttribute('aria-pressed', String(other === tile));
-        const kind = tile.dataset.liveSource;
-        if (kind === 'file') {
-            $('#parameterTuningFile').click();
-            return;
-        }
-        const sections = { mqtt: '#parameterTuningMqtt', opcua: '#parameterTuningOpcUa', push: '#parameterTuningPush' };
-        for (const [name, selector] of Object.entries(sections)) $(selector).open = name === kind;
-        $(sections[kind]).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    });
-}
-
-// The demonstration (docs/connectingADataSource.md, "Running a log as a live twin"): the simulated rig's model, and six hours of its
-// recorded readings played at 600× (about a minute), steady or with a heat loss that grows; one click from nothing to a twin running.
-async function runLiveTwinDemo(variant) {
-    if (simulationRunning || !liveTwinAvailable()) return;
-    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
-    const status = $('#liveTwinStatus');
-    try {
-        if (liveTwinState?.running) await stopLiveTwin();
-        const demo = await window.engine.liveTwin.demo(variant);
-        await loadProjectDocument(JSON.parse(demo.project.content), { fileName: demo.projectFileName, saved: false });
-        openLiveTwin();
-        await loadParameterTuningCsv(demo.log.content, demo.log.fileName);
-        $('#liveTwinSpeed').value = '600';
-        await startLiveTwin();
-        $('#liveTwin').scrollIntoView({ block: 'start', behavior: 'smooth' });
-        $('#statusText').textContent = variant === 'drifting' ? 'Live twin demonstration: a rig that drifts' : 'Live twin demonstration: the simulated rig';
-    } catch (error) {
-        status.className = 'equationDiagnostics';
-        status.textContent = `The demonstration could not start: ${String(error.message).replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
-    }
-}
-$('#liveTwinTryDemo').addEventListener('click', () => runLiveTwinDemo('steady'));
-$('#liveTwinTryDrifting').addEventListener('click', () => runLiveTwinDemo('drifting'));
 $('#liveTwinButton').hidden = !window.engine.liveTwin?.available;
 
-// The twin's chip in the toolbar while it runs, so a person sees it is alive with the card closed, and sees at once when the real
-// system drifts past the warning they set.
+// The twin's chip in the toolbar while one runs, so a person sees it is alive with its window behind this one or on another screen,
+// and sees at once when the real system drifts past the warning: the twin window's own twin, or one run from the tuning card's
+// replay goal. A click brings that twin to the front.
+let windowTwinStatus = null;
 function refreshLiveTwinChip() {
-    const twin = liveTwinState;
     const chip = $('#liveTwinChip');
-    chip.hidden = !twin?.running;
-    if (!twin?.running) return;
-    const alarm = Boolean(twin.cycles.at(-1)?.trend?.alarm);
-    chip.classList.toggle('failed', alarm);
-    $('#liveTwinChipText').textContent = alarm ? 'Live twin: drifting' : `Live twin · ${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}`;
-    chip.title = alarm ? 'The real system is drifting away from the model past the warning you set: open the live twin' : 'A live twin is running: open it';
+    const fromWindow = windowTwinStatus?.running ? windowTwinStatus : null;
+    const fromCard = liveTwinState?.running ? { moves: liveTwinState.cycles.length, alarm: Boolean(liveTwinState.cycles.at(-1)?.trend?.alarm) } : null;
+    const twin = fromWindow ?? fromCard;
+    chip.hidden = !twin;
+    if (!twin) return;
+    chip.classList.toggle('failed', Boolean(twin.alarm));
+    $('#liveTwinChipText').textContent = twin.alarm ? 'Live twin: drifting' : `Live twin · ${twin.moves} move${twin.moves === 1 ? '' : 's'}`;
+    chip.title = twin.alarm ? 'The real system is drifting away from the model past the warning: open the live twin' : 'A live twin is running: open it';
 }
+window.engine.liveTwin?.onStatusChanged?.((status) => {
+    windowTwinStatus = status;
+    refreshLiveTwinChip();
+});
+$('#liveTwinChip').addEventListener('click', async () => {
+    if (windowTwinStatus?.running && await window.engine.liveTwin.focusWindow()) return;
+    if (!liveTwinState?.running) return;
+    openParameterTuning();
+    if (parameterTuningGoal !== 'replay') switchParameterTuningGoal('replay');
+});
 
 function renderParameterTuningMapping() {
     const container = $('#parameterTuningMappingRows');
@@ -10913,7 +10861,7 @@ function setParameterTuningRunning(running) {
     $('#stopParameterTuning').disabled = false;
     $('#applyBestParameterTuning').disabled = false;
     $('#stopParameterTuning').textContent = 'Stop and use best so far';
-    $('#cancelParameterTuning').textContent = running ? 'Discard' : $('#parameterTuning').classList.contains('liveTwinMode') ? 'Close' : 'Cancel';
+    $('#cancelParameterTuning').textContent = running ? 'Discard' : 'Cancel';
     $('#cancelParameterTuning').title = running ? 'End the search and keep nothing' : '';
     $('#parameterTuningChip').hidden = !running;
     $('#parameterTuningProgressTitle').textContent = running ? 'Fitting…' : 'Fit';

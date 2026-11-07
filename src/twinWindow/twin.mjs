@@ -1,8 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // The twin's own window (docs/proposals/controlRoom.md): the setup (the model, where its readings come from, and how they map to it,
-// with suggestions and unit conversions proposed), then the control room, a tile for every measured signal and the health of the
-// twin and its source along the top. The setup is handed back to the project window to be kept with the project; matches confirmed
+// with suggestions and unit conversions proposed), then the control room: the health of the twin and its source along the top, a
+// tile for every measured signal, and under them the inputs as they were received, what the twin infers of what no sensor measures,
+// and the events. The setup is handed back to the project window to be kept with the project; matches confirmed
 // are remembered across projects.
 
 import { readDataLog } from '../dataLog.mjs';
@@ -425,9 +426,13 @@ function openRoom(settings) {
     $('#room').hidden = false;
     const measured = settings.mapping.filter((entry) => entry.role === 'output');
     const label = (entry) => state.candidates.find((candidate) => candidate.kind === 'state' && candidate.id === entry.stateId);
+    const parameter = (entry) => state.candidates.find((candidate) => candidate.kind === 'parameter' && candidate.id === entry.parameterId);
     state.twin = {
-        settings, running: true, cycles: [],
-        tiles: measured.map((entry) => ({ signal: entry.signal, target: label(entry), measured: new Map(), tolerance: settings.tolerances[entry.signal] }))
+        settings, running: true, cycles: [], events: [], drift: 'good', stats: { skipped: 0, recoveries: 0 },
+        tiles: measured.map((entry) => ({ signal: entry.signal, target: label(entry), measured: new Map(), tolerance: settings.tolerances[entry.signal] })),
+        inputs: settings.mapping.filter((entry) => entry.role === 'input').map((entry) => ({ signal: entry.signal, target: parameter(entry), readings: new Map() })),
+        inferred: new Map(),    // stateId → { target, history: Map(time → value) }
+        tracked: new Map()      // parameterId → { name, unit, history: Map(time → value) }
     };
     $('#tiles').replaceChildren(...state.twin.tiles.map((tile) => {
         const element = document.createElement('section');
@@ -445,6 +450,183 @@ function openRoom(settings) {
     $('#healthSource').textContent = state.source.kind === 'file' ? `${state.log.fileName}${state.log.speed === 'follow' ? ', followed as it grows' : `, played at ${state.log.speed === 'Infinity' ? 'full speed' : `${state.log.speed}×`}`}` : state.source.url ?? 'the push service';
     $('#healthDrift').textContent = '';
     $('#roomStatus').textContent = '';
+    renderInputs();
+    $('#inferredRows').replaceChildren(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Waiting for the twin\'s first move.' }));
+    $('#eventsList').replaceChildren();
+    addEvent('info', 'The twin started', $('#healthSource').textContent);
+    reportStatus();
+}
+
+// What a person in the room looks at from across it: the twin's status, also shown on the project window's toolbar chip.
+function reportStatus() {
+    const twin = state.twin;
+    api.reportStatus?.({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad' }).catch(() => {});
+}
+
+const clock = (date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const dataTime = (seconds) => `at ${Number((seconds / 3600).toFixed(2))} h of data`;
+
+// One list, timed, newest first: warnings, the twin falling behind, the engine restarted, what the source says, refits, the end.
+function addEvent(kind, text, detail = '', time = null) {
+    const twin = state.twin;
+    if (!twin) return;
+    const event = { at: new Date(), kind, text, detail: [detail, time === null ? '' : dataTime(time)].filter(Boolean).join(' · ') };
+    twin.events.unshift(event);
+    twin.events.length = Math.min(twin.events.length, 500);
+    const item = document.createElement('li');
+    item.className = kind;
+    const body = document.createElement('div');
+    body.append(text);
+    if (event.detail) body.append(Object.assign(document.createElement('small'), { textContent: event.detail }));
+    item.append(Object.assign(document.createElement('time'), { textContent: clock(event.at), dateTime: event.at.toISOString() }), body);
+    $('#eventsList').prepend(item);
+    while ($('#eventsList').children.length > 500) $('#eventsList').lastElementChild.remove();
+}
+
+// The events a move brings: the twin's first move, the drift's state changing, moves skipped to keep up, the engine restarted, a
+// refit applied.
+function cycleEvents(cycle, stats) {
+    const twin = state.twin;
+    if (twin.cycles.length === 1) addEvent('good', 'The twin is live: its first move is made', '', cycle.now);
+    const trend = cycle.trend ?? {};
+    const drift = trend.alarm ? 'bad' : trend.direction && trend.direction !== 'none' ? 'lean' : 'good';
+    if (drift !== twin.drift) {
+        const tile = twin.tiles.find((candidate) => candidate.signal === trend.signal);
+        const name = tile?.target?.label ?? trend.signal;
+        const unit = tile?.target?.unit ? ` ${tile.target.unit}` : '';
+        const jumps = `the model is put right by ${shown(Math.abs(trend.mean))}${unit} a move on average`;
+        if (drift === 'bad') addEvent('bad', `${name} is drifting past the warning`, `${jumps}; the warning is ${shown(twin.settings.alertAt * (tile?.tolerance ?? 0))}${unit}`, cycle.now);
+        else if (drift === 'lean') addEvent('lean', `${name} is leaning ${trend.direction} the readings`, jumps, cycle.now);
+        else addEvent('good', 'Back in step with the readings', '', cycle.now);
+        twin.drift = drift;
+    }
+    if (stats.skipped > twin.stats.skipped) addEvent('lean', `The twin fell behind the data, and skipped ${stats.skipped - twin.stats.skipped} move${stats.skipped - twin.stats.skipped === 1 ? '' : 's'} to keep up`, '', cycle.now);
+    if (stats.recoveries > twin.stats.recoveries) addEvent('lean', 'The engine stopped, and was started again from the last move', '', cycle.now);
+    if (cycle.refit) addEvent('info', 'A refit was applied', '', cycle.now);
+    twin.stats = { skipped: stats.skipped ?? 0, recoveries: stats.recoveries ?? 0 };
+}
+
+const plotLayout = (extra = {}) => ({
+    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#9fb2bb', size: 11 }, showlegend: false,
+    xaxis: { gridcolor: '#1c2c38', zeroline: false }, yaxis: { gridcolor: '#1c2c38', zeroline: false }, ...extra
+});
+
+// The inputs: each as a step line of what it was set to, and when.
+function renderInputs() {
+    const twin = state.twin;
+    if (!twin.inputs.length) {
+        $('#inputRows').replaceChildren(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'No input is mapped: the model runs on its own parameter values.' }));
+        return;
+    }
+    $('#inputRows').replaceChildren(...twin.inputs.map((input) => {
+        const row = document.createElement('div');
+        row.className = 'inputRow';
+        row.dataset.signal = input.signal;
+        const name = document.createElement('div');
+        name.append(Object.assign(document.createElement('strong'), { textContent: input.target?.label.replace(/^Shared · /, '') ?? input.signal }),
+            Object.assign(document.createElement('small'), { className: 'latest', textContent: '—' }));
+        input.element = row;
+        row.append(name, Object.assign(document.createElement('div'), { className: 'plot' }));
+        return row;
+    }));
+}
+
+function drawInputs(cycle) {
+    for (const input of state.twin.inputs) {
+        for (const reading of cycle.inputChanges?.[input.signal] ?? []) input.readings.set(reading.time, reading.value);
+        const readings = [...input.readings].sort((a, b) => a[0] - b[0]);
+        const unit = input.target?.unit ? ` ${input.target.unit}` : '';
+        $('.latest', input.element).textContent = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
+        if (!globalThis.Plotly || !readings.length) continue;
+        // The last value held up to now, so a step is drawn to the present.
+        const x = [...readings.map(([time]) => time / 3600), cycle.now / 3600];
+        const y = [...readings.map(([, value]) => value), readings.at(-1)[1]];
+        globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
+            plotLayout({ margin: { l: 40, r: 6, t: 4, b: 16 }, xaxis: { gridcolor: '#1c2c38', zeroline: false, showticklabels: false } }), { displayModeBar: false, responsive: true, staticPlot: true });
+    }
+}
+
+const valueAt = (series, time) => {
+    if (!series.length) return NaN;
+    if (time <= series[0].time) return series[0].value;
+    for (let index = 1; index < series.length; index += 1) {
+        if (series[index].time >= time) {
+            const [a, b] = [series[index - 1], series[index]];
+            return a.value + (b.value - a.value) * ((time - a.time) / (b.time - a.time || 1));
+        }
+    }
+    return series.at(-1).value;
+};
+
+// How a quantity has moved over the last hour of data: rising or falling when it moved by more than half a percent of itself (or of
+// its own range, for one near zero), else steady.
+function trendOf(history) {
+    const points = [...history].sort((a, b) => a[0] - b[0]);
+    if (points.length < 2) return { word: '—', kind: '' };
+    const [latestTime, latest] = points.at(-1);
+    const [earlierTime, earlier] = points.find(([time]) => time >= latestTime - 3600 - 1e-9);
+    if (latestTime - earlierTime < 1e-9) return { word: '—', kind: '' };
+    const perHour = (latest - earlier) / ((latestTime - earlierTime) / 3600);
+    const values = points.map(([, value]) => value);
+    const scale = Math.abs(latest) > 1e-12 ? Math.abs(latest) : Math.max(...values) - Math.min(...values);
+    if (!(scale > 0) || Math.abs(perHour) <= 0.005 * scale) return { word: 'steady', kind: 'steady', perHour };
+    return { word: perHour > 0 ? 'rising' : 'falling', kind: perHour > 0 ? 'rising' : 'falling', perHour };
+}
+
+// A parameter's name and unit, wherever in the model it is.
+function parameterInfo(parameterId) {
+    const model = state.context.document;
+    const all = [
+        ...(model.sharedParameters ?? []),
+        ...(model.edges ?? []).flatMap((edge) => edge.parameters ?? []),
+        ...(model.nodes ?? []).flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))
+    ];
+    const found = all.find((candidate) => candidate.id === parameterId);
+    return { name: found?.name ?? `Parameter ${parameterId}`, unit: found?.unit ?? '' };
+}
+
+// What the twin infers: each state no sensor measures, at now (its spread when the estimator runs), and the parameters it tracks.
+function drawInferred(cycle) {
+    const twin = state.twin;
+    for (const [key, series] of Object.entries(cycle.inferred ?? {})) {
+        const stateId = Number(key);
+        if (!twin.inferred.has(stateId)) twin.inferred.set(stateId, { target: state.candidates.find((candidate) => candidate.kind === 'state' && candidate.id === stateId), history: new Map() });
+        const entry = twin.inferred.get(stateId);
+        for (const point of series) if (point.time <= cycle.now + 1e-9) entry.history.set(point.time, point.value);
+        entry.history.set(cycle.now, valueAt(series, cycle.now));
+        entry.spread = cycle.estimate?.states?.find((candidate) => candidate.stateId === stateId)?.spread ?? null;
+    }
+    for (const parameter of cycle.estimate?.parameters ?? []) {
+        if (!twin.tracked.has(parameter.parameterId)) twin.tracked.set(parameter.parameterId, { ...parameterInfo(parameter.parameterId), history: new Map() });
+        const entry = twin.tracked.get(parameter.parameterId);
+        entry.history.set(cycle.anchor, parameter.mean);
+        entry.spread = parameter.spread;
+    }
+    const row = ({ name, kind, unit, history, spread }) => {
+        const element = document.createElement('div');
+        element.className = 'inferredRow';
+        element.setAttribute('role', 'row');
+        const points = [...history].sort((a, b) => a[0] - b[0]);
+        const latest = points.at(-1)?.[1];
+        const trend = trendOf(history);
+        const units = unit ? ` ${unit}` : '';
+        element.append(
+            Object.assign(document.createElement('div'), { innerHTML: '<strong></strong><small></small>' }),
+            Object.assign(document.createElement('div'), { className: 'number' }),
+            Object.assign(document.createElement('span'), { className: `trend ${trend.kind}`, textContent: trend.word, title: Number.isFinite(trend.perHour) ? `${trend.perHour > 0 ? '+' : ''}${shown(trend.perHour)}${units} an hour` : '' }),
+            sparkline(points.slice(-120).map(([, value]) => value))
+        );
+        $('strong', element).textContent = name;
+        $('small', element).textContent = kind;
+        $('.number', element).textContent = `${shown(latest)}${units}`;
+        if (Number.isFinite(spread) && spread > 0) $('.number', element).append(Object.assign(document.createElement('small'), { textContent: ` ±${shown(spread)}` }));
+        return element;
+    };
+    const rows = [
+        ...[...twin.tracked.values()].map((entry) => row({ name: entry.name, kind: 'a parameter, tracked', unit: entry.unit, history: entry.history, spread: entry.spread })),
+        ...[...twin.inferred.values()].map((entry) => row({ name: entry.target?.label ?? 'A state', kind: entry.spread === null ? 'carried by the model' : 'estimated', unit: entry.target?.unit ?? '', history: entry.history, spread: entry.spread }))
+    ];
+    $('#inferredRows').replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Every state is measured: there is nothing left to infer.' })]));
 }
 
 function closeRoom() {
@@ -496,17 +678,30 @@ api.liveTwin.onEvent((update) => {
         $('#healthDrift').className = `healthItem ${alarm ? 'bad' : cycle.trend?.direction !== 'none' ? 'lean' : 'good'}`;
         $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : cycle.trend?.direction !== 'none' ? 'Leaning' : 'In step';
         for (const tile of twin.tiles) drawTile(tile, cycle);
+        drawInputs(cycle);
+        drawInferred(cycle);
+        cycleEvents(cycle, stats);
+        reportStatus();
     } else if (update.type === 'note') {
         $('#roomStatus').textContent = update.message;
+        addEvent('info', update.message);
     } else if (update.type === 'ended') {
         twin.running = false;
         $('#healthTwin').className = 'healthItem';
         $('#healthTwin').textContent = update.reason === 'played' ? `The whole log has been played: ${twin.cycles.length} moves` : `Stopped after ${twin.cycles.length} moves`;
-        if (update.recordedTo) $('#roomStatus').textContent = `What the source sent is recorded in ${update.recordedTo}.`;
+        addEvent('info', update.reason === 'played' ? 'The whole log has been played' : 'The twin was stopped', `${twin.cycles.length} move${twin.cycles.length === 1 ? '' : 's'}`, twin.cycles.at(-1)?.now ?? null);
+        if (update.recordedTo) {
+            $('#roomStatus').textContent = `What the source sent is recorded in ${update.recordedTo}.`;
+            addEvent('info', 'What the source sent is recorded', update.recordedTo);
+        }
+        if (update.recordingLate) addEvent('lean', `${update.recordingLate} reading${update.recordingLate === 1 ? '' : 's'} came after later ones`, 'they reached the twin, but a log only goes forward, so the recording could not hold them');
+        reportStatus();
     } else if (update.type === 'error') {
         twin.running = false;
         $('#healthTwin').className = 'healthItem bad';
         $('#healthTwin').textContent = `Stopped: ${update.message}`;
+        addEvent('bad', 'The twin stopped', update.message);
+        reportStatus();
     }
 });
 
@@ -517,6 +712,7 @@ $('#roomSetup').addEventListener('click', async () => {
     if (state.twin?.running && !window.confirm('Go back to the setup? The twin stops.')) return;
     await api.liveTwin.stop();
     state.twin = null;
+    reportStatus();
     closeRoom();
 });
 
@@ -525,6 +721,7 @@ api.onContext(async (context) => {
     state.context = context;
     state.memory = await api.memory.get().catch(() => ({}));
     renderModel();
+    if (state.twin) return;
     // A model opened again (a demonstration's, or the project changed) with readings already chosen: they are matched again.
     if (state.signals.length && !state.twin) {
         offerSignals(state.signals);

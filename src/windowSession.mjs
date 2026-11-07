@@ -18,7 +18,7 @@
 // reaches neither the live session nor its record.
 
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
-import { interpolate, ReplayError } from './dataLogReplay.mjs';
+import { interpolate, replayTargets, ReplayError } from './dataLogReplay.mjs';
 import { fitPlanFromLog } from './dataLogFit.mjs';
 import { analyse, ensembleStatistics, explainedShareTogether, initialEnsemble, perturb, quantile, readingNoise, seededNormal } from './stateEstimator.mjs';
 
@@ -129,6 +129,8 @@ export class WindowSession {
                 this.estimatedParameters.push({ parameterId, name: parameter.name, value: parameter.value, bounds: { ...parameter.tuning } });
             }
         }
+        // The states no sensor measures are reported too, after the measured ones, so a move says what the twin infers of them.
+        this.inferredStateIds = replayTargets(this.document).states.map((state) => state.stateId).filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId));
         for (const entry of [...this.inputs, ...this.outputs]) this.#readings.set(entry.signal, new Map());
     }
 
@@ -137,7 +139,7 @@ export class WindowSession {
     #engineConfiguration() {
         return {
             globalTimeStep: this.timeStep, outputInterval: this.timeStep, checkpointInterval: this.stride,
-            reportedStateIds: this.outputs.map((entry) => entry.stateId), execution: { backend: 'serial' }
+            reportedStateIds: [...this.outputs.map((entry) => entry.stateId), ...this.inferredStateIds], execution: { backend: 'serial' }
         };
     }
 
@@ -314,8 +316,13 @@ export class WindowSession {
             forecast[entry.signal] = series.filter((sample) => sample.time > now + 1e-9);
             model[entry.signal] = [...inWindow, ...forecast[entry.signal]].filter((sample, position, all) => position === 0 || sample.time > all[position - 1].time);
         });
+        // Each unmeasured state's course over the move, from its anchor to the horizon: what the twin infers of it.
+        const inferred = Object.fromEntries(this.inferredStateIds.map((stateId, position) => [stateId, [
+            { time: anchor, value: restored.values[this.#engine.stateIds.indexOf(stateId)] },
+            ...samples.map((sample) => ({ time: sample.time, value: sample.values[this.outputs.length + position] }))
+        ].filter((sample, index, all) => index === 0 || sample.time > all[index - 1].time)]));
         const cycle = {
-            index, anchor, now, jumps, window, forecast, model,
+            index, anchor, now, jumps, window, forecast, model, inferred,
             restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),
             wallSeconds, computeSeconds, checkpointsTaken, corrections,

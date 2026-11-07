@@ -824,7 +824,11 @@ function openTwinWindow(projectWindow, payload) {
     state.twinWindow = createdWindow;
     installCustomWindowState(createdWindow);
     createdWindow.on('close', () => { state.twinBounds = createdWindow.isDestroyed() ? state.twinBounds : createdWindow.getNormalBounds(); });
-    createdWindow.on('closed', () => { if (state.twinWindow === createdWindow) state.twinWindow = null; });
+    createdWindow.on('closed', () => {
+        if (state.twinWindow === createdWindow) state.twinWindow = null;
+        // Its twin ends with it: the project window's chip is told.
+        if (!projectWindow.isDestroyed()) projectWindow.webContents.send('twinStatusChanged', { running: false });
+    });
     createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('twinContext', state.twinContext); });
     createdWindow.loadFile(join(currentDir, 'twinWindow', 'index.html'));
     if (!state.twinBounds) createdWindow.maximize();
@@ -840,6 +844,21 @@ ipcMain.handle('twinSaveSetup', (event, setup) => {
     const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
     if (!projectWindow) throw new Error('This twin\'s project window has closed.');
     projectWindow.webContents.send('twinSetupChanged', setup);
+    return true;
+});
+// The twin's status (running, its moves, drifting past the warning), for the project window's toolbar chip.
+ipcMain.handle('twinStatus', (event, status) => {
+    const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
+    if (projectWindow && !projectWindow.isDestroyed()) projectWindow.webContents.send('twinStatusChanged', status);
+    return true;
+});
+// The project window's chip brings its twin's window to the front, as it is.
+ipcMain.handle('twinFocusWindow', (event) => {
+    requireProjectWindow(event, 'Only a project window can show its twin.');
+    const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
+    if (!twinWindow || twinWindow.isDestroyed()) return false;
+    twinWindow.show();
+    twinWindow.focus();
     return true;
 });
 // The push service's Connections panel lives in the project window: the twin window asks it to open there.

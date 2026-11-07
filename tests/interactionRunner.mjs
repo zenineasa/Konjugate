@@ -5011,7 +5011,20 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `document.querySelector('#healthDrift').textContent === 'Drifting past the warning'`, 'The control room did not warn of the drift.', 120000);
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').classList.contains('bad')`), true);
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('bad')`), true, 'The tile says so across the room.');
+        // Under the tiles: the heater's power as it was set, what the twin infers of what no sensor measures, and the events.
+        assert.match(await evaluate(twin, `document.querySelector('#inputRows .inputRow strong').textContent`), /^Heater power$/);
+        assert.match(await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`), /^\d[\d.]* W$/);
+        assert.equal(await evaluate(twin, `document.querySelector('#inputRows .inputRow .plot svg') !== null`), true, 'Drawn as a timeline.');
+        const inferred = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' '))`);
+        assert.ok(inferred.length > 0 && inferred.every((text) => /carried by the model/.test(text) && /(steady|rising|falling)/.test(text)), 'Each unmeasured state with its value and trend.');
+        const events = await evaluate(twin, `[...document.querySelectorAll('#eventsList li')].map((item) => item.className + ': ' + item.innerText.replace(/\\s+/g, ' '))`);
+        assert.match(events.at(-1), /^info: .*The twin started/);
+        assert.ok(events.some((text) => /^good: .*The twin is live/.test(text)));
+        assert.match(events[0], /^bad: .*Water temperature is drifting past the warning/);
+        // The project window's toolbar chip says so too, and brings the twin's window forward.
+        await waitFor(opened, `!document.querySelector('#liveTwinChip').hidden && document.querySelector('#liveTwinChipText').textContent === 'Live twin: drifting'`, 'The toolbar chip did not show the drift.');
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await waitFor(opened, `document.querySelector('#liveTwinChip').hidden`, 'The chip stayed after the twin stopped.');
         await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);

@@ -6,6 +6,8 @@
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 export const cleanError = (error) => String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': (Error: )?/, '').replace(/^(ReplayError|ENGINE_FAILURE): /, '');
+// A value read across a room: four figures.
+export const readable = (value) => (Number.isFinite(value) ? Number(value.toPrecision(4)).toString() : '—');
 export const shown = (value) => (Number.isFinite(value) ? Number(value.toPrecision(5)).toString() : '—');
 export const clock = (date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 export const dataTime = (seconds) => `at ${Number((seconds / 3600).toFixed(2))} h of data`;
@@ -39,7 +41,7 @@ export function sparkline(values, color = '#42c9bc') {
 
 export const plotLayout = (extra = {}) => ({
     paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#9fb2bb', size: 11 }, showlegend: false,
-    xaxis: { gridcolor: '#1c2c38', zeroline: false }, yaxis: { gridcolor: '#1c2c38', zeroline: false }, ...extra
+    xaxis: { gridcolor: '#17252f', zeroline: false }, yaxis: { gridcolor: '#17252f', zeroline: false }, ...extra
 });
 
 export function valueAt(series, time) {

@@ -5072,6 +5072,36 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
+    await run('a house in one click: three rooms, five inputs and the floor slab in the room, and the bedroom with its window open drifting while the others stay in step', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-house-'));
+        const projectPath = join(directory, 'rig.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        const twin = await openTwinWindow(opened);
+        await evaluate(twin, `document.querySelector('[data-demo="house"]').click()`);
+        await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'smartHouse'`, 'The house\'s model did not open in the project window.', 15000);
+        await waitFor(twin, `!document.querySelector('#room').hidden`, 'The house did not go into the control room.', 15000);
+        assert.match(await evaluate(twin, `document.querySelector('#healthSource').textContent`), /^smartHouse\.csv, played at 1200×$/);
+        assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#tiles .tile strong')].map((name) => name.textContent)`), ['Living room · Air temperature', 'Bedroom · Air temperature', 'Kitchen · Air temperature']);
+        assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow strong')].map((name) => name.textContent)`), ['Outdoor temperature', 'Solar gain', 'Living room heater', 'Bedroom heater', 'Kitchen heater']);
+        await waitFor(twin, `/Floor slab · Temperature/.test(document.querySelector('#inferredRows').textContent)`, 'The floor slab was not among what the twin infers.', 30000);
+        // The bedroom, its window open from 14:00, drifts past the warning; the living room and the kitchen do not.
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li.bad')].some((item) => /Bedroom · Air temperature is drifting past the warning/.test(item.textContent))`, 'The bedroom did not drift past the warning.', 120000);
+        const tileState = (name) => evaluate(twin, `[...document.querySelectorAll('#tiles .tile')].find((tile) => tile.querySelector('strong').textContent === ${JSON.stringify(name)}).className`);
+        assert.match(await tileState('Bedroom · Air temperature'), /\bbad\b/);
+        assert.doesNotMatch(await tileState('Living room · Air temperature'), /\bbad\b/);
+        assert.doesNotMatch(await tileState('Kitchen · Air temperature'), /\bbad\b/);
+        assert.match(await evaluate(twin, `document.querySelector('#healthDrift').title`), /^Bedroom · Air temperature/);
+        assert.equal((await twinEvents(twin)).filter((text) => /^bad: .*drifting past the warning/.test(text)).length, 1, 'Only the bedroom.');
+        await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
     await run('the twin\'s own window: a plant\'s names matched to the model with their units converted, and the control room running', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-twinwindow-'));
         const projectPath = join(directory, 'rig.kjt');
@@ -5174,7 +5204,7 @@ export async function runInteractionTests(driver) {
 
         // The warning, taken at once.
         await evaluate(twin, `(() => { const field = document.querySelector('#alertAmount'); field.value = '0.05'; field.dispatchEvent(new Event('change')); })()`);
-        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /The warning set to 0.05 K a move/.test(item.textContent))`, 'The warning was not set.');
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /The warning set to 0.05 °C a move/.test(item.textContent))`, 'The warning was not set.');
 
         // Trying something: the heater off for an hour, drawn dotted, and kept as a draft scenario.
         await evaluate(twin, `document.querySelector('#trySomething').click()`);

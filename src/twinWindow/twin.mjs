@@ -10,6 +10,7 @@ import { readDataLog } from '../dataLog.mjs';
 import { defaultTolerance, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import { suggestSymbol } from '../csvImport.mjs';
 import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
+import { readingNoise } from '../stateEstimator.mjs';
 import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMatching.mjs';
 import { normalizeTwinSetup, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
@@ -136,12 +137,14 @@ $('#fileSpeed').addEventListener('change', () => { if (state.log) state.log.spee
 // model opened in the project window first (the project asks about unsaved work, as opening any project does). The rig and the rig
 // that drifts go straight into the control room once matched; a plant's names stay on the mapping, which is what they are there to
 // show.
-const rigModelOpen = () => state.candidates.some((candidate) => candidate.label === 'Water tank · Water temperature');
+// The demonstration's model is open when its first room or tank is among the model's quantities.
+const demoMarkers = { house: 'Living room · Air temperature' };
+const demoModelOpen = (variant) => state.candidates.some((candidate) => candidate.label === (demoMarkers[variant] ?? 'Water tank · Water temperature'));
 
 // A demonstration whose readings are matched goes into the control room, unless it is there to show the mapping.
 function continueDemo() {
     const variant = state.demoPending;
-    if (!variant || !rigModelOpen()) return;
+    if (!variant || !demoModelOpen(variant)) return;
     state.demoPending = null;
     if (variant !== 'plant' && state.rows.some((row) => row.target && row.role === 'output')) startTwin();
 }
@@ -152,17 +155,19 @@ for (const button of $$('[data-demo]')) {
             const variant = button.dataset.demo;
             const demo = await api.liveTwin.demo(variant);
             chooseSourceTile('file');
-            $('#fileSpeed').value = '600';
+            const speed = demo.speed ?? '600';
+            if ([...$('#fileSpeed').options].some((option) => option.value === speed)) $('#fileSpeed').value = speed;
             state.demoPending = variant;
-            offerLog(demo.log.content, { fileName: demo.log.fileName, speed: '600', demo: true });
-            if (rigModelOpen()) {
+            offerLog(demo.log.content, { fileName: demo.log.fileName, speed, demo: true });
+            if (demoModelOpen(variant)) {
                 continueDemo();
                 return;
             }
-            // The rig's readings against another model match nothing: the rig's model is opened in the project window, and the
+            // The demonstration's readings against another model match nothing: its model is opened in the project window, and the
             // readings matched to it when it comes. Should the project decline (unsaved work kept), the button does it again.
-            sourceStatus('These are the simulated rig\'s readings: opening the rig\'s model in the project window to compare them with…', 'warning');
-            const open = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Open the rig\'s model' });
+            const whose = variant === 'house' ? 'house' : 'rig';
+            sourceStatus(`These are the simulated ${whose}'s readings: opening the ${whose}'s model in the project window to compare them with…`, 'warning');
+            const open = Object.assign(document.createElement('button'), { type: 'button', textContent: `Open the ${whose}'s model` });
             open.addEventListener('click', () => api.openDemoModel(variant));
             $('#sourceStatus').append(' ', open);
             await api.openDemoModel(variant);
@@ -448,7 +453,10 @@ function buildRun(setup) {
     const tolerances = Object.fromEntries(rows.filter((row) => row.role === 'output').map((row) => {
         const conversion = conversions[row.name];
         const readings = (row.signal.values ?? []).map((value) => ({ value: conversion ? value * conversion.scale + conversion.offset : value }));
-        return [row.name, readings.length > 1 ? defaultTolerance(readings) : 1];
+        // At least four times the readings' own noise, so a thermometer's scatter is not taken for drift; else a twentieth of the
+        // range they moved over.
+        const noise = readingNoise(readings.map((reading) => reading.value)) ?? 0;
+        return [row.name, readings.length > 1 ? Number(Math.max(defaultTolerance(readings), 4 * noise).toPrecision(2)) : 1];
     }));
     const first = mapping.find((entry) => entry.role === 'output');
     const saved = { ...liveDefaults, ...setup.live };

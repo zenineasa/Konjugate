@@ -107,6 +107,18 @@ export const plantSignalNames = [
             { name: 'Htr_Element_HeatOut', unit: 'W', role: 'output', expected: 'Electric heater · Heat flow' }
         ]
     },
+    // A house's controller: a room's thermometer is that room's, not the outdoor air's, though "room" is also a word for the
+    // surroundings and both are temperatures of the right size.
+    {
+        model: 'dataSources/smartHouse.kjt',
+        signals: [
+            { name: 'livingRoomTemperature', unit: '°C', role: 'output', expected: 'Living room · Air temperature' },
+            { name: 'bedroomTemperature', unit: '°C', role: 'output', expected: 'Bedroom · Air temperature' },
+            { name: 'kitchenTemperature', unit: '°C', role: 'output', expected: 'Kitchen · Air temperature' },
+            { name: 'outdoorTemperature', unit: '°C', role: 'input', expected: 'Shared · Outdoor temperature' },
+            { name: 'LivingRoom_Heater_W', unit: 'W', expected: 'Shared · Living room heater' }
+        ]
+    },
     // A broker's topics, the site's name first: "lab" here is where, not the room around the tank.
     {
         model: 'dataSources/simulatedTankRig.kjt',

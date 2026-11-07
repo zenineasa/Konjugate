@@ -346,7 +346,12 @@ export class WindowSession {
             if (!estimating) this.#startEnsemble(cycle);
             cycle.estimate = await this.#estimateFigures(cycle, analysis);
         }
-        cycle.trend = this.#trend([...this.cycles, cycle]);
+        // Every measured signal's trend, and the one that matters most on the move itself: one past the warning, else the one
+        // leaning furthest for its tolerance, else the first signal's (a twin with one sensor reads as it always has).
+        cycle.trends = Object.fromEntries(this.outputs.map((entry) => [entry.signal, this.#trend([...this.cycles, cycle], entry.signal)]));
+        const share = (trend) => Math.abs(trend.mean) / (this.tolerances[trend.signal] > 0 ? this.tolerances[trend.signal] : 1);
+        const ranked = Object.values(cycle.trends).sort((a, b) => (b.alarm - a.alarm) || ((b.direction !== 'none') - (a.direction !== 'none')) || share(b) - share(a));
+        cycle.trend = ranked[0].alarm || ranked[0].direction !== 'none' ? ranked[0] : cycle.trends[this.outputs[0].signal];
         this.#refit = null;
         this.#restartFrom = null;
         this.cycles.push(cycle);
@@ -550,10 +555,9 @@ export class WindowSession {
         return cycle.model[signal];
     }
 
-    // What the jumps of the last few cycles say, per signal and for the first measured signal on the cycle itself: their trend in
-    // units an hour, whether they lean to one side by more than their own scatter allows, and the alarm.
-    #trend(cycles) {
-        const signal = this.outputs[0].signal;
+    // What the jumps of the last few cycles say of one measured signal: their trend in units an hour, whether they lean to one side by
+    // more than their own scatter allows, and the alarm.
+    #trend(cycles, signal) {
         const recent = cycles.filter((cycle) => cycle.jumps[signal]).slice(-Math.max(3, this.trendCycles));
         if (recent.length < 3) return { signal, slopePerHour: 0, mean: 0, direction: 'none', alarm: false };
         const line = fitLine(recent.map((cycle) => [cycle.anchor / 3600, cycle.jumps[signal].jump]));
@@ -569,11 +573,12 @@ export class WindowSession {
         // Once a lean is called it stays called until the jumps' mean falls below half of what called it, or changes side: one jump
         // that happens to land near zero (a thermostat that was off for that stride, say) must not make the call flicker.
         const side = line.mean > 0 ? 'above' : 'below';
-        const previous = cycles.at(-2)?.trend;
+        const previous = cycles.at(-2)?.trends?.[signal];
         const holding = previous?.direction === side && previous.threshold > 0 && Math.abs(line.mean) > previous.threshold / 2;
         const leaning = Math.abs(line.mean) > threshold || holding;
         const direction = !leaning ? 'none' : side;
-        const alarm = this.alertAt !== null && tolerance > 0 && Math.abs(line.mean) > this.alertAt * tolerance;
+        // Past the warning means drifting past it: leaning to one side, not jumps that are large but scattered either side of nothing.
+        const alarm = leaning && this.alertAt !== null && tolerance > 0 && Math.abs(line.mean) > this.alertAt * tolerance;
         // The threshold kept is the one that called the lean, so holding it is judged against what called it.
         return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm, threshold: holding && !(Math.abs(line.mean) > threshold) ? previous.threshold : threshold };
     }

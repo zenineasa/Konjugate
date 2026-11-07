@@ -180,7 +180,7 @@ function judge(signal, words, candidate) {
     const name = squash(signal.name);
     if (name && [candidate.symbol, candidate.label.split(' · ').pop(), candidate.label.replace(' · ', ''), candidate.label.replace(/^Shared · /, '')].some((form) => squash(form) === name)) {
         const conversion = signal.unit && candidate.unit ? unitConversion(signal.unit, candidate.unit) : null;
-        if (!conversion?.error || !(parseUnit(signal.unit) && parseUnit(candidate.unit))) return { score: 0.97, reasons: ['the same name'], conversion: conversion?.error ? null : conversion };
+        if (!conversion?.error || !(parseUnit(signal.unit) && parseUnit(candidate.unit))) return { score: 2, confidence: 0.97, reasons: ['the same name'], conversion: conversion?.error ? null : conversion };
     }
     const reasons = [];
     let score = 0;
@@ -264,7 +264,10 @@ function judge(signal, words, candidate) {
     }
     // A name that shares nothing with the quantity is not made a match by its unit alone.
     if (!shared.length && !shortened.length && !(words.instrument && namedKinds.includes(candidateKind))) score = Math.min(score, 0.3 * weight);
-    return { score: Math.max(0, Math.min(1, score / weight)), reasons, conversion };
+    // Ranked by the whole score, which can pass 1 when every piece of evidence agrees, so two candidates that both do are still told
+    // apart (the living room's thermometer and the outdoor air, both temperatures of the right size); the confidence shown stops short
+    // of the same name's.
+    return { score: Math.max(0, score / weight), confidence: Math.max(0, Math.min(0.96, score / weight)), reasons, conversion };
 }
 
 // One suggestion for each signal: { signalId, name, role, target: { kind, id, label, unit } | null, confidence, reasons, conversion,
@@ -279,7 +282,7 @@ export function suggestMapping(signals, document, { memory = {}, floor = 0.35 } 
         const judged = candidates.flatMap((candidate) => {
             if (remembered && candidate === remembered) {
                 const conversion = memory[signal.name].conversion ?? (signal.unit && candidate.unit ? unitConversion(signal.unit, candidate.unit) : null);
-                return [{ candidate, score: 0.99, reasons: ['matched to it before'], conversion: conversion?.error ? null : conversion }];
+                return [{ candidate, score: 3, confidence: 0.99, reasons: ['matched to it before'], conversion: conversion?.error ? null : conversion }];
             }
             const result = judge(signal, words, candidate);
             return result ? [{ candidate, ...result }] : [];
@@ -291,7 +294,7 @@ export function suggestMapping(signals, document, { memory = {}, floor = 0.35 } 
     const chosen = new Map();
     const taken = new Set();
     for (const pair of pairs) {
-        if (pair.score < floor || chosen.has(pair.signal.id) || taken.has(`${pair.candidate.kind}:${pair.candidate.id}`)) continue;
+        if (pair.confidence < floor || chosen.has(pair.signal.id) || taken.has(`${pair.candidate.kind}:${pair.candidate.id}`)) continue;
         chosen.set(pair.signal.id, pair);
         taken.add(`${pair.candidate.kind}:${pair.candidate.id}`);
     }
@@ -301,9 +304,9 @@ export function suggestMapping(signals, document, { memory = {}, floor = 0.35 } 
         return {
             signalId: signal.id, name: signal.name, unit: signal.unit ?? '',
             role: pick ? pick.candidate.role : null, target: pick ? target(pick.candidate) : null,
-            confidence: pick ? Number(pick.score.toFixed(2)) : 0, reasons: pick ? pick.reasons : ['nothing in the model looks like it'],
+            confidence: pick ? Number(pick.confidence.toFixed(2)) : 0, reasons: pick ? pick.reasons : ['nothing in the model looks like it'],
             conversion: pick?.conversion && !pick.conversion.identity ? { scale: pick.conversion.scale, offset: pick.conversion.offset, from: pick.conversion.from, to: pick.conversion.to, note: pick.conversion.note ?? null } : null,
-            alternatives: judged.filter((entry) => entry !== pick && entry.score >= floor / 2).slice(0, 3).map((entry) => ({ target: target(entry.candidate), confidence: Number(entry.score.toFixed(2)) }))
+            alternatives: judged.filter((entry) => entry !== pick && entry.confidence >= floor / 2).slice(0, 3).map((entry) => ({ target: target(entry.candidate), confidence: Number(entry.confidence.toFixed(2)) }))
         };
     });
 }

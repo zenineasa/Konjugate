@@ -3015,12 +3015,17 @@ ipcMain.handle('liveTwinListen', async (_event, url, seconds) => listenToBroker(
 // tank, steady or with a heat loss that grows 10% an hour), so a person sees a twin running with one click and no equipment.
 ipcMain.handle('liveTwinDemo', async (_event, variant = 'steady') => {
     const folder = join(examplesDir, 'dataSources');
-    // 'plant' is the steady recording as a plant's logger would keep it (instrument tags, kW and °C), for the twin's setup to match.
-    const logFileName = { drifting: 'simulatedTankRigDrifting.csv', plant: 'simulatedTankRigPlant.csv' }[variant] ?? 'simulatedTankRig.csv';
+    // 'plant' is the steady recording as a plant's logger would keep it (instrument tags, kW and °C), for the twin's setup to match;
+    // 'house' a house of three rooms, their heaters, the weather and the sun, a day of it (scripts/generateHouseTwin.mjs), for a room
+    // with many signals.
+    const projectFileName = variant === 'house' ? 'smartHouse.kjt' : 'simulatedTankRig.kjt';
+    const logFileName = { drifting: 'simulatedTankRigDrifting.csv', plant: 'simulatedTankRigPlant.csv', house: 'smartHouse.csv' }[variant] ?? 'simulatedTankRig.csv';
     return {
-        project: await decodeProjectForRenderer(await readFile(join(folder, 'simulatedTankRig.kjt'))),
-        projectFileName: 'simulatedTankRig.kjt',
-        log: { content: await readFile(join(folder, logFileName), 'utf8'), fileName: logFileName }
+        project: await decodeProjectForRenderer(await readFile(join(folder, projectFileName))),
+        projectFileName,
+        log: { content: await readFile(join(folder, logFileName), 'utf8'), fileName: logFileName },
+        // A day of the house at 1200× is a minute and a bit; six hours of the rig at 600× a little less.
+        speed: variant === 'house' ? '1200' : '600'
     };
 });
 // Konjugate's own OPC UA certificate, and the servers it has been told to trust, in the app's own folder.

@@ -106,17 +106,17 @@ input:focus, select:focus { border-color: var(--accent); }
 .tile .plot { flex: 1; min-height: 140px; }
 .tile .facts { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; }
 
-.roomLower { display: grid; grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1fr) minmax(280px, 1fr); gap: 10px; height: 230px; flex: none; }
+.roomLower { display: grid; grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1fr) minmax(280px, 1fr); gap: 10px; height: 262px; flex: none; }
 .panel { display: flex; flex-direction: column; min-height: 0; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .panel h3 { margin: 0 0 6px; font-size: 13px; font-weight: 650; }
 .panel h3 small { margin-left: 6px; color: var(--muted); font-weight: 400; font-size: 12px; }
 .panel .empty { margin: 0; color: var(--muted); }
 .inputRows, .inferredRows, .eventsList { flex: 1; min-height: 0; overflow-y: auto; }
-.inputRow { display: grid; grid-template-columns: 150px 1fr; gap: 8px; align-items: center; min-height: 56px; border-bottom: 1px solid var(--line); }
+.inputRow { display: grid; grid-template-columns: 150px 1fr; gap: 8px; align-items: center; min-height: 42px; border-bottom: 1px solid var(--line); }
 .inputRow:last-child { border-bottom: 0; }
 .inputRow strong, .inferredRow strong { display: block; font-size: 12.5px; font-weight: 600; }
 .inputRow small, .inferredRow small { color: var(--muted); font-size: 12px; }
-.inputRow .plot { height: 54px; }
+.inputRow .plot { height: 40px; }
 .inferredRow { display: grid; grid-template-columns: minmax(120px, 1.3fr) minmax(90px, auto) 90px 70px; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
 .inferredRow:last-child { border-bottom: 0; }
 .inferredRow .number { font-variant-numeric: tabular-nums; text-align: right; }
@@ -176,7 +176,7 @@ button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400
 .tunableRow input[type="range"] { grid-column: 1 / -1; height: 18px; padding: 0; accent-color: var(--accent); }
 .tunableRow input[type="number"] { width: 96px; height: 26px; }
 .refitRows { display: grid; gap: 2px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.correctionRow { display: grid; grid-template-columns: 1fr 150px 72px; gap: 6px; align-items: center; margin-bottom: 6px; font-size: 12.5px; }
+.correctionRow { display: grid; grid-template-columns: minmax(0, 1fr) 176px 64px; gap: 6px; align-items: center; margin-bottom: 6px; font-size: 12.5px; }
 .correctionRow input { height: 26px; }
 .trackRows label { display: flex; gap: 6px; align-items: center; font-size: 12.5px; margin-bottom: 4px; }
 .trackRows input { height: auto; }
@@ -189,3 +189,60 @@ button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400
 .fileChoice { display: flex; gap: 10px; align-items: center; }
 .fileChoice #fileName { color: var(--text); font-size: 13px; }
 .modelSummary .modelEmpty { margin: 0; }
+
+/* ---- Finish: scrollbars, controls and type that belong to a dark control room -------------------------------------------------- */
+/* Scrollbars: thin, dark and rounded, the thumb brightening under the pointer; the space kept so content does not jump. */
+* { scrollbar-width: thin; scrollbar-color: #2c4250 transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #22343f; border: 2px solid transparent; border-radius: 8px; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #35505e; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+.inputRows, .inferredRows, .eventsList, .engineer, .setup, .tiles, .scenarioList { scrollbar-gutter: stable; }
+
+::selection { background: rgb(66 201 188 / 30%); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button:focus:not(:focus-visible) { outline: none; }
+
+/* The time slider: a thin track, a small thumb. */
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 18px; padding: 0; background: transparent; border: 0; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: #22343f; border-radius: 4px; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; background: var(--accent); border: 2px solid var(--background); border-radius: 50%; box-shadow: 0 0 0 1px #47736f; }
+input[type="range"]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgb(66 201 188 / 18%); }
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgb(66 201 188 / 35%); }
+
+/* Selects drawn as the inputs are, with an arrow of the room's own. */
+select { -webkit-appearance: none; appearance: none; padding-right: 26px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+input[type="number"] { font-variant-numeric: tabular-nums; }
+
+/* The health strip's buttons: quiet until they are wanted; the Engineer switch lit when on; Stop says what it does. */
+.health button { height: 30px; background: transparent; border-color: var(--line); color: var(--text); }
+.health button:hover:not(:disabled) { background: var(--panelRaised); border-color: #3a5866; }
+.health button[aria-pressed="true"] { color: var(--accentText); background: var(--accent); border-color: var(--accent); }
+#roomStop { color: #f0b3b9; border-color: #5a3238; }
+#roomStop:hover:not(:disabled) { background: rgb(212 112 122 / 14%); border-color: var(--bad); }
+.healthItem { font-variant-numeric: tabular-nums; }
+
+/* Panel titles in small capitals, as the project window's cards are titled. */
+.panel h3, .engineer h3 { color: #9fb2bb; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.panel h3 small { text-transform: none; letter-spacing: 0; font-size: 11.5px; }
+.engineer h4 { color: #9fb2bb; font-size: 11.5px; }
+
+/* Tiles: the title's unit and the signal's own name a step quieter, the value in tabular figures. */
+.tile header small { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--faint); }
+.tile .value { letter-spacing: -.01em; }
+.tile .facts { padding-top: 2px; }
+.inferredRow .number, .inputRow .latest, .eventsList time { font-variant-numeric: tabular-nums; }
+.inputRow:hover, .inferredRow:hover { background: rgb(255 255 255 / 2%); }
+.eventsList li { transition: background .2s; }
+.eventsList li:first-child { animation: arrive .6s ease-out; }
+@keyframes arrive { from { background: rgb(66 201 188 / 12%); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .eventsList li:first-child { animation: none; } }
+
+/* A tile's title gives way to its value in a narrow tile, never the value to the title. */
+.tile header > div:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile header .value { flex: none; white-space: nowrap; }
+.correctionRow select { width: 100%; font-size: 12.5px; }
+/* The status line takes no room until it has something to say. */
+.room > .status:empty { display: none; }

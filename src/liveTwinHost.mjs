@@ -43,7 +43,7 @@ export function cycleEvent(cycle, stats) {
     return {
         type: 'cycle',
         cycle: {
-            index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, wallSeconds: cycle.wallSeconds,
+            index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, trends: cycle.trends, wallSeconds: cycle.wallSeconds,
             corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null, estimate: cycle.estimate ?? null,
             // Each input's last reading up to now, for a sandbox to start its controls from.
             inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null])),

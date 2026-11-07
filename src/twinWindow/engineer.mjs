@@ -44,8 +44,12 @@ export function engineerOpened(twin) {
     $('#refitApply').hidden = true;
     $('#refitKeep').hidden = true;
     const first = twin.tiles[0];
-    $('#alertLabel').textContent = `Warn when it drifts by (${first?.target?.unit ? `${first.target.unit} ` : ''}a move, on ${first?.target?.label ?? first?.signal ?? 'the first measured signal'})`;
-    $('#alertAmount').value = live.alert > 0 ? String(Number(live.alert.toPrecision(4))) : '';
+    // A drift is a difference, the same in kelvin and in °C: said in the unit the room shows.
+    const unit = first?.target?.unit === 'K' && twin.layout?.temperature !== 'K' ? '°C' : first?.target?.unit ?? '';
+    $('#alertLabel').textContent = twin.tiles.length > 1
+        ? `Warn when a signal drifts by (${unit ? `${unit} ` : ''}a move on ${first?.target?.label ?? first?.signal}; the same share of each other signal's tolerance)`
+        : `Warn when it drifts by (${unit ? `${unit} ` : ''}a move)`;
+    $('#alertAmount').value = live.alert > 0 ? String(Number(live.alert.toPrecision(2))) : '';
     $('#timingWindow').value = String(live.window / 60);
     $('#timingStride').value = String(live.stride / 60);
     $('#timingHorizon').value = String(live.horizon / 60);
@@ -90,7 +94,9 @@ function renderTunable(twin) {
         return;
     }
     $('#tunableRows').replaceChildren(...parameters.map((parameter) => {
-        const label = element('label', { textContent: `${parameter.name} ` }, element('small', { textContent: `${parameter.owner}${parameter.unit ? ` · ${parameter.unit}` : ''}` }));
+        // The relationship it belongs to, when that says more than its own name does.
+        const owner = parameter.owner !== parameter.name ? parameter.owner : '';
+        const label = element('label', { textContent: `${parameter.name} ` }, element('small', { textContent: [owner, parameter.unit].filter(Boolean).join(' · ') }));
         const row = element('div', { className: 'tunableRow' }, label);
         row.dataset.parameterId = String(parameter.parameterId);
         if (tracked.has(parameter.parameterId)) {
@@ -231,7 +237,9 @@ async function setAlert() {
     const amount = Number(text);
     const tolerance = twin.tiles[0]?.tolerance;
     const alertAt = text !== '' && amount > 0 && tolerance > 0 ? amount / tolerance : null;
-    const unit = twin.tiles[0]?.target?.unit ? ` ${twin.tiles[0].target.unit}` : '';
+    const modelUnit = twin.tiles[0]?.target?.unit ?? '';
+    const shownUnit = modelUnit === 'K' && twin.layout?.temperature !== 'K' ? '°C' : modelUnit;
+    const unit = shownUnit ? ` ${shownUnit}` : '';
     try {
         if (twin.running) await host.api.liveTwin.setAlert(alertAt);
     } catch (error) {

@@ -6,7 +6,7 @@
 // the twin has made. "Try something" opens a sandbox from now, which never changes the twin, and keeps what was tried as a draft
 // scenario. A change to the model in the project window is offered to the engineer to apply.
 
-import { $, $$, clock, cleanError, dataTime, describeChange, element, plotLayout, plural, sameTwinModel, shown, sparkline, trendOf, valueAt } from './common.mjs';
+import { $, $$, clock, cleanError, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, trendOf, valueAt } from './common.mjs';
 import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
 
 const keptCycles = 1000;
@@ -84,7 +84,7 @@ export function openRoom(run) {
     const state = (stateId) => candidates.find((candidate) => candidate.kind === 'state' && candidate.id === stateId);
     const parameter = (parameterId) => candidates.find((candidate) => candidate.kind === 'parameter' && candidate.id === parameterId);
     twin = {
-        run, settings, running: true, cycles: [], firstIndex: 0, events: [], startedAt: new Date(), drift: 'good', stats: { skipped: 0, recoveries: 0 }, view: null,
+        run, settings, running: true, cycles: [], firstIndex: 0, events: [], startedAt: new Date(), drift: 'good', drifts: {}, stats: { skipped: 0, recoveries: 0 }, view: null,
         layout: { order: [], wide: [], pinned: [], hidden: [], ...structuredClone(run.layout ?? {}) },
         tiles: settings.mapping.filter((entry) => entry.role === 'output').map((entry) => ({
             signal: entry.signal, name: run.nameOf(entry.signal), target: state(entry.stateId), measured: new Map(), tolerance: settings.tolerances[entry.signal],
@@ -237,8 +237,9 @@ function drawTile(tile, cycle, past) {
     const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
     $('.value', tile.element).textContent = `${shown(latest)}${unit}`;
     const jump = cycle.jumps?.[tile.signal]?.jump;
-    const leaning = cycle.trend?.signal === tile.signal && cycle.trend.direction !== 'none';
-    const alarm = cycle.trend?.signal === tile.signal && cycle.trend.alarm;
+    const trend = trendOfSignal(cycle, tile.signal);
+    const leaning = Boolean(trend) && trend.direction !== 'none';
+    const alarm = Boolean(trend?.alarm);
     tile.element.className = tile.element.className.replace(/ ?\b(good|lean|bad)\b/g, '') + ` ${alarm ? 'bad' : leaning || (Number.isFinite(jump) && Math.abs(jump) > tile.tolerance) ? 'lean' : 'good'}`;
     const facts = $('.facts', tile.element);
     facts.replaceChildren();
@@ -248,7 +249,7 @@ function drawTile(tile, cycle, past) {
         element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${brief(shownAs.by(jump))}${unit}` : '—'}`),
         element('span', { textContent: `tolerance ±${brief(shownAs.by(tile.tolerance))}${unit}` }));
     if (alarm) facts.append(element('span', { textContent: 'drifting past the warning' }));
-    else if (leaning) facts.append(element('span', { textContent: `leaning ${cycle.trend.direction} the readings` }));
+    else if (leaning) facts.append(element('span', { textContent: `leaning ${trend.direction} the readings` }));
     // An estimated signal: how many readings fell outside the band the twin expected, where about one in five is honest.
     if (tile.estimated) {
         const outside = upTo.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.outside ?? 0), 0);
@@ -274,8 +275,8 @@ function drawTile(tile, cycle, past) {
     globalThis.Plotly.react($('.plot', tile.element), traces, plotLayout({
         margin: { l: 52, r: 10, t: 22, b: 28 },
         showlegend: true, legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', font: { size: 10 }, bgcolor: 'rgba(0,0,0,0)' },
-        xaxis: { gridcolor: '#1c2c38', zeroline: false, title: { text: 'hours', standoff: 2 } },
-        yaxis: { gridcolor: '#1c2c38', zeroline: false, title: { text: shownAs.unit, standoff: 4 } },
+        xaxis: { gridcolor: '#17252f', zeroline: false, title: { text: 'hours', standoff: 2 } },
+        yaxis: { gridcolor: '#17252f', zeroline: false, title: { text: shownAs.unit, standoff: 4 } },
         shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: cycle.anchor / 3600, x1: cycle.now / 3600, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
     }), { displayModeBar: false, responsive: true });
 }
@@ -311,8 +312,8 @@ function drawInputs(cycle) {
         const pad = (high - low || Math.abs(high) || 1) * 0.15;
         globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
             plotLayout({
-                margin: { l: 46, r: 6, t: 4, b: 16 }, xaxis: { gridcolor: '#1c2c38', zeroline: false, showticklabels: false },
-                yaxis: { gridcolor: '#1c2c38', zeroline: false, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => shown(value)) }
+                margin: { l: 46, r: 6, t: 8, b: 8 }, font: { color: '#9fb2bb', size: 10 }, xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false },
+                yaxis: { gridcolor: '#17252f', zeroline: false, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => shown(value)) }
             }), { displayModeBar: false, responsive: true, staticPlot: true });
     }
 }
@@ -360,8 +361,8 @@ function drawInferred(cycle) {
         // Judged in the model's own units, since half a percent of a temperature in °C is not half a percent of it in kelvin.
         const trend = trendOf(raw);
         const units = shownAs.unit ? ` ${shownAs.unit}` : '';
-        const number = element('div', { className: 'number', textContent: `${shown(latest)}${units}` });
-        if (Number.isFinite(spread) && spread > 0) number.append(element('small', { textContent: ` ±${shown(spread)}` }));
+        const number = element('div', { className: 'number', textContent: `${readable(latest)}${units}` });
+        if (Number.isFinite(spread) && spread > 0) number.append(element('small', { textContent: ` ±${brief(spread)}` }));
         const made = element('div', { className: 'inferredRow' },
             element('div', {}, element('strong', { textContent: name }), element('small', { textContent: kind })),
             number,
@@ -425,22 +426,30 @@ function keepRecord() {
     host.saveRecord({ startedAt: twin.startedAt.toISOString(), events: twin.events.map((event) => ({ at: event.at.toISOString(), kind: event.kind, text: event.text, detail: event.detail })) });
 }
 
+// A signal's trend on a move: its own, or (from a twin that judged only its first signal) the move's when it is this signal's.
+const trendOfSignal = (cycle, signal) => cycle.trends?.[signal] ?? (cycle.trend?.signal === signal ? cycle.trend : null);
+const driftOf = (trend) => (trend?.alarm ? 'bad' : trend?.direction && trend.direction !== 'none' ? 'lean' : 'good');
+
 function cycleEvents(cycle, stats) {
     if (twin.cycles.length === 1) addEvent('good', 'The twin is live: its first move is made', '', cycle.now);
-    const trend = cycle.trend ?? {};
-    const drift = trend.alarm ? 'bad' : trend.direction && trend.direction !== 'none' ? 'lean' : 'good';
-    if (drift !== twin.drift) {
-        const tile = twin.tiles.find((candidate) => candidate.signal === trend.signal);
-        const name = tile?.target?.label ?? trend.signal;
-        const unit = tile?.target?.unit ? ` ${tile.target.unit}` : '';
-        const jumps = `the model is put right by ${shown(Math.abs(trend.mean))}${unit} a move on average`;
-        const estimating = Object.values(cycle.corrections ?? {}).some((correction) => correction?.estimate);
+    // Each measured signal on its own: a bedroom drifting while the other rooms stay in step is said of the bedroom.
+    const estimating = Object.values(cycle.corrections ?? {}).some((correction) => correction?.estimate);
+    for (const tile of twin.tiles) {
+        const trend = trendOfSignal(cycle, tile.signal);
+        if (!trend) continue;
+        const drift = driftOf(trend);
+        if (drift === (twin.drifts[tile.signal] ?? 'good')) continue;
+        twin.drifts[tile.signal] = drift;
+        const name = tile.target?.label ?? tile.signal;
+        const shownAs = displayOf(tile.target?.unit);
+        const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
+        const jumps = `the model is put right by ${brief(shownAs.by(Math.abs(trend.mean)))}${unit} a move on average`;
         const advice = estimating ? '' : '. An engineer can refit on the latest window to find what changed, or estimate the signal and track the tunable parameters as it goes';
-        if (drift === 'bad') addEvent('bad', `${name} is drifting past the warning`, `${jumps}; the warning is ${shown(twin.settings.alertAt * (tile?.tolerance ?? 0))}${unit}${advice}`, cycle.now);
+        if (drift === 'bad') addEvent('bad', `${name} is drifting past the warning`, `${jumps}; the warning is ${brief(shownAs.by(twin.settings.alertAt * (tile.tolerance ?? 0)))}${unit}${advice}`, cycle.now);
         else if (drift === 'lean') addEvent('lean', `${name} is leaning ${trend.direction} the readings`, jumps, cycle.now);
-        else addEvent('good', 'Back in step with the readings', '', cycle.now);
-        twin.drift = drift;
+        else addEvent('good', `${name} is back in step with the readings`, '', cycle.now);
     }
+    twin.drift = driftOf(cycle.trend);
     if (stats.skipped > twin.stats.skipped) addEvent('lean', `The twin fell behind the data, and skipped ${plural(stats.skipped - twin.stats.skipped, 'move')} to keep up`, 'a longer stride or a shorter window (Engineer, Timing) keeps up', cycle.now);
     if (stats.recoveries > twin.stats.recoveries) addEvent('lean', 'The engine stopped, and was started again from the last move', '', cycle.now);
     twin.stats = { skipped: stats.skipped ?? 0, recoveries: stats.recoveries ?? 0 };
@@ -471,6 +480,8 @@ export function handleEvent(update) {
         const alarm = cycle.trend?.alarm;
         $('#healthDrift').className = `healthItem ${alarm ? 'bad' : cycle.trend?.direction !== 'none' ? 'lean' : 'good'}`;
         $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : cycle.trend?.direction !== 'none' ? 'Leaning' : 'In step';
+        const worst = twin.tiles.find((tile) => tile.signal === cycle.trend?.signal);
+        $('#healthDrift').title = alarm || cycle.trend?.direction !== 'none' ? `${worst?.target?.label ?? cycle.trend?.signal}${twin.tiles.filter((tile) => driftOf(trendOfSignal(cycle, tile.signal)) !== 'good').length > 1 ? ', and others' : ''}` : 'Every measured signal is in step';
         cycleEvents(cycle, stats);
         if (twin.view === null) renderView();
         else {

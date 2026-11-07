@@ -271,6 +271,7 @@ if(BUILD_TESTING)
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
+        src/childProcess.cpp
     )
     target_include_directories(relationshipProviderTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(relationshipProviderTests PRIVATE Eigen3::Eigen protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
@@ -317,6 +318,7 @@ if(BUILD_TESTING)
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
+        src/childProcess.cpp
     )
     target_include_directories(nodeProviderRuntimeTests PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(nodeProviderRuntimeTests PRIVATE Eigen3::Eigen protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
@@ -469,6 +471,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
+        src/childProcess.cpp
     )
     target_include_directories(providerBatchingBenchmark PRIVATE include ${BOOST_INCLUDE_DIR} "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(providerBatchingBenchmark PRIVATE protobuf::libprotobuf OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})

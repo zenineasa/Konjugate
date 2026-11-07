@@ -2036,6 +2036,9 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderFields').hidden`), false);
         assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceExpression').hidden`), true);
         assert.match(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderSource').value`), /from konjugate import/);
+        // The row draws the shared program section (src/renderer/programSourceSection.mjs): a template in offers to reset it.
+        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .insertSourceTermTemplate').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderFields h3').textContent.trim().startsWith('Provider source')`), true);
 
         await evaluate(window, `(() => {
             document.querySelector('.sourceTermRow .addSourceTermBinding').click();

@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "providerRuntime.hpp"
+#include "childProcess.hpp"
 #include "cppToolchain.hpp"
 #include "relationshipProvider.pb.h"
 #include "konjugate/providerSharedMemoryChannel.hpp"
@@ -35,7 +36,6 @@
 #include <process.h>
 #include <fcntl.h>
 using ssize_t = intptr_t;
-using pid_t = int;
 #else
 #include <cerrno>
 #include <dlfcn.h>
@@ -54,51 +54,6 @@ namespace konjugate {
 namespace {
 
 using namespace konjugate::provider::protocol;
-
-void writeFramed(int fd, const google::protobuf::MessageLite& message) {
-    const auto size = static_cast<std::uint32_t>(message.ByteSizeLong());
-    const unsigned char header[4] = {
-        static_cast<unsigned char>((size >> 24) & 0xff),
-        static_cast<unsigned char>((size >> 16) & 0xff),
-        static_cast<unsigned char>((size >> 8) & 0xff),
-        static_cast<unsigned char>(size & 0xff)
-    };
-    if (::write(fd, header, 4) != 4) {
-        throw std::runtime_error("Failed to write frame header to provider process.");
-    }
-    std::string payload;
-    if (!message.SerializeToString(&payload)) {
-        throw std::runtime_error("Failed to serialize message for provider process.");
-    }
-    std::size_t written = 0;
-    while (written < payload.size()) {
-        const auto result = ::write(fd, payload.data() + written, payload.size() - written);
-        if (result <= 0) throw std::runtime_error("Failed to write payload to provider process.");
-        written += static_cast<std::size_t>(result);
-    }
-}
-
-bool readExact(int fd, char* buffer, std::size_t size) {
-    std::size_t readCount = 0;
-    while (readCount < size) {
-        const auto result = ::read(fd, buffer + readCount, size - readCount);
-        if (result <= 0) return false;
-        readCount += static_cast<std::size_t>(result);
-    }
-    return true;
-}
-
-bool readFramed(int fd, ProviderToEngine& message) {
-    unsigned char header[4];
-    if (!readExact(fd, reinterpret_cast<char*>(header), 4)) return false;
-    const std::uint32_t size = (static_cast<std::uint32_t>(header[0]) << 24) |
-                               (static_cast<std::uint32_t>(header[1]) << 16) |
-                               (static_cast<std::uint32_t>(header[2]) << 8) |
-                                static_cast<std::uint32_t>(header[3]);
-    std::string payload(size, '\0');
-    if (!readExact(fd, payload.data(), size)) return false;
-    return message.ParseFromString(payload);
-}
 
 std::string sha256Hex(const std::string& data) {
     unsigned char digest[EVP_MAX_MD_SIZE];
@@ -251,18 +206,17 @@ public:
     }
 };
 
-// Owns one spawned provider process's control pipe: spawn, protocol handshake, the initialize
-// round trip, the pipe evaluateBatch round trip (the hot path for PipeProviderBackend; used by
-// SharedMemoryProviderBackend only for handshake/initialize/shutdown, never for evaluation),
-// and shutdown. Both backends below compose one of these rather than duplicating process
-// lifecycle handling.
+// Owns one provider process's control channel: the start (a ChildProcess, the same class that starts a person's objective program),
+// the protocol handshake, the initialize round trip, the pipe evaluateBatch round trip (the hot path for PipeProviderBackend; used by
+// SharedMemoryProviderBackend only for handshake/initialize/shutdown, never for evaluation), and shutdown. Both backends below compose
+// one of these rather than duplicating process lifecycle handling.
 class ProviderControlChannel {
 public:
     ProviderControlChannel(std::string processKey, ContributionImplementation implementation,
                            std::string sourcePath, const ProviderConfiguration& config,
                            std::vector<std::pair<std::string, std::string>> extraEnvironment = {})
         : processKey_(std::move(processKey)), implementation_(implementation), sourcePath_(std::move(sourcePath)) {
-        spawn(config, extraEnvironment);
+        spawn(config, std::move(extraEnvironment));
         performHandshake();
     }
 
@@ -276,12 +230,7 @@ public:
         if (request.instances_size() == 0) return;
         EngineToProvider msg;
         *msg.mutable_initialize() = request;
-        writeFramed(stdinFd_, msg);
-
-        ProviderToEngine resp;
-        if (!readFramed(stdoutFd_, resp)) {
-            throw std::runtime_error("Provider process " + processKey_ + " closed stdout during initialization.");
-        }
+        const auto resp = roundTrip(msg, "initialization");
         if (resp.has_failure()) {
             throw std::runtime_error("Provider process initialization failed: " + std::string(resp.failure().message()));
         }
@@ -305,12 +254,7 @@ public:
             for (const auto val : inputs) eval->add_inputs(val);
         }
 
-        writeFramed(stdinFd_, msg);
-
-        ProviderToEngine resp;
-        if (!readFramed(stdoutFd_, resp)) {
-            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during evaluateBatch.");
-        }
+        const auto resp = roundTrip(msg, "evaluateBatch");
         if (resp.has_failure()) {
             throw std::runtime_error("Provider process evaluation failed: " + std::string(resp.failure().message()));
         }
@@ -339,12 +283,7 @@ public:
         evaluation->set_instance_id(instanceId);
         for (const auto value : inputs) evaluation->add_inputs(value);
 
-        writeFramed(stdinFd_, msg);
-
-        ProviderToEngine resp;
-        if (!readFramed(stdoutFd_, resp)) {
-            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during nodeEvaluate.");
-        }
+        const auto resp = roundTrip(msg, "nodeEvaluate");
         if (resp.has_failure()) {
             throw std::runtime_error("Provider process node evaluation failed: " + std::string(resp.failure().message()));
         }
@@ -365,12 +304,7 @@ public:
     std::vector<std::byte> sendCheckpoint(std::uint64_t instanceId) {
         EngineToProvider msg;
         msg.mutable_checkpoint()->set_instance_id(instanceId);
-        writeFramed(stdinFd_, msg);
-
-        ProviderToEngine resp;
-        if (!readFramed(stdoutFd_, resp)) {
-            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during checkpoint.");
-        }
+        const auto resp = roundTrip(msg, "checkpoint");
         if (resp.has_failure()) {
             throw std::runtime_error("Provider process checkpoint failed: " + std::string(resp.failure().message()));
         }
@@ -390,12 +324,7 @@ public:
         auto* request = msg.mutable_restore();
         request->set_instance_id(instanceId);
         request->set_payload(std::string(reinterpret_cast<const char*>(payload.data()), payload.size()));
-        writeFramed(stdinFd_, msg);
-
-        ProviderToEngine resp;
-        if (!readFramed(stdoutFd_, resp)) {
-            throw std::runtime_error("Provider process " + processKey_ + " closed pipe during restore.");
-        }
+        const auto resp = roundTrip(msg, "restore");
         if (resp.has_failure()) {
             throw std::runtime_error("Provider process restore failed: " + std::string(resp.failure().message()));
         }
@@ -405,229 +334,55 @@ public:
     }
 
     void close() noexcept {
-#ifdef _WIN32
-        if (hProcess_ == NULL) return;
-#else
-        if (pid_ <= 0) return;
-#endif
-        // Best-effort: this whole function is noexcept, and the fds get closed unconditionally
-        // right below regardless of whether the provider ever answers the shutdown handshake.
+        if (!process_) return;
+        // Best-effort: this whole function is noexcept, and the process is ended right below (its stdin closed, then stopped if it
+        // does not end by itself) whether or not the provider answers the shutdown handshake.
         try {
             EngineToProvider msg;
             msg.mutable_shutdown();
-            writeFramed(stdinFd_, msg);
+            send(msg);
             ProviderToEngine resp;
-            readFramed(stdoutFd_, resp);
+            receive(resp);
         } catch (...) {} // NOLINT(bugprone-empty-catch)
-
-        if (stdinFd_ != -1) { ::close(stdinFd_); stdinFd_ = -1; }
-        if (stdoutFd_ != -1) { ::close(stdoutFd_); stdoutFd_ = -1; }
-
-#ifdef _WIN32
-        DWORD waitResult = WaitForSingleObject(hProcess_, 1000);
-        if (waitResult == WAIT_TIMEOUT) {
-            TerminateProcess(hProcess_, 1);
-        }
-        CloseHandle(hProcess_);
-        hProcess_ = NULL;
-        pid_ = -1;
-#else
-        int status = 0;
-        ::waitpid(pid_, &status, WNOHANG);
-        pid_ = -1;
-#endif
+        process_.reset();
     }
 
 private:
-#ifdef _WIN32
-    void spawn(const ProviderConfiguration& config, const std::vector<std::pair<std::string, std::string>>& extraEnvironment) {
-        HANDLE hChildStd_IN_Rd = NULL;
-        HANDLE hChildStd_IN_Wr = NULL;
-        HANDLE hChildStd_OUT_Rd = NULL;
-        HANDLE hChildStd_OUT_Wr = NULL;
-
-        SECURITY_ATTRIBUTES saAttr;
-        saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-        saAttr.bInheritHandle = TRUE;
-        saAttr.lpSecurityDescriptor = NULL;
-
-        if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0)) {
-            throw std::runtime_error("Failed to create stdout pipe for provider process.");
-        }
-        if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)) {
-            CloseHandle(hChildStd_OUT_Rd);
-            CloseHandle(hChildStd_OUT_Wr);
-            throw std::runtime_error("Failed to set handle info for stdout pipe.");
-        }
-
-        if (!CreatePipe(&hChildStd_IN_Rd, &hChildStd_IN_Wr, &saAttr, 0)) {
-            CloseHandle(hChildStd_OUT_Rd);
-            CloseHandle(hChildStd_OUT_Wr);
-            throw std::runtime_error("Failed to create stdin pipe for provider process.");
-        }
-        if (!SetHandleInformation(hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0)) {
-            CloseHandle(hChildStd_OUT_Rd);
-            CloseHandle(hChildStd_OUT_Wr);
-            CloseHandle(hChildStd_IN_Rd);
-            CloseHandle(hChildStd_IN_Wr);
-            throw std::runtime_error("Failed to set handle info for stdin pipe.");
-        }
-
-        // CreateProcessA below passes a NULL environment block, which inherits this process's
-        // environment, so setting variables here (rather than building an explicit block) is
-        // sufficient for both PYTHONPATH and any shared-memory channel names a backend needs.
-        for (const auto& [name, value] : extraEnvironment) {
-            SetEnvironmentVariableA(name.c_str(), value.c_str());
-        }
-
-        std::string commandLine;
+    void spawn(const ProviderConfiguration& config, std::vector<std::pair<std::string, std::string>> environment) {
+        std::vector<std::vector<std::string>> commands;
         if (implementation_ == ContributionImplementation::pythonProvider) {
-            std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
-            // The resolved python3 may be a distribution (Anaconda, a pyenv shim, ...) with no
-            // knowledge of Konjugate's SDK; put it on PYTHONPATH explicitly rather than relying on
-            // the package being installed into whichever interpreter is found.
+            const std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
+            commands.push_back({pythonExe, "-m", "konjugate", sourcePath_});
+            // No override was configured, and some platforms only provide the interpreter as "python".
+            if (pythonExe == "python3") commands.push_back({"python", "-m", "konjugate", sourcePath_});
+            // The interpreter found may be a distribution (Anaconda, a pyenv shim, ...) with no knowledge of Konjugate's SDK; it is
+            // put on the child's PYTHONPATH rather than relying on the package being installed into whichever interpreter is found.
             if (!config.pythonSdkPath.empty()) {
-                char existingPythonPath[32768];
-                const auto existingLength = GetEnvironmentVariableA("PYTHONPATH", existingPythonPath, sizeof(existingPythonPath));
-                const std::string pythonPath = existingLength > 0
-                    ? config.pythonSdkPath + ";" + std::string(existingPythonPath, existingLength) : config.pythonSdkPath;
-                SetEnvironmentVariableA("PYTHONPATH", pythonPath.c_str());
-            }
-            commandLine = "\"" + pythonExe + "\" -m konjugate \"" + sourcePath_ + "\"";
-        } else {
-            commandLine = "\"" + sourcePath_ + "\"";
-        }
-
-        BOOL bSuccess = FALSE;
-        PROCESS_INFORMATION piProcInfo;
-        ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
-
-        auto tryCreateProcess = [&](const std::string& cmd) -> BOOL {
-            STARTUPINFOA siStartInfo;
-            ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
-            siStartInfo.cb = sizeof(STARTUPINFOA);
-            siStartInfo.hStdInput = hChildStd_IN_Rd;
-            siStartInfo.hStdOutput = hChildStd_OUT_Wr;
-            siStartInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-            siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
-
-            std::vector<char> cmdLineBuf(cmd.begin(), cmd.end());
-            cmdLineBuf.push_back('\0');
-
-            return CreateProcessA(
-                NULL,
-                cmdLineBuf.data(),
-                NULL,
-                NULL,
-                TRUE,
-                0,
-                NULL,
-                NULL,
-                &siStartInfo,
-                &piProcInfo
-            );
-        };
-
-        bSuccess = tryCreateProcess(commandLine);
-        if (!bSuccess && implementation_ == ContributionImplementation::pythonProvider) {
-            std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
-            if (pythonExe == "python3") {
-                std::string fallbackCommandLine = "\"python\" -m konjugate \"" + sourcePath_ + "\"";
-                bSuccess = tryCreateProcess(fallbackCommandLine);
-            }
-        }
-
-        CloseHandle(hChildStd_IN_Rd);
-        CloseHandle(hChildStd_OUT_Wr);
-
-        if (!bSuccess) {
-            CloseHandle(hChildStd_IN_Wr);
-            CloseHandle(hChildStd_OUT_Rd);
-            throw std::runtime_error("Failed to spawn provider process: " + std::to_string(GetLastError()));
-        }
-
-        CloseHandle(piProcInfo.hThread);
-
-        stdinFd_ = _open_osfhandle(reinterpret_cast<intptr_t>(hChildStd_IN_Wr), _O_WRONLY | _O_BINARY);
-        stdoutFd_ = _open_osfhandle(reinterpret_cast<intptr_t>(hChildStd_OUT_Rd), _O_RDONLY | _O_BINARY);
-        hProcess_ = piProcInfo.hProcess;
-        pid_ = static_cast<pid_t>(piProcInfo.dwProcessId);
-    }
+#ifdef _WIN32
+                constexpr const char* separator = ";";
 #else
-    void spawn(const ProviderConfiguration& config, const std::vector<std::pair<std::string, std::string>>& extraEnvironment) {
-        int inPipe[2];
-        int outPipe[2];
-        if (::pipe(inPipe) != 0 || ::pipe(outPipe) != 0) {
-            throw std::runtime_error("Failed to create pipes for provider process.");
-        }
-
-        pid_ = ::fork();
-        if (pid_ < 0) {
-            throw std::runtime_error("Failed to fork provider process.");
-        }
-
-        if (pid_ == 0) {
-            // Child process
-            ::dup2(inPipe[0], STDIN_FILENO);
-            ::dup2(outPipe[1], STDOUT_FILENO);
-            ::close(inPipe[0]); ::close(inPipe[1]);
-            ::close(outPipe[0]); ::close(outPipe[1]);
-
-            for (const auto& [name, value] : extraEnvironment) ::setenv(name.c_str(), value.c_str(), 1);
-
-            if (implementation_ == ContributionImplementation::pythonProvider) {
-                std::string pythonExe = config.pythonInterpreter.empty() ? "python3" : config.pythonInterpreter;
-                // The resolved python3 may be a distribution (Anaconda, a pyenv shim, ...) with no
-                // knowledge of Konjugate's SDK; put it on the child's PYTHONPATH explicitly rather
-                // than relying on the package being installed into whichever interpreter is found.
-                if (!config.pythonSdkPath.empty()) {
-                    const char* existingPythonPath = std::getenv("PYTHONPATH");
-                    const std::string pythonPath = existingPythonPath && *existingPythonPath
-                        ? config.pythonSdkPath + ":" + existingPythonPath : config.pythonSdkPath;
-                    ::setenv("PYTHONPATH", pythonPath.c_str(), 1);
-                }
-                std::vector<const char*> args;
-                args.push_back(pythonExe.c_str());
-                args.push_back("-m");
-                args.push_back("konjugate");
-                args.push_back(sourcePath_.c_str());
-                args.push_back(nullptr);
-                ::execvp(pythonExe.c_str(), const_cast<char* const*>(args.data()));
-                if (pythonExe == "python3") {
-                    // No override was configured and "python3" itself was not found; some
-                    // platforms only provide the interpreter as "python".
-                    args[0] = "python";
-                    ::execvp("python", const_cast<char* const*>(args.data()));
-                }
-            } else {
-                std::vector<const char*> args;
-                args.push_back(sourcePath_.c_str());
-                args.push_back(nullptr);
-                ::execvp(sourcePath_.c_str(), const_cast<char* const*>(args.data()));
-            }
-            std::perror("execvp failed");
-            ::_exit(127);
-        }
-
-        // Parent process
-        ::close(inPipe[0]);
-        ::close(outPipe[1]);
-        stdinFd_ = inPipe[1];
-        stdoutFd_ = outPipe[0];
-    }
+                constexpr const char* separator = ":";
 #endif
+                const char* existingPythonPath = std::getenv("PYTHONPATH");
+                environment.emplace_back("PYTHONPATH", existingPythonPath && *existingPythonPath
+                    ? config.pythonSdkPath + separator + existingPythonPath : config.pythonSdkPath);
+            }
+        } else {
+            commands.push_back({sourcePath_});
+        }
+        try {
+            process_ = std::make_unique<ChildProcess>(commands, environment, true);
+        } catch (const std::exception& error) {
+            throw std::runtime_error("Provider process " + processKey_ + " could not be started: " + error.what());
+        }
+    }
 
     void performHandshake() {
         EngineToProvider msg;
         auto* handshake = msg.mutable_handshake();
         handshake->set_protocol_version(1);
         handshake->set_provider_api_version(1);
-        writeFramed(stdinFd_, msg);
-
-        ProviderToEngine resp;
-        if (!readFramed(stdoutFd_, resp)) {
-            throw std::runtime_error("Provider process " + processKey_ + " failed handshake (no response).");
-        }
+        const auto resp = roundTrip(msg, "the handshake");
         if (resp.has_failure()) {
             throw std::runtime_error("Provider process handshake failed: " + std::string(resp.failure().message()));
         }
@@ -636,15 +391,43 @@ private:
         }
     }
 
+    void send(const google::protobuf::MessageLite& message) {
+        std::string payload;
+        if (!message.SerializeToString(&payload)) {
+            throw std::runtime_error("Failed to serialize message for provider process.");
+        }
+        process_->writeFrame(payload);
+    }
+
+    bool receive(ProviderToEngine& message) {
+        std::string payload;
+        if (!process_->readFrame(payload, ChildProcess::noLimit)) return false;
+        return message.ParseFromString(payload);
+    }
+
+    // One request and its answer. A provider that ends instead of answering is reported with the last of what it wrote to stderr.
+    ProviderToEngine roundTrip(const EngineToProvider& message, const char* during) {
+        ProviderToEngine resp;
+        bool answered = false;
+        try {
+            send(message);
+            answered = receive(resp);
+        } catch (const std::exception&) {
+            answered = false;
+        }
+        if (!answered) {
+            auto said = process_->diagnostics();
+            while (!said.empty() && (said.back() == '\n' || said.back() == '\r')) said.pop_back();
+            throw std::runtime_error("Provider process " + processKey_ + " ended during " + during +
+                (said.empty() ? std::string(".") : ": " + said));
+        }
+        return resp;
+    }
+
     std::string processKey_;
     ContributionImplementation implementation_;
     std::string sourcePath_;
-    pid_t pid_ = -1;
-#ifdef _WIN32
-    HANDLE hProcess_ = NULL;
-#endif
-    int stdinFd_ = -1;
-    int stdoutFd_ = -1;
+    std::unique_ptr<ChildProcess> process_;
 };
 
 class PipeProviderBackend final : public ProviderBackend {

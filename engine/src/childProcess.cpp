@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "childProcess.hpp"
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -44,6 +45,7 @@ struct ChildProcess::Impl {
     std::string diagnostics;
     std::thread stderrReader;
     std::string pending;
+    bool echo = false;
 #ifdef _WIN32
     HANDLE process = NULL;
     HANDLE stdinWrite = NULL;
@@ -58,14 +60,20 @@ struct ChildProcess::Impl {
 
     void keep(const char* bytes, std::size_t size) {
         std::lock_guard lock(diagnosticsMutex);
+        if (echo) {
+            std::fwrite(bytes, 1, size, stderr);
+            std::fflush(stderr);
+        }
         diagnostics.append(bytes, size);
         if (diagnostics.size() > keptDiagnostics) diagnostics.erase(0, diagnostics.size() - keptDiagnostics);
     }
 };
 
 #ifndef _WIN32
-ChildProcess::ChildProcess(const std::vector<std::vector<std::string>>& commands, const std::vector<std::pair<std::string, std::string>>& environment)
+ChildProcess::ChildProcess(const std::vector<std::vector<std::string>>& commands, const std::vector<std::pair<std::string, std::string>>& environment,
+                           bool echoDiagnostics)
     : impl_(new Impl) {
+    impl_->echo = echoDiagnostics;
     std::string tried;
     for (const auto& command : commands) {
         if (command.empty()) continue;
@@ -149,7 +157,7 @@ void ChildProcess::writeFrame(const std::string& payload) {
 }
 
 bool ChildProcess::readFrame(std::string& payload, std::chrono::milliseconds limit) {
-    const auto deadline = std::chrono::steady_clock::now() + limit;
+    const auto deadline = limit == noLimit ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + limit;
     auto& pending = impl_->pending;
     while (true) {
         if (pending.size() >= 4) {
@@ -160,12 +168,14 @@ bool ChildProcess::readFrame(std::string& payload, std::chrono::milliseconds lim
                 return true;
             }
         }
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
-        if (left <= 0) throw std::runtime_error("The program did not answer within " + std::to_string(limit.count() / 1000) + " s.");
-        pollfd watched{impl_->stdoutFd, POLLIN, 0};
-        const auto ready = ::poll(&watched, 1, static_cast<int>(left));
-        if (ready < 0 && errno == EINTR) continue;
-        if (ready <= 0) continue;
+        if (limit != noLimit) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+            if (left <= 0) throw std::runtime_error("The program did not answer within " + std::to_string(limit.count() / 1000) + " s.");
+            pollfd watched{impl_->stdoutFd, POLLIN, 0};
+            const auto ready = ::poll(&watched, 1, static_cast<int>(left));
+            if (ready < 0 && errno == EINTR) continue;
+            if (ready <= 0) continue;
+        }
         char buffer[65536];
         const auto count = ::read(impl_->stdoutFd, buffer, sizeof(buffer));
         if (count <= 0) return false;
@@ -185,8 +195,10 @@ std::string quoted(const std::string& argument) {
 }
 }
 
-ChildProcess::ChildProcess(const std::vector<std::vector<std::string>>& commands, const std::vector<std::pair<std::string, std::string>>& environment)
+ChildProcess::ChildProcess(const std::vector<std::vector<std::string>>& commands, const std::vector<std::pair<std::string, std::string>>& environment,
+                           bool echoDiagnostics)
     : impl_(new Impl) {
+    impl_->echo = echoDiagnostics;
     for (const auto& [name, value] : environment) SetEnvironmentVariableA(name.c_str(), value.c_str());
     std::string tried;
     for (const auto& command : commands) {
@@ -254,7 +266,7 @@ void ChildProcess::writeFrame(const std::string& payload) {
 }
 
 bool ChildProcess::readFrame(std::string& payload, std::chrono::milliseconds limit) {
-    const auto deadline = std::chrono::steady_clock::now() + limit;
+    const auto deadline = limit == noLimit ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + limit;
     auto& pending = impl_->pending;
     while (true) {
         if (pending.size() >= 4) {
@@ -264,6 +276,14 @@ bool ChildProcess::readFrame(std::string& payload, std::chrono::milliseconds lim
                 pending.erase(0, 4 + static_cast<std::size_t>(size));
                 return true;
             }
+        }
+        if (limit == noLimit) {
+            // No deadline: a blocking read, with no polling between a provider's evaluations.
+            char buffer[65536];
+            DWORD count = 0;
+            if (!ReadFile(impl_->stdoutRead, buffer, sizeof(buffer), &count, NULL) || !count) return false;
+            pending.append(buffer, count);
+            continue;
         }
         if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("The program did not answer within " + std::to_string(limit.count() / 1000) + " s.");
         DWORD available = 0;

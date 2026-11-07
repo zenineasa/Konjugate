@@ -162,7 +162,7 @@ Open question: what the sandbox assumes for the inputs it is not controlling, wi
 
 ## The push service, a fallback
 
-For a lab whose instrument script has nowhere to put its numbers and cannot write a file or publish to a broker, Konjugate can listen for observations itself: JSON over HTTP or WebSocket, from any script. It comes last in the order of work, and only if a lab needs it.
+For a lab whose instrument script has nowhere to put its numbers and cannot write a file or publish to a broker, Konjugate can listen for observations itself: JSON over HTTP or WebSocket, from any script. It comes last in the order of work, and only if a lab needs it. The design to build from is [The push service](pushService.md).
 
 - **Started and stopped from the app.** A Connections panel with one Start / Stop switch and its state: stopped, or listening on an address and port with the number of clients and the rate of data. It shows how to connect, with a short copyable example in Python and in JavaScript. Opening a project never starts it.
 - **Visible while on.** A toolbar chip, like the one for a running tuning, says "Listening on 127.0.0.1:PORT, 2 clients".
@@ -198,7 +198,7 @@ Each step is proved on real data before the next starts.
 3. **Live.** The file endpoint following a growing file, then MQTT, with a wall clock, the time-alignment layer, the session log, and raw recording for sources without history. Several people on one rig works from here on, each a client of the same source. **Built**, for data log files and MQTT: `src/dataLogFollower.mjs` follows a log while a logger writes it, `src/mqttSource.mjs` listens to a broker and follows its topics, and the live twin runs from either in the app; the time-alignment layer is the held input readings and the readings each move compares. What a broker sends is recorded as a data log in a `recordings` folder beside the project, with nobody asked where (the settings choice of folder is not built).
 4. **The sandbox and scenarios.** **Built:** a sandbox is a separate engine started from the live twin's latest move; what was tried is kept with the project as a draft scenario when the person goes back to live (`scenarios`, [project schema](../projectSchema.md)).
 5. **OPC UA,** with the tag browser and certificate trust described above. **Built** (`src/opcuaSource.mjs`, with the `node-opcua-client` library): tags browsed with their engineering units and range, security of none, sign, or sign and encrypt with a server's certificate trusted only when the person confirms it, subscriptions timed by source timestamps with each status as the reading's quality, reconnection, and recording as for MQTT. Testing it showed three things now handled for every live source: a server's notifications group tags rather than times (each batch is put in time order); readings of several signals for one instant arrive one after another (a move waits until the data has gone past its now, and a source that has finished says so); and a repeated value is still a reading (the subscription asks for timestamp changes). Serving the model's own states as tags remains under [Later](#later).
-6. **The push service,** only if a lab needs it.
+6. **The push service,** only if a lab needs it. Designed in [The push service](pushService.md).
 
 ## Demonstrations that need no hardware
 

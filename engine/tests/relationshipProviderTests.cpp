@@ -276,6 +276,50 @@ void providerRuntimeExecutesPythonWorkerEndToEnd() {
     runtime.shutdown();
 }
 
+// A provider started through ChildProcess, as an objective program is: one that ends during an evaluation is reported by name, with
+// what it last wrote to its stderr, and an interpreter that cannot be found is said plainly rather than as a failed handshake.
+void providerRuntimeReportsAProviderThatEndsAndOneThatCannotStart() {
+    const auto endingPlan = konjugate::compileExecutionPlan(projectWithImplementation(R"json({
+        "kind": "python",
+        "providerApiVersion": 1,
+        "source": "../tests/pythonEndingProviderTest.py",
+        "bindings": [
+            {"key": "delta", "kind": "state", "nodeId": 1, "stateId": 11}
+        ],
+        "output": {"key": "gradient", "role": "target", "stateId": 12}
+    })json"));
+    ::setenv("PYTHONPATH", "../sdk/python", 1);
+
+    konjugate::ProviderConfiguration config;
+    config.pythonInterpreter = "python3";
+    std::string message;
+    {
+        konjugate::ProviderRuntime runtime(config);
+        runtime.initialize(endingPlan);
+        const auto& node = endingPlan.nodes.at(1);
+        try {
+            konjugate::evaluateContributionTasks(
+                node, {290}, endingPlan.initialStates, konjugate::resolveParameterValues(node, {}), 1.5, 0.01, &runtime);
+        } catch (const std::exception& error) {
+            message = error.what();
+        }
+        runtime.shutdown();
+    }
+    require(message.find("ended during evaluateBatch") != std::string::npos && message.find("the rig is unplugged") != std::string::npos,
+        "A provider that ended during an evaluation was not reported with what it said: " + message);
+
+    config.pythonInterpreter = "konjugate-no-such-python";
+    message.clear();
+    try {
+        konjugate::ProviderRuntime runtime(config);
+        runtime.initialize(endingPlan);
+    } catch (const std::exception& error) {
+        message = error.what();
+    }
+    require(message.find("could not be started") != std::string::npos && message.find("konjugate-no-such-python") != std::string::npos,
+        "An interpreter that could not be found was not said plainly: " + message);
+}
+
 std::string cppInlineConductanceProviderSource() {
     return R"cpp(
 #include <konjugate/relationshipProvider.hpp>
@@ -1359,6 +1403,7 @@ int main() {
     validatorWarnsWithoutBlockingAnUntouchedProgrammableRelationshipTemplate();
     executionDelegatesResolvedScalarsWithoutChangingCadence();
     providerRuntimeExecutesPythonWorkerEndToEnd();
+    providerRuntimeReportsAProviderThatEndsAndOneThatCannotStart();
     providerRuntimeCompilesAndExecutesAnInlineCppProviderEndToEnd();
     providerRuntimeCompilesAndExecutesAnInlineCppProviderOverSharedMemory();
     providerRuntimeBatchesMultipleCppInstancesOverSharedMemoryInOneRoundTrip();

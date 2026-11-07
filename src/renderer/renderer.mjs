@@ -98,7 +98,7 @@ import {
 } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // The program sections of the four editors that can write a relationship as a program (src/renderer/programSourceSection.mjs), drawn
-// before anything looks for their parts by id.
+// before anything looks for their parts by id. Each source-term row of the node builder makes its own (addSourceTermRow).
 const relationshipPluginHint = 'A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.';
 const termProgramSection = new ProgramSourceSection({
     container: document.querySelector('#termProviderSection'),
@@ -4397,16 +4397,7 @@ function addSourceTermRow() {
         </select>
         <input class="sourceExpression" placeholder="Source expression, e.g. qDot / heatCapacity">
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
-        <div class="sourceTermProviderFields" hidden>
-            <textarea class="sourceTermProviderSource" rows="8" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>
-            <div class="templateButtonGroup">
-                <button type="button" class="openSourceTermProviderEditor templateButton">Open code editor</button>
-                <button type="button" class="insertSourceTermTemplate templateButton" hidden>Reset template</button>
-            </div>
-            <div class="sourceTermProviderBindingRows"></div>
-            <button type="button" class="addSourceTermBinding templateButton">＋ Add binding</button>
-            <label class="editorField"><span>Output key</span><input class="sourceTermProviderOutputKey" placeholder="e.g. rateGradient"></label>
-        </div>
+        <div class="sourceTermProviderFields" hidden></div>
     `;
     $('#sourceTermRows').appendChild(row);
     refreshSourceStateOptions();
@@ -4414,9 +4405,13 @@ function addSourceTermRow() {
     const kindSelect = $('.sourceTermKind', row);
     const expressionInput = $('.sourceExpression', row);
     const providerFields = $('.sourceTermProviderFields', row);
-    const providerSource = $('.sourceTermProviderSource', row);
-    const resetTemplateButton = $('.insertSourceTermTemplate', row);
-    const outputKeyInput = $('.sourceTermProviderOutputKey', row);
+    // The same program section as the source-term editor's (src/renderer/programSourceSection.mjs), one for each row, its parts named
+    // by class since a builder has as many as it has rows.
+    const section = new ProgramSourceSection({
+        container: providerFields, rows: 8,
+        classes: { open: 'openSourceTermProviderEditor', reset: 'insertSourceTermTemplate', source: 'sourceTermProviderSource', addBinding: 'addSourceTermBinding', bindings: 'sourceTermProviderBindingRows', outputKey: 'sourceTermProviderOutputKey' },
+        bindingHint: 'Each binding exposes one state of this node to the provider under a stable key.', outputPlaceholder: 'e.g. rateGradient'
+    });
 
     const bindingCandidates = () => stateVariablesFromBuilder().map((state) => ({ symbol: state.symbol, label: state.symbol }));
     const refreshBindingRowOptions = () => {
@@ -4430,8 +4425,7 @@ function addSourceTermRow() {
     };
     const currentBindingKeys = () => $$('.providerBindingRow [data-field="key"]', providerFields).map((input) => ({ key: input.value }));
     const regenerateTemplate = () => {
-        providerSource.value = defaultProviderSource(kindSelect.value, currentBindingKeys(), outputKeyInput.value, $('#newNodeName').value);
-        resetTemplateButton.hidden = !providerSource.value.trim();
+        section.source = defaultProviderSource(kindSelect.value, currentBindingKeys(), section.outputKey, $('#newNodeName').value);
     };
     const addBindingRow = () => {
         const bindingRow = document.createElement('div');
@@ -4441,7 +4435,7 @@ function addSourceTermRow() {
             <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
             <button type="button" title="Remove binding">×</button>
         `;
-        $('.sourceTermProviderBindingRows', providerFields).appendChild(bindingRow);
+        section.bindings.appendChild(bindingRow);
         refreshBindingRowOptions();
         bindingRow.querySelector('button').addEventListener('click', () => bindingRow.remove());
     };
@@ -4450,17 +4444,16 @@ function addSourceTermRow() {
         const isEquation = kindSelect.value === 'equation';
         expressionInput.hidden = !isEquation;
         providerFields.hidden = isEquation;
-        if (!isEquation && !providerSource.value.trim()) regenerateTemplate();
+        if (!isEquation && !section.source.trim()) regenerateTemplate();
     });
-    resetTemplateButton.addEventListener('click', () => {
-        if (providerSource.value.trim() && !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+    section.onReset(() => {
+        if (section.source.trim() && !window.confirm('Replace the current provider source with a freshly generated template?')) return;
         regenerateTemplate();
     });
-    providerSource.addEventListener('input', () => { resetTemplateButton.hidden = !providerSource.value.trim(); });
-    $('.addSourceTermBinding', row).addEventListener('click', addBindingRow);
-    $('.openSourceTermProviderEditor', row).addEventListener('click', () => {
-        providerEditTarget = { type: 'builderSourceTerm', sourceElement: providerSource };
-        window.providerEditor.openWindow({ source: providerSource.value, kind: kindSelect.value, title: $('#newNodeName').value });
+    section.onAddBinding(addBindingRow);
+    section.onOpenEditor(() => {
+        providerEditTarget = { type: 'builderSourceTerm', sourceElement: section.sourceField };
+        window.providerEditor.openWindow({ source: section.source, kind: kindSelect.value, title: $('#newNodeName').value });
     });
 
     row.querySelector('.removeBuilderRow').addEventListener('click', () => { row.remove(); refreshSourceStateOptions(); });

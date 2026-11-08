@@ -31,7 +31,8 @@ export function createLocalModelsSection({ root, api, endpoint = () => '', inUse
     }
 
     // The control for one model: Download (with its progress and Stop while it runs), Use it, or In use.
-    function actionFor(model, onUse) {
+    // `primary`: the suggested models' actions stand out; a file found on Hugging Face is offered plainly.
+    function actionFor(model, onUse, { primary = true } = {}) {
         const box = element('div', 'localModelAction');
         const pull = pulls.get(model);
         if (pull) {
@@ -41,19 +42,19 @@ export function createLocalModelsSection({ root, api, endpoint = () => '', inUse
             progress.setAttribute('aria-label', `Downloading ${model}`);
             const text = element('small', 'localModelProgressText', pull.total > 0
                 ? `${formatBytes(pull.completed)} of ${formatBytes(pull.total)}` : pull.status || 'Starting…');
-            const stop = element('button', '', 'Stop');
+            const stop = element('button', 'settingsButton', 'Stop');
             stop.type = 'button';
             stop.dataset.localModelStop = model;
             stop.addEventListener('click', () => api.cancelPull(model));
             box.append(progress, text, stop);
             return box;
         }
-        const button = element('button', 'doneButton');
+        const button = element('button', primary ? 'settingsButton primary' : 'settingsButton');
         button.type = 'button';
         if (inUse()?.toLowerCase() === model.toLowerCase() && has(model)) {
             button.textContent = 'In use';
             button.disabled = true;
-            button.classList.remove('doneButton');
+            button.className = 'settingsButton';
         } else if (has(model)) {
             button.textContent = 'Use it';
             button.dataset.localModelUse = model;
@@ -92,9 +93,10 @@ export function createLocalModelsSection({ root, api, endpoint = () => '', inUse
             card.append(heading, element('p', '', suggestion.description), facts);
             const fit = memoryFit(suggestion.memoryBytes, status?.totalMemory);
             if (!fit.fits) card.append(element('small', 'localModelFit', fit.note));
+            // Only the recommended model's button stands out: one prominent action on the page.
             card.append(actionFor(suggestion.model, () => useModel({
                 model: suggestion.model, title: suggestion.title, ...suggestion.configuration
-            })));
+            }), { primary: suggestion === suggestedLocalModels[0] }));
             return card;
         }));
     }
@@ -102,10 +104,10 @@ export function createLocalModelsSection({ root, api, endpoint = () => '', inUse
     function renderFiles() {
         const results = find('#huggingFaceResults');
         const header = element('div', 'huggingFaceChosen');
-        const back = element('button', '', '← Results');
+        const back = element('button', 'settingsButton', '‹ Results');
         back.type = 'button';
         back.addEventListener('click', () => { chosenRepository = null; search(); });
-        const open = element('button', '', 'Open on Hugging Face');
+        const open = element('button', 'settingsButton', 'Open on Hugging Face');
         open.type = 'button';
         open.addEventListener('click', () => api.openPage(chosenRepository.repository));
         header.append(back, element('strong', '', chosenRepository.repository), open);
@@ -117,7 +119,7 @@ export function createLocalModelsSection({ root, api, endpoint = () => '', inUse
             const label = element('span', '', file.quantization);
             const details = element('small', '', `${formatBytes(file.size)}${fit.fits ? '' : ' · won’t fit on this computer'}`);
             const shortName = chosenRepository.repository.split('/').pop().replace(/-GGUF$/i, '');
-            row.append(label, details, actionFor(name, () => useModel({ model: name, title: `${shortName} ${file.quantization}`, think: null, timeoutSeconds: 180 })));
+            row.append(label, details, actionFor(name, () => useModel({ model: name, title: `${shortName} ${file.quantization}`, think: null, timeoutSeconds: 180 }), { primary: false }));
             return row;
         });
         results.replaceChildren(header, ...(chosenRepository.license ? [element('small', 'huggingFaceLicense', `Licence: ${chosenRepository.license}. Check the model's page for its terms before you rely on it.`)] : []), ...rows);

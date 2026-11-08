@@ -337,12 +337,11 @@ export class ConnectionsPanel {
         const lastUsed = this.#state.lastUsed ?? {};
         this.parts.keys.replaceChildren(...this.#keys.map((key) => {
             const row = document.createElement('div');
-            row.className = `connectionsKey${key.revoked ? ' revoked' : ''}`;
+            row.className = `settingsItem connectionsKey${key.revoked ? ' revoked' : ''}`;
             row.dataset.key = key.name;
             const used = lastUsed[key.name] ? `last used ${new Date(lastUsed[key.name]).toLocaleTimeString()}` : 'not used since the service started';
-            row.innerHTML = `<span><strong>${escapeHtml(key.name)}</strong><small>${escapeHtml(key.signals.join(', '))}</small></span>`
-                + `<small>${key.revoked ? 'revoked' : escapeHtml(used)}</small>`
-                + (key.revoked ? '' : '<button type="button" data-revoke>Revoke</button>');
+            row.innerHTML = `<span class="settingsItemText"><strong class="settingsItemLabel">${escapeHtml(key.name)}</strong><small class="settingsItemHint">${escapeHtml(key.signals.join(', '))}</small><small class="settingsItemHint">${key.revoked ? 'Revoked' : escapeHtml(used[0].toUpperCase() + used.slice(1))}</small></span>`
+                + (key.revoked ? '' : '<span class="settingsItemControl"><button class="settingsButton danger" type="button" data-revoke>Revoke</button></span>');
             row.querySelector('[data-revoke]')?.addEventListener('click', async () => {
                 if (!this.#confirm(`Revoke the key "${key.name}"? A script using it is refused from its next message.`)) return;
                 await this.#api.keys.revoke(key.name);
@@ -350,7 +349,7 @@ export class ConnectionsPanel {
             });
             return row;
         }));
-        if (!this.#keys.length) this.parts.keys.innerHTML = '<small>No keys yet: make one for each rig or script.</small>';
+        if (!this.#keys.length) this.parts.keys.innerHTML = '<div class="settingsItem settingsEmpty">No keys yet. Make one below for each rig or script.</div>';
     }
 
     async #addKey() {
@@ -385,10 +384,14 @@ export class ConnectionsPanel {
         this.#examplesShown = shown;
         const examples = pushExamples(settings);
         const open = new Set([...this.parts.examples.querySelectorAll('details[open]')].map((details) => details.dataset.example));
+        // In the order of the groups, so each group's heading appears once.
+        const groups = ['Try', 'JSON', 'Protobuf', 'gRPC'];
         const sections = [
             ...examples.map((example) => ({ ...example, group: example.id === 'rig' ? 'Try' : ['python', 'javascript', 'curl'].includes(example.id) ? 'JSON' : example.id === 'protobuf' ? 'Protobuf' : 'gRPC' })),
             { id: 'proto', title: 'pushReadings.proto', code: this.#proto || 'The message definition could not be read.', group: 'Protobuf' }
-        ];
+        ].map((section, index) => ({ section, index }))
+            .sort((a, b) => groups.indexOf(a.section.group) - groups.indexOf(b.section.group) || a.index - b.index)
+            .map(({ section }) => section);
         let lastGroup = null;
         this.parts.examples.replaceChildren(...sections.flatMap((section) => {
             const parts = [];
@@ -402,7 +405,7 @@ export class ConnectionsPanel {
             details.className = 'connectionsExample';
             details.dataset.example = section.id;
             details.open = open.has(section.id) || (open.size === 0 && section.id === 'python');
-            details.innerHTML = `<summary>${escapeHtml(section.title)}<button type="button" data-copy>Copy</button></summary><pre><code>${escapeHtml(section.code)}</code></pre>`;
+            details.innerHTML = `<summary>${escapeHtml(section.title)}<button class="settingsButton" type="button" data-copy>Copy</button></summary><pre><code>${escapeHtml(section.code)}</code></pre>`;
             parts.push(details);
             return parts;
         }));

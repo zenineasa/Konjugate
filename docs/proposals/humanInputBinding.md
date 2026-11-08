@@ -56,7 +56,7 @@ The rules (what a binding is, how a reading becomes a value, when a value is sen
 
 In the app's settings (decision 3), in their own file (`inputBindings.json` in the user's data folder, [src/inputBindingsStore.mjs](../../src/inputBindingsStore.mjs); the browser's own storage in the web edition), never in a project. A binding names the device and control, how it maps, and the parameter it drives by the parameter's **symbol and name**, not its id, since ids differ from one project to the next: binding "Heater power" (`heaterPower`) once drives it in every model that has a live parameter of that symbol, which suits a person who keeps a controller set up for a family of models. Every project window and twin window is told when the bindings change, so one made in the twin's window drives in the project window too.
 
-Bindings are listed in **Settings** ([Settings](../settings.md), ⚙ in the titlebar or ⌘,), on its **Controllers** page: every binding, with its device's state and whether the open model has its parameter ("not in this model"), to change or remove; **Bind a control** for any live parameter of the open model, before a run as well as during one; and the threshold. They are kept as they are made, as everything in Settings is.
+Bindings are listed in **Settings** ([Settings](../settings.md), ⚙ in the titlebar or ⌘,), on its **Controllers** page: every binding, with its device's state and whether the open model has its parameter ("not in this model"), to change or remove; **Bind a control** (choose the parameter, then **Bind**) for any live parameter of the open model, before a run as well as during one; and the threshold. They are kept as they are made, as everything in Settings is.
 
 ## Recording what was done
 

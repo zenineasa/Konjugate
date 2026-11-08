@@ -7242,8 +7242,8 @@ async function refreshToolchainField(kind) {
     const { path, detected, status } = toolchainFields(kind);
     const { overridePath, detectedPath } = await window.providerToolchains.get(kind);
     path.value = overridePath ?? '';
-    path.placeholder = detectedPath ? `Auto-detected: ${detectedPath}` : 'Leave blank to auto-detect';
-    detected.textContent = detectedPath ? `Auto-detected: ${detectedPath}` : 'Not auto-detected on this machine.';
+    path.placeholder = 'Automatic';
+    detected.textContent = detectedPath ? `Automatic: ${detectedPath}` : 'None found on this computer: choose one.';
     status.textContent = '';
     status.className = 'assistantConfigurationStatus';
 }
@@ -7282,9 +7282,11 @@ function updateProviderExecutionModeWarning() {
     $('#providerExecutionModeWarning').hidden = $('#providerExecutionMode').value !== 'inProcess';
 }
 
+// Where C++ code runs in a process of its own or not; the web edition has no such choice, so the section is not shown there.
 async function refreshProviderExecutionMode() {
-    const { executionMode } = await window.providerToolchains.executionMode.get();
-    $('#providerExecutionMode').value = executionMode;
+    const { executionMode, available = true } = await window.providerToolchains.executionMode.get();
+    $('#providerExecutionMode').closest('.settingsSection').hidden = available === false;
+    $('#providerExecutionMode').value = executionMode ?? '';
     updateProviderExecutionModeWarning();
 }
 
@@ -7322,9 +7324,9 @@ async function refreshGeneralSettings() {
     updateUiZoomControls();
     try {
         const { version } = await window.applicationInfo.get();
-        $('#settingsVersion').textContent = `Konjugate ${version}`;
+        $('#settingsVersion').textContent = version;
     } catch {
-        $('#settingsVersion').textContent = 'Konjugate';
+        $('#settingsVersion').textContent = 'Unknown';
     }
 }
 $('#settingsZoomOut').addEventListener('click', () => updateUiZoomControls(window.uiZoom.decrease()));
@@ -7381,20 +7383,20 @@ function renderControllerSettings() {
         const described = steering.describe(entry);
         const here = (entry.model === null || entry.model === modelName) && symbols.has(entry.parameter.symbol);
         const row = document.createElement('div');
-        row.className = 'controllerBindingRow';
+        row.className = 'settingsItem controllerBindingRow';
         row.dataset.bindingId = entry.id;
         const notes = [
             `${entry.device.name}${described.connected ? '' : ', not plugged in'}`,
             `drives ${entry.parameter.name} (${entry.parameter.symbol})${entry.model ? ` only in “${entry.model}”` : ''}`,
             ...(here ? [] : ['not in this model'])
         ];
-        row.innerHTML = `<div><strong>${escapeHtml(described.label)}</strong><small>${escapeHtml(notes.join(' · '))}</small></div>
-            <button type="button" data-change>Change…</button><button type="button" data-remove>Remove</button>`;
+        row.innerHTML = `<div class="settingsItemText"><strong class="settingsItemLabel">${escapeHtml(described.label)}</strong><small class="settingsItemHint">${escapeHtml(notes.join(' · '))}</small></div>
+            <div class="settingsItemControl"><button class="settingsButton" type="button" data-change>Change…</button><button class="settingsButton danger" type="button" data-remove>Remove</button></div>`;
         $('[data-change]', row).addEventListener('click', () => steering.openSettings(entry.id));
         $('[data-remove]', row).addEventListener('click', () => steering.save({ ...steering.document, bindings: steering.document.bindings.filter((other) => other.id !== entry.id) }));
         return row;
     }));
-    if (!kept.bindings.length) list.replaceChildren(Object.assign(document.createElement('p'), { className: 'emptyEditorState', textContent: 'No control is bound yet.' }));
+    if (!kept.bindings.length) list.replaceChildren(Object.assign(document.createElement('div'), { className: 'settingsItem settingsEmpty', textContent: 'No controls bound yet.' }));
     const choose = $('#controllerBindParameter');
     const chosen = choose.value;
     choose.replaceChildren(...(live.length
@@ -7413,7 +7415,7 @@ $('#controllerBindButton').addEventListener('click', () => {
     if (!parameter) return;
     steering.bindParameter({ symbol: parameter.symbol, name: parameter.name }, {
         waiting: (waiting) => {
-            button.textContent = waiting ? 'Move a control… (Esc to stop)' : 'Bind a control';
+            button.textContent = waiting ? 'Move a control… (Esc to stop)' : 'Bind';
             if (waiting) button.dataset.waiting = 'true'; else delete button.dataset.waiting;
         }
     });
@@ -10689,31 +10691,67 @@ function confirmAssistantConfigurationNavigation() {
     return !assistantConfigurationIsDirty() || window.confirm('Discard unsaved changes to this model configuration?');
 }
 
+// Settings › Model assistant's configurations, one row each, the one in use marked; a row opens its configuration on a page of its own.
 function renderAssistantConfigurationList() {
-    const query = $('#searchAssistantConfigurations').value.trim().toLowerCase();
-    const selectedUuid = $('#assistantConfigurationUuid').value;
-    const configurations = assistantConfigurationCatalog.configurations.filter((configuration) =>
-        `${configuration.name} ${configuration.provider} ${configuration.model}`.toLowerCase().includes(query));
+    const configurations = assistantConfigurationCatalog.configurations;
     $('#assistantConfigurationList').replaceChildren(...configurations.map((configuration) => {
         const button = document.createElement('button');
         button.type = 'button';
+        button.className = 'settingsItem settingsItemLink';
         button.dataset.configurationUuid = configuration.uuid;
-        button.classList.toggle('selected', configuration.uuid === selectedUuid);
-        button.setAttribute('role', 'option');
-        button.setAttribute('aria-selected', String(configuration.uuid === selectedUuid));
+        button.setAttribute('role', 'listitem');
         const provider = assistantConfigurationCatalog.providers.find((item) => item.id === configuration.provider);
+        const text = document.createElement('span');
+        text.className = 'settingsItemText';
         const title = document.createElement('strong');
+        title.className = 'settingsItemLabel';
         title.textContent = configuration.name;
-        const details = document.createElement('span');
-        details.textContent = `${provider?.name ?? configuration.provider} · ${configuration.model || 'No model selected'}${configuration.think === true ? ' · reasons first' : ''}`;
-        button.append(title, details);
+        const details = document.createElement('small');
+        details.className = 'settingsItemHint';
+        details.textContent = `${provider?.name ?? configuration.provider} · ${configuration.model || 'No model chosen'}${configuration.think === true ? ' · reasons first, slow' : ''}`;
+        text.append(title, details);
+        const control = document.createElement('span');
+        control.className = 'settingsItemControl';
         if (configuration.uuid === activeAssistantConfigurationUuid) {
             const active = document.createElement('i');
-            active.textContent = 'Active';
-            button.append(active);
+            active.className = 'settingsBadge';
+            active.textContent = 'In use';
+            control.append(active);
         }
+        const chevron = document.createElement('span');
+        chevron.className = 'settingsChevron';
+        chevron.ariaHidden = 'true';
+        chevron.textContent = '›';
+        control.append(chevron);
+        button.append(text, control);
         return button;
     }));
+    if (!configurations.length) {
+        $('#assistantConfigurationList').replaceChildren(Object.assign(document.createElement('div'), {
+            className: 'settingsItem settingsEmpty', textContent: 'None yet. Run a model on this computer above, or add a configuration for an online provider.'
+        }));
+    }
+}
+
+// The page shows the list (the suggested models and the configurations), or one configuration's form with a way back to the list.
+function showAssistantView(view) {
+    const page = $('[data-settings-page="assistant"]');
+    page.dataset.assistantView = view;
+    $('.assistantListView').hidden = view !== 'list';
+    $('#assistantConfigurationForm').hidden = view !== 'detail';
+    $('.settingsPages').scrollTop = 0;
+    if (view === 'detail') $('#assistantConfigurationName').focus({ preventScroll: true });
+}
+
+// Back to the list, once a configuration with changes not saved may be left.
+function leaveAssistantDetail() {
+    if (!confirmAssistantConfigurationNavigation()) return false;
+    assistantDiscoveryRevision += 1;
+    clearTimeout(assistantDiscoveryTimer);
+    assistantConfigurationBaseline = '';
+    renderAssistantConfigurationList();
+    showAssistantView('list');
+    return true;
 }
 
 function syncAssistantProviderFields({ replaceEndpoint = false } = {}) {
@@ -10750,7 +10788,7 @@ function populateAssistantConfiguration(configuration = null) {
     $('#assistantConfigurationCredential').value = '';
     $('#assistantConfigurationThink').value = configuration?.think === true ? 'on' : configuration?.think === false ? 'off' : (configuration ? '' : 'off');
     $('#assistantConfigurationDialogTitle').textContent = configuration?.name ?? 'New configuration';
-    $('#assistantCredentialHint').textContent = configuration?.credentialConfigured ? 'Leave blank to preserve the stored key' : 'Stored only when this configuration is saved';
+    $('#assistantCredentialHint').textContent = configuration?.credentialConfigured ? 'Leave empty to keep the saved key' : 'Kept, encrypted, when you save';
     $('#deleteAssistantConfiguration').hidden = !configuration;
     setAssistantConfigurationStatus(
         assistantConfigurationCatalog.credentialStorage?.plainText
@@ -10772,8 +10810,11 @@ async function prepareAssistantConfigurationPage() {
     await refreshAssistantConfigurations();
     const providers = assistantConfigurationCatalog.providers;
     $('#assistantConfigurationProvider').replaceChildren(...providers.map((provider) => new Option(provider.name, provider.id)));
-    $('#searchAssistantConfigurations').value = '';
-    populateAssistantConfiguration(activeConfigurationRecord());
+    assistantDiscoveryRevision += 1;
+    clearTimeout(assistantDiscoveryTimer);
+    assistantConfigurationBaseline = '';
+    renderAssistantConfigurationList();
+    showAssistantView('list');
     localModelsSection.check();
 }
 
@@ -10794,8 +10835,7 @@ async function useLocalModel({ model, title, think = null, timeoutSeconds = 180 
     await window.aiProviders.setActiveConfiguration(uuid);
     await refreshAssistantConfigurations();
     $('#assistantConfiguration').value = uuid;
-    populateAssistantConfiguration(assistantConfigurationCatalog.configurations.find((configuration) => configuration.uuid === uuid));
-    setAssistantConfigurationStatus(`${title} is the assistant’s model now.`);
+    renderAssistantConfigurationList();
 }
 
 const localModelsSection = createLocalModelsSection({
@@ -10843,8 +10883,11 @@ async function discoverAssistantModels() {
             assistantConfigurationFormValue(), $('#assistantConfigurationCredential').value || undefined
         );
         if (revision !== assistantDiscoveryRevision || settings.page !== 'assistant') return;
+        // Filling in the choices is not a change the person made: a form nobody had touched stays untouched.
+        const untouched = !assistantConfigurationIsDirty();
         const selectedModel = selectedAssistantModel();
         setAssistantModelChoices(models, selectedModel || models[0]?.id || '');
+        if (untouched) assistantConfigurationBaseline = assistantConfigurationDraftSignature();
         setAssistantConfigurationStatus(models.length ? '' : 'Connected, but no compatible models were found.', models.length ? 'neutral' : 'warning');
     } catch (error) {
         if (revision !== assistantDiscoveryRevision || settings.page !== 'assistant') return;
@@ -11054,15 +11097,17 @@ $('#assistantConfigurationModel').addEventListener('change', syncAssistantCustom
 $('#assistantConfigurationThink').addEventListener('change', syncAssistantThinkNote);
 $('#assistantSetUpModel').addEventListener('click', () => openSettings('assistant'));
 $('#newAssistantConfiguration').addEventListener('click', () => {
-    if (!confirmAssistantConfigurationNavigation()) return;
     populateAssistantConfiguration();
+    showAssistantView('detail');
 });
-$('#searchAssistantConfigurations').addEventListener('input', renderAssistantConfigurationList);
+$('#assistantConfigurationBack').addEventListener('click', leaveAssistantDetail);
 $('#assistantConfigurationList').addEventListener('click', (event) => {
     const control = event.target.closest('[data-configuration-uuid]');
-    if (!control || !confirmAssistantConfigurationNavigation()) return;
+    if (!control) return;
     const configuration = assistantConfigurationCatalog.configurations.find((item) => item.uuid === control.dataset.configurationUuid);
-    if (configuration) populateAssistantConfiguration(configuration);
+    if (!configuration) return;
+    populateAssistantConfiguration(configuration);
+    showAssistantView('detail');
 });
 $('#assistantConfigurationForm').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -11082,13 +11127,12 @@ $('#testAssistantConfiguration').addEventListener('click', async () => {
 $('#deleteAssistantConfiguration').addEventListener('click', async () => {
     const uuid = $('#assistantConfigurationUuid').value;
     if (!uuid || !window.confirm('Delete this model configuration and its stored credential?')) return;
-    const index = assistantConfigurationCatalog.configurations.findIndex((configuration) => configuration.uuid === uuid);
     await window.aiProviders.removeConfiguration(uuid);
     activeAssistantConfigurationUuid = null;
     await refreshAssistantConfigurations();
-    const next = assistantConfigurationCatalog.configurations[Math.min(index, assistantConfigurationCatalog.configurations.length - 1)];
-    populateAssistantConfiguration(next ?? null);
-    setAssistantConfigurationStatus('Configuration deleted.');
+    assistantConfigurationBaseline = '';
+    renderAssistantConfigurationList();
+    showAssistantView('list');
     localModelsSection.render();
 });
 $('#assistantPrompt').addEventListener('keydown', (event) => {

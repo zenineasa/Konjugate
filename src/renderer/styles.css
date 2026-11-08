@@ -430,21 +430,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .executionAdvanced summary { color: #8499a3; font-size: 8px; cursor: pointer; user-select: none; }
 .executionAdvanced[open] summary { margin-bottom: 8px; color: #b8cbd1; }
 .executionAdvanced label:first-of-type { margin-top: 0; }
-.assistantConfigurationWorkspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 410px; }
-.assistantConfigurationWorkspace > aside { display: flex; flex-direction: column; gap: 9px; padding: 13px; background: #09141b; border-right: 1px solid #263a44; }
-.assistantConfigurationWorkspace > aside > button { width: 100%; height: 30px; border: 0; border-radius: 4px; font-size: 8px; }
-.assistantConfigurationWorkspace > aside > input { width: 100%; }
-.assistantConfigurationList { display: grid; align-content: start; gap: 4px; min-height: 0; overflow-y: auto; }
-.assistantConfigurationList button { position: relative; display: grid; gap: 4px; width: 100%; padding: 9px 10px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 4px; }
-.assistantConfigurationList button:hover { background: #102029; }
-.assistantConfigurationList button.selected { background: #132630; border-color: #31505a; }
-.assistantConfigurationList strong { margin: 0; padding-right: 35px; color: #c7d5da; font-size: 9px; }
-.assistantConfigurationList span { overflow: hidden; color: #647984; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
-.assistantConfigurationList i { position: absolute; top: 8px; right: 8px; color: #66c8bf; font-size: 6px; font-style: normal; text-transform: uppercase; letter-spacing: .6px; }
-.assistantConfigurationDetails { padding: 15px 18px; }
-.assistantConfigurationDetails > div:first-child { min-height: 58px; }
-.assistantConfigurationDetails fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-.assistantConfigurationDetails fieldset:disabled { opacity: .65; }
 .assistantConfigurationStatus { min-height: 16px; padding-top: 6px; color: #718691; font-size: 8px; }
 .assistantConfigurationStatus.error { color: #d48288; }
 .assistantConfigurationStatus.warning { color: #d6a35f; }
@@ -458,9 +443,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .toolchainPathRow input { flex: 1; min-width: 0; }
 .passwordDialog .toolchainPathRow button { padding: 0 9px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 7px; }
 .assistantConfigurationForm footer #deleteAssistantConfiguration { color: #c17980; }
-@media (max-width: 650px) {
-    .assistantConfigurationWorkspace { grid-template-columns: 180px minmax(0, 1fr); }
-}
 .passwordDialog .runModeSwitch { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 13px; padding: 9px; background: #0a151d; border: 1px solid #293b46; border-radius: 4px; cursor: pointer; }
 .runModeSwitch > span { display: grid; gap: 3px; }
 .runModeSwitch b { color: #b9c9d0; font-size: 8px; font-weight: 650; }
@@ -2021,31 +2003,12 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Project properties, the defaults for new projects and the save-time override (docs/proposals/modelOwnership.md). */
 .passwordDialog.ownershipDialog { width: 420px; max-height: calc(100vh - 32px); overflow-y: auto; }
 /* Settings › Push service (src/renderer/connectionsPanel.mjs): the push service's switch, its keys and the examples to copy. */
-.connectionsPage :is(.connectionsRow, .connectionsKey, .connectionsKeyMade, .connectionsExample) button { height: 26px; padding: 0 10px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 8px; font-weight: 500; cursor: pointer; }
+.connectionsPage :is(.connectionsKeyMade, .connectionsExample) button { height: 26px; padding: 0 10px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 8px; font-weight: 500; cursor: pointer; }
 .connectionsPage .connectionsExample summary button { height: 20px; padding: 0 8px; font-size: 7px; }
-.connectionsPage .connectionsRow button.doneButton { color: #09201e !important; background: var(--accent) !important; border-color: var(--accent) !important; font-weight: 700; }
-.connectionsPage .connectionsRow :is(input, select) { height: 28px; font-size: 8px; }
-.connectionsRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-top: 8px; }
-.connectionsRow > small { flex: 1; min-width: 90px; padding-bottom: 8px; color: #718691; font-size: 8px; }
-.passwordDialog .connectionsPort { margin-top: 0; }
-.connectionsPort input { width: 90px; }
-.connectionsAddKey input { flex: 1 1 160px; min-width: 0; }
-.connectionsHint { margin: 6px 0 8px !important; }
-.passwordDialog .connectionsNetwork { display: flex; gap: 6px; align-items: center; margin-top: 10px; color: #b8c7ce; }
-.connectionsNetwork input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
-.connectionsCertificate { padding: 8px; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; }
 .connectionsCertificate[hidden] { display: none; }
-.connectionsCertificate .assistantConfigurationStatus:empty { display: none; }
-.connectionsCertificate > span { display: block; overflow-wrap: anywhere; color: #9fb2bb; font-size: 8px; line-height: 1.5; }
 .connectionsLog { margin: 0; padding: 0; list-style: none; color: #5d717c; font-size: 7px; line-height: 1.6; }
 .connectionsLog:empty { display: none; }
 .connectionsKeys { display: grid; gap: 4px; }
-.connectionsKeys > small { color: #5d717c; font-size: 8px; }
-.connectionsKey { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 6px 8px; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; }
-.connectionsKey span { display: grid; gap: 2px; min-width: 0; }
-.connectionsKey strong { margin: 0; font-size: 9px; }
-.connectionsKey small { overflow: hidden; color: #718691; font-size: 7px; text-overflow: ellipsis; }
-.connectionsKey.revoked { opacity: .55; }
 .connectionsKeyMade { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 8px; padding: 8px; background: rgb(66 201 188 / 6%); border: 1px solid #2f5f5b; border-radius: 4px; }
 .connectionsKeyMade[hidden] { display: none; }
 .connectionsKeyMade span { grid-column: 1 / -1; color: #9fd6cf; font-size: 8px; }
@@ -2144,24 +2107,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .settingsPage { padding: 15px 18px 20px; }
 .settingsPage[hidden] { display: none; }
 .passwordDialog.settingsSheet :is(input, select) { font-size: 9px; }
-.settingsPage[data-settings-page="assistant"] { display: flex; flex-direction: column; min-height: 100%; padding: 0; }
-.settingsPage[data-settings-page="assistant"][hidden] { display: none; }
-.passwordDialog .assistantConfigurationForm { display: flex; flex: 1; flex-direction: column; padding: 0; }
-.assistantConfigurationForm .assistantConfigurationWorkspace { flex: 1; min-height: 360px; }
-/* Delete on the left when there is one, then room, then Test and Save. */
-.assistantConfigurationForm > footer { display: flex !important; align-items: center; gap: 7px; }
-.assistantConfigurationForm > footer > span { flex: 1; }
 /* Settings › Model assistant › Run a model on this computer (docs/proposals/suggestedLocalModels.md). */
 .localModelsSection { display: grid; gap: 9px; padding: 14px 17px 15px; border-bottom: 1px solid #263a44; }
-.localModelsHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.passwordDialog .localModelsHeader strong { margin: 0; color: #d2e0e4; font-size: 10px; }
 .localModelsState { color: #66c8bf; font-size: 7px; }
-.localModelsNote { margin: 0; color: #718691; font-size: 8px; line-height: 1.5; }
-.localModelsNote.warning { color: #d6a35f; }
-.localModelsMissing { display: grid; gap: 8px; }
-.localModelsMissing[hidden] { display: none; }
-.localModelsMissing > p { margin: 0; color: #9fb3bb; font-size: 8px; line-height: 1.6; }
-.passwordDialog .localModelsMissing strong { display: inline; margin: 0; color: #c7d5da; font-size: 8px; font-weight: 650; }
 .localModelsState.stopped { color: #d6a35f; }
 .localModelsCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .localModelsCards[hidden] { display: none; }
@@ -2209,7 +2157,114 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .settingsRow button { height: 28px; padding: 0 10px; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: 8px; cursor: pointer; }
 .settingsRow button:disabled { opacity: .45; cursor: default; }
 .settingsZoomRow output { min-width: 40px; color: #d2e0e4; text-align: center; font-size: 9px; font-variant-numeric: tabular-nums; }
-.settingsPage[data-settings-page="newProjects"] .ownershipDialog { max-width: 460px; }
+/* Settings pages, all built the same way (docs/settings.md): an optional line saying what the page is for, then titled sections of rows
+   in a card, each row a name and a hint on the left and its control on the right, and a note under a card where more needs saying.
+   One kind of button (and one prominent kind, at most once on a page), switches for what is on or off, the same sizes on every page. */
+.passwordDialog.settingsSheet .settingsLead { max-width: 640px; margin: 0 0 16px; color: #8ea3ad; font-size: 8.5px; line-height: 1.55; }
+.settingsSection + .settingsSection { margin-top: 20px; }
+.settingsSection[hidden], .settingsCard[hidden] { display: none; }
+.settingsSectionHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.passwordDialog.settingsSheet .settingsSectionTitle { margin: 0 0 7px 2px; color: #9fb3bb; font-size: 8.5px; font-weight: 650; }
+.settingsCard { min-width: 0; margin: 0; padding: 0; background: #0b171e; border: 1px solid #22343e; border-radius: 7px; }
+.passwordDialog.settingsSheet .settingsItem { display: flex; align-items: center; gap: 14px; min-height: 42px; margin: 0; padding: 8px 12px; color: inherit; font-size: inherit; text-align: left; background: transparent; border: 0; border-radius: 0; }
+.passwordDialog.settingsSheet .settingsItem[hidden] { display: none; }
+.passwordDialog.settingsSheet .settingsCard > .settingsItem + .settingsItem,
+.passwordDialog.settingsSheet .settingsCard > * + .settingsItem,
+.passwordDialog.settingsSheet .settingsCard > div > .settingsItem + .settingsItem { border-top: 1px solid #1c2c35; }
+.settingsItemText { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.passwordDialog.settingsSheet .settingsItemLabel { display: block; margin: 0; color: #d2e0e4; font-size: 9px; font-weight: 500; }
+.passwordDialog.settingsSheet .settingsItemHint { display: block; color: #6f848e; font-size: 7.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.passwordDialog.settingsSheet .settingsItemHint[hidden] { display: none; }
+.settingsItemValue { color: #b8c9cf; font-size: 9px; font-variant-numeric: tabular-nums; }
+.settingsItemControl { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.passwordDialog.settingsSheet .settingsItem > :is(input, select), .passwordDialog.settingsSheet .settingsItemControl > :is(input, select) { flex: 0 1 260px; min-width: 0; height: 28px; font-size: 9px; }
+/* A row whose control needs the width: the name above, the control across. */
+.passwordDialog.settingsSheet .settingsItemWide { flex-wrap: wrap; }
+.passwordDialog.settingsSheet .settingsItemWide > .settingsItemControl { flex: 1 1 100%; justify-content: flex-start; }
+.passwordDialog.settingsSheet .settingsItemWide .settingsItemControl > input { flex: 1 1 160px; }
+.passwordDialog.settingsSheet .settingsEmpty { color: #6f848e; font-size: 8px; line-height: 1.5; }
+.passwordDialog.settingsSheet .settingsNote, .passwordDialog.settingsSheet .settingsPage .assistantConfigurationStatus { min-height: 0; margin: 6px 2px 0; padding: 0; color: #647984; font-size: 7.5px; line-height: 1.5; }
+.passwordDialog.settingsSheet :is(.settingsNote, .assistantConfigurationStatus):empty { display: none; }
+.passwordDialog.settingsSheet :is(.settingsNote, .assistantConfigurationStatus).warning { color: #d6a35f; }
+.passwordDialog.settingsSheet :is(.settingsNote, .assistantConfigurationStatus).error { color: #d48288; }
+.settingsSectionActions { display: flex; gap: 6px; margin-top: 8px; }
+.settingsUnit { color: #8aa0aa; font-size: 9px; }
+.settingsBadge { color: #66c8bf; font-size: 7px; font-style: normal; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
+.settingsChevron { color: #567080; font-size: 13px; line-height: 1; }
+.passwordDialog.settingsSheet button.settingsItemLink { width: 100%; cursor: pointer; }
+.passwordDialog.settingsSheet button.settingsItemLink:hover { background: #102029; }
+.passwordDialog.settingsSheet .settingsCard > button.settingsItemLink:first-child { border-radius: 6px 6px 0 0; }
+.passwordDialog.settingsSheet .settingsCard > button.settingsItemLink:last-child { border-radius: 0 0 6px 6px; }
+.passwordDialog.settingsSheet .settingsCard > button.settingsItemLink:only-child { border-radius: 6px; }
+.passwordDialog.settingsSheet .settingsButton { flex: 0 0 auto; height: 26px; padding: 0 11px; color: #a9c4c8; background: #13232b; border: 1px solid #2c4048; border-radius: 5px; font-size: 8px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.passwordDialog.settingsSheet .settingsButton:hover:not(:disabled) { color: #d2e6e8; border-color: #3d5b63; }
+.passwordDialog.settingsSheet .settingsButton:disabled { opacity: .45; cursor: default; }
+.passwordDialog.settingsSheet .settingsButton.primary { color: #04161a; background: var(--accent); border-color: transparent; font-weight: 650; }
+.passwordDialog.settingsSheet .settingsButton.primary:hover:not(:disabled) { color: #04161a; filter: brightness(1.08); }
+.passwordDialog.settingsSheet .settingsButton.danger { color: #d48288; }
+.passwordDialog.settingsSheet input.settingsSwitch { position: relative; flex: 0 0 auto; width: 30px; min-width: 30px; height: 17px; margin: 0; padding: 0; appearance: none; background: #21343e; border: 1px solid #3a505c; border-radius: 10px; cursor: pointer; }
+.passwordDialog.settingsSheet input.settingsSwitch::after { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; background: #71858f; border-radius: 50%; content: ''; transition: transform 120ms ease, background 120ms ease; }
+.passwordDialog.settingsSheet input.settingsSwitch:checked { background: rgb(66 201 188 / 24%); border-color: #39877f; }
+.passwordDialog.settingsSheet input.settingsSwitch:checked::after { background: var(--accent); transform: translateX(13px); }
+.passwordDialog.settingsSheet input.settingsSwitch:disabled { opacity: .5; cursor: default; }
+.settingsDisclosure { background: #0b171e; border: 1px solid #22343e; border-radius: 7px; }
+.settingsDisclosure[hidden] { display: none; }
+.settingsDisclosure > summary { padding: 11px 12px; color: #c4d4d9; font-size: 9px; cursor: pointer; user-select: none; }
+.settingsDisclosure[open] > summary { border-bottom: 1px solid #1c2c35; }
+.settingsDisclosureBody { display: grid; gap: 8px; padding: 10px 12px 12px; }
+.settingsSidebarIcon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* General: the interface size's buttons and its value. */
+.settingsZoomRow output { min-width: 34px; color: #d2e0e4; text-align: center; font-size: 9px; font-variant-numeric: tabular-nums; }
+
+/* Model assistant: the list (the models to run here and the configurations), or one configuration on a page of its own. */
+.settingsPage[data-settings-page="assistant"] .assistantListView[hidden], .settingsPage[data-settings-page="assistant"] .assistantDetailView[hidden] { display: none; }
+.passwordDialog.settingsSheet .assistantDetailView { display: block; padding: 0; }
+.passwordDialog.settingsSheet .settingsPageBack { height: 24px; margin: -4px 0 6px -6px; padding: 0 6px; color: var(--accent); background: transparent; border: 0; border-radius: 4px; font-size: 8.5px; cursor: pointer; }
+.passwordDialog.settingsSheet .settingsDetailTitle { margin: 0 0 10px 2px; color: #d8e4e9; font-size: 11px; font-weight: 650; }
+.passwordDialog.settingsSheet .assistantDetailView fieldset { border: 1px solid #22343e; }
+.passwordDialog.settingsSheet .assistantDetailView label.settingsItem > :is(input, select), .passwordDialog.settingsSheet .assistantDetailView .configurationModelControl { flex: 0 1 300px; }
+.passwordDialog.settingsSheet .assistantDetailView .configurationModelField select { height: 28px; font-size: 9px; }
+.passwordDialog.settingsSheet .assistantDetailView .configurationModelField button { height: 28px; font-size: 8px; }
+.passwordDialog.settingsSheet .settingsDetailFooter { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding: 0; border: 0; }
+.passwordDialog.settingsSheet .settingsDetailFooter > span { flex: 1; }
+.passwordDialog.settingsSheet .localModelsSection { display: block; padding: 0; border: 0; }
+.passwordDialog.settingsSheet .localModelsCards { margin-bottom: 8px; }
+.passwordDialog.settingsSheet .huggingFaceBrowser { padding: 0; }
+
+/* Providers: a path, chosen or found. */
+.passwordDialog.settingsSheet .toolchainPathRow { margin: 0; }
+.passwordDialog.settingsSheet .toolchainDetected { margin: 0; }
+
+/* Controllers: a binding's row, and the smallest change recorded. */
+.passwordDialog.settingsSheet .controllerThreshold input { flex: 0 0 70px; width: 70px; }
+.passwordDialog.settingsSheet .controllerBindRow .settingsItemControl { flex-wrap: nowrap; }
+.passwordDialog.settingsSheet .controllerBindRow select { flex: 0 1 220px; }
+
+/* Push service: the port, keys and the examples, as rows. */
+.passwordDialog.settingsSheet .connectionsPort input { flex: 0 0 90px; width: 90px; }
+.passwordDialog.settingsSheet .connectionsKeys { gap: 0; }
+.passwordDialog.settingsSheet .connectionsKeys > .settingsItem + .settingsItem { border-top: 1px solid #1c2c35; }
+.passwordDialog.settingsSheet .connectionsKey.revoked { opacity: .55; }
+.passwordDialog.settingsSheet .connectionsAddKey .settingsItemControl > input { flex: 1 1 150px; }
+.passwordDialog.settingsSheet .connectionsCertificate:not([hidden]) { display: flex; padding: 8px 12px; background: transparent; border: 0; border-top: 1px solid #1c2c35; border-radius: 0; }
+.passwordDialog.settingsSheet .connectionsKeyMade { margin-top: 8px; }
+.passwordDialog.settingsSheet .connectionsLog { margin: 6px 2px 0; }
+.passwordDialog.settingsSheet .connectionsDemo { justify-content: flex-start; }
+.passwordDialog.settingsSheet .connectionsDemo small { flex: 1 1 200px; }
+.passwordDialog.settingsSheet .connectionsExamples h4:first-child { margin-top: 0; }
+
+/* New projects: the shared owner and license fields (the #ownershipFields template), each a row. */
+.passwordDialog.settingsSheet .settingsFieldRows > label { display: flex; align-items: center; gap: 14px; min-height: 42px; margin: 0; padding: 8px 12px; color: #d2e0e4; font-size: 9px; }
+.passwordDialog.settingsSheet .settingsFieldRows > label[hidden] { display: none; }
+.passwordDialog.settingsSheet .settingsFieldRows > label + label { border-top: 1px solid #1c2c35; }
+.passwordDialog.settingsSheet .settingsFieldRows > label > span:first-child { flex: 1 1 auto; min-width: 0; }
+.passwordDialog.settingsSheet .settingsFieldRows > label > :is(input:not([type="checkbox"]), select, textarea) { flex: 0 1 300px; min-width: 0; }
+.passwordDialog.settingsSheet .settingsFieldRows > label > input:not([type="checkbox"]) { height: 28px; font-size: 9px; }
+.passwordDialog.settingsSheet .settingsFieldRows .runModeSwitch { justify-content: space-between; background: transparent; border: 0; border-top: 1px solid #1c2c35; border-radius: 0; cursor: pointer; }
+.passwordDialog.settingsSheet .settingsFieldRows .runModeSwitch > span { display: grid; gap: 2px; }
+.passwordDialog.settingsSheet .settingsFieldRows .runModeSwitch b { color: #d2e0e4; font-size: 9px; font-weight: 500; }
+.passwordDialog.settingsSheet .settingsFieldRows .runModeSwitch small { color: #6f848e; font-size: 7.5px; line-height: 1.45; }
 @media (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
     /* The edges of the screen, not 100vw and 100vh: the web edition enlarges the whole page on a phone, which would enlarge those too. */
     .passwordDialog.settingsSheet { inset: 0; width: auto; height: auto; max-height: none; margin: 0; border: 0; border-radius: 0; }
@@ -2218,5 +2273,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .settingsSidebar { border-right: 0; }
     .settingsSidebarItem { height: 42px; font-size: 10px; }
     .settingsBack { display: inline-block; }
-    .assistantConfigurationForm .assistantConfigurationWorkspace { grid-template-columns: 1fr; }
+    /* A phone: a row's control goes under its name, across the row. */
+    .passwordDialog.settingsSheet .settingsPage .settingsItem { flex-wrap: wrap; }
+    .passwordDialog.settingsSheet .settingsPage .settingsItem > :is(input:not(.settingsSwitch), select),
+    .passwordDialog.settingsSheet .settingsPage .settingsItem > .settingsItemControl:not(:only-child),
+    .passwordDialog.settingsSheet .settingsPage .settingsItem .configurationModelControl,
+    .passwordDialog.settingsSheet .settingsPage .settingsFieldRows > label > :is(input:not([type="checkbox"]), select, textarea) { flex: 1 1 100%; justify-content: flex-start; }
+    .passwordDialog.settingsSheet .settingsPage .settingsItem > .settingsItemControl:has(> .settingsBadge, > .settingsChevron) { flex: 0 0 auto; }
+    .passwordDialog.settingsSheet .settingsPage .settingsFieldRows > label > span:first-child { flex-basis: 100%; }
+    .passwordDialog.settingsSheet .settingsPage :is(.connectionsNetwork, .settingsFieldRows .runModeSwitch) { flex-wrap: nowrap; }
 }

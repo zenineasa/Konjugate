@@ -61,7 +61,7 @@ The page provides:
 - whether an Ollama model reasons before answering;
 - seamless editing and deletion.
 
-Selecting a saved configuration in the assistant panel makes it active. Saving a configuration from Settings also selects it. Unlike the rest of Settings, a configuration is kept only when **Save configuration** is pressed, since its API key is stored only then; leaving the page or closing Settings with changes not saved asks first.
+The page lists the configurations, the one in use marked **In use**. A row opens that configuration on a page of its own, and **Add configuration…** opens a new one; **‹ Model assistant** goes back to the list. Selecting a saved configuration in the assistant panel makes it active, and saving one in Settings also does. Unlike the rest of Settings, a configuration is kept only when **Save** is pressed, since its API key is stored only then; leaving it or closing Settings with changes not saved asks first.
 
 ## Ollama
 
@@ -104,7 +104,7 @@ Provider availability, model identifiers, account requirements and pricing are c
 
 API keys are handled by Electron's main process. Saved keys are encrypted through the operating system's secure-storage facility and are not returned by renderer-facing configuration APIs. Konjugate refuses to persist a key when the available Linux storage backend would keep it as plain text.
 
-A key entered while discovering models or testing a draft configuration remains transient. It is persisted only when **Save configuration** is selected. Leaving the key field blank while editing a saved configuration preserves and securely reuses the existing key.
+A key entered while discovering models or testing a draft configuration remains transient. It is persisted only when **Save** is selected. Leaving the key field blank while editing a saved configuration preserves and securely reuses the existing key.
 
 When an online provider is selected, the request, a summary of the active model, and the conversation history described above are sent to that provider. Users should not send confidential model information to a service they are not authorised to use. Ollama remains local when its endpoint points to localhost; changing it to a remote endpoint changes that privacy boundary.
 

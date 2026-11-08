@@ -561,6 +561,11 @@ export async function runInteractionTests(driver) {
         assert.deepEqual({ name: qwen.name, provider: qwen.provider, endpoint: qwen.endpoint, think: qwen.think }, { name: 'Qwen3.5 4B', provider: 'ollama', endpoint: fakeOllama.endpoint, think: false });
         assert.equal(configurations.activeConfigurationUuid, qwen.uuid);
 
+        // The configurations are a list, the one in use marked; a row opens its configuration on a page of its own.
+        assert.match(await evaluate(window, `document.querySelector('[data-configuration-uuid="${qwen.uuid}"]').textContent`), /Qwen3\.5 4B.*Ollama · qwen3\.5:4b.*In use/);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationForm').hidden`), true, 'The list is shown, not a form.');
+        await evaluate(window, `document.querySelector('[data-configuration-uuid="${qwen.uuid}"]').click()`);
+        await waitFor(window, `!document.querySelector('#assistantConfigurationForm').hidden && document.querySelector('#assistantConfigurationName').value === 'Qwen3.5 4B'`, 'The configuration did not open.');
         // The reasoning setting, with what it was measured to cost.
         assert.equal(await isRenderedVisible(window, '#assistantThinkField'), true, 'Ollama can be told whether to reason.');
         assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationThink').value`), 'off');
@@ -569,6 +574,11 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('#assistantThinkNote').textContent`), /3½ to 10 minutes an answer with reasoning on, against about 20 seconds/);
         assert.equal(await evaluate(window, `document.querySelector('#assistantThinkNote').hidden`), false);
         await evaluate(window, `(() => { const select = document.querySelector('#assistantConfigurationThink'); select.value = 'off'; select.dispatchEvent(new Event('change')); })()`);
+        // Discovering the models fills in the form, which is not a change: going back asks nothing.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        await evaluate(window, `window.__asked = 0; window.confirm = () => { window.__asked += 1; return false; }; document.querySelector('#assistantConfigurationBack').click()`);
+        assert.equal(await evaluate(window, `window.__asked`), 0, 'Leaving a configuration nobody changed asked to discard changes.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationForm').hidden`), true, 'Back did not return to the list.');
 
         await evaluate(window, `window.aiProviders.removeConfiguration(${JSON.stringify(elsewhere.uuid)})`);
         await evaluate(window, `document.querySelector('#settingsClose').click()`);
@@ -809,13 +819,14 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }))`);
         await waitFor(window, `document.querySelector('#settingsDialog').open`, 'The shortcut did not open Settings.');
         // Push service only where the app can listen on a port: the desktop, not a web page.
-        const pages = ['⚙General', '✦Model assistant', '⚒Providers', '⌨\uFE0EControllers', ...(driver.kind === 'electron' ? ['⇄Push service'] : []), '❐New projects'];
+        const pages = ['General', 'Model assistant', 'Providers', 'Controllers', ...(driver.kind === 'electron' ? ['Push service'] : []), 'New projects'];
         assert.deepEqual(await sidebar(), pages);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#settingsSidebarList .settingsSidebarIcon svg path').length`), pages.length, 'Each page has a drawn icon.');
         // It opens where it was last (General the first time); General is chosen here, as a click in the sidebar chooses a page.
         await evaluate(window, `document.querySelector('[data-settings-target="general"]').click()`);
         assert.deepEqual(await visiblePage(), ['general']);
         assert.equal(await evaluate(window, `document.querySelector('[data-settings-target="general"]').getAttribute('aria-selected')`), 'true');
-        await waitFor(window, `/^Konjugate \\d+\\.\\d+\\.\\d+/.test(document.querySelector('#settingsVersion').textContent)`, 'General did not show the version.');
+        await waitFor(window, `/^\\d+\\.\\d+\\.\\d+/.test(document.querySelector('#settingsVersion').textContent)`, 'General did not show the version.');
 
         // The interface size, as A− and A+ set it in the titlebar: both follow one another.
         const zoom = async () => Number.parseInt(await evaluate(window, `document.querySelector('#settingsZoomValue').textContent`), 10);
@@ -831,7 +842,7 @@ export async function runInteractionTests(driver) {
         // A search narrows the pages, by what a page is about as well as its title; Enter opens the first.
         const search = (text) => evaluate(window, `(() => { const field = document.querySelector('#settingsSearch'); field.value = ${JSON.stringify(text)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         await search('midi');
-        assert.deepEqual(await sidebar(), ['⌨\uFE0EControllers']);
+        assert.deepEqual(await sidebar(), ['Controllers']);
         await evaluate(window, `document.querySelector('#settingsSearch').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
         await waitFor(window, `!document.querySelector('[data-settings-page="controllers"]').hidden && document.querySelector('#settingsPageTitle').textContent === 'Controllers'`, 'Enter did not open the page found.');
         await search('nothing like this');
@@ -949,7 +960,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
         await evaluate(window, `document.querySelector('[data-settings-target="controllers"]').click()`);
         await waitFor(window, `!document.querySelector('[data-settings-page="controllers"]').hidden`, 'Settings › Controllers did not open.');
-        assert.equal(await evaluate(window, `document.querySelector('#controllerBindingList').textContent.trim()`), 'No control is bound yet.');
+        assert.equal(await evaluate(window, `document.querySelector('#controllerBindingList').textContent.trim()`), 'No controls bound yet.');
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#controllerBindParameter option')].map((option) => option.textContent)`), ['Drive (k)']);
         assert.equal(await evaluate(window, `document.querySelector('#controllerThreshold').value`), '1', 'The threshold is 1% of the live range unless changed.');
 

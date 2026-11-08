@@ -37,7 +37,12 @@ export function createSettingsSheet({ dialog, opened = {}, left = {}, has = () =
             const icon = document.createElement('span');
             icon.className = 'settingsSidebarIcon';
             icon.ariaHidden = 'true';
-            icon.textContent = page.icon;
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', page.icon);
+            svg.append(path);
+            icon.append(svg);
             const title = document.createElement('span');
             title.textContent = page.title;
             item.append(icon, title);

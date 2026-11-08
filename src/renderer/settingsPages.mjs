@@ -4,16 +4,16 @@
 // a page is reached by its id from anywhere (openSettings('controllers')). Settings holds what belongs to the person, kept on this
 // computer, never what belongs to a project: a project's own details stay in Project properties, its run settings in the Run dialog.
 // The Extensions Explorer is not one of them: it is a place to browse and install, with a button of its own in the titlebar.
-// `keywords` are the words a search finds a page by besides its title and what the page says; `requires` names what the window must
+// `icon` is a line drawing's SVG path (24 by 24, drawn with a 1.8 stroke) for the sidebar. `keywords` are the words a search finds a page by besides its title and what the page says; `requires` names what the window must
 // have for the page to be shown at all (the push service listens on a port, which a web page cannot). No DOM.
 
 export const settingsPages = Object.freeze([
-    { id: 'general', title: 'General', icon: '⚙', keywords: ['interface', 'size', 'zoom', 'larger', 'smaller', 'welcome', 'tour', 'version', 'about'] },
-    { id: 'assistant', title: 'Model assistant', icon: '✦', keywords: ['ai', 'model', 'provider', 'ollama', 'openai', 'gemini', 'nvidia', 'hugging face', 'api key', 'endpoint', 'configuration'] },
-    { id: 'providers', title: 'Providers', icon: '⚒', keywords: ['compiler', 'c++', 'clang', 'python', 'interpreter', 'toolchain', 'execution mode', 'in-process', 'shared memory'] },
-    { id: 'controllers', title: 'Controllers', icon: '⌨\uFE0E', keywords: ['gamepad', 'joystick', 'midi', 'knob', 'fader', 'keyboard', 'keys', 'binding', 'bind', 'threshold', 'steer'] },
-    { id: 'pushService', title: 'Push service', icon: '⇄', requires: 'pushService', keywords: ['connections', 'scripts', 'readings', 'port', 'network', 'certificate', 'tls', 'keys', 'grpc', 'websocket', 'live twin', 'listen'] },
-    { id: 'newProjects', title: 'New projects', icon: '❐', keywords: ['owner', 'copyright', 'license', 'contact', 'defaults', 'ownership', 'confidential'] }
+    { id: 'general', title: 'General', icon: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4', keywords: ['interface', 'size', 'zoom', 'larger', 'smaller', 'welcome', 'tour', 'version', 'about'] },
+    { id: 'assistant', title: 'Model assistant', icon: 'M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1L5 10.5l5.1-1.9zM18.5 16l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z', keywords: ['ai', 'model', 'provider', 'ollama', 'openai', 'gemini', 'nvidia', 'hugging face', 'api key', 'endpoint', 'configuration'] },
+    { id: 'providers', title: 'Providers', icon: 'M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5.5l-3 13', keywords: ['compiler', 'c++', 'clang', 'python', 'interpreter', 'toolchain', 'execution mode', 'in-process', 'shared memory'] },
+    { id: 'controllers', title: 'Controllers', icon: 'M7.5 8.5h9a4.5 4.5 0 0 1 4.4 5.4l-.4 2a2.6 2.6 0 0 1-4.6 1L14.5 15h-5l-1.4 1.9a2.6 2.6 0 0 1-4.6-1l-.4-2a4.5 4.5 0 0 1 4.4-5.4zM8 10.8v3M6.5 12.3h3M15.8 11.5h.01M17.6 13.3h.01', keywords: ['gamepad', 'joystick', 'midi', 'knob', 'fader', 'keyboard', 'keys', 'binding', 'bind', 'threshold', 'steer'] },
+    { id: 'pushService', title: 'Push service', icon: 'M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3', requires: 'pushService', keywords: ['connections', 'scripts', 'readings', 'port', 'network', 'certificate', 'tls', 'keys', 'grpc', 'websocket', 'live twin', 'listen'] },
+    { id: 'newProjects', title: 'New projects', icon: 'M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8zM14 3.5V8h4.5M12 11v6M9 14h6', keywords: ['owner', 'copyright', 'license', 'contact', 'defaults', 'ownership', 'confidential'] }
 ].map((page) => Object.freeze(page)));
 
 export const defaultSettingsPage = 'general';

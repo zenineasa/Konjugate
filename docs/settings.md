@@ -33,8 +33,22 @@ The web edition keeps the same things in the browser's own storage, for that bro
 
 ## How changes are kept
 
-A change is kept as it is made, with no Save button, as an operating system's settings are. A compiler or interpreter path is checked before it is kept, and says beside it when it could not be; blank goes back to the one found on the machine. The defaults for new projects are kept a moment after the last key, and at once when Settings closes. The one exception is a model configuration: its API key is stored only when **Save configuration** is pressed, so that page keeps its Save and Test buttons, and leaving it with changes not saved asks first.
+A change is kept as it is made, with no Save button, as an operating system's settings are. A compiler or interpreter path is checked before it is kept, and says beside it when it could not be; blank goes back to the one found on the machine. The defaults for new projects are kept a moment after the last key, and at once when Settings closes. The one exception is a model configuration: its API key is stored only when **Save** is pressed, so a configuration's page keeps its Save and Test buttons, and leaving it with changes not saved asks first. Filling in the list of models a provider offers is not a change.
+
+On **Model assistant**, the configurations are a list, the one in use marked **In use**; a row, or **Add configuration…**, opens a configuration on a page of its own, with **‹ Model assistant** to go back to the list.
+
+## How a page is laid out
+
+Every page is built the same way, as macOS's and GNOME's settings are, so they read alike and work alike on a phone:
+
+* an optional line under the title saying what the page is for (`.settingsLead`);
+* titled sections (`.settingsSection`, `.settingsSectionTitle`), each a card of rows (`.settingsCard`, `.settingsItem`): a row's name and a one-line hint on the left (`.settingsItemText`, `.settingsItemLabel`, `.settingsItemHint`), its control on the right (`.settingsItemControl`); a row whose control needs the width puts it across, under the name (`.settingsItemWide`); on a phone every control goes under its name;
+* a note under a card where more needs saying (`.settingsNote`, `.warning` for a caution), rather than a paragraph above it;
+* one kind of button (`.settingsButton`), at most one prominent one on a page (`.primary`), `.danger` for what removes something; a switch (`input.settingsSwitch`) for anything on or off;
+* what is long and only sometimes needed folded away (`.settingsDisclosure`), such as the push service's example scripts.
+
+The styles are under "Settings pages" in `src/renderer/styles.css`, and the sidebar's icons are line drawings, an SVG path for each page in `settingsPages.mjs`.
 
 ## Adding a page
 
-The pages are listed once, in `src/renderer/settingsPages.mjs` (id, title, icon, the words a search finds it by, and what a window must have to offer it, such as the push service); the sidebar, its search and the phone's list are made from that list. A page's content is a `<section data-settings-page="id">` in `src/renderer/index.html`, and the window says what it does when it is shown in the `opened` hooks given to `createSettingsSheet` (`src/renderer/settingsSheet.mjs`). `openSettings('id')` opens Settings on it from anywhere. A setting that belongs to a project does not go here.
+The pages are listed once, in `src/renderer/settingsPages.mjs` (id, title, icon (an SVG path), the words a search finds it by, and what a window must have to offer it, such as the push service); the sidebar, its search and the phone's list are made from that list. A page's content is a `<section data-settings-page="id">` in `src/renderer/index.html`, laid out as above, and the window says what it does when it is shown in the `opened` hooks given to `createSettingsSheet` (`src/renderer/settingsSheet.mjs`). `openSettings('id')` opens Settings on it from anywhere. A setting that belongs to a project does not go here.

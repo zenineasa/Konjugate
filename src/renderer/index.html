@@ -429,88 +429,90 @@
                     <button id="settingsClose" class="settingsClose" type="button" aria-label="Close settings">×</button>
                 </header>
                 <div class="settingsPages">
+                    <!-- Every page is built the same way (styles.css, "Settings pages"): an optional line saying what the page is for
+                         (.settingsLead), then titled sections (.settingsSection) of rows in a card (.settingsCard › .settingsItem), each a name
+                         and a hint on the left and its control on the right, and a note under a card where more needs saying (.settingsNote). -->
                     <section class="settingsPage" data-settings-page="general" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
-                        <section class="settingsGroup">
-                            <span class="configurationSectionTitle">Konjugate</span>
-                            <p id="settingsVersion" class="settingsValue"></p>
-                            <div class="settingsRow"><button id="settingsOpenWelcome" type="button">Open the Welcome window</button><button id="settingsStartTour" type="button">Take the guided tour</button></div>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">About</h3>
+                            <div class="settingsCard">
+                                <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Version</span></div><div class="settingsItemControl"><span id="settingsVersion" class="settingsItemValue"></span></div></div>
+                                <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Welcome window</span><small class="settingsItemHint">Examples, tutorials and what is new</small></div><div class="settingsItemControl"><button id="settingsOpenWelcome" class="settingsButton" type="button">Open</button></div></div>
+                                <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Guided tour</span><small class="settingsItemHint">A first model, step by step</small></div><div class="settingsItemControl"><button id="settingsStartTour" class="settingsButton" type="button">Start</button></div></div>
+                            </div>
                         </section>
-                        <section class="settingsGroup">
-                            <span class="configurationSectionTitle">Interface size</span>
-                            <p>How large the interface is drawn in this window, as the A− and A+ buttons in the titlebar set it.</p>
-                            <div class="settingsRow settingsZoomRow"><button id="settingsZoomOut" type="button" aria-label="Smaller interface">A−</button><output id="settingsZoomValue" aria-live="polite"></output><button id="settingsZoomIn" type="button" aria-label="Larger interface">A+</button><button id="settingsZoomReset" type="button">Actual size</button></div>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Appearance</h3>
+                            <div class="settingsCard">
+                                <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Interface size</span><small class="settingsItemHint">In this window, as A− and A+ in the titlebar set it</small></div><div class="settingsItemControl settingsZoomRow"><button id="settingsZoomOut" class="settingsButton" type="button" aria-label="Smaller interface">A−</button><output id="settingsZoomValue" aria-live="polite"></output><button id="settingsZoomIn" class="settingsButton" type="button" aria-label="Larger interface">A+</button><button id="settingsZoomReset" class="settingsButton" type="button">Actual size</button></div></div>
+                            </div>
                         </section>
                     </section>
-                    <section class="settingsPage" data-settings-page="assistant" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
-                        <section id="localModelsSection" class="localModelsSection" aria-labelledby="localModelsTitle">
-                            <div class="localModelsHeader"><strong id="localModelsTitle">Run a model on this computer</strong><span id="localModelsState" class="localModelsState" role="status"></span></div>
-                            <p id="localModelsDesktopOnly" class="localModelsNote" hidden>Running a model on this computer needs the desktop app. Here, choose an online provider below.</p>
-                            <div id="localModelsMissing" class="localModelsMissing" hidden>
-                                <p><strong>Free, and private: your model never leaves this computer.</strong> Konjugate runs models through Ollama, a free app made by others. Install it from its website, open it, then come back here.</p>
-                                <p id="localModelsLinuxNote" class="localModelsNote" hidden>On Linux, Ollama's website gives a one-line command to install it.</p>
-                                <div class="settingsRow"><button id="openOllamaPage" type="button">Open the Ollama website</button><button id="checkOllamaAgain" type="button">Check again</button></div>
-                            </div>
-                            <div id="localModelsCards" class="localModelsCards" hidden></div>
-                            <details id="huggingFaceBrowser" class="huggingFaceBrowser" hidden>
-                                <summary>Browse Hugging Face…</summary>
-                                <p class="localModelsNote warning">These models have not been tried with Konjugate. Some will not follow the assistant's format, and their proposals may be wrong more often. Every proposal is still reviewed before it changes your model.</p>
-                                <div class="huggingFaceSearchRow"><input id="huggingFaceSearch" type="search" placeholder="Search models published as GGUF files" aria-label="Search Hugging Face models"><button id="huggingFaceSearchButton" type="button">Search</button></div>
-                                <p id="huggingFaceStatus" class="localModelsNote" role="status"></p>
-                                <div id="huggingFaceResults" class="huggingFaceResults"></div>
-                            </details>
-                        </section>
-                        <form id="assistantConfigurationForm" class="assistantConfigurationForm" method="dialog">
-                            <div class="assistantConfigurationWorkspace">
-                                <aside>
-                                    <button id="newAssistantConfiguration" class="doneButton" type="button">＋ New configuration</button>
-                                    <input id="searchAssistantConfigurations" type="search" placeholder="Search configurations" aria-label="Search model configurations">
-                                    <div id="assistantConfigurationList" class="assistantConfigurationList" role="listbox" aria-label="Model configurations"></div>
-                                </aside>
-                                <section class="assistantConfigurationDetails">
-                                    <div><span class="contextKicker">Configuration</span><strong id="assistantConfigurationDialogTitle">New configuration</strong><p>Discover and test a model before saving. Credentials remain transient until Save is clicked.</p></div>
-                                    <fieldset id="assistantConfigurationFields">
-                                        <input id="assistantConfigurationUuid" type="hidden">
-                                        <label><span>Name</span><input id="assistantConfigurationName" autocomplete="off" required></label>
-                                        <label><span>Provider</span><select id="assistantConfigurationProvider"></select></label>
-                                        <label><span>Endpoint</span><input id="assistantConfigurationEndpoint" type="url" autocomplete="off" required></label>
-                                        <label><span>Model</span><span class="configurationModelControl"><span class="configurationModelField"><select id="assistantConfigurationModel"><option value="">Discover available models</option><option value="__custom__">Custom model ID…</option></select><button id="discoverAssistantModels" type="button">Discover</button></span><input id="assistantCustomModel" autocomplete="off" placeholder="Enter a model ID" hidden></span></label>
-                                        <label id="assistantCredentialField"><span>API key <small id="assistantCredentialHint">Stored only when this configuration is saved</small></span><input id="assistantConfigurationCredential" type="password" autocomplete="new-password"></label>
-                                        <label><span>Timeout (seconds) <small>Counts silence from the model, not total time</small></span><input id="assistantConfigurationTimeout" type="number" min="1" max="600" value="60" required></label>
-                                        <label id="assistantThinkField" hidden><span>Reasoning <small>Whether the model reasons before it answers</small></span><select id="assistantConfigurationThink"><option value="">The model's own default</option><option value="off">Off: answers quickly</option><option value="on">Reason before answering: slow</option></select></label>
-                                        <p id="assistantThinkNote" class="assistantConfigurationStatus warning" hidden></p>
-                                    </fieldset>
-                                    <div class="assistantConfigurationStatus" id="assistantConfigurationStatus" role="status"></div>
-                                </section>
-                            </div>
-                            <footer><button id="deleteAssistantConfiguration" type="button" hidden>Delete configuration</button><span></span><button id="testAssistantConfiguration" type="button">Test connection</button><button id="saveAssistantConfiguration" class="doneButton" type="submit">Save configuration</button></footer>
+                    <section class="settingsPage" data-settings-page="assistant" data-assistant-view="list" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
+                        <div class="assistantListView">
+                            <section id="localModelsSection" class="settingsSection localModelsSection" aria-labelledby="localModelsTitle">
+                                <div class="settingsSectionHeader"><h3 id="localModelsTitle" class="settingsSectionTitle">Run a model on this computer</h3><span id="localModelsState" class="localModelsState" role="status"></span></div>
+                                <p id="localModelsDesktopOnly" class="settingsNote" hidden>Running a model on this computer needs the desktop app. Here, add a configuration for an online provider below.</p>
+                                <div id="localModelsMissing" class="settingsCard" hidden>
+                                    <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Free, and private: your model never leaves this computer</span><small class="settingsItemHint">Konjugate runs models through Ollama, a free app made by others. Install it from its website, open it, then check again.</small><small id="localModelsLinuxNote" class="settingsItemHint" hidden>On Linux, Ollama's website gives a one-line command to install it.</small></div><div class="settingsItemControl"><button id="openOllamaPage" class="settingsButton primary" type="button">Open the Ollama website</button><button id="checkOllamaAgain" class="settingsButton" type="button">Check again</button></div></div>
+                                </div>
+                                <div id="localModelsCards" class="localModelsCards" hidden></div>
+                                <details id="huggingFaceBrowser" class="settingsDisclosure huggingFaceBrowser" hidden>
+                                    <summary>Browse Hugging Face…</summary>
+                                    <div class="settingsDisclosureBody">
+                                        <p class="settingsNote warning">These models have not been tried with Konjugate. Some will not follow the assistant's format, and their proposals may be wrong more often. Every proposal is still reviewed before it changes your model.</p>
+                                        <div class="huggingFaceSearchRow"><input id="huggingFaceSearch" type="search" placeholder="Search models published as GGUF files" aria-label="Search Hugging Face models"><button id="huggingFaceSearchButton" class="settingsButton" type="button">Search</button></div>
+                                        <p id="huggingFaceStatus" class="settingsNote" role="status"></p>
+                                        <div id="huggingFaceResults" class="huggingFaceResults"></div>
+                                    </div>
+                                </details>
+                            </section>
+                            <section class="settingsSection">
+                                <h3 class="settingsSectionTitle">Model configurations</h3>
+                                <div id="assistantConfigurationList" class="settingsCard assistantConfigurationList" role="list" aria-label="Model configurations"></div>
+                                <div class="settingsSectionActions"><button id="newAssistantConfiguration" class="settingsButton" type="button">Add configuration…</button></div>
+                                <p class="settingsNote">The assistant uses the one marked In use. Another can be chosen in the assistant's panel.</p>
+                            </section>
+                        </div>
+                        <form id="assistantConfigurationForm" class="assistantConfigurationForm assistantDetailView" method="dialog">
+                            <button id="assistantConfigurationBack" class="settingsPageBack" type="button">‹ Model assistant</button>
+                            <h3 id="assistantConfigurationDialogTitle" class="settingsDetailTitle">New configuration</h3>
+                            <fieldset id="assistantConfigurationFields" class="settingsCard">
+                                <input id="assistantConfigurationUuid" type="hidden">
+                                <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">Name</span></span><input id="assistantConfigurationName" autocomplete="off" required></label>
+                                <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">Provider</span></span><select id="assistantConfigurationProvider"></select></label>
+                                <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">Endpoint</span></span><input id="assistantConfigurationEndpoint" type="url" autocomplete="off" required></label>
+                                <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">Model</span></span><span class="configurationModelControl"><span class="configurationModelField"><select id="assistantConfigurationModel"><option value="">Discover available models</option><option value="__custom__">Custom model ID…</option></select><button id="discoverAssistantModels" type="button">Discover</button></span><input id="assistantCustomModel" autocomplete="off" placeholder="Enter a model ID" hidden></span></label>
+                                <label id="assistantCredentialField" class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">API key</span><small id="assistantCredentialHint" class="settingsItemHint">Kept, encrypted, when you save</small></span><input id="assistantConfigurationCredential" type="password" autocomplete="new-password"></label>
+                                <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">Timeout</span><small class="settingsItemHint">Seconds of silence from the model before it is stopped</small></span><input id="assistantConfigurationTimeout" type="number" min="1" max="600" value="60" required></label>
+                                <label id="assistantThinkField" class="settingsItem" hidden><span class="settingsItemText"><span class="settingsItemLabel">Reasoning</span><small class="settingsItemHint">Whether the model reasons before it answers</small></span><select id="assistantConfigurationThink"><option value="">The model's own default</option><option value="off">Off: answers quickly</option><option value="on">Reason before answering: slow</option></select></label>
+                            </fieldset>
+                            <p id="assistantThinkNote" class="settingsNote warning" hidden></p>
+                            <p class="settingsNote">A configuration is kept when you press Save, with its API key encrypted by the operating system.</p>
+                            <div class="assistantConfigurationStatus" id="assistantConfigurationStatus" role="status"></div>
+                            <footer class="settingsDetailFooter"><button id="deleteAssistantConfiguration" class="settingsButton danger" type="button" hidden>Delete</button><span></span><button id="testAssistantConfiguration" class="settingsButton" type="button">Test connection</button><button id="saveAssistantConfiguration" class="settingsButton primary" type="submit">Save</button></footer>
                         </form>
                     </section>
                     <section class="settingsPage" data-settings-page="providers" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
-                        <p>Override the C++ compiler or Python interpreter used to build and run inline providers, if auto-detection does not find the right one on this machine.</p>
-                        <section class="executionConfiguration">
-                            <span class="configurationSectionTitle">C++ compiler</span>
-                            <small id="toolchainCppDetected" class="toolchainDetected"></small>
-                            <div class="toolchainPathRow">
-                                <input id="toolchainCppPath" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect">
-                                <button id="toolchainCppBrowse" type="button">Browse…</button>
-                                <button id="toolchainCppTest" type="button">Test</button>
+                        <p class="settingsLead">The C++ compiler and Python interpreter that build and run the code in relationships. Konjugate finds them itself; choose one only if it finds the wrong one.</p>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">C++ compiler</h3>
+                            <div class="settingsCard">
+                                <div class="settingsItem settingsItemWide"><div class="settingsItemText"><span class="settingsItemLabel">Compiler</span><small id="toolchainCppDetected" class="settingsItemHint toolchainDetected"></small></div><div class="settingsItemControl toolchainPathRow"><input id="toolchainCppPath" autocomplete="off" spellcheck="false" placeholder="Automatic" aria-label="C++ compiler"><button id="toolchainCppBrowse" class="settingsButton" type="button">Browse…</button><button id="toolchainCppTest" class="settingsButton" type="button">Test</button></div></div>
                             </div>
-                            <p id="toolchainCppStatus" class="assistantConfigurationStatus"></p>
+                            <p id="toolchainCppStatus" class="settingsNote assistantConfigurationStatus"></p>
                         </section>
-                        <section class="executionConfiguration">
-                            <span class="configurationSectionTitle">Python interpreter</span>
-                            <small id="toolchainPythonDetected" class="toolchainDetected"></small>
-                            <div class="toolchainPathRow">
-                                <input id="toolchainPythonPath" autocomplete="off" spellcheck="false" placeholder="Leave blank to auto-detect">
-                                <button id="toolchainPythonBrowse" type="button">Browse…</button>
-                                <button id="toolchainPythonTest" type="button">Test</button>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Python interpreter</h3>
+                            <div class="settingsCard">
+                                <div class="settingsItem settingsItemWide"><div class="settingsItemText"><span class="settingsItemLabel">Interpreter</span><small id="toolchainPythonDetected" class="settingsItemHint toolchainDetected"></small></div><div class="settingsItemControl toolchainPathRow"><input id="toolchainPythonPath" autocomplete="off" spellcheck="false" placeholder="Automatic" aria-label="Python interpreter"><button id="toolchainPythonBrowse" class="settingsButton" type="button">Browse…</button><button id="toolchainPythonTest" class="settingsButton" type="button">Test</button></div></div>
                             </div>
-                            <p id="toolchainPythonStatus" class="assistantConfigurationStatus"></p>
+                            <p id="toolchainPythonStatus" class="settingsNote assistantConfigurationStatus"></p>
                         </section>
-                        <section class="executionConfiguration">
-                            <details id="providerExecutionModeAdvanced" class="executionAdvanced">
-                                <summary>Advanced: C++ provider execution mode</summary>
-                                <label><span>Mode</span>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Advanced</h3>
+                            <div class="settingsCard">
+                                <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">How C++ code runs</span><small class="settingsItemHint">Isolated is safest; in-process is fastest</small></span>
                                     <select id="providerExecutionMode">
                                         <option value="">Automatic (recommended)</option>
                                         <option value="pipeWorker">Isolated process (safest, slowest)</option>
@@ -518,71 +520,72 @@
                                         <option value="inProcess">In-process (fastest, experimental)</option>
                                     </select>
                                 </label>
-                                <p id="providerExecutionModeWarning" class="assistantConfigurationStatus warning" role="alert" hidden>
-                                    In-process mode runs relationship code directly inside Konjugate, with no isolation: a bug or
-                                    crash in a relationship's own code will crash Konjugate itself, not just that simulation.
-                                    Only choose this for provider code you trust.
-                                </p>
-                            </details>
+                            </div>
+                            <p id="providerExecutionModeWarning" class="settingsNote warning" role="alert" hidden>In-process runs a relationship's code inside Konjugate itself, with no isolation: a bug or crash in that code crashes Konjugate, not just the simulation. Choose it only for code you trust.</p>
                         </section>
                     </section>
                     <section class="settingsPage" data-settings-page="controllers" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
-                        <p>Gamepads and joysticks, MIDI controllers and keys that steer live parameters while a run goes. A binding follows a parameter's symbol, so it drives that parameter in every model that has it. Changes here are kept as you make them.</p>
-                        <p id="controllersMidiNote" class="assistantConfigurationStatus" hidden></p>
-                        <section class="executionConfiguration">
-                            <div id="controllerBindingList" class="controllerBindingList" aria-label="Controller bindings"></div>
-                            <div class="controllerBindRow">
-                                <select id="controllerBindParameter" aria-label="Live parameter to bind a control to"></select>
-                                <button id="controllerBindButton" type="button">Bind a control</button>
+                        <p class="settingsLead">Gamepads, joysticks, MIDI controllers and keys that steer live parameters while a run goes. A binding follows a parameter's symbol, so it works in every model that has it.</p>
+                        <p id="controllersMidiNote" class="settingsNote warning" hidden></p>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Bindings</h3>
+                            <div class="settingsCard">
+                                <div id="controllerBindingList" class="controllerBindingList" aria-label="Controller bindings"></div>
+                                <div class="settingsItem controllerBindRow"><div class="settingsItemText"><span class="settingsItemLabel">Bind a control</span><small class="settingsItemHint">Choose a live parameter, press Bind, then move a control or press a key</small></div><div class="settingsItemControl"><select id="controllerBindParameter" aria-label="Live parameter to bind a control to"></select><button id="controllerBindButton" class="settingsButton" type="button">Bind</button></div></div>
                             </div>
-                            <label class="controllerThreshold" title="A moving control is recorded when it has moved by this much since the value last recorded (or by one step, if that is more), and once more where it comes to rest"><span>Record a change once it is</span><input id="controllerThreshold" type="number" min="0.01" max="50" step="0.01" aria-label="Smallest change recorded, as a percentage of the live range"><span>% of the live range</span></label>
+                        </section>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Recording</h3>
+                            <div class="settingsCard">
+                                <label class="settingsItem controllerThreshold"><span class="settingsItemText"><span class="settingsItemLabel">Smallest change recorded</span><small class="settingsItemHint">As a share of the parameter's live range</small></span><span class="settingsItemControl"><input id="controllerThreshold" type="number" min="0.01" max="50" step="0.01" aria-label="Smallest change recorded, as a percentage of the live range"><span class="settingsUnit">%</span></span></label>
+                            </div>
+                            <p class="settingsNote">A moving control is recorded when it has moved this much since the value last recorded (or by one step, if that is more), and once more where it comes to rest. Bindings are kept as you make them.</p>
                         </section>
                     </section>
                     <section class="settingsPage connectionsPage" data-settings-page="pushService" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
-                    <p>For a script that reads an instrument and has nowhere to put its numbers: it sends them here, and a live twin follows them. Every other source is one Konjugate connects out to; this is the one place it listens, on this computer only, and only while it is on. A script that can append to a file or publish to a broker needs none of this.</p>
-                    <section class="executionConfiguration">
-                        <span class="configurationSectionTitle">Listening</span>
-                        <div class="connectionsRow">
-                            <label class="connectionsPort"><span>Port</span><input id="pushServicePort" type="number" min="1" max="65534" step="1" inputmode="numeric"></label>
-                            <small id="pushServiceGrpcPort"></small>
-                            <button id="pushServiceToggle" type="button" class="doneButton">Start</button>
-                        </div>
-                        <label class="connectionsNetwork"><input id="pushServiceNetwork" type="checkbox"><span>On the network, encrypted</span></label>
-                        <p class="connectionsHint">So a script on another computer can send readings. Offered only encrypted: HTTPS, secure WebSockets and gRPC over TLS, with a certificate Konjugate makes for this computer (or your own). Give the scripts that certificate to trust, so they know they are talking to this Konjugate; nothing is sent in the clear.</p>
-                        <div id="pushCertificate" class="connectionsCertificate" hidden>
-                            <span id="pushCertificateText"></span>
-                            <div class="connectionsRow">
-                                <button id="pushCertificateSave" type="button">Save certificate…</button>
-                                <button id="pushCertificateChoose" type="button">Use my own…</button>
-                                <button id="pushCertificateKonjugate" type="button" hidden>Use Konjugate's own</button>
+                        <p class="settingsLead">Lets a script that reads an instrument send its readings here, for a live twin to follow. Konjugate listens only while it is on. A script that writes a file or publishes to a broker does not need it.</p>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Listening</h3>
+                            <div class="settingsCard">
+                                <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Push service</span><small id="pushServiceState" class="settingsItemHint" role="status"></small></div><div class="settingsItemControl"><button id="pushServiceToggle" type="button" class="settingsButton primary">Start</button></div></div>
+                                <label class="settingsItem connectionsPort"><span class="settingsItemText"><span class="settingsItemLabel">Port</span><small id="pushServiceGrpcPort" class="settingsItemHint"></small></span><input id="pushServicePort" type="number" min="1" max="65534" step="1" inputmode="numeric"></label>
+                                <label class="settingsItem connectionsNetwork"><span class="settingsItemText"><span class="settingsItemLabel">On the network</span><small class="settingsItemHint">So a script on another computer can send readings, encrypted: HTTPS, secure WebSockets and gRPC over TLS</small></span><input id="pushServiceNetwork" class="settingsSwitch" type="checkbox" role="switch"></label>
+                                <div id="pushCertificate" class="settingsItem settingsItemWide connectionsCertificate" hidden>
+                                    <div class="settingsItemText"><span class="settingsItemLabel">Certificate</span><small id="pushCertificateText" class="settingsItemHint"></small></div>
+                                    <div class="settingsItemControl"><button id="pushCertificateSave" class="settingsButton" type="button">Save certificate…</button><button id="pushCertificateChoose" class="settingsButton" type="button">Use my own…</button><button id="pushCertificateKonjugate" class="settingsButton" type="button" hidden>Use Konjugate's own</button></div>
+                                </div>
                             </div>
-                            <p id="pushCertificateStatus" class="assistantConfigurationStatus" role="status"></p>
-                        </div>
-                        <p id="pushServiceState" class="assistantConfigurationStatus" role="status"></p>
-                        <ul id="pushServiceLog" class="connectionsLog"></ul>
-                    </section>
-                    <section class="executionConfiguration">
-                        <span class="configurationSectionTitle">Keys</span>
-                        <p class="connectionsHint">One for each rig or script, allowed to send only the signals you give it, and revoked on its own. A key is shown once, when it is made, and kept only as a hash.</p>
-                        <div id="pushKeys" class="connectionsKeys"></div>
-                        <div class="connectionsRow connectionsAddKey">
-                            <input id="pushKeyName" placeholder="Name, e.g. vessel rig" autocomplete="off" aria-label="Name of the new key">
-                            <input id="pushKeySignals" placeholder="Signals it may send, e.g. vesselTemperature, heaterPower" autocomplete="off" spellcheck="false" aria-label="Signals the new key may send">
-                            <button id="pushKeyAdd" type="button">Make key</button>
-                        </div>
-                        <div id="pushKeyMade" class="connectionsKeyMade" hidden><span>Copy it into the script now: it is not shown again.</span><code id="pushKeyMadeValue"></code><button id="pushKeyCopy" type="button">Copy</button></div>
-                        <p id="pushKeyStatus" class="assistantConfigurationStatus" role="status"></p>
-                    </section>
-                    <section class="executionConfiguration">
-                        <span class="configurationSectionTitle">Sending from a script</span>
-                        <div class="connectionsRow"><button id="pushSaveDemoScripts" type="button">Save the demo scripts…</button><small id="pushSaveDemoStatus">The simulated rig, to try the service without equipment: run it with the command under Try it.</small></div>
-                        <div id="pushExamples" class="connectionsExamples"></div>
-                    </section>
+                            <p id="pushCertificateStatus" class="settingsNote assistantConfigurationStatus" role="status"></p>
+                            <p class="settingsNote">On the network, give each script the certificate to trust, so it knows it is talking to this Konjugate. Nothing is sent in the clear.</p>
+                            <ul id="pushServiceLog" class="connectionsLog"></ul>
+                        </section>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Keys</h3>
+                            <div class="settingsCard">
+                                <div id="pushKeys" class="connectionsKeys"></div>
+                                <div class="settingsItem settingsItemWide connectionsAddKey"><div class="settingsItemText"><span class="settingsItemLabel">New key</span><small class="settingsItemHint">One for each rig or script, allowed to send only the signals you name</small></div><div class="settingsItemControl"><input id="pushKeyName" placeholder="Name, e.g. vessel rig" autocomplete="off" aria-label="Name of the new key"><input id="pushKeySignals" placeholder="Signals, e.g. vesselTemperature, heaterPower" autocomplete="off" spellcheck="false" aria-label="Signals the new key may send"><button id="pushKeyAdd" class="settingsButton" type="button">Make key</button></div></div>
+                            </div>
+                            <div id="pushKeyMade" class="connectionsKeyMade" hidden><span>Copy it into the script now: it is not shown again.</span><code id="pushKeyMadeValue"></code><button id="pushKeyCopy" class="settingsButton" type="button">Copy</button></div>
+                            <p id="pushKeyStatus" class="settingsNote assistantConfigurationStatus" role="status"></p>
+                            <p class="settingsNote">A key is shown once, when it is made, and kept only as a hash. Each is revoked on its own.</p>
+                        </section>
+                        <section class="settingsSection">
+                            <details id="pushExamplesSection" class="settingsDisclosure">
+                                <summary>Example scripts</summary>
+                                <div class="settingsDisclosureBody">
+                                    <div class="settingsItemControl connectionsDemo"><button id="pushSaveDemoScripts" class="settingsButton" type="button">Save the demo scripts…</button><small id="pushSaveDemoStatus" class="settingsItemHint">A simulated rig, to try the service without equipment: run it with the command under Try it.</small></div>
+                                    <div id="pushExamples" class="connectionsExamples"></div>
+                                </div>
+                            </details>
+                        </section>
                     </section>
                     <section class="settingsPage" data-settings-page="newProjects" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
-                        <p>New projects start with these details. Projects you have already saved are not changed. They stay on this computer; Konjugate never fills them in from your account or computer.</p>
-                        <div id="ownershipDefaultsFieldsHost" class="ownershipDialog"></div>
-                        <p id="ownershipDefaultsStatus" class="assistantConfigurationStatus" role="status"></p>
+                        <p class="settingsLead">New projects start with these details. Projects already saved are not changed, and nothing is filled in from your account or computer.</p>
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Owner and license</h3>
+                            <div id="ownershipDefaultsFieldsHost" class="settingsCard settingsFieldRows"></div>
+                            <p id="ownershipDefaultsStatus" class="settingsNote assistantConfigurationStatus" role="status"></p>
+                        </section>
                     </section>
                 </div>
             </div>

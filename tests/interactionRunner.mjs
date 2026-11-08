@@ -14,6 +14,7 @@ import { Aedes } from 'aedes';
 import mqtt from 'mqtt';
 import { readDataLog } from '../src/dataLog.mjs';
 import { startRigServer } from './fixtures/opcuaRigServer.mjs';
+import { startFakeOllama } from './fixtures/fakeOllama.mjs';
 
 // These 10 primitives, and every scenario below, operate on a "handle" -- a driver-produced
 // object wrapping either a live Electron BrowserWindow (tests/drivers/electronWindowDriver.mjs)
@@ -263,6 +264,9 @@ export async function runInteractionTests(driver) {
     const addonMissing = (addonId, repository) => !installedAddons.has(addonId) && `needs the ${addonId} add-on -- build ../${repository} (npm run build) or set KONJUGATE_INTERACTION_ADDONS`;
     let passedCount = 0;
     let skippedCount = 0;
+    // The assistant's model in these tests: a fake Ollama server (tests/fixtures/fakeOllama.mjs) answering by fixed rules, through
+    // the app's own Ollama provider. It starts with no model, so the scenario that sets the assistant up downloads one.
+    const fakeOllama = driver.capabilities.aiAssistant ? await startFakeOllama({ models: [], pullSteps: 6, pullDelayMilliseconds: 60 }) : null;
     // One substring of a test's name, or several separated by "||" to run those tests in the order they appear.
     const only = process.env.KONJUGATE_INTERACTION_ONLY?.split('||').filter(Boolean);
     const run = async (name, task, { skip } = {}) => {
@@ -512,6 +516,69 @@ export async function runInteractionTests(driver) {
         assert.equal(typeof outcomes[1].report.valid, 'boolean');
     }, { skip: !driver.capabilities.cancellableValidation && 'The web engine cannot cancel a validation in progress' });
 
+    await run('with no model set up the assistant offers Settings, which finds Ollama, downloads the suggested model and uses it', async () => {
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await waitFor(window, `document.querySelector('#assistantPanel').classList.contains('needsModel')`, 'The assistant did not say no model is set up.');
+        assert.equal(await isRenderedVisible(window, '#assistantSetup'), true);
+        assert.equal(await isRenderedVisible(window, '#assistantEmpty'), false);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').disabled && document.querySelector('#generateAssistantProposal').disabled`), true, 'Nothing can be asked with no model.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfiguration').selectedOptions[0].textContent`), 'No model set up');
+
+        // Ollama is asked where an Ollama configuration says it listens; here first somewhere nothing answers.
+        const closedPort = await new Promise((resolve) => {
+            const probe = createServer().listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+        });
+        const elsewhere = await evaluate(window, `window.aiProviders.saveConfiguration({ name: 'Elsewhere', provider: 'ollama', endpoint: 'http://127.0.0.1:${closedPort}', model: 'none', timeoutSeconds: 60 })`);
+        await evaluate(window, `document.querySelector('#assistantSetUpModel').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, '"Set up a model…" did not open Settings › Model assistant.');
+        await waitFor(window, `!document.querySelector('#localModelsMissing').hidden`, 'The page did not say Ollama is not running.');
+        assert.equal(await evaluate(window, `document.querySelector('#localModelsState').textContent`), 'Ollama is not running');
+        assert.equal(await evaluate(window, `document.querySelector('#openOllamaPage').textContent`), 'Open the Ollama website');
+        assert.equal(await evaluate(window, `document.querySelector('#localModelsCards').hidden && document.querySelector('#huggingFaceBrowser').hidden`), true);
+        assert.equal(await evaluate(window, `window.localModels.openPage('https://example.com/installer.pkg')`), false, 'Only Ollama\'s download page and a model\'s page are opened.');
+
+        // Ollama starts (its configuration is pointed at the fake one), and Check again finds it.
+        await evaluate(window, `window.aiProviders.saveConfiguration({ ...${JSON.stringify(elsewhere)}, endpoint: ${JSON.stringify(fakeOllama?.endpoint)} })`);
+        await evaluate(window, `window.confirm = () => true; document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        await evaluate(window, `document.querySelector('#manageAssistantConfigurations').click()`);
+        await waitFor(window, `!document.querySelector('#localModelsCards').hidden`, 'The suggested models were not shown once Ollama was running.');
+        assert.equal(await evaluate(window, `document.querySelector('#localModelsState').textContent`), 'Ollama 0.12.0 is running');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.localModelCard')].map((card) => [card.dataset.localModel, card.querySelector('.localModelBadge').textContent, card.querySelector('.localModelAction button').textContent])`), [
+            ['qwen3.5:4b', 'Recommended', 'Download'], ['qwen3.5:2b', 'For slower computers', 'Download']
+        ]);
+
+        // Download shows Ollama's progress, then Use it; Use it makes a configuration for it with reasoning off, in use.
+        await evaluate(window, `document.querySelector('[data-local-model-download="qwen3.5:4b"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-local-model="qwen3.5:4b"] progress'))`, 'The download did not show its progress.');
+        assert.ok(await evaluate(window, `Boolean(document.querySelector('[data-local-model-stop="qwen3.5:4b"]'))`), 'A download can be stopped.');
+        await waitFor(window, `Boolean(document.querySelector('[data-local-model-use="qwen3.5:4b"]'))`, 'The downloaded model was not offered for use.', 10000);
+        assert.equal(fakeOllama.requests.filter((request) => request.path === '/api/pull').at(-1).body.model, 'qwen3.5:4b', 'Ollama was asked to pull it.');
+        await evaluate(window, `document.querySelector('[data-local-model-use="qwen3.5:4b"]').click()`);
+        await waitFor(window, `document.querySelector('[data-local-model="qwen3.5:4b"] .localModelAction button')?.textContent === 'In use'`, 'Use it did not put the model in use.');
+        const configurations = await evaluate(window, `window.aiProviders.listConfigurations()`);
+        const qwen = configurations.configurations.find((configuration) => configuration.model === 'qwen3.5:4b');
+        assert.deepEqual({ name: qwen.name, provider: qwen.provider, endpoint: qwen.endpoint, think: qwen.think }, { name: 'Qwen3.5 4B', provider: 'ollama', endpoint: fakeOllama.endpoint, think: false });
+        assert.equal(configurations.activeConfigurationUuid, qwen.uuid);
+
+        // The reasoning setting, with what it was measured to cost.
+        assert.equal(await isRenderedVisible(window, '#assistantThinkField'), true, 'Ollama can be told whether to reason.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationThink').value`), 'off');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantThinkNote').hidden`), true);
+        await evaluate(window, `(() => { const select = document.querySelector('#assistantConfigurationThink'); select.value = 'on'; select.dispatchEvent(new Event('change')); })()`);
+        assert.match(await evaluate(window, `document.querySelector('#assistantThinkNote').textContent`), /3½ to 10 minutes an answer with reasoning on, against about 20 seconds/);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantThinkNote').hidden`), false);
+        await evaluate(window, `(() => { const select = document.querySelector('#assistantConfigurationThink'); select.value = 'off'; select.dispatchEvent(new Event('change')); })()`);
+
+        await evaluate(window, `window.aiProviders.removeConfiguration(${JSON.stringify(elsewhere.uuid)})`);
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click(); document.querySelector('#assistantButton').click()`);
+        await waitFor(window, `!document.querySelector('#assistantPanel').classList.contains('needsModel') && document.querySelector('#assistantConfiguration').options.length === 1`, 'The assistant did not take the model set up.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').disabled`), false);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
     await run('local assistant prepares, validates and applies one undoable transaction', async () => {
         await evaluate(window, `window.dispatchEvent(new Event('resize')); document.querySelector('#assistantButton').click(); (() => {
             const prompt = document.querySelector('#assistantPrompt');
@@ -523,7 +590,7 @@ export async function runInteractionTests(driver) {
         assert.ok(await evaluate(window, `Math.abs(document.querySelector('#assistantPanel').getBoundingClientRect().right - (window.innerWidth - 10))`) < 2);
         await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The local assistant proposal was not ready to apply.');
         await waitFor(window, `document.querySelector('#assistantConfiguration').options.length === 1`, 'Assistant configurations did not load through the main process.');
-        assert.match(await evaluate(window, `document.querySelector('#assistantConfiguration').selectedOptions[0].textContent`), /Local demonstration · Local/);
+        assert.match(await evaluate(window, `document.querySelector('#assistantConfiguration').selectedOptions[0].textContent`), /Qwen3\.5 4B · Local/);
         assert.equal(await evaluate(window, `typeof window.aiProviders.getCredential`), 'undefined');
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container').length`), 3);
         assert.equal(await evaluate(window, `!document.querySelector('#assistantPanel').hidden && !document.querySelector('#applyAssistantProposal').disabled`), true);
@@ -557,7 +624,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && !document.querySelector('#assistantPanel').hidden`), true);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').value`), 'Battery module');
         await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#nodeEditor [data-close-card]').click(); document.querySelector('#closeAssistantPanel').click()`);
-    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('local assistant can disable and enable a node and a relationship', async () => {
         const nodeLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy'))`;
@@ -589,7 +656,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await waitFor(window, `![...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Electrical losses'))?.textContent.includes('Disabled')`, 'Undo did not restore the assistant-applied edge disable.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
-    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click()`);
@@ -638,7 +705,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn').length`), 2, 'Applying should update the existing turn, not add a new one.');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
-    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('dismissing a clarification and starting a new conversation both clear it without submitting', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click()`);
@@ -674,14 +741,14 @@ export async function runInteractionTests(driver) {
         // implementation asked for confirmation here).
         await evaluate(window, `document.querySelector('#newAssistantConversation').click()`);
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
-    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring (including the local, non-credentialed demonstration provider) has no web-edition equivalent yet' });
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('model configurations expose all provider adapters without renderer credential access', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
         await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, 'The assistant\'s ⚙ did not open Settings › Model assistant.');
         assert.equal(await evaluate(window, `document.querySelector('#settingsPageTitle').textContent`), 'Model assistant');
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [
-            'localDemonstration', 'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'
+            'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'
         ]);
         await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#assistantCredentialField').hidden`), true);
@@ -7219,5 +7286,6 @@ export async function runInteractionTests(driver) {
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
     for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (after the last test, a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
+    await fakeOllama?.close();
     console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
 }

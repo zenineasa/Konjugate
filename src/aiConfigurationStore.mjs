@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export const aiConfigurationStoreVersion = 1;
-export const localDemonstrationConfigurationUuid = '00000000-0000-4000-8000-000000000001';
+// Version 2: no built-in configuration. Version 1 began with a built-in "Local demonstration", which is gone
+// (docs/proposals/suggestedLocalModels.md); a version 1 file is read and moved forward without it.
+export const aiConfigurationStoreVersion = 2;
+const retiredProviders = new Set(['localDemonstration']);
 const providerPattern = /^[a-z][A-Za-z0-9]*$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -36,6 +38,9 @@ function normalizeConfiguration(input, existing, uuidFactory) {
     const model = typeof input.model === 'string' ? input.model.trim() : '';
     const uuid = existing?.uuid ?? input.uuid ?? uuidFactory();
     if (!uuidPattern.test(uuid)) throw new AIConfigurationError('Configuration UUID is invalid.');
+    // Whether the model reasons before it answers: true, false, or null for the model's own default. Only providers
+    // that can be told send it (Ollama's `think`).
+    const think = input.think === true || input.think === false ? input.think : null;
     return {
         uuid,
         name,
@@ -43,12 +48,34 @@ function normalizeConfiguration(input, existing, uuidFactory) {
         endpoint,
         model,
         timeoutSeconds,
-        credentialUuid: existing?.credentialUuid ?? null,
-        builtIn: Boolean(existing?.builtIn)
+        think,
+        credentialUuid: existing?.credentialUuid ?? null
     };
 }
 
-export function createAIConfigurationStore({ directory, credentialVault, uuidFactory = randomUUID } = {}) {
+// A version 1 file, moved forward: the retired demonstration configuration is dropped, and the one in use becomes
+// another configuration if there is one, or none.
+function migrated(loaded) {
+    const configurations = loaded.configurations
+        .filter((configuration) => !retiredProviders.has(configuration.provider) && !configuration.builtIn)
+        .map(({ builtIn, ...configuration }) => ({ think: null, ...configuration }));
+    const active = configurations.some((configuration) => configuration.uuid === loaded.activeConfigurationUuid)
+        ? loaded.activeConfigurationUuid : configurations[0]?.uuid ?? null;
+    return { version: aiConfigurationStoreVersion, activeConfigurationUuid: active, configurations };
+}
+
+// What a person is told when a saved key cannot be read: the operating system's key store would not unlock it (on macOS the
+// Keychain request was denied, on Linux the keyring is locked), and how to get it back.
+export function unreadableCredentialMessage(platform = process.platform) {
+    const how = platform === 'darwin'
+        ? 'macOS\'s Keychain did not allow it. Quit and reopen Konjugate, and choose Allow when macOS asks (or allow Konjugate in Keychain Access, under “konjugate Safe Storage”).'
+        : platform === 'linux'
+            ? 'the system keyring did not unlock. Unlock your keyring (or sign in to your desktop session again), then quit and reopen Konjugate.'
+            : 'the system would not decrypt it. Quit and reopen Konjugate.';
+    return `Konjugate could not read this configuration's API key: ${how} Or enter the key again and save the configuration.`;
+}
+
+export function createAIConfigurationStore({ directory, credentialVault, uuidFactory = randomUUID, platform = process.platform } = {}) {
     if (!directory || !credentialVault) throw new AIConfigurationError('Configuration storage requires a directory and credential vault.');
     const configurationPath = join(directory, 'configurations.json');
     const credentialsDirectory = join(directory, 'credentials');
@@ -70,26 +97,31 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
         await mkdir(credentialsDirectory, { recursive: true, mode: 0o700 });
         try {
             const loaded = JSON.parse(await readFile(configurationPath, 'utf8'));
-            if (loaded.version !== aiConfigurationStoreVersion || !Array.isArray(loaded.configurations)) {
+            if (![1, aiConfigurationStoreVersion].includes(loaded.version) || !Array.isArray(loaded.configurations)) {
                 throw new AIConfigurationError('The AI configuration file uses an unsupported format.', 'unsupportedConfigurationFormat');
             }
-            state = loaded;
+            if (loaded.version === aiConfigurationStoreVersion) state = loaded;
+            else {
+                state = migrated(loaded);
+                await persist();
+            }
         } catch (error) {
             if (error.code !== 'ENOENT') throw error;
-            state = {
-                version: aiConfigurationStoreVersion,
-                activeConfigurationUuid: localDemonstrationConfigurationUuid,
-                configurations: [{
-                    uuid: localDemonstrationConfigurationUuid,
-                    name: 'Local demonstration',
-                    provider: 'localDemonstration',
-                    endpoint: '', model: '', timeoutSeconds: 30, credentialUuid: null, builtIn: true
-                }]
-            };
+            state = { version: aiConfigurationStoreVersion, activeConfigurationUuid: null, configurations: [] };
             await persist();
         }
     };
     const find = (uuid) => state.configurations.find((configuration) => configuration.uuid === uuid);
+    // A configuration's saved key, decrypted; a key the operating system will not decrypt is said plainly.
+    const storedCredential = async (configuration) => {
+        if (!configuration?.credentialUuid) return null;
+        const encrypted = await readFile(join(credentialsDirectory, `${configuration.credentialUuid}.bin`));
+        try {
+            return await credentialVault.decrypt(encrypted);
+        } catch {
+            throw new AIConfigurationError(unreadableCredentialMessage(platform), 'credentialUnreadable');
+        }
+    };
 
     return Object.freeze({
         async list() {
@@ -104,7 +136,6 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
             await initialize();
             const existing = input.uuid ? find(input.uuid) : null;
             if (input.uuid && !existing) throw new AIConfigurationError('That model configuration does not exist.', 'configurationNotFound');
-            if (existing?.builtIn) throw new AIConfigurationError('Built-in configurations cannot be modified.', 'builtInConfiguration');
             const configuration = normalizeConfiguration(input, existing, uuidFactory);
             if (credential !== undefined) {
                 if (typeof credential !== 'string' || !credential.trim()) throw new AIConfigurationError('The API key cannot be empty.', 'emptyCredential');
@@ -126,9 +157,8 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
             await initialize();
             const configuration = find(uuid);
             if (!configuration) return false;
-            if (configuration.builtIn) throw new AIConfigurationError('Built-in configurations cannot be removed.', 'builtInConfiguration');
             state.configurations = state.configurations.filter((item) => item.uuid !== uuid);
-            if (state.activeConfigurationUuid === uuid) state.activeConfigurationUuid = localDemonstrationConfigurationUuid;
+            if (state.activeConfigurationUuid === uuid) state.activeConfigurationUuid = state.configurations[0]?.uuid ?? null;
             if (configuration.credentialUuid) await unlink(join(credentialsDirectory, `${configuration.credentialUuid}.bin`)).catch((error) => {
                 if (error.code !== 'ENOENT') throw error;
             });
@@ -142,26 +172,24 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
             await persist();
             return uuid;
         },
-        async resolve(uuid) {
+        // `useCredential: false` for a provider that needs no key, so its saved key (if any) is not decrypted, which on macOS
+        // would ask the Keychain.
+        async resolve(uuid, { useCredential = true } = {}) {
             await initialize();
+            if (!uuid && !state.activeConfigurationUuid) {
+                throw new AIConfigurationError('No model is set up for the assistant yet. Set one up in Settings › Model assistant.', 'noConfiguration');
+            }
             const configuration = find(uuid || state.activeConfigurationUuid);
             if (!configuration) throw new AIConfigurationError('That model configuration does not exist.', 'configurationNotFound');
-            let credential = null;
-            if (configuration.credentialUuid) {
-                const encrypted = await readFile(join(credentialsDirectory, `${configuration.credentialUuid}.bin`));
-                credential = await credentialVault.decrypt(encrypted);
-            }
+            const credential = useCredential ? await storedCredential(configuration) : null;
             return { configuration: structuredClone(configuration), credential };
         },
-        async resolveDraft(input, credential) {
+        async resolveDraft(input, credential, { useCredential = true } = {}) {
             await initialize();
             const existing = input.uuid ? find(input.uuid) : null;
             const configuration = normalizeConfiguration(input, existing, uuidFactory);
             let resolvedCredential = typeof credential === 'string' && credential.trim() ? credential.trim() : null;
-            if (!resolvedCredential && existing?.credentialUuid) {
-                const encrypted = await readFile(join(credentialsDirectory, `${existing.credentialUuid}.bin`));
-                resolvedCredential = await credentialVault.decrypt(encrypted);
-            }
+            if (!resolvedCredential && useCredential) resolvedCredential = await storedCredential(existing);
             return { configuration, credential: resolvedCredential };
         }
     });

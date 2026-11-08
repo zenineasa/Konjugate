@@ -298,26 +298,48 @@ contextBridge.exposeInMainWorld('engine', {
     onError: (callback) => ipcRenderer.on('engineRunError', (_event, update) => callback(update))
 });
 
+// A failed call to the main process arrives as "Error invoking remote method 'channel': SomeError: what happened". Only what
+// happened is for the person, so the rest is taken off, keeping a code the main process put in the message's place.
+const plainError = (error) => {
+    const message = String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': (?:[A-Za-z]*Error: )?/, '');
+    const plain = new Error(message);
+    if (error?.code) plain.code = error.code;
+    return plain;
+};
+const invokePlainly = (channel, ...args) => ipcRenderer.invoke(channel, ...args).catch((error) => { throw plainError(error); });
+
 contextBridge.exposeInMainWorld('aiProviders', {
-    listConfigurations: () => ipcRenderer.invoke('aiListConfigurations'),
-    listModels: (configurationUuid) => ipcRenderer.invoke('aiListModels', configurationUuid),
-    listDraftModels: (configuration, credential) => ipcRenderer.invoke('aiListDraftModels', configuration, credential),
-    saveConfiguration: (configuration, credential) => ipcRenderer.invoke('aiSaveConfiguration', configuration, credential),
-    removeConfiguration: (configurationUuid) => ipcRenderer.invoke('aiRemoveConfiguration', configurationUuid),
-    setActiveConfiguration: (configurationUuid) => ipcRenderer.invoke('aiSetActiveConfiguration', configurationUuid),
-    testConnection: (configurationUuid) => ipcRenderer.invoke('aiTestConnection', configurationUuid),
-    testDraftConnection: (configuration, credential) => ipcRenderer.invoke('aiTestDraftConnection', configuration, credential),
+    listConfigurations: () => invokePlainly('aiListConfigurations'),
+    listModels: (configurationUuid) => invokePlainly('aiListModels', configurationUuid),
+    listDraftModels: (configuration, credential) => invokePlainly('aiListDraftModels', configuration, credential),
+    saveConfiguration: (configuration, credential) => invokePlainly('aiSaveConfiguration', configuration, credential),
+    removeConfiguration: (configurationUuid) => invokePlainly('aiRemoveConfiguration', configurationUuid),
+    setActiveConfiguration: (configurationUuid) => invokePlainly('aiSetActiveConfiguration', configurationUuid),
+    testConnection: (configurationUuid) => invokePlainly('aiTestConnection', configurationUuid),
+    testDraftConnection: (configuration, credential) => invokePlainly('aiTestDraftConnection', configuration, credential),
     generateProposal: async (requestUuid, configurationUuid, request, context, history) => {
-        const result = await ipcRenderer.invoke('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });
+        const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });
         if (result.ok) return result.proposal;
         if (result.error?.code === 'requestCancelled') throw new DOMException(result.error.message, 'AbortError');
         const error = new Error(result.error?.message ?? 'The model provider could not generate a proposal.');
         error.code = result.error?.code;
         throw error;
     },
-    cancelRequest: (requestUuid) => ipcRenderer.invoke('aiCancelRequest', requestUuid),
+    cancelRequest: (requestUuid) => invokePlainly('aiCancelRequest', requestUuid),
     // What a request in flight is doing: stage, attempt and the latest of the model's own output.
     onProgress: (callback) => ipcRenderer.on('aiProgress', (_event, progress) => callback(progress))
+});
+
+// Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md).
+contextBridge.exposeInMainWorld('localModels', {
+    status: (endpoint) => invokePlainly('localModelsStatus', endpoint),
+    pull: (endpoint, model) => invokePlainly('localModelsPull', endpoint, model),
+    cancelPull: (model) => invokePlainly('localModelsCancelPull', model),
+    searchHuggingFace: (query) => invokePlainly('localModelsSearchHuggingFace', query),
+    huggingFaceFiles: (repository) => invokePlainly('localModelsHuggingFaceFiles', repository),
+    // 'ollama' for Ollama's download page, or a Hugging Face repository for its page.
+    openPage: (page) => invokePlainly('localModelsOpenPage', page),
+    onPullProgress: (callback) => ipcRenderer.on('localModelsPullProgress', (_event, progress) => callback(progress))
 });
 
 contextBridge.exposeInMainWorld('addons', {

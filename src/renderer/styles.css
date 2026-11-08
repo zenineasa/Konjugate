@@ -2151,6 +2151,58 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Delete on the left when there is one, then room, then Test and Save. */
 .assistantConfigurationForm > footer { display: flex !important; align-items: center; gap: 7px; }
 .assistantConfigurationForm > footer > span { flex: 1; }
+/* Settings › Model assistant › Run a model on this computer (docs/proposals/suggestedLocalModels.md). */
+.localModelsSection { display: grid; gap: 9px; padding: 14px 17px 15px; border-bottom: 1px solid #263a44; }
+.localModelsHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.passwordDialog .localModelsHeader strong { margin: 0; color: #d2e0e4; font-size: 10px; }
+.localModelsState { color: #66c8bf; font-size: 7px; }
+.localModelsNote { margin: 0; color: #718691; font-size: 8px; line-height: 1.5; }
+.localModelsNote.warning { color: #d6a35f; }
+.localModelsMissing { display: grid; gap: 8px; }
+.localModelsMissing[hidden] { display: none; }
+.localModelsMissing > p { margin: 0; color: #9fb3bb; font-size: 8px; line-height: 1.6; }
+.passwordDialog .localModelsMissing strong { display: inline; margin: 0; color: #c7d5da; font-size: 8px; font-weight: 650; }
+.localModelsState.stopped { color: #d6a35f; }
+.localModelsCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.localModelsCards[hidden] { display: none; }
+.localModelCard { display: grid; align-content: start; gap: 5px; padding: 10px 11px; background: #0a161d; border: 1px solid #263b45; border-radius: 6px; }
+.localModelHeading { display: flex; align-items: baseline; gap: 7px; }
+.passwordDialog .localModelHeading strong { margin: 0; color: #d2e0e4; font-size: 10px; }
+.localModelBadge { color: #66c8bf; font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
+.localModelCard p { margin: 0; color: #9fb3bb; font-size: 8px; line-height: 1.5; }
+.localModelFacts { color: #657985; font-size: 7px; }
+.localModelFit, .localModelError { color: #d6a35f; font-size: 7px; line-height: 1.4; }
+.localModelError { color: #d48288; }
+.localModelAction { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 3px; }
+.localModelAction button { height: 26px; padding: 0 11px; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.localModelAction button.doneButton { color: #04161a; background: var(--accent); border-color: transparent; }
+.localModelAction button:disabled { opacity: .6; cursor: default; }
+.localModelAction progress { flex: 1; min-width: 80px; height: 6px; accent-color: var(--accent); }
+.localModelProgressText { color: #8aa0aa; font-size: 7px; font-variant-numeric: tabular-nums; }
+.huggingFaceBrowser { padding: 8px 9px; background: #0a161d; border: 1px solid #263b45; border-radius: 5px; }
+.huggingFaceBrowser[hidden] { display: none; }
+.huggingFaceBrowser summary { color: #8fb4b6; font-size: 8px; cursor: pointer; user-select: none; }
+.huggingFaceBrowser[open] { display: grid; gap: 8px; }
+.huggingFaceSearchRow { display: flex; gap: 5px; }
+.huggingFaceSearchRow input { flex: 1; min-width: 0; }
+.passwordDialog .huggingFaceSearchRow button, .huggingFaceChosen button { padding: 0 9px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 7px; cursor: pointer; }
+.huggingFaceChosen button { height: 24px; }
+.huggingFaceResults { display: grid; gap: 3px; max-height: 260px; overflow-y: auto; }
+.huggingFaceResult { display: grid; gap: 2px; padding: 6px 8px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.huggingFaceResult:hover { background: #102029; border-color: #2c4048; }
+.passwordDialog .huggingFaceResult strong, .passwordDialog .huggingFaceChosen strong { margin: 0; color: #c7d5da; font-size: 8px; overflow-wrap: anywhere; }
+.huggingFaceResult small, .huggingFaceFile small, .huggingFaceLicense { color: #657985; font-size: 7px; }
+.huggingFaceChosen { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 4px; }
+.huggingFaceChosen strong { flex: 1; }
+.huggingFaceFile { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 6px; border-top: 1px solid #1c2e37; }
+.huggingFaceFile > span { color: #c7d5da; font-size: 8px; font-variant-numeric: tabular-nums; }
+.huggingFaceFile .localModelAction { margin: 0; }
+/* A file that was not measured is offered plainly, not in the colour of a recommendation. */
+.huggingFaceFile .localModelAction button.doneButton { color: #76c8c1; background: #172730; border-color: #304650; }
+/* With no model set up, the assistant's panel offers Settings instead of a prompt. */
+.assistantPanel.needsModel #assistantEmpty { display: none; }
+.assistantPanel.needsModel .assistantPromptForm { opacity: .55; }
+#assistantSetup .doneButton { height: 28px; margin-top: 4px; padding: 0 12px; border: 0; border-radius: 4px; font-size: 8px; }
 .settingsGroup + .settingsGroup { margin-top: 16px; padding-top: 14px; border-top: 1px solid #1c2e37; }
 .passwordDialog .settingsValue { margin: 6px 0 10px; color: #c4d4d9; font-size: 9px; }
 .settingsRow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }

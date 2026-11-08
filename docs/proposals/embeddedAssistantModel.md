@@ -20,7 +20,7 @@ The [model assistant](../aiAssistantGuide.md) works well with a strong hosted mo
 ## What was decided
 
 * **Fine-tune a small open model rather than prompt a general one.** Prompting was tried and does not close the gap (see the findings). The judgement the assistant needs, when to act and when to ask, is something training can teach and wording cannot.
-* **Embed it with llama.cpp (Option B), not by bundling Ollama.** The app would load a quantised GGUF file in-process through `node-llama-cpp`, which avoids shipping and supervising a second server, and allows constrained decoding later. Ollama stays available as a provider for users who have it.
+* **Embed it with llama.cpp (Option B), not by bundling Ollama.** The app would load a quantised GGUF file in-process through `node-llama-cpp`, which avoids shipping and supervising a second server, and allows constrained decoding later. Ollama stays available as a provider for users who have it, and until a fine-tuned model exists it is how the app runs a model on the person's computer: see [Suggested local models](suggestedLocalModels.md).
 * **Measure first.** Before anything is trained there is a harness that scores a model on the real job, counts errors by direction, and holds back models and test cases so that generalisation can be judged. That is built.
 * **Do not use another vendor's outputs in a way their terms forbid.** A strong hosted model is the obvious source of training answers ("distillation"), but its terms may restrict using its outputs to train other models. That is a legal question the project has chosen not to risk, so the teacher question is open and the plan below has a route that needs no teacher.
 

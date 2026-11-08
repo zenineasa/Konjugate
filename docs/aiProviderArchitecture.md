@@ -64,7 +64,13 @@ Ollama uses portable JSON mode because its structured-output schema converter do
 - **NVIDIA.** The documentation supports `response_format: json_object` and streaming, and recommends `nvext.guided_json` for schema-constrained output. The adapter uses plain JSON mode and does not send `nvext`.
 - **Hugging Face.** The chat-completion API takes `json_object` or `json_schema` and streams server-sent events with a bearer token; which of those a given model's provider honours varies. The adapter uses plain JSON mode.
 - **Gemini.** The key goes in `x-goog-api-key` (which is what the adapter sends), and `streamGenerateContent?alt=sse` streams. Google has been retiring standard API keys for the Gemini API: unrestricted ones are rejected, with an HTTP 401 whose text talks about OAuth, and new keys made in Google AI Studio are the kind it accepts. A 401 from Gemini therefore carries a hint to create a new key. Reasoning summaries come from `generationConfig.thinkingConfig.includeThoughts`; the adapter does not send it, because models without thinking support can refuse the field, so Gemini shows no reasoning.
-- **Ollama.** `/api/chat` streams newline-delimited JSON by default, takes `format: "json"`, and puts reasoning in `message.thinking` only when the `think` option is enabled. The adapter does not send `think`, for the same reason, so reasoning appears only for models that produce it by default.
+- **Ollama.** `/api/chat` streams newline-delimited JSON by default, takes `format: "json"`, and puts reasoning in `message.thinking` only when the `think` option is enabled. The adapter sends `think` only when a configuration sets it (**Reasoning** in Settings, `think` in the configuration: true, false, or unset for the model's own default), since a model that cannot reason may refuse the field. Its descriptor says `reasoningSetting: true`, which is what shows the setting.
+
+### Running a model on this computer
+
+`src/localModels.mjs` is the main process's side of **Settings › Model assistant › Run a model on this computer** ([proposal](proposals/suggestedLocalModels.md)): whether Ollama is running (`/api/version`, `/api/tags`), pulling a model with progress (`/api/pull`, streamed, cancellable, one at a time per model), and finding GGUF models on Hugging Face that Ollama can pull (`/api/models?filter=gguf`, and a repository's `tree/main` for its files by quantization). It only asks an Ollama on this computer, never downloads Ollama, and stores no model itself. The suggested models, and the setup each was measured with, are data in `src/suggestedLocalModels.mjs`. The window reaches it through `window.localModels` (`src/preload.mjs`); pull progress is sent to every project window. The only pages it opens are Ollama's download page and a model's page on Hugging Face.
+
+There is no built-in model. A new installation has no configuration, and the configuration store's version 2 moves a version 1 file forward without the demonstration configuration it used to start with. The tests drive the assistant through a fake Ollama server (`tests/fixtures/fakeOllama.mjs`), which answers by fixed rules (`tests/fixtures/demonstrationAssistant.mjs`) through the app's own Ollama provider.
 
 ### Main-process boundary
 
@@ -152,7 +158,7 @@ A configuration's timeout is how long the model may stay silent, not how long a 
 
 ## Conversation history
 
-The renderer keeps a bounded window of the last five exchanges, each a compact `{ request, outcome }` summary rather than the full proposal JSON, and sends it with every `generateProposal` call as `history`. Adapters fold it in however suits their API: `openAICompatibleProvider` expands it into real alternating `user`/`assistant` messages ahead of the current turn; `ollamaProvider` and `geminiProvider`, which only ever send one text blob, prepend a `CONVERSATION SO FAR:` block instead. The local demonstration provider, having no real language understanding, only ever falls back to history when the plain request alone can't be resolved (an ambiguous target, a missing value, an unrecognized shape) — trying the request exactly as typed first keeps an unrelated, already self-sufficient new request from being derailed by an earlier turn's own numbers or names.
+The renderer keeps a bounded window of the last five exchanges, each a compact `{ request, outcome }` summary rather than the full proposal JSON, and sends it with every `generateProposal` call as `history`. Adapters fold it in however suits their API: `openAICompatibleProvider` expands it into real alternating `user`/`assistant` messages ahead of the current turn; `ollamaProvider` and `geminiProvider`, which only ever send one text blob, prepend a `CONVERSATION SO FAR:` block instead.
 
 ## Adding a provider
 

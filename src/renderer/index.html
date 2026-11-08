@@ -442,6 +442,23 @@
                         </section>
                     </section>
                     <section class="settingsPage" data-settings-page="assistant" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
+                        <section id="localModelsSection" class="localModelsSection" aria-labelledby="localModelsTitle">
+                            <div class="localModelsHeader"><strong id="localModelsTitle">Run a model on this computer</strong><span id="localModelsState" class="localModelsState" role="status"></span></div>
+                            <p id="localModelsDesktopOnly" class="localModelsNote" hidden>Running a model on this computer needs the desktop app. Here, choose an online provider below.</p>
+                            <div id="localModelsMissing" class="localModelsMissing" hidden>
+                                <p><strong>Free, and private: your model never leaves this computer.</strong> Konjugate runs models through Ollama, a free app made by others. Install it from its website, open it, then come back here.</p>
+                                <p id="localModelsLinuxNote" class="localModelsNote" hidden>On Linux, Ollama's website gives a one-line command to install it.</p>
+                                <div class="settingsRow"><button id="openOllamaPage" type="button">Open the Ollama website</button><button id="checkOllamaAgain" type="button">Check again</button></div>
+                            </div>
+                            <div id="localModelsCards" class="localModelsCards" hidden></div>
+                            <details id="huggingFaceBrowser" class="huggingFaceBrowser" hidden>
+                                <summary>Browse Hugging Face…</summary>
+                                <p class="localModelsNote warning">These models have not been tried with Konjugate. Some will not follow the assistant's format, and their proposals may be wrong more often. Every proposal is still reviewed before it changes your model.</p>
+                                <div class="huggingFaceSearchRow"><input id="huggingFaceSearch" type="search" placeholder="Search models published as GGUF files" aria-label="Search Hugging Face models"><button id="huggingFaceSearchButton" type="button">Search</button></div>
+                                <p id="huggingFaceStatus" class="localModelsNote" role="status"></p>
+                                <div id="huggingFaceResults" class="huggingFaceResults"></div>
+                            </details>
+                        </section>
                         <form id="assistantConfigurationForm" class="assistantConfigurationForm" method="dialog">
                             <div class="assistantConfigurationWorkspace">
                                 <aside>
@@ -459,6 +476,8 @@
                                         <label><span>Model</span><span class="configurationModelControl"><span class="configurationModelField"><select id="assistantConfigurationModel"><option value="">Discover available models</option><option value="__custom__">Custom model ID…</option></select><button id="discoverAssistantModels" type="button">Discover</button></span><input id="assistantCustomModel" autocomplete="off" placeholder="Enter a model ID" hidden></span></label>
                                         <label id="assistantCredentialField"><span>API key <small id="assistantCredentialHint">Stored only when this configuration is saved</small></span><input id="assistantConfigurationCredential" type="password" autocomplete="new-password"></label>
                                         <label><span>Timeout (seconds) <small>Counts silence from the model, not total time</small></span><input id="assistantConfigurationTimeout" type="number" min="1" max="600" value="60" required></label>
+                                        <label id="assistantThinkField" hidden><span>Reasoning <small>Whether the model reasons before it answers</small></span><select id="assistantConfigurationThink"><option value="">The model's own default</option><option value="off">Off: answers quickly</option><option value="on">Reason before answering: slow</option></select></label>
+                                        <p id="assistantThinkNote" class="assistantConfigurationStatus warning" hidden></p>
                                     </fieldset>
                                     <div class="assistantConfigurationStatus" id="assistantConfigurationStatus" role="status"></div>
                                 </section>
@@ -796,6 +815,12 @@
                     <p id="assistantProgressQuiet" class="assistantProgressNote">Nothing has arrived from the model yet.</p>
                 </details>
             </section>
+            <div id="assistantSetup" class="assistantEmpty" hidden>
+                <span aria-hidden="true">✦</span>
+                <strong>Choose a model for the assistant</strong>
+                <p>Run one on this computer for free, or use an account with an online provider.</p>
+                <button id="assistantSetUpModel" class="doneButton" type="button">Set up a model…</button>
+            </div>
             <div id="assistantEmpty" class="assistantEmpty">
                 <span aria-hidden="true">✦</span>
                 <strong>Your model remains unchanged</strong>

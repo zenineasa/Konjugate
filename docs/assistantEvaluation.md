@@ -96,7 +96,7 @@ node scripts/evalAssistant.mjs <provider> <model> [options]
 node scripts/evalAssistant.mjs --compare before.json after.json
 ```
 
-`<provider>` is `reference`, `localDemonstration`, `ollama`, `openAi`, `nvidia`, `huggingFace` or `gemini`. A key, if one is needed, is read from `KONJUGATE_AI_KEY` and never printed. Options:
+`<provider>` is `reference`, `ollama`, `openAi`, `nvidia`, `huggingFace` or `gemini`. A key, if one is needed, is read from `KONJUGATE_AI_KEY` and never printed. Options:
 
 | Option | Meaning |
 |---|---|

@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { generateAssistantProposal, localAssistantProvider } from './assistantProviders.mjs';
+import { generateAssistantProposal } from './assistantProviders.mjs';
 import { AssistantProposalError, validateAssistantClarification, validateAssistantProposal } from './assistantOperations.mjs';
 
 const maximumRepairAttempts = 2;
@@ -17,14 +17,13 @@ export class AIProviderRegistryError extends Error {
     }
 }
 
-export function createAIProviderRegistry(providers = [localAssistantProvider]) {
-    const allProviders = providers.some((provider) => provider.id === localAssistantProvider.id)
-        ? providers : [localAssistantProvider, ...providers];
-    const registry = new Map(allProviders.map((provider) => [provider.id, provider]));
+export function createAIProviderRegistry(providers = []) {
+    const registry = new Map(providers.map((provider) => [provider.id, provider]));
     return Object.freeze({
         descriptors() {
-            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local' }) => ({
-                id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality
+            // `reasoningSetting`: whether the provider can be told to reason before answering, or not (a configuration's `think`).
+            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false }) => ({
+                id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality, reasoningSetting
             }));
         },
         async testConnection({ configuration, credential, signal }) {

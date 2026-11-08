@@ -110,15 +110,30 @@ Settled, on this sample:
 
 Not settled:
 
-* **Thinking mode.** Qwen3.5 can reason before answering. It might ask less, at a large cost in time. Not measured.
+* **Thinking mode.** Qwen3.5 can reason before answering. A quick test (see [A second sample](#a-second-sample-dory-and-reasoning)) found it 10 to 20 times slower; whether it asks less is not settled.
 * **Other models.** Qwen3 1.7B and 0.6B, Gemma 4 E2B, Granite 3.3 2B and SmolLM3 3B were not run.
 * **Whether the cases are all fair.** The should-act labels are the case authors' judgement. A few are arguable, for instance a history case whose request is a bare number, and a reviewer could rightly call a handful of the 28 ambiguous. That would lower the measured rate but not change the reading: 16 of the 28 were asked about by every model, which includes plain requests such as "Set the DC supply voltage to 12 V."
 * **Noise.** One run per model on 70 cases. The results should be repeated, and the whole 1,032-case set run, before a decision rests on a small difference.
 * **Real use.** The harness uses written cases. Real requests phrase things differently and may be asked more or less often.
 
+## A second sample: Dory, and reasoning
+
+A second sample of 70 cases (51 drawn from the ask and act cases and 19 written by hand; 41 should ask, 29 should act) was run on the same 8 GB M1, to weigh NVIDIA's Nemotron Labs Dory 1.0 4B against Qwen3.5 4B. Dory ran in llama.cpp's server from NVIDIA's own branch (the release did not yet support Dory's looped layers), with its BF16 scale tensors stored as F32 so they run on the GPU, `temperature 0`, 8192 tokens of context, at most 4096 out, in JSON mode. Qwen3.5 4B ran through Ollama as before.
+
+| Model | Passed | Asked when it should have acted | Acted when it should have asked | Valid but wrong edit | Median time | Whole sample |
+|---|---|---|---|---|---|---|
+| Dory 4B, reasoning off | 47 of 70 (67%) | 19 of 29 (66%) | 1 of 41 (2%) | 0 of 29 | 53 s | 66 min |
+| Qwen3.5 4B, thinking off | 41 of 70 (59%) | 16 of 29 (55%) | 2 of 41 (5%) | 0 of 29 | 18.5 s | 29 min |
+
+* 38 cases passed for both; 9 only for Dory, 3 only for Qwen. Five of Qwen's failures were only a temporary reference not in lower camel case, three of them among Dory's 9.
+* Qwen3.5 4B's 59% here against 61% on the first sample suggests the two samples are comparable.
+* Dory with reasoning on spent over 10 minutes and 2,000 reasoning tokens on the first case, and the run was stopped.
+* **Qwen3.5 4B with thinking on** was tried on two cases it had failed with thinking off: `actSupplyNine` (a needless question) passed, in 210 s; `blankAddNode` (a temporary reference not in lower camel case) failed again over three attempts, in 597 s. Each answer took 10 to 20 times as long as with thinking off.
+
+Dory is slightly better and about three times slower; the lead is near the noise of one run, and part of it is a formatting rule rather than judgement. Neither fixes the needless questions. Qwen3.5 4B with thinking off is the model the app suggests ([Suggested local models](proposals/suggestedLocalModels.md)), with reasoning offered as a slow option.
+
 ## What to do with it
 
 * Treat the asking rate and the wrong-proceed rate as the two numbers a tuned model must move, and watch both together. A model that fixes one by trading the other has not improved.
 * Teach the judgement with data, not wording: include clear requests with the right proposal, ambiguous requests with a good question, and a mix of both near the one-in-five ratio of the tests. See the [proposal](proposals/embeddedAssistantModel.md#the-approach).
-* Test the thinking-on setting before concluding that asking is hard-wired in these models.
 * Keep the model-agnostic fixes made on the way: output caps, per-case time limits, numeric id handling and the conduct report.

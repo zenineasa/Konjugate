@@ -9,7 +9,7 @@
 //                                  [--repeat <n>] [--think true|false] [--timeout <seconds>] [--out <results.json>] [--no-native] [--verbose]
 //   node scripts/evalAssistant.mjs --compare <before.json> <after.json>
 //
-// <provider> is one of: reference (replays the recorded known-good answers, to check the harness and the cases), localDemonstration, ollama, openAi, nvidia, huggingFace, gemini (the key, if one is needed, is
+// <provider> is one of: reference (replays the recorded known-good answers, to check the harness and the cases), ollama, openAi, nvidia, huggingFace, gemini (the key, if one is needed, is
 // read from KONJUGATE_AI_KEY and never printed). Native validation uses out/engine/konjugateEngine when it is built
 // (`npm run build:engine`) and is skipped with a note when it is not.
 
@@ -103,13 +103,13 @@ const verbose = flag('--verbose', false);
 const timeoutSeconds = Number.parseFloat(flag('--timeout') ?? '240');   // per case, so one runaway generation cannot stall a run
 const think = flag('--think');   // true | false: Ollama's `think` for models that can reason; unset leaves the model's default
 const [provider, model = ''] = args;
-const knownProviders = ['reference', 'localDemonstration', 'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'];
-if (!knownProviders.includes(provider) || (!['reference', 'localDemonstration'].includes(provider) && !model) || !(repeat >= 1)) {
+const knownProviders = ['reference', 'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'];
+if (!knownProviders.includes(provider) || (provider !== 'reference' && !model) || !(repeat >= 1)) {
     console.error(`Usage: node scripts/evalAssistant.mjs <${knownProviders.join('|')}> <model> [--endpoint <url>] [--cases <id|family|domain|style>,...] [--cases-file <path>] [--repeat <n>] [--out <results.json>] [--no-native] [--verbose]\n       node scripts/evalAssistant.mjs --compare <before.json> <after.json>`);
     process.exit(2);
 }
 const credential = process.env.KONJUGATE_AI_KEY ?? '';
-if (!['reference', 'localDemonstration', 'ollama'].includes(provider) && !credential) {
+if (!['reference', 'ollama'].includes(provider) && !credential) {
     console.error('Set KONJUGATE_AI_KEY to the provider API key.');
     process.exit(2);
 }

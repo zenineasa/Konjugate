@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { release as osRelease, tmpdir } from 'node:os';
+import { release as osRelease, tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
@@ -26,6 +26,8 @@ import {
 } from './addonHost.mjs';
 import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
+import { createLocalModels } from './localModels.mjs';
+import { ollamaDownloadPage } from './suggestedLocalModels.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries, checkpointIndex } from './resultSession.mjs';
@@ -2652,6 +2654,17 @@ ipcMain.handle('providerExecutionModeSet', async (event, executionMode) => {
     return { executionMode: settings.executionMode };
 });
 
+// Whether a configuration's provider needs its key: a provider that needs none (Ollama) never decrypts one, which on macOS
+// would ask the Keychain for nothing.
+const aiCredentialOptions = (provider) => ({
+    useCredential: aiProviderRegistry.descriptors().find((descriptor) => descriptor.id === provider)?.credentialRequired !== false
+});
+const resolveAIConfiguration = async (uuid) => {
+    const { configuration } = await aiConfigurationStore.resolve(uuid, { useCredential: false });
+    return aiConfigurationStore.resolve(uuid, aiCredentialOptions(configuration.provider));
+};
+const resolveAIDraft = (configuration, credential) => aiConfigurationStore.resolveDraft(configuration, credential, aiCredentialOptions(configuration?.provider));
+
 ipcMain.handle('aiListConfigurations', async (event) => {
     requireProjectWindow(event);
     const result = await aiConfigurationStore.list();
@@ -2660,14 +2673,14 @@ ipcMain.handle('aiListConfigurations', async (event) => {
 
 ipcMain.handle('aiListModels', async (event, configurationUuid) => {
     requireProjectWindow(event);
-    const resolved = await aiConfigurationStore.resolve(configurationUuid);
+    const resolved = await resolveAIConfiguration(configurationUuid);
     return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
         (signal) => aiProviderRegistry.listModels({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiListDraftModels', async (event, configuration, credential) => {
     requireProjectWindow(event);
-    const resolved = await aiConfigurationStore.resolveDraft(configuration, credential);
+    const resolved = await resolveAIDraft(configuration, credential);
     return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
         (signal) => aiProviderRegistry.listModels({ ...resolved, signal }));
 });
@@ -2689,14 +2702,14 @@ ipcMain.handle('aiSetActiveConfiguration', async (event, configurationUuid) => {
 
 ipcMain.handle('aiTestConnection', async (event, configurationUuid) => {
     requireProjectWindow(event);
-    const resolved = await aiConfigurationStore.resolve(configurationUuid);
+    const resolved = await resolveAIConfiguration(configurationUuid);
     return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
         (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential) => {
     requireProjectWindow(event);
-    const resolved = await aiConfigurationStore.resolveDraft(configuration, credential);
+    const resolved = await resolveAIDraft(configuration, credential);
     return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
         (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
@@ -2713,7 +2726,7 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
     }
     const key = aiRequestKey(event.sender, requestUuid);
     activeAIRequests.get(key)?.controller.abort();
-    const resolved = await aiConfigurationStore.resolve(configurationUuid);
+    const resolved = await resolveAIConfiguration(configurationUuid);
     const controller = new AbortController();
     let expiredBecause = null;
     // The configuration's timeout is how long the model may stay silent, not how long the whole request
@@ -2752,6 +2765,48 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
         progressToPanel.stop();
         if (activeAIRequests.get(key)?.controller === controller) activeAIRequests.delete(key);
     }
+});
+
+// Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md). A pull goes on when Settings
+// closes, and every project window is told how it goes, so any of them shows it.
+const localModels = createLocalModels({ totalMemory: totalmem });
+const huggingFaceRepository = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+const tellProjectWindows = (channel, value) => {
+    for (const window of projectWindows) if (!window.isDestroyed()) window.webContents.send(channel, value);
+};
+ipcMain.handle('localModelsStatus', async (event, endpoint) => {
+    requireProjectWindow(event);
+    return { ...(await localModels.status(endpoint)), pulling: localModels.pulling() };
+});
+ipcMain.handle('localModelsPull', async (event, endpoint, model) => {
+    requireProjectWindow(event);
+    try {
+        const result = await localModels.pull(endpoint, model, (progress) => tellProjectWindows('localModelsPullProgress', progress));
+        tellProjectWindows('localModelsPullProgress', { model, status: result.cancelled ? 'cancelled' : 'success', finished: true });
+        return { ok: true, ...result };
+    } catch (error) {
+        tellProjectWindows('localModelsPullProgress', { model, status: 'failed', error: error.message, finished: true });
+        return { ok: false, error: { message: error.message, code: error.code ?? 'pullFailed' } };
+    }
+});
+ipcMain.handle('localModelsCancelPull', async (event, model) => {
+    requireProjectWindow(event);
+    return localModels.cancelPull(model);
+});
+ipcMain.handle('localModelsSearchHuggingFace', async (event, query) => {
+    requireProjectWindow(event);
+    return localModels.searchHuggingFace(query);
+});
+ipcMain.handle('localModelsHuggingFaceFiles', async (event, repository) => {
+    requireProjectWindow(event);
+    return localModels.huggingFaceFiles(repository);
+});
+// The only pages this opens: Ollama's download page, never an installer, and a model's own page on Hugging Face.
+ipcMain.handle('localModelsOpenPage', async (event, page) => {
+    requireProjectWindow(event);
+    if (page === 'ollama') { await shell.openExternal(ollamaDownloadPage); return true; }
+    if (typeof page === 'string' && huggingFaceRepository.test(page)) { await shell.openExternal(`https://huggingface.co/${page}`); return true; }
+    return false;
 });
 
 ipcMain.handle('aiCancelRequest', async (event, requestUuid) => {

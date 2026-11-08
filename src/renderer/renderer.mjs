@@ -20,6 +20,8 @@ import { normalizeTwinSetup } from '../twinSetup.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
+import { createLocalModelsSection } from './localModelsSection.mjs';
+import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
@@ -10598,19 +10600,35 @@ async function refreshAssistantConfigurations() {
         const result = await window.aiProviders.listConfigurations();
         assistantConfigurationCatalog = result;
         const previous = activeAssistantConfigurationUuid || select.value;
-        select.replaceChildren(...result.configurations.map((configuration) => {
-            const locality = configuration.provider === 'localDemonstration' || configuration.provider === 'ollama' ? 'Local' : 'Online';
-            return new Option(`${configuration.name} · ${locality}`, configuration.uuid);
-        }));
+        select.replaceChildren(...result.configurations.map((configuration) => new Option(assistantConfigurationLabel(configuration), configuration.uuid)));
         activeAssistantConfigurationUuid = result.configurations.some((item) => item.uuid === previous)
             ? previous : result.activeConfigurationUuid;
-        select.value = activeAssistantConfigurationUuid;
-        select.disabled = false;
+        if (!result.configurations.length) select.replaceChildren(new Option('No model set up', ''));
+        select.value = activeAssistantConfigurationUuid ?? '';
+        select.disabled = !result.configurations.length;
+        renderAssistantSetup();
     } catch (error) {
         select.replaceChildren(new Option('Configurations unavailable', ''));
         select.disabled = true;
         renderAssistantGenerationError(error.message);
     }
+}
+
+// How a configuration is named in the assistant's list: its name, whether it runs on this computer, and whether it reasons first.
+function assistantConfigurationLabel(configuration) {
+    const provider = assistantConfigurationCatalog.providers.find((item) => item.id === configuration.provider);
+    const locality = provider?.locality === 'local' ? 'Local' : 'Online';
+    return `${configuration.name} · ${locality}${configuration.think === true ? ' · Reasons before answering: slow' : ''}`;
+}
+
+// With no model set up, the panel says so and offers Settings › Model assistant, and nothing can be asked.
+function renderAssistantSetup() {
+    const none = !assistantConfigurationCatalog.configurations?.length;
+    $('#assistantPanel').classList.toggle('needsModel', none);
+    $('#assistantSetup').hidden = !none;
+    $('#assistantPrompt').disabled = none;
+    $('#generateAssistantProposal').disabled = none;
+    $('#manageAssistantConfigurations').hidden = none;
 }
 
 function activeConfigurationRecord() {
@@ -10687,7 +10705,7 @@ function renderAssistantConfigurationList() {
         const title = document.createElement('strong');
         title.textContent = configuration.name;
         const details = document.createElement('span');
-        details.textContent = configuration.builtIn ? 'Built-in · Local' : `${provider?.name ?? configuration.provider} · ${configuration.model || 'No model selected'}`;
+        details.textContent = `${provider?.name ?? configuration.provider} · ${configuration.model || 'No model selected'}${configuration.think === true ? ' · reasons first' : ''}`;
         button.append(title, details);
         if (configuration.uuid === activeAssistantConfigurationUuid) {
             const active = document.createElement('i');
@@ -10706,15 +10724,22 @@ function syncAssistantProviderFields({ replaceEndpoint = false } = {}) {
         $('#assistantConfigurationTimeout').value = provider.defaultTimeoutSeconds ?? 60;
     }
     $('#assistantCredentialField').hidden = !provider.credentialRequired;
+    $('#assistantThinkField').hidden = !provider.reasoningSetting;
+    syncAssistantThinkNote();
     const existing = assistantConfigurationCatalog.configurations.find((item) => item.uuid === $('#assistantConfigurationUuid').value);
     $('#assistantConfigurationCredential').required = provider.credentialRequired && !existing?.credentialConfigured;
+}
+
+function syncAssistantThinkNote() {
+    const note = $('#assistantThinkNote');
+    note.hidden = $('#assistantThinkField').hidden || $('#assistantConfigurationThink').value !== 'on';
+    note.textContent = reasoningCostNote;
 }
 
 function populateAssistantConfiguration(configuration = null) {
     assistantDiscoveryRevision += 1;
     const providers = assistantConfigurationCatalog.providers;
-    const selectableProviders = providers.filter((provider) => provider.id !== 'localDemonstration');
-    const initialProvider = configuration?.provider ?? selectableProviders.find((provider) => provider.id === 'ollama')?.id ?? selectableProviders[0]?.id ?? '';
+    const initialProvider = configuration?.provider ?? providers.find((provider) => provider.id === 'ollama')?.id ?? providers[0]?.id ?? '';
     $('#assistantConfigurationUuid').value = configuration?.uuid ?? '';
     $('#assistantConfigurationName').value = configuration?.name ?? 'My local model';
     $('#assistantConfigurationProvider').value = initialProvider;
@@ -10723,12 +10748,10 @@ function populateAssistantConfiguration(configuration = null) {
     const initialDescriptor = providers.find((provider) => provider.id === initialProvider);
     $('#assistantConfigurationTimeout').value = configuration?.timeoutSeconds ?? initialDescriptor?.defaultTimeoutSeconds ?? 60;
     $('#assistantConfigurationCredential').value = '';
+    $('#assistantConfigurationThink').value = configuration?.think === true ? 'on' : configuration?.think === false ? 'off' : (configuration ? '' : 'off');
     $('#assistantConfigurationDialogTitle').textContent = configuration?.name ?? 'New configuration';
     $('#assistantCredentialHint').textContent = configuration?.credentialConfigured ? 'Leave blank to preserve the stored key' : 'Stored only when this configuration is saved';
-    $('#assistantConfigurationFields').disabled = Boolean(configuration?.builtIn);
-    $('#deleteAssistantConfiguration').hidden = !configuration || configuration.builtIn;
-    $('#testAssistantConfiguration').hidden = Boolean(configuration?.builtIn);
-    $('#saveAssistantConfiguration').hidden = Boolean(configuration?.builtIn);
+    $('#deleteAssistantConfiguration').hidden = !configuration;
     setAssistantConfigurationStatus(
         assistantConfigurationCatalog.credentialStorage?.plainText
             ? 'Secure persistent credentials are unavailable with the current operating-system backend.' : '',
@@ -10738,24 +10761,54 @@ function populateAssistantConfiguration(configuration = null) {
     assistantConfigurationBaseline = assistantConfigurationDraftSignature();
     renderAssistantConfigurationList();
     clearTimeout(assistantDiscoveryTimer);
-    if (!configuration?.builtIn && initialProvider === 'ollama') {
+    if (initialProvider === 'ollama') {
         assistantDiscoveryTimer = setTimeout(discoverAssistantModels, 350);
     }
 }
 
-// Settings › Model assistant, filled when it is opened. Settings can be opened on it before the assistant has ever been, so the
-// providers and configurations are read first if they have not been yet.
+// Settings › Model assistant, filled when it is opened, from the providers and configurations as they are now (Settings can be
+// opened on it before the assistant has ever been, and a configuration may have changed since).
 async function prepareAssistantConfigurationPage() {
-    if (!assistantConfigurationCatalog?.providers?.length) await refreshAssistantConfigurations();
+    await refreshAssistantConfigurations();
     const providers = assistantConfigurationCatalog.providers;
-    $('#assistantConfigurationProvider').replaceChildren(...providers.map((provider) => {
-        const option = new Option(provider.name, provider.id);
-        option.disabled = provider.id === 'localDemonstration';
-        return option;
-    }));
+    $('#assistantConfigurationProvider').replaceChildren(...providers.map((provider) => new Option(provider.name, provider.id)));
     $('#searchAssistantConfigurations').value = '';
     populateAssistantConfiguration(activeConfigurationRecord());
+    localModelsSection.check();
 }
+
+// The Ollama the "Run a model on this computer" section asks: that of the Ollama configuration in use, or of any, or Ollama's own.
+function localOllamaEndpoint() {
+    const ollama = assistantConfigurationCatalog.configurations.filter((configuration) => configuration.provider === 'ollama');
+    const active = ollama.find((configuration) => configuration.uuid === activeAssistantConfigurationUuid);
+    return (active ?? ollama[0])?.endpoint ?? '';
+}
+
+// The suggested or chosen model the section's **Use it** asks for: an Ollama configuration for it, found or made, put in use.
+async function useLocalModel({ model, title, think = null, timeoutSeconds = 180 }) {
+    const endpoint = localOllamaEndpoint();
+    const existing = assistantConfigurationCatalog.configurations.find((configuration) => configuration.provider === 'ollama'
+        && configuration.model === model && (configuration.endpoint ?? '') === endpoint);
+    const uuid = existing?.uuid ?? (await window.aiProviders.saveConfiguration({ name: title, provider: 'ollama', endpoint, model, timeoutSeconds, think })).uuid;
+    activeAssistantConfigurationUuid = uuid;
+    await window.aiProviders.setActiveConfiguration(uuid);
+    await refreshAssistantConfigurations();
+    $('#assistantConfiguration').value = uuid;
+    populateAssistantConfiguration(assistantConfigurationCatalog.configurations.find((configuration) => configuration.uuid === uuid));
+    setAssistantConfigurationStatus(`${title} is the assistant’s model now.`);
+}
+
+const localModelsSection = createLocalModelsSection({
+    root: $('#localModelsSection'),
+    api: window.localModels,
+    endpoint: localOllamaEndpoint,
+    inUse: () => {
+        const active = assistantConfigurationCatalog.configurations.find((configuration) => configuration.uuid === activeAssistantConfigurationUuid);
+        return active?.provider === 'ollama' ? active.model : null;
+    },
+    useModel: useLocalModel,
+    platform: /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent) ? 'linux' : ''
+});
 
 function assistantConfigurationFormValue() {
     return {
@@ -10764,7 +10817,9 @@ function assistantConfigurationFormValue() {
         provider: $('#assistantConfigurationProvider').value,
         endpoint: $('#assistantConfigurationEndpoint').value,
         model: selectedAssistantModel(),
-        timeoutSeconds: Number($('#assistantConfigurationTimeout').value)
+        timeoutSeconds: Number($('#assistantConfigurationTimeout').value),
+        think: !selectedProviderDescriptor()?.reasoningSetting ? null
+            : { on: true, off: false }[$('#assistantConfigurationThink').value] ?? null
     };
 }
 
@@ -10996,6 +11051,8 @@ $('#assistantConfigurationProvider').addEventListener('change', () => {
     }
 });
 $('#assistantConfigurationModel').addEventListener('change', syncAssistantCustomModel);
+$('#assistantConfigurationThink').addEventListener('change', syncAssistantThinkNote);
+$('#assistantSetUpModel').addEventListener('click', () => openSettings('assistant'));
 $('#newAssistantConfiguration').addEventListener('click', () => {
     if (!confirmAssistantConfigurationNavigation()) return;
     populateAssistantConfiguration();
@@ -11032,6 +11089,7 @@ $('#deleteAssistantConfiguration').addEventListener('click', async () => {
     const next = assistantConfigurationCatalog.configurations[Math.min(index, assistantConfigurationCatalog.configurations.length - 1)];
     populateAssistantConfiguration(next ?? null);
     setAssistantConfigurationStatus('Configuration deleted.');
+    localModelsSection.render();
 });
 $('#assistantPrompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {

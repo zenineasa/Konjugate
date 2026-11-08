@@ -206,7 +206,7 @@ function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false }
 function ollamaProvider() {
     return {
         id: 'ollama', name: 'Ollama', defaultEndpoint: defaults.ollama, defaultTimeoutSeconds: 180,
-        credentialRequired: false, locality: 'local',
+        credentialRequired: false, locality: 'local', reasoningSetting: true,
         async listModels({ configuration, signal, fetchImpl }) {
             const result = await responseJson(fetchImpl, `${baseUrl({ ...configuration, provider: 'ollama' })}/api/tags`, { signal });
             return (result.models ?? []).map((model) => ({ id: model.model ?? model.name, name: model.name ?? model.model }));

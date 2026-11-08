@@ -19,7 +19,7 @@ test('provider registry dispatches generation without exposing provider details 
     assert.equal(result.summary, 'Build it:true');
     assert.deepEqual(registry.descriptors().find((item) => item.id === 'testProvider'), {
         id: 'testProvider', name: 'Test provider', defaultEndpoint: '', defaultTimeoutSeconds: 60,
-        credentialRequired: false, locality: 'local'
+        credentialRequired: false, locality: 'local', reasoningSetting: false
     });
 });
 

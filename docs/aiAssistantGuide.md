@@ -18,6 +18,29 @@ The assistant does not edit the model immediately. Konjugate validates the propo
 
 When a request is ambiguous or missing information the assistant needs, it can ask a clarifying question instead of guessing, sometimes with suggested answers shown as buttons. Selecting a suggestion fills in the prompt rather than sending it immediately, so it can still be edited before the reply is sent.
 
+The assistant needs a model. Until one is set up, its panel says so and **Set up a model…** opens **Settings › Model assistant**: run one on this computer for free (below), or use an account with an online provider ([Hosted providers](#hosted-providers)).
+
+## Run a model on this computer
+
+At the top of **Settings › Model assistant**, **Run a model on this computer** runs a model privately and for free, through [Ollama](https://ollama.com/), a free app made by others. Konjugate does not download or install Ollama: if it is not running, the section says so, **Open the Ollama website** opens its download page in your browser, and **Check again** looks for it once it is installed and open. On Linux, Ollama's website gives a one-line command to install it.
+
+Once Ollama is running, the section suggests models we have measured with the [evaluation harness](assistantEvaluation.md) ([findings](assistantModelFindings.md)):
+
+| Model | Download | Notes |
+|---|---|---|
+| **Qwen3.5 4B** (recommended) | about 4 GB | About 20 seconds an answer on a recent laptop with 8 GB of memory. |
+| **Qwen3.5 2B** (for slower computers) | about 3 GB | Faster, and asks more questions it does not need to. |
+
+**Download** asks Ollama to fetch the model and shows its progress; **Stop** stops it, and closing Settings does not. Once it is downloaded, **Use it** makes a configuration for it, with reasoning off as it was measured, and the assistant uses it. The model is kept by Ollama, which is also where it is removed (`ollama rm`, or Ollama's own app). A card says when a model needs more memory than this computer has.
+
+**Browse Hugging Face…** searches Hugging Face for any model published as GGUF files, the format Ollama runs. Choose one to see its files by quantization, their sizes, whether each fits this computer's memory, and its licence; **Download** fetches it through Ollama (as `hf.co/<repository>:<quantization>`), and **Use it** uses it. Only what you type in the search is sent to Hugging Face. Models that need a Hugging Face account to download are not listed. A model found this way has not been tried with Konjugate: some will not follow the assistant's format, and their proposals may be wrong more often. Every proposal is still reviewed before it changes your model.
+
+The section asks the Ollama that the assistant's Ollama configuration uses, or Ollama's own address on this computer (`http://127.0.0.1:11434`) if there is none; it only ever asks one on this computer.
+
+### Reasoning
+
+Some models can reason before they answer. An Ollama configuration's **Reasoning** setting is the model's own default, **Off** (the suggested models, as measured) or **Reason before answering**. Reasoning is much slower: in a test on an 8 GB M1, Qwen3.5 4B took about 3½ to 10 minutes an answer with reasoning on, against about 20 seconds with it off, and fixed one of two requests it had got wrong. While the model reasons, the panel shows its reasoning as it is written, and a configuration that reasons is marked "Reasons before answering: slow" in the assistant's list.
+
 ## Conversation memory
 
 The assistant panel keeps a scrollable transcript of the last five exchanges. That history is sent along with every new request, so a reply to a clarifying question, or a follow-up like "make it 10 K warmer instead," is understood in context rather than as an unrelated new request. History is not cleared by applying, discarding or closing the panel — only the **New conversation** button (or switching to a different model configuration, since a different model has no memory of what was said to the previous one) starts a fresh transcript.
@@ -28,20 +51,21 @@ The selector below the assistant prompt chooses the active model configuration. 
 
 The page provides:
 
+- **Run a model on this computer** ([above](#run-a-model-on-this-computer));
 - a searchable list of saved configurations;
-- a protected built-in demonstration configuration;
 - local and hosted provider settings;
 - model discovery before saving;
 - connection testing;
 - custom model identifiers;
 - configurable request timeouts;
+- whether an Ollama model reasons before answering;
 - seamless editing and deletion.
 
 Selecting a saved configuration in the assistant panel makes it active. Saving a configuration from Settings also selects it. Unlike the rest of Settings, a configuration is kept only when **Save configuration** is pressed, since its API key is stored only then; leaving the page or closing Settings with changes not saved asks first.
 
 ## Ollama
 
-Ollama runs models locally. Konjugate uses `http://127.0.0.1:11434` as its default Ollama endpoint.
+Ollama runs models locally. Konjugate uses `http://127.0.0.1:11434` as its default Ollama endpoint. [Run a model on this computer](#run-a-model-on-this-computer) does the steps below in a few clicks; to set up a configuration by hand instead:
 
 1. Install Ollama from [ollama.com](https://ollama.com/).
 2. Download at least one model using Ollama.
@@ -123,6 +147,16 @@ Review the assistant's assumptions as engineering decisions, not merely explanat
 Applying a proposal does not imply that the resulting model is physically complete or suitable for a particular engineering decision. The user remains responsible for model formulation, numerical settings and interpretation.
 
 ## Troubleshooting
+
+### The API key can't be read
+
+A saved key is encrypted by the operating system, and reading it needs its permission. If that is refused, Konjugate says it could not read the configuration's API key, and how to get it back:
+
+* **macOS:** the Keychain asked whether Konjugate may use "konjugate Safe Storage", and Deny was chosen. Quit and reopen Konjugate, and choose **Allow** (or **Always Allow**) when macOS asks again. A choice made earlier can be changed in the Keychain Access app, on that item's Access Control tab.
+* **Linux:** the keyring is locked. Unlock it, or sign in to the desktop session again, then quit and reopen Konjugate.
+* **Anywhere:** enter the key again in the configuration and save it.
+
+Only configurations that use a key ask for it. An Ollama configuration never does.
 
 ### Ollama is not reachable
 

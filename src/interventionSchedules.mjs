@@ -86,6 +86,26 @@ export function scheduleForChanges(parameter, changes, forkTime) {
     return { interpolation: 'linear', samples };
 }
 
+// A run's record of parameter changes (a result's `interventions`, as the engine kept them) as the commands that repeat them: each
+// value and schedule sent again as it was, held until the time it was recorded at (EngineCommand.apply_at), so a run of the same model
+// and settings from the same start goes through the same changes at the same steps and gives the same result to the bit
+// (tests/engine/handSteeredReplay.mjs). A run that was continued after it stopped began again from the model's values partway through,
+// which no command repeats, so it throws a message a user can act on.
+export function recordAsCommands(interventions) {
+    const changes = interventions ?? [];
+    if (changes.some((change) => change.kind === 'restart')) {
+        throw new Error('This run was continued after it stopped, so it cannot be repeated from its record; repeat a run that went from start to end in one go.');
+    }
+    return changes.flatMap((change) => {
+        if (change.kind === 'value') return [{ type: 'setParameterValue', parameterId: change.parameterId, value: change.value, applyAt: change.time }];
+        if (change.kind === 'schedule') {
+            const { time, kind, parameterId, ...schedule } = change;
+            return [{ type: 'scheduleParameterValue', parameterId, schedule, applyAt: time }];
+        }
+        return [];
+    });
+}
+
 // A copy of the model whose shared parameters named in `interventions` follow the schedules that carry those changes from `forkTime`.
 // Throws a message a user can act on when a change names a parameter the model does not have.
 export function applyInterventionSchedules(document, interventions, forkTime) {

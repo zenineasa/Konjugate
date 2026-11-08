@@ -51,6 +51,12 @@ contextBridge.exposeInMainWorld('twin', Object.freeze({
         showRecording: (path) => ipcRenderer.invoke('liveTwinShowRecording', path),
         pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } }
     }),
+    // The controller bindings a person keeps (docs/proposals/humanInputBinding.md), the same as the project window's.
+    inputBindings: Object.freeze({
+        get: () => ipcRenderer.invoke('inputBindingsGet'),
+        set: (document) => ipcRenderer.invoke('inputBindingsSet', document),
+        onChanged: (callback) => ipcRenderer.on('inputBindingsChanged', (_event, document) => callback(document))
+    }),
     pushService: Object.freeze({
         state: () => ipcRenderer.invoke('pushServiceState'),
         keys: () => ipcRenderer.invoke('pushKeysList')

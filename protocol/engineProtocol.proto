@@ -15,6 +15,8 @@ message Capabilities {
     // waveform), so the UI offers only what the engine it is talking to can do. An engine from before
     // this field reports none, which the UI reads as the original three.
     repeated string parameter_schedule_modes = 4;
+    // Whether a run holds a command until its apply_at time (EngineCommand.apply_at). An engine from before reports false.
+    bool held_commands = 5;
 }
 
 message StateDescriptor {
@@ -193,6 +195,11 @@ message EngineCommand {
     }
     // Commands sent together share a batch number; once one fails, the rest of its batch is not carried out. 0 is no batch.
     uint64 batch = 12;
+    // A run only: held until the run reaches this simulation time, then carried out at the first step at or after it, as if it had
+    // arrived then (and recorded at that step). Held commands are carried out in the order they arrived. 0: at once. A run's record
+    // of parameter changes, sent back with each change's recorded time, repeats the run's changes at the same steps
+    // (docs/proposals/humanInputBinding.md).
+    double apply_at = 13;
 }
 
 // A session's answer to one command: whether it was carried out, why not if it was not, the time the session is at, and for a

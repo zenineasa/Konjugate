@@ -522,6 +522,8 @@ $('#openRoom').addEventListener('click', async () => {
 initRoom({
     api,
     candidates: () => state.candidates,
+    // The project's name, which a controller binding may be narrowed to (docs/proposals/humanInputBinding.md).
+    projectName: () => state.context?.projectName ?? '',
     saveLayout: (layout) => saveSetup(normalizeTwinSetup({ ...state.saved, layout: { ...layout, ...(state.saved?.layout?.bounds ? { bounds: state.saved.layout.bounds } : {}) } })),
     saveRecord: (record) => saveSetup(normalizeTwinSetup({ ...state.saved, record })),
     backToSetup: () => closeRoom(),

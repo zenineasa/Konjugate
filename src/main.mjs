@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, shell, utilityProcess } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, session, shell, utilityProcess } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
@@ -64,6 +64,7 @@ import { registerLauncherHandlers } from './launcherHost.mjs';
 import { addonCacheDirectory } from './addonCache.mjs';
 import { createAddonSettingsStore } from './addonSettingsStore.mjs';
 import { createOwnershipDefaultsStore } from './ownershipDefaultsStore.mjs';
+import { createInputBindingsStore } from './inputBindingsStore.mjs';
 import { publicNoticeOf, stampProjectContent } from './ownership.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from './shapeLibraryCatalog.mjs';
@@ -2556,6 +2557,47 @@ ipcMain.handle('ownershipDefaultsSet', async (event, defaults) => {
     return ownershipDefaults().set(defaults);
 });
 
+// The controller bindings a person keeps (docs/proposals/humanInputBinding.md): in their own data folder, read and changed by a project
+// window or a twin's window (each reads its own devices), and every such window told when they change, so a binding made in one drives
+// in the others.
+let inputBindingsInstance = null;
+const inputBindings = () => (inputBindingsInstance ??= createInputBindingsStore({ userData: app.getPath('userData') }));
+// The project windows and their twins' windows: the app's own pages that steer a model.
+function steeringWindows() {
+    return [...projectWindows].flatMap((projectWindow) => [projectWindow, projectWindowState.get(projectWindow)?.twinWindow])
+        .filter((window) => window && !window.isDestroyed());
+}
+function requireSteeringWindow(event) {
+    if (!steeringWindows().some((window) => window.webContents === event.sender)) throw new Error('Only a project window or a twin\'s window can use the controller bindings.');
+}
+ipcMain.handle('inputBindingsGet', async (event) => {
+    requireSteeringWindow(event);
+    return inputBindings().get();
+});
+ipcMain.handle('inputBindingsSet', async (event, document) => {
+    requireSteeringWindow(event);
+    const kept = await inputBindings().set(document);
+    for (const window of steeringWindows()) if (window.webContents !== event.sender) window.webContents.send('inputBindingsChanged', kept);
+    return kept;
+});
+
+// MIDI controllers are read through Web MIDI, which asks for permission: granted to the app's own project and twin windows (their own
+// page, not a frame inside them such as an add-on's), refused to everything else, and never with system-exclusive messages. Every
+// other permission is left as Electron decides it without a handler, which is to grant it.
+function midiAllowed(webContents, permission, details) {
+    if (permission !== 'midi') return false;
+    if (details?.isMainFrame === false) return false;
+    const url = details?.requestingUrl ?? details?.requestingOrigin ?? webContents?.getURL?.() ?? '';
+    return url.startsWith('file:') && steeringWindows().some((window) => window.webContents === webContents);
+}
+function installMidiPermission() {
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+        callback(permission === 'midi' || permission === 'midiSysex' ? midiAllowed(webContents, permission, details) : true);
+    });
+    session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => (
+        permission === 'midi' || permission === 'midiSysex' ? midiAllowed(webContents, permission, { ...details, requestingOrigin }) : true));
+}
+
 const requireToolchainWindow = (event) => requireProjectWindow(event, 'Only a project window can access toolchain settings.');
 
 ipcMain.handle('providerToolchainGet', async (event, kind) => {
@@ -3185,16 +3227,16 @@ ipcMain.handle('engineSetExecutionState', async (event, jobId, executionState) =
     return job.setExecutionState(executionState);
 });
 
-ipcMain.handle('engineSetParameterValue', async (event, jobId, parameterId, value) => {
+ipcMain.handle('engineSetParameterValue', async (event, jobId, parameterId, value, options) => {
     const job = activeEngineJobs.get(jobId);
     if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
-    return job.setParameterValue(parameterId, value);
+    return job.setParameterValue(parameterId, value, { applyAt: options?.applyAt });
 });
 
-ipcMain.handle('engineScheduleParameterValue', async (event, jobId, parameterId, schedule) => {
+ipcMain.handle('engineScheduleParameterValue', async (event, jobId, parameterId, schedule, options) => {
     const job = activeEngineJobs.get(jobId);
     if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
-    return job.scheduleParameterValue(parameterId, schedule);
+    return job.scheduleParameterValue(parameterId, schedule, { applyAt: options?.applyAt });
 });
 
 ipcMain.handle('engineCancel', async (event, jobId) => {
@@ -3267,6 +3309,7 @@ app.whenReady().then(async () => {
         directory: join(app.getPath('userData'), 'providers')
     });
     extensionStateStore = createExtensionStateStore({ directory: join(app.getPath('userData'), 'packages') });
+    installMidiPermission();
 
     // A file passed on the initial launch (Windows/Linux double-click, or a path Electron
     // handed us via process.argv) opens directly into the first window rather than opening

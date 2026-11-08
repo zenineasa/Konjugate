@@ -23,6 +23,10 @@ import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objective
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
+import { liveRange } from '../inputBindings.mjs';
+import { recordAsCommands } from '../interventionSchedules.mjs';
+import { createHumanInput } from './humanInput.mjs';
+import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
@@ -605,6 +609,22 @@ let openControlHistoryOnLive = false;
 let controlHistoryTimer = null;
 let controlHistoryDrawnAt = 0;
 const liveParameterUpdateTimers = new Map();
+// Steering live parameters with a gamepad, a MIDI controller or keys (docs/proposals/humanInputBinding.md): the bindings are the
+// person's own, kept in the app's settings, and drive the live parameters of whichever model is open by their symbols.
+const humanInput = createHumanInput();
+const steering = createSteering({
+    humanInput, store: window.inputBindings, modelName: () => filenameStem(currentProjectFilename),
+    status: (text) => { $('#statusText').textContent = text; }
+});
+let steeringSignature = '';
+// Whether the engine holds a command until a time (EngineCommand.apply_at), which repeating a run from its record needs.
+let heldCommandsAvailable = false;
+// For the interaction tests: the bindings, simulated devices, and the result on screen with its record.
+window.__debugSteering = {
+    steering, devices: humanInput.simulated,
+    result: () => (activeResult ? structuredClone({ jobId: activeEngineJobId, running: simulationRunning, lifecycle: activeResult.lifecycle, interventions: activeResult.interventions ?? [], samples: activeResult.samples }) : null)
+};
+steering.load();
 let runLaunchSettings = {
     startPaused: false,
     targetTime: 1,
@@ -5504,6 +5524,7 @@ function updateLiveResultControls() {
     $('#simulationPacing').hidden = !live || activeResult?.pacing?.mode === 'fastest';
     const liveParameters = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
     const hasLiveControls = liveControlsOffered();
+    updateSteeringTargets(hasLiveControls);
     $('#liveParameterButton').hidden = !hasLiveControls;
     // Entering live mode opens the panel that plots how the controls are moved, so each change shows as it is made.
     if (hasLiveControls && openControlHistoryOnLive) {
@@ -5551,16 +5572,29 @@ function liveRangeFields(control) {
                 <label class="parameterField" title="How far the slider and the − and + buttons move it at a time"><span>Live step</span><input data-control-field="step" type="number" min="0" value="${control.step}"></label>`;
 }
 
-function liveParameterRange(parameter) {
-    const value = Number(parameter.value) || 0;
-    const magnitude = Math.max(Math.abs(value), 1);
-    const minimum = Number.isFinite(Number(parameter.control?.minimum))
-        ? Number(parameter.control.minimum) : Math.min(0, value - magnitude);
-    const maximum = Number.isFinite(Number(parameter.control?.maximum))
-        ? Number(parameter.control.maximum) : Math.max(0, value + magnitude);
-    const fallbackStep = Math.max((maximum - minimum) / 100, 0.001);
-    const step = Number(parameter.control?.step) > 0 ? Number(parameter.control.step) : fallbackStep;
-    return { minimum, maximum, step };
+// The live range is worked out in one place (src/inputBindings.mjs), which the twin's window and a controller's mapping use too.
+const liveParameterRange = (parameter) => liveRange(parameter);
+
+// The live parameters a controller can drive now: those of a live run, each with how to read, show and send its value. The chips
+// beside the rows are only redrawn when what can be driven changes, not for every batch of samples.
+function updateSteeringTargets(live = liveControlsOffered()) {
+    const owners = live ? parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live') : [];
+    const targets = owners.map(({ parameter }) => {
+        const id = parameter.id;
+        return {
+            key: id, symbol: parameter.symbol, name: parameter.name, unit: parameter.unit ?? '', range: liveParameterRange(parameter),
+            value: () => liveParameterValues.get(id) ?? (Number(parameter.value) || 0),
+            show: (value) => {
+                liveParameterValues.set(id, value);
+                $(`#liveParameterRows [data-parameter-id="${id}"]`)?.showValue(value);
+            },
+            apply: (value) => scheduleLiveParameterUpdate(id, value, true)
+        };
+    });
+    const signature = JSON.stringify([filenameStem(currentProjectFilename), ...targets.map(({ key, symbol, range }) => [key, symbol, range])]);
+    if (signature === steeringSignature) return;
+    steeringSignature = signature;
+    steering.setTargets(targets);
 }
 
 function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
@@ -6182,6 +6216,7 @@ function renderControlHistory() {
         $('#controlHistoryButton').ariaExpanded = 'false';
         return;
     }
+    $('#repeatFromRecord').hidden = !runRepeatable();
     if ($('#controlHistoryPanel').hidden) return;
     const wait = 250 - (performance.now() - controlHistoryDrawnAt);
     if (wait <= 0) drawControlHistory();
@@ -6198,6 +6233,43 @@ function setControlHistoryOpen(open) {
     drawControlHistory();
 }
 $('#controlHistoryButton').addEventListener('click', () => setControlHistoryOpen($('#controlHistoryPanel').hidden));
+
+// Repeating a run from its record (docs/proposals/humanInputBinding.md): a new branch from the run's start, with every change the run
+// recorded sent again and held until the step it was made at, so a run steered by hand is repeated to the bit without the controller.
+// Offered for a finished run whose changes were all made in one go, by an engine that can hold a command until a time.
+function runRepeatable() {
+    const changes = activeResult?.interventions ?? [];
+    // A repeat is a fork from the run's start, so it needs what a fork needs: a finished run with its checkpoints, read back from the engine.
+    return heldCommandsAvailable && canForkActiveResult() && typeof window.engine.readCheckpoint === 'function' && Boolean(activeEngineJobId)
+        && changes.length > 0 && !changes.some((change) => change.kind === 'restart');
+}
+$('#repeatFromRecord').addEventListener('click', async () => {
+    if (!runRepeatable()) return;
+    let commands;
+    try {
+        commands = recordAsCommands(activeResult.interventions);
+    } catch (error) {
+        $('#statusText').textContent = error.message;
+        return;
+    }
+    let checkpoint = null;
+    try {
+        checkpoint = await window.engine.readCheckpoint(activeEngineJobId, 0);
+    } catch (error) {
+        console.error('The checkpoint could not be read.', error);
+    }
+    if (!checkpoint || Number(checkpoint.time) !== 0) {
+        $('#statusText').textContent = 'This run kept no checkpoint at its start, so it cannot be repeated from its record.';
+        return;
+    }
+    const targetTime = Number(activeResult.targetTime) || runLaunchSettings.targetTime;
+    forkOverrideValues = new Map();
+    pendingFork = { parentBranchUuid: activeBranchUuid, forkTime: 0, checkpoint, overrides: [], repeat: commands };
+    runLaunchSettings.targetTime = targetTime;
+    openForkLaunchDialog();
+    $('#runTargetTime').value = targetTime;
+    $('#runLaunchDescription').textContent = `Repeat the run from its start with its record: ${commands.length} ${commands.length === 1 ? 'change' : 'changes'}, each at the step it was made.`;
+});
 $('#closeControlHistoryPanel').addEventListener('click', () => setControlHistoryOpen(false));
 
 async function loadAvailableScheduleModes() {
@@ -6205,13 +6277,14 @@ async function loadAvailableScheduleModes() {
         const response = await window.engine.capabilities();
         const modes = response?.available ? response.capabilities?.parameterScheduleModes : null;
         availableScheduleModes = Array.isArray(modes) && modes.length ? modes : originalScheduleModes;
+        heldCommandsAvailable = Boolean(response?.available && response.capabilities?.heldCommands);
     } catch {
         availableScheduleModes = originalScheduleModes;
     }
 }
 loadAvailableScheduleModes();
 
-function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedule = false, onSchedule = null } = {}) {
+function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedule = false, onSchedule = null, bindingKey = null } = {}) {
     const { minimum, maximum, step } = liveParameterRange(parameter);
     const normalizedValue = Number.isFinite(Number(value)) ? Number(value) : 0;
     const baseValue = normalizedValue;
@@ -6249,6 +6322,7 @@ function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedu
                 <small class="waveformCaption"></small>
             </span>
         </div>` : ''}
+        ${bindingKey !== null ? '<div class="inputBindingSlot"></div>' : ''}
     `;
     const slider = $('input[type="range"]', row);
     const numberInput = $('input[type="number"]:not([data-schedule-duration]):not([data-wave])', row);
@@ -6374,24 +6448,36 @@ function buildParameterRow(parameter, ownerLabel, value, onChange, { allowSchedu
         onSchedule({ mode, duration, targetValue: normalized, baseValue });
     };
     if (allowSchedule) $('[data-schedule-start]', row).addEventListener('click', () => setValue(numberInput.value, true));
-    slider.addEventListener('input', () => setValue(slider.value));
+    // Moved by hand, the slider wins over a bound control until the control moves again.
+    const byHand = () => { if (bindingKey !== null) steering.sliderMoved(bindingKey); };
+    slider.addEventListener('input', () => { byHand(); setValue(slider.value); });
     slider.addEventListener('change', () => setValue(slider.value, true));
-    numberInput.addEventListener('change', () => setValue(numberInput.value, true));
-    $$('[data-adjust]', row).forEach((button) => button.addEventListener('click', () =>
-        setValue((Number(numberInput.value) || 0) + Number(button.dataset.adjust) * step, true)));
+    numberInput.addEventListener('change', () => { byHand(); setValue(numberInput.value, true); });
+    $$('[data-adjust]', row).forEach((button) => button.addEventListener('click', () => {
+        byHand();
+        setValue((Number(numberInput.value) || 0) + Number(button.dataset.adjust) * step, true);
+    }));
+    if (bindingKey !== null) {
+        row.dataset.parameterId = String(bindingKey);
+        // A controller moves the slider and the value box without sending anything itself (src/renderer/inputSteering.mjs sends).
+        row.showValue = (shownValue) => { slider.value = shownValue; numberInput.value = shownValue; };
+        steering.decorate($('.inputBindingSlot', row), bindingKey);
+    }
     return row;
 }
 
 function renderLiveParameterControls() {
     const container = $('#liveParameterRows');
     container.replaceChildren();
+    updateSteeringTargets();
     parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live')
         .forEach(({ parameter, ownerLabel }) => {
             const value = (liveParameterValues.get(parameter.id) ?? Number(parameter.value)) || 0;
             container.appendChild(buildParameterRow(parameter, ownerLabel, value,
                 (normalized, immediate) => scheduleLiveParameterUpdate(parameter.id, normalized, immediate), {
                     allowSchedule: true,
-                    onSchedule: (schedule) => sendLiveParameterSchedule(parameter.id, schedule)
+                    onSchedule: (schedule) => sendLiveParameterSchedule(parameter.id, schedule),
+                    bindingKey: parameter.id
                 }));
         });
 }
@@ -6877,7 +6963,9 @@ async function startSimulation() {
             // Checked (the default) omits the field so engineAdapter.mjs's own "monitor every
             // node" default applies unchanged; unchecked explicitly disables it for this run.
             ...(runLaunchSettings.stabilityMonitoring ? {} : { stabilityMonitoring: { nodeIds: [] } }),
-            ...(runLaunchSettings.startPaused ? { startPaused: true } : {}),
+            // A repeat is held before its first step until every recorded change is in: a fast run could otherwise be over before a
+            // pause sent after its start was read.
+            ...(runLaunchSettings.startPaused || pendingFork?.repeat?.length ? { startPaused: true } : {}),
             ...(pendingFork ? { startCheckpoint: pendingFork.checkpoint } : pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
@@ -6911,6 +6999,16 @@ async function startSimulation() {
                 }
             }
             await window.engine.setExecutionState(execution.jobId, 'running');
+        }
+        const repeat = pendingFork?.repeat ?? [];
+        if (repeat.length) {
+            // Started held (startPaused, above), then each recorded change sent with the time it was made at: the engine holds it
+            // until that step (EngineCommand.apply_at), however fast this run goes.
+            for (const command of repeat) {
+                if (command.type === 'setParameterValue') await window.engine.setParameterValue(execution.jobId, command.parameterId, command.value, { applyAt: command.applyAt });
+                else await window.engine.scheduleParameterValue(execution.jobId, command.parameterId, command.schedule, { applyAt: command.applyAt });
+            }
+            if (!runLaunchSettings.startPaused) await window.engine.setExecutionState(execution.jobId, 'running');
         }
     } catch (error) {
         console.error('C++ simulation failed.', error);
@@ -7161,26 +7259,90 @@ async function refreshProviderExecutionMode() {
     updateProviderExecutionModeWarning();
 }
 
-$('#providerToolchainsButton').addEventListener('click', async () => {
-    $('#providerToolchainsError').textContent = '';
+$('#settingsButton').addEventListener('click', async () => {
+    $('#settingsError').textContent = '';
     await Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode()]);
-    $('#providerToolchainsDialog').showModal();
+    $('#settingsDialog').showModal();
+    renderControllerSettings();
 });
-$('#providerToolchainsCancel').addEventListener('click', () => $('#providerToolchainsDialog').close());
+$('#settingsCancel').addEventListener('click', () => $('#settingsDialog').close());
+$('#settingsDialog').addEventListener('close', () => steering.stopBinding());
+
+// Settings › Controllers (docs/proposals/humanInputBinding.md): every binding the person keeps, with its device's state and whether the
+// open model has its parameter, to change or remove; a control bound to any live parameter of the open model, run or no run; and how
+// big a change of a moving control must be to be recorded. Kept as they are made: the Save button is for the provider fields above.
+function renderControllerSettings() {
+    if (!$('#settingsDialog').open) return;
+    const kept = steering.document;
+    const modelName = filenameStem(currentProjectFilename);
+    const live = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
+    const symbols = new Set(live.map(({ parameter }) => parameter.symbol));
+    const midi = humanInput.midiState;
+    $('#controllersMidiNote').hidden = midi !== 'unsupported' && midi !== 'denied';
+    $('#controllersMidiNote').textContent = midi === 'unsupported'
+        ? 'This browser has no Web MIDI, so a MIDI controller cannot be used here; gamepads and the keyboard can.'
+        : 'MIDI was not allowed for this page, so a MIDI controller cannot be used; gamepads and the keyboard can.';
+    const list = $('#controllerBindingList');
+    list.replaceChildren(...kept.bindings.map((entry) => {
+        const described = steering.describe(entry);
+        const here = (entry.model === null || entry.model === modelName) && symbols.has(entry.parameter.symbol);
+        const row = document.createElement('div');
+        row.className = 'controllerBindingRow';
+        row.dataset.bindingId = entry.id;
+        const notes = [
+            `${entry.device.name}${described.connected ? '' : ', not plugged in'}`,
+            `drives ${entry.parameter.name} (${entry.parameter.symbol})${entry.model ? ` only in “${entry.model}”` : ''}`,
+            ...(here ? [] : ['not in this model'])
+        ];
+        row.innerHTML = `<div><strong>${escapeHtml(described.label)}</strong><small>${escapeHtml(notes.join(' · '))}</small></div>
+            <button type="button" data-change>Change…</button><button type="button" data-remove>Remove</button>`;
+        $('[data-change]', row).addEventListener('click', () => steering.openSettings(entry.id));
+        $('[data-remove]', row).addEventListener('click', () => steering.save({ ...steering.document, bindings: steering.document.bindings.filter((other) => other.id !== entry.id) }));
+        return row;
+    }));
+    if (!kept.bindings.length) list.replaceChildren(Object.assign(document.createElement('p'), { className: 'emptyEditorState', textContent: 'No control is bound yet.' }));
+    const choose = $('#controllerBindParameter');
+    const chosen = choose.value;
+    choose.replaceChildren(...(live.length
+        ? [...new Map(live.map(({ parameter }) => [parameter.symbol, parameter])).values()].map((parameter) => new Option(`${parameter.name} (${parameter.symbol})`, parameter.symbol, false, parameter.symbol === chosen))
+        : [new Option('No live parameter in this model', '')]));
+    choose.disabled = !live.length;
+    $('#controllerBindButton').disabled = !live.length;
+    $('#controllerThreshold').value = String(Number((kept.threshold * 100).toPrecision(4)));
+}
+steering.onChanged(renderControllerSettings);
+$('#controllerBindButton').addEventListener('click', () => {
+    const button = $('#controllerBindButton');
+    if (button.dataset.waiting) { steering.stopBinding(); return; }
+    const symbol = $('#controllerBindParameter').value;
+    const parameter = parameterOwnersInModel().map((owner) => owner.parameter).find((candidate) => candidate.mode === 'live' && candidate.symbol === symbol);
+    if (!parameter) return;
+    steering.bindParameter({ symbol: parameter.symbol, name: parameter.name }, {
+        waiting: (waiting) => {
+            button.textContent = waiting ? 'Move a control… (Esc to stop)' : 'Bind a control';
+            if (waiting) button.dataset.waiting = 'true'; else delete button.dataset.waiting;
+        }
+    });
+});
+$('#controllerThreshold').addEventListener('change', () => {
+    const percent = Number($('#controllerThreshold').value);
+    if (!(percent > 0) || percent > 50) { renderControllerSettings(); return; }
+    steering.save({ ...steering.document, threshold: percent / 100 });
+});
 $('#toolchainCppBrowse').addEventListener('click', () => browseToolchainField('cpp'));
 $('#toolchainPythonBrowse').addEventListener('click', () => browseToolchainField('python'));
 $('#toolchainCppTest').addEventListener('click', () => testToolchainField('cpp'));
 $('#toolchainPythonTest').addEventListener('click', () => testToolchainField('python'));
 $('#providerExecutionMode').addEventListener('change', updateProviderExecutionModeWarning);
-$('#providerToolchainsDialog').addEventListener('submit', async (event) => {
+$('#settingsDialog').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const error = $('#providerToolchainsError');
+    const error = $('#settingsError');
     error.textContent = '';
     try {
         await window.providerToolchains.set('cpp', $('#toolchainCppPath').value);
         await window.providerToolchains.set('python', $('#toolchainPythonPath').value);
         await window.providerToolchains.executionMode.set($('#providerExecutionMode').value);
-        $('#providerToolchainsDialog').close();
+        $('#settingsDialog').close();
     } catch (submitError) {
         error.textContent = submitError.message;
     }

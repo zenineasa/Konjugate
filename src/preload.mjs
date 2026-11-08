@@ -166,6 +166,13 @@ contextBridge.exposeInMainWorld('ownershipDefaults', {
     set: (defaults) => ipcRenderer.invoke('ownershipDefaultsSet', defaults)
 });
 
+// The controller bindings a person keeps (docs/proposals/humanInputBinding.md), shared with their other windows.
+contextBridge.exposeInMainWorld('inputBindings', {
+    get: () => ipcRenderer.invoke('inputBindingsGet'),
+    set: (document) => ipcRenderer.invoke('inputBindingsSet', document),
+    onChanged: (callback) => ipcRenderer.on('inputBindingsChanged', (_event, document) => callback(document))
+});
+
 contextBridge.exposeInMainWorld('providerToolchains', {
     get: (kind) => ipcRenderer.invoke('providerToolchainGet', kind),
     set: (kind, path) => ipcRenderer.invoke('providerToolchainSet', { kind, path }),
@@ -279,8 +286,8 @@ contextBridge.exposeInMainWorld('engine', {
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),
     setPacing: (jobId, pacing) => ipcRenderer.invoke('engineSetPacing', jobId, pacing),
     setExecutionState: (jobId, executionState) => ipcRenderer.invoke('engineSetExecutionState', jobId, executionState),
-    setParameterValue: (jobId, parameterId, value) => ipcRenderer.invoke('engineSetParameterValue', jobId, parameterId, value),
-    scheduleParameterValue: (jobId, parameterId, schedule) => ipcRenderer.invoke('engineScheduleParameterValue', jobId, parameterId, schedule),
+    setParameterValue: (jobId, parameterId, value, options) => ipcRenderer.invoke('engineSetParameterValue', jobId, parameterId, value, options),
+    scheduleParameterValue: (jobId, parameterId, schedule, options) => ipcRenderer.invoke('engineScheduleParameterValue', jobId, parameterId, schedule, options),
     readResultSeries: (jobId, signalIds, options) => ipcRenderer.invoke('engineReadResultSeries', jobId, signalIds, options),
     readResultSample: (jobId, time) => ipcRenderer.invoke('engineReadResultSample', jobId, time),
     readCheckpoint: (jobId, time) => ipcRenderer.invoke('engineReadCheckpoint', jobId, time),

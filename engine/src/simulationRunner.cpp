@@ -69,6 +69,8 @@ struct RunControl {
     // Every parameter change applied so far, in order, with the simulation time of the step it took effect at; written into the
     // result (protocol::Intervention) so the record of how the controls were moved is kept with it.
     std::vector<std::pair<double, protocol::EngineCommand>> interventions;
+    // Commands held until the run reaches their apply_at time, in the order they are to be carried out (by time, then arrival).
+    std::vector<protocol::EngineCommand> held;
 };
 struct ControlInbox {
     std::mutex mutex;
@@ -480,6 +482,17 @@ void applyControlCommand(RunControl& current, const protocol::EngineCommand& com
     }
 }
 
+// Carries out the held commands whose time has come, in order: at the first step at or after each one's apply_at, as if it had
+// arrived then.
+void applyDueHeldCommands(RunControl& current, double now) {
+    std::size_t due = 0;
+    while (due < current.held.size() && current.held[due].apply_at() <= now) ++due;
+    if (!due) return;
+    std::vector<protocol::EngineCommand> commands(std::make_move_iterator(current.held.begin()), std::make_move_iterator(current.held.begin() + static_cast<std::ptrdiff_t>(due)));
+    current.held.erase(current.held.begin(), current.held.begin() + static_cast<std::ptrdiff_t>(due));
+    for (const auto& command : commands) applyControlCommand(current, command, now);
+}
+
 RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunControl current, double now) {
     std::vector<protocol::EngineCommand> commands;
     {
@@ -487,7 +500,18 @@ RunControl drainRunControl(const std::shared_ptr<ControlInbox>& inbox, RunContro
         if (!inbox->error.empty()) throw std::runtime_error(inbox->error);
         commands.swap(inbox->commands);
     }
-    for (const auto& command : commands) applyControlCommand(current, command, now);
+    applyDueHeldCommands(current, now);
+    for (auto& command : commands) {
+        if (!std::isfinite(command.apply_at()) || command.apply_at() < 0) throw std::runtime_error("The engine received a command held until a time that is not a finite, non-negative number.");
+        if (command.apply_at() > now) {
+            // After every held command due at the same time or earlier, so commands for one step keep the order they were sent in.
+            const auto at = std::upper_bound(current.held.begin(), current.held.end(), command.apply_at(),
+                [](double time, const protocol::EngineCommand& other) { return time < other.apply_at(); });
+            current.held.insert(at, std::move(command));
+        } else {
+            applyControlCommand(current, command, now);
+        }
+    }
     return current;
 }
 
@@ -1289,6 +1313,9 @@ void Simulation::refreshRunControl(bool force) {
 #endif
         runControl = drainRunControl(controlInbox, std::move(runControl), currentTime);
         lastControlReadAt = now;
+    } else {
+        // A held command is carried out at its own step, however long since the inbox was last read.
+        applyDueHeldCommands(runControl, currentTime);
     }
 }
 

@@ -592,7 +592,7 @@ test('a window can ask whether the providers\' Python imports the modules it nee
     assert.match(found.message, /^Python 3\.12\.4 at \/usr\/bin\/python3 has mujoco\.$/);
     const missing = await checkPythonModules({ interpreter: '/opt/py/bin/python', chosen: true, modules: ['mujoco', 'numpy'], run: answering({ mujoco: { found: false, error: "ModuleNotFoundError: No module named 'mujoco'" }, numpy: { found: true, version: '2.0' } }) });
     assert.equal(missing.modules.mujoco.found, false);
-    assert.match(missing.message, /^mujoco is not importable in Python 3\.12\.4 .*the Python set under Provider toolchains/);
+    assert.match(missing.message, /^mujoco is not importable in Python 3\.12\.4 .*the Python set under Settings/);
     // No Python at all, or one that fails, is said plainly, with every module counted missing.
     const absent = await checkPythonModules({ interpreter: 'python3', modules: ['mujoco'], run: async () => ({ code: -1, stdout: '', stderr: 'spawn python3 ENOENT' }) });
     assert.equal(absent.found, false);

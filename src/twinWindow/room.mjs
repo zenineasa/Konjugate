@@ -8,16 +8,23 @@
 
 import { $, $$, clock, cleanError, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, trendOf, valueAt } from './common.mjs';
 import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
+import { liveRange } from '../inputBindings.mjs';
+import { createHumanInput } from '../renderer/humanInput.mjs';
+import { createSteering } from '../renderer/inputSteering.mjs';
 
 const keptCycles = 1000;
 // A jump or a tolerance to two figures: a difference read at a glance.
 const brief = (value) => (Number.isFinite(value) ? Number(value.toPrecision(2)).toString() : '—');
 let host = null;
 let twin = null;
+// The controls a person steers the sandbox with (docs/proposals/humanInputBinding.md): this window reads its own devices, since a
+// gamepad is read only by the window in front; the bindings are the ones the project window uses, matched by symbol.
+let steering = null;
+let sandboxTargets = [];
 
 export const currentTwin = () => twin;
 
-// host: { api, state (the window's), candidates(), saveLayout(layout), saveRecord(record), backToSetup(), replayRecording(path),
+// host: { api, state (the window's), candidates(), projectName(), saveLayout(layout), saveRecord(record), backToSetup(), replayRecording(path),
 //         askProject(action, payload), reportStatus(status) }
 export function initRoom(given) {
     host = given;
@@ -63,6 +70,20 @@ export function initRoom(given) {
         $('#modelBanner').hidden = true;
     });
     $('#trySomething').addEventListener('click', () => openSandbox());
+    $('#sandboxFollow').addEventListener('click', () => (twin?.sandbox?.following ? stopFollowing() : followControls()));
+    $('#sandboxPace').addEventListener('change', () => {
+        // A new pace counts from now, so the sandbox does not leap to catch up with it.
+        const following = twin?.sandbox?.following;
+        if (following) Object.assign(following, { startedWall: performance.now(), startedModel: twin.sandbox.startedAt + twin.sandbox.ranFor });
+    });
+    const humanInput = createHumanInput();
+    steering = createSteering({
+        humanInput, store: host.api.inputBindings, modelName: () => host.projectName?.() ?? '',
+        status: (text) => { $('#sandboxStatus').className = 'status'; $('#sandboxStatus').textContent = text; }
+    });
+    steering.onChanged(() => refreshFollowOffer());
+    steering.load();
+    window.__debugSteering = { steering, devices: humanInput.simulated };
     $('#sandboxRun').addEventListener('click', () => runSandbox());
     $('#sandboxBack').addEventListener('click', () => closeSandbox());
     $('#scenariosToggle').addEventListener('click', () => { $('#scenarioList').hidden = !$('#scenarioList').hidden; });
@@ -588,13 +609,36 @@ async function openSandbox() {
         const cycle = twin.cycles.at(-1);
         twin.sandbox = { startedAt: opened.time, ranFor: 0, tried: [], series: null, cycle };
         twin.view = null;
+        const slots = [];
+        sandboxTargets = [];
         $('#sandboxInputs').replaceChildren(...twin.inputs.map((input) => {
             const field = element('input', { type: 'number', step: 'any', value: String(cycle.inputs?.[input.signal] ?? '') });
             field.dataset.signal = input.signal;
             const name = input.target?.label.replace(/^Shared · /, '') ?? input.signal;
             field.setAttribute('aria-label', `${name} from now`);
-            return element('label', { className: 'field inline' }, element('span', { textContent: `${name}${input.target?.unit ? ` (${input.target.unit})` : ''}` }), field);
+            const label = element('label', { className: 'field inline' }, element('span', { textContent: `${name}${input.target?.unit ? ` (${input.target.unit})` : ''}` }), field);
+            if (!input.target?.symbol) return label;
+            // A control bound to the input's parameter (by its symbol) moves this field, and while the sandbox follows the controls,
+            // the input itself.
+            const shared = (twin.settings.document?.sharedParameters ?? []).find((parameter) => parameter.id === input.target.id);
+            const range = liveRange(shared ?? { value: Number(field.value) || 0 });
+            field.addEventListener('input', () => steering.sliderMoved(input.signal));
+            sandboxTargets.push({
+                key: input.signal, symbol: input.target.symbol, name, unit: input.target.unit ?? '', range,
+                value: () => Number(field.value) || 0,
+                show: (value) => { field.value = String(value); },
+                apply: (value) => {
+                    field.value = String(value);
+                    twin?.sandbox?.following?.queue.push({ signal: input.signal, value });
+                }
+            });
+            const slot = element('span', {});
+            slots.push([slot, input.signal]);
+            return element('span', { className: 'sandboxInput' }, label, slot);
         }));
+        steering.setTargets(sandboxTargets);
+        for (const [slot, key] of slots) steering.decorate(slot, key);
+        refreshFollowOffer();
         if (!twin.inputs.length) $('#sandboxInputs').replaceChildren(element('span', { className: 'hint', textContent: 'No input is mapped: run ahead to see the twin\'s own course.' }));
         $('#sandboxStatus').textContent = `From ${dataTime(opened.time)}.`;
         $('#sandboxBar').hidden = false;
@@ -618,10 +662,7 @@ async function runSandbox() {
         const seconds = Number($('#sandboxMinutes').value) * 60;
         if (!(seconds > 0)) throw new Error('Run ahead for a positive number of minutes.');
         const result = await host.api.liveTwin.sandboxRunFor(seconds);
-        sandbox.tried = result.tried;
-        sandbox.ranFor = result.time - sandbox.startedAt;
-        const previous = sandbox.series ?? {};
-        sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, [...(previous[signal] ?? []), ...samples]]));
+        takeSandboxResult(sandbox, result);
         $('#sandboxStatus').className = 'status good';
         $('#sandboxStatus').textContent = `Ran ahead to ${Number((result.time / 3600).toFixed(2))} h${result.tried.length ? ` with ${result.tried.map((step) => `${step.signal} ${step.value}`).join(', ')}` : ' with nothing changed'}.`;
         renderView();
@@ -633,11 +674,99 @@ async function runSandbox() {
     }
 }
 
+function takeSandboxResult(sandbox, result) {
+    sandbox.tried = result.tried;
+    sandbox.ranFor = result.time - sandbox.startedAt;
+    const previous = sandbox.series ?? {};
+    sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, [...(previous[signal] ?? []), ...samples]]));
+}
+
+// Follow the controls is offered once a control drives one of the sandbox's inputs.
+function refreshFollowOffer() {
+    const offered = Boolean(twin?.sandbox) && sandboxTargets.some((target) => steering.isBound(target.key));
+    $('#sandboxFollowControls').hidden = !offered;
+    if (!offered && twin?.sandbox?.following) stopFollowing();
+}
+
+// Following the controls: the sandbox runs ahead continuously at the pace chosen beside it, each input taking the value its control
+// has as it goes (sent by the size of each change, so what was tried is a short list of steps), and the tiles draw its course as it
+// grows. It runs on the sandbox's own engine; the live twin is never touched. A slow model falls behind the pace and simply runs as
+// fast as it can, rather than leaping ahead to catch up.
+async function followControls() {
+    const sandbox = twin?.sandbox;
+    if (!sandbox || sandbox.following) return;
+    const following = { queue: [], startedWall: performance.now(), startedModel: sandbox.startedAt + sandbox.ranFor };
+    // What the fields say as it starts goes first: a value typed or moved before.
+    for (const field of $$('#sandboxInputs input')) {
+        const value = Number(field.value);
+        const before = sandbox.tried.filter((step) => step.signal === field.dataset.signal).at(-1)?.value ?? sandbox.cycle.inputs?.[field.dataset.signal];
+        if (field.value.trim() !== '' && Number.isFinite(value) && value !== before) following.queue.push({ signal: field.dataset.signal, value });
+    }
+    sandbox.following = following;
+    $('#sandboxFollow').setAttribute('aria-pressed', 'true');
+    $('#sandboxFollow').textContent = 'Pause';
+    $('#sandboxRun').disabled = true;
+    const step = Number(twin.settings.timeStep) > 0 ? Number(twin.settings.timeStep) : 60;
+    let drawnAt = 0;
+    following.done = (async () => {
+        while (twin?.sandbox === sandbox && sandbox.following === following) {
+            try {
+                const pace = Number($('#sandboxPace').value) || 60;
+                const reached = sandbox.startedAt + sandbox.ranFor;
+                let wanted = following.startedModel + pace * (performance.now() - following.startedWall) / 1000;
+                // More than two seconds behind: carry on from where it is.
+                if (wanted - reached > 2 * pace) {
+                    Object.assign(following, { startedWall: performance.now(), startedModel: reached });
+                    wanted = reached;
+                }
+                for (const { signal, value } of following.queue.splice(0)) await host.api.liveTwin.sandboxSetInput(signal, value);
+                if (wanted - reached >= step) {
+                    const result = await host.api.liveTwin.sandboxRunFor(Math.floor((wanted - reached) / step) * step);
+                    if (twin?.sandbox !== sandbox) break;
+                    takeSandboxResult(sandbox, result);
+                    if (performance.now() - drawnAt > 250) {
+                        drawnAt = performance.now();
+                        $('#sandboxStatus').className = 'status good';
+                        $('#sandboxStatus').textContent = `Following the controls: ${Number((result.time / 3600).toFixed(2))} h${result.tried.length ? `, ${result.tried.length} ${result.tried.length === 1 ? 'change' : 'changes'} tried` : ''}.`;
+                        renderView();
+                    }
+                }
+            } catch (error) {
+                if (twin?.sandbox === sandbox) {
+                    $('#sandboxStatus').className = 'status warning';
+                    $('#sandboxStatus').textContent = cleanError(error);
+                }
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        if (sandbox.following === following) sandbox.following = null;
+        if (twin?.sandbox === sandbox) {
+            $('#sandboxFollow').setAttribute('aria-pressed', 'false');
+            $('#sandboxFollow').textContent = 'Follow the controls';
+            $('#sandboxRun').disabled = false;
+            renderView();
+        }
+    })();
+}
+
+// Pause holds the sandbox where it is; Run ahead and Follow the controls carry on from there.
+async function stopFollowing() {
+    const following = twin?.sandbox?.following;
+    if (!following) return;
+    twin.sandbox.following = null;
+    await following.done;
+}
+
 // Back to live: nothing the sandbox did reaches the twin. What was tried is kept as a draft scenario with the project.
 export async function closeSandbox() {
     const sandbox = twin?.sandbox;
     if (!sandbox) return;
+    await stopFollowing();
+    sandboxTargets = [];
+    steering.setTargets([]);
     twin.sandbox = null;
+    $('#sandboxFollowControls').hidden = true;
     $('#sandboxBar').hidden = true;
     $('#trySomething').disabled = false;
     const closed = await host.api.liveTwin.sandboxClose().catch(() => null);

@@ -162,6 +162,8 @@ export function createElectronDriver(mainWindow) {
             cppProviders: true,
             parameterWaveforms: true,
             startPausedRuns: true,
+            heldCommands: true,
+            forks: true,
             fitProgress: true,
             renderedExampleGuide: true,
             aiAssistant: true,

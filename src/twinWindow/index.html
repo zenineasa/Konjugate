@@ -116,6 +116,15 @@
             <strong>Trying something</strong>
             <span class="hint" id="sandboxHint">A copy of the twin from now: set an input, run ahead, and the tiles show what would happen (dotted). The twin is not changed.</span>
             <div id="sandboxInputs" class="sandboxInputs"></div>
+            <span id="sandboxFollowControls" class="sandboxFollow" hidden>
+                <button id="sandboxFollow" type="button" aria-pressed="false" title="Run ahead continuously, each input taking the value its control has as it goes">Follow the controls</button>
+                <label class="field inline"><span>Pace</span><select id="sandboxPace" aria-label="How fast the sandbox runs ahead while it follows the controls">
+                    <option value="1">Real time</option>
+                    <option value="60" selected>A minute a second</option>
+                    <option value="600">Ten minutes a second</option>
+                    <option value="3600">An hour a second</option>
+                </select></label>
+            </span>
             <label class="field inline"><span>Run ahead</span><input id="sandboxMinutes" type="number" min="1" step="1" value="60"><span>min</span></label>
             <button id="sandboxRun" type="button" class="primary">Run ahead</button>
             <button id="sandboxBack" type="button">Back to live</button>

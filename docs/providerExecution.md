@@ -28,13 +28,13 @@ Because `inProcess` gives up isolation entirely, it is meant to stay an explicit
 
 ## Choosing a mode
 
-A user can change the default in **Provider Toolchains** (⚒ in the titlebar) under **Advanced: C++ provider execution mode**; selecting **In-process (fastest, experimental)** shows an inline warning about the isolation tradeoff. The setting is a machine-local preference stored alongside the compiler/interpreter overrides (`providerToolchainStore.mjs`), not a per-project setting.
+A user can change the default in **Settings** (⚒ in the titlebar), under **Providers**, under **Advanced: C++ provider execution mode**; selecting **In-process (fastest, experimental)** shows an inline warning about the isolation tradeoff. The setting is a machine-local preference stored alongside the compiler/interpreter overrides (`providerToolchainStore.mjs`), not a per-project setting.
 
 Precedence, from `engineAdapter.mjs`'s `startEngineRun()`:
 
 1. An explicit `configuration.providers.executionMode` (not set by anything in the app today, but available to callers/tests).
 2. The `KONJUGATE_PROVIDER_EXECUTION_MODE` environment variable — a developer's session-scoped override.
-3. The user's saved choice in the Provider Toolchains dialog.
+3. The user's saved choice in the Settings dialog.
 4. If the model has any `cpp`-kind computational-node provider, `inProcess` — the only mode a node-shaped provider supports at all (see `providerRuntime.cpp`'s "no worker-process fallback exists" note under "Build artifacts" below); otherwise `sharedMemoryWorker`.
 
 The engine itself reads a top-level `providers.executionMode` string in the run configuration JSON (`""`/absent, `"pipeWorker"`, `"sharedMemoryWorker"`, or `"inProcess"`; anything else is treated as absent) — this is the field every layer above ultimately writes into before invoking `konjugate run`.

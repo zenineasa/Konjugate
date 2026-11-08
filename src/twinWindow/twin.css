@@ -246,3 +246,29 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .correctionRow select { width: 100%; font-size: 12.5px; }
 /* The status line takes no room until it has something to say. */
 .room > .status:empty { display: none; }
+
+/* Steering the sandbox by hand (docs/proposals/humanInputBinding.md): a Bind… button and a chip per binding beside each input, and a
+   binding's settings, built by src/renderer/inputSteering.mjs with the project window's class names. */
+.sandboxInput { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.inputBindingSlot { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.inputBindingSlot button { height: 26px; padding: 0 9px; border-radius: 13px; font-size: 12px; }
+.inputBindingSlot .inputBindingChip { display: inline-flex; align-items: center; gap: 6px; background: #12302f; border-color: #2f6a62; }
+.inputBindingSlot .inputBindingChip small { color: var(--lean); font-size: 11px; }
+.inputBindingSlot .inputBindingChipNote { background: #2a2614; border-color: #6a5a2f; }
+.inputBindingSlot .inputBindButton { color: var(--muted); border-style: dashed; }
+.sandboxFollow { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+#sandboxFollow[aria-pressed="true"] { color: var(--accentText); background: #9b8cf0; border-color: #9b8cf0; }
+.inputBindingDialog { width: min(380px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 1px solid #3a4d58; border-radius: 10px; box-shadow: 0 20px 55px rgb(0 0 0 / 60%); }
+.inputBindingDialog::backdrop { background: rgb(2 7 11 / 62%); }
+.inputBindingDialog form { display: grid; gap: 8px; padding: 18px; }
+.inputBindingDialog .contextKicker { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.inputBindingDialog strong { font-size: 16px; }
+.inputBindingDialog p { margin: 0; color: var(--muted); }
+.inputBindingDialog .inputBindingField, .inputBindingDialog .inputBindingGroup { display: grid; gap: 4px; }
+.inputBindingDialog .inputBindingField > span { color: var(--muted); font-size: 12px; }
+.inputBindingDialog .inputBindingField small { color: var(--faint); font-size: 11px; }
+.inputBindingDialog .inputBindingCheck { display: flex; align-items: center; gap: 8px; }
+.inputBindingDialog .inputBindingCheck input { width: 16px; height: 16px; accent-color: var(--accent); }
+.inputBindingDialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.inputBindingDialog .inputBindingRemove { margin-right: auto; color: var(--bad); }
+.inputBindingDialog .doneButton { color: var(--accentText); background: var(--accent); border-color: var(--accent); font-weight: 650; }

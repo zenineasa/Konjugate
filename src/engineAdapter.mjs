@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
 import { decodeResultFile, encodeEngineCommand, FramedEngineEventDecoder } from './engineProtocol.mjs';
-import { parameterScheduleCommand } from './parameterSchedule.mjs';
+import { heldUntil, parameterScheduleCommand } from './parameterSchedule.mjs';
 import { fitArguments } from './fitArguments.mjs';
 import { decodeFittingProgressEvent, decodeFittingReport, decodeInferenceReport, decodeValidationReport, FramedMessageReader } from './reportProtocol.mjs';
 import { resolveInstalledPlugins } from './pluginResolver.mjs';
@@ -558,20 +558,21 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             if (executionState === 'stopped') await closeCommandStream();
             return executionState;
         },
-        setParameterValue: async (parameterId, parameterValue) => {
+        // `applyAt`: hold the change until the run reaches that time (a run's record sent back to repeat it); otherwise at once.
+        setParameterValue: async (parameterId, parameterValue, { applyAt } = {}) => {
             const value = Number(parameterValue);
             if (!liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
             if (!Number.isFinite(value)) throw new Error('A live parameter value must be finite.');
-            await sendCommand({ type: 'setParameterValue', parameterId, value });
+            await sendCommand({ type: 'setParameterValue', parameterId, value, ...heldUntil(applyAt) });
             return { parameterId, value };
         },
         // A recorded, timestamped intervention (see docs/resultExploration.md's "Parameter
         // interventions") rather than an instantaneous override -- appended to the run's active
         // schedule list, not replacing the previous value outright. samples is only meaningful
         // (and required, at least two) for mode "piecewise".
-        scheduleParameterValue: async (parameterId, schedule) => {
+        scheduleParameterValue: async (parameterId, schedule, { applyAt } = {}) => {
             if (!liveParameterIds.has(parameterId)) throw new Error('That parameter is not available for live control.');
-            await sendCommand(parameterScheduleCommand(parameterId, schedule));
+            await sendCommand({ ...parameterScheduleCommand(parameterId, schedule), ...heldUntil(applyAt) });
             return { parameterId, ...schedule };
         },
         shutdown,

@@ -19,7 +19,7 @@ export const phoneMenuEntries = [
     { id: 'causalInferenceButton', label: 'Causal inference' },
     { id: 'parameterTuningButton', label: 'Parameter tuning' },
     { id: 'parametersButton', label: 'Parameters' },
-    { id: 'providerToolchainsButton', label: 'Provider toolchains' },
+    { id: 'settingsButton', label: 'Settings' },
     { id: 'extensionsButton', label: 'Extensions' },
     { id: 'diagnosticsButton', label: 'Diagnostics log' },
     { id: 'offlineButton', label: 'Use offline' },

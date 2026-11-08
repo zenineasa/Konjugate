@@ -2089,3 +2089,36 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .loggerColumnDetails { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .loggerColumnDetails[hidden] { display: none; }
 .loggerColumnDetails [data-field="values"] { grid-column: 1 / -1; }
+
+/* Steering by hand (docs/proposals/humanInputBinding.md): the Bind… button and a chip per binding under a live control, a binding's
+   settings, and Settings › Controllers. */
+.liveParameterRow .inputBindingSlot { display: flex; grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: 5px; }
+.inputBindingSlot button { width: auto; height: 22px; padding: 0 8px; color: #8fa7b0; background: #101e27; border: 1px solid #2d414c; border-radius: 11px; font-size: 7px; }
+.inputBindingSlot .inputBindingChip { display: inline-flex; align-items: center; gap: 5px; color: #cfe3e0; background: #12302f; border-color: #2f6a62; }
+.inputBindingSlot .inputBindingChip small { color: #d8b24a; font-size: 7px; }
+.inputBindingSlot .inputBindingChipNote { background: #2a2614; border-color: #6a5a2f; }
+.inputBindingSlot .inputBindButton { border-style: dashed; }
+.inputBindingDialog { width: 340px; }
+.inputBindingDialog .inputBindingGroup { display: grid; gap: 0; }
+.inputBindingDialog .inputBindingGroup[hidden] { display: none; }
+.inputBindingDialog .inputBindingField small { color: #566b76; font-size: 7px; }
+.passwordDialog .inputBindingCheck { display: flex; align-items: center; gap: 7px; }
+.passwordDialog .inputBindingCheck input { width: 14px; height: 14px; padding: 0; accent-color: var(--accent); }
+.passwordDialog footer .inputBindingRemove { margin-right: auto; color: #d98b7f; border-color: #5a3530; }
+.settingsDialog { width: 380px; max-height: 88vh; overflow: auto; }
+.passwordDialog .settingsPartTitle { margin: 16px 0 6px; padding-top: 12px; color: #9fb4bd; border-top: 1px solid #1f313b; font-size: 9px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.passwordDialog .settingsPartTitle:first-of-type { margin-top: 10px; padding-top: 0; border-top: 0; }
+.controllerBindingList { display: grid; gap: 6px; }
+.controllerBindingList .emptyEditorState { margin: 0; }
+.controllerBindingRow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 7px 8px; background: #09141b; border: 1px solid #22343e; border-radius: 4px; }
+.controllerBindingRow > div { display: grid; gap: 2px; min-width: 0; }
+.controllerBindingRow strong { margin: 0; font-size: 9px; }
+.controllerBindingRow small { overflow-wrap: anywhere; color: #667b86; font-size: 7px; line-height: 1.4; }
+.controllerBindingRow button, .controllerBindRow button { height: 26px; padding: 0 9px; color: #8fa7b0; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
+.controllerBindRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 8px; }
+.passwordDialog .controllerThreshold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.passwordDialog .controllerThreshold input { width: 70px; height: 26px; }
+.controlHistoryFooter { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid #1e313b; }
+.controlHistoryFooter button { height: 26px; padding: 0 10px; color: #cfe3e0; background: #12302f; border: 1px solid #2f6a62; border-radius: 4px; font-size: 8px; }
+.controlHistoryFooter button[hidden] { display: none; }
+.controlHistoryFooter:has(> button[hidden]) { display: none; }

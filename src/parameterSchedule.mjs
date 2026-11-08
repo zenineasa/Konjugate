@@ -129,6 +129,14 @@ export function scheduleSummary(schedule) {
     return `${samples.length} sample${samples.length === 1 ? '' : 's'}, ${how}, from t = ${samples[0][0]} to ${samples.at(-1)[0]}, values ${Math.min(...values)} to ${Math.max(...values)}; before the first and after the last, the nearest sample's value holds.`;
 }
 
+// The part of an engine command that holds it until the run reaches `applyAt` (EngineCommand.apply_at), checked: nothing when it is
+// not given, so the command is carried out at once.
+export function heldUntil(applyAt) {
+    if (applyAt === undefined || applyAt === null) return {};
+    if (!Number.isFinite(applyAt) || applyAt < 0) throw new Error('A change can only be held until a time that is a finite, non-negative number.');
+    return applyAt > 0 ? { applyAt } : {};
+}
+
 // The engine command that starts a schedule on a live parameter during a run, checked first: the same for the desktop's engine process
 // (src/engineAdapter.mjs) and the web edition's (src/webEngineLiveShim.mjs), so a schedule one refuses the other refuses too.
 export function parameterScheduleCommand(parameterId, schedule) {

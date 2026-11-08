@@ -45,6 +45,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowCorre
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowRefit.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowEstimator.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'interventionRecord.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'handSteeredReplay.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterHistory.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'metisStdoutIsolation.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'scripts', 'checkNodeProviderExample.mjs')]);

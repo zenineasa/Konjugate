@@ -148,7 +148,7 @@ const screens = [
     { name: 'assistant', open: click('#assistantButton') },
     { name: 'parameters table', open: click('#parametersButton') },
     { name: 'diagnostics', open: click('#diagnosticsButton') },
-    { name: 'toolchains', open: click('#providerToolchainsButton') },
+    { name: 'settings', open: click('#settingsButton') },
     { name: 'extensions', open: click('#extensionsButton') },
     { name: 'help and feedback', open: click('#helpFeedbackButton') },
     { name: 'causal inference', needsExample: true, open: click('#causalInferenceButton') },

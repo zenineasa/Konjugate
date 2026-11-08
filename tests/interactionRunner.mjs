@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
 import { unzipSync } from 'fflate';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
 import { createServer } from 'node:net';
@@ -735,8 +735,8 @@ export async function runInteractionTests(driver) {
         // Opening/saving this dialog awaits real IPC round trips before flipping dialog.open,
         // so each step below waits for that observable state change rather than assuming a
         // click's synchronous return means the async handler it triggered has finished.
-        await evaluate(window, `document.querySelector('#providerToolchainsButton').click()`);
-        await waitFor(window, `document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not open.');
+        await evaluate(window, `document.querySelector('#settingsButton').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings dialog did not open.');
         assert.equal(await evaluate(window, `document.querySelector('#providerExecutionMode').value`), '');
         assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), false);
 
@@ -753,19 +753,87 @@ export async function runInteractionTests(driver) {
             select.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
         assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), false);
-        await evaluate(window, `document.querySelector('#providerToolchainsSave').click()`);
-        await waitFor(window, `!document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not close after saving.');
+        await evaluate(window, `document.querySelector('#settingsSave').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings dialog did not close after saving.');
 
-        await evaluate(window, `document.querySelector('#providerToolchainsButton').click()`);
-        await waitFor(window, `document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not reopen.');
+        await evaluate(window, `document.querySelector('#settingsButton').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings dialog did not reopen.');
         assert.equal(await evaluate(window, `document.querySelector('#providerExecutionMode').value`), 'sharedMemoryWorker');
 
         // Reset to Automatic so this machine-global (not project-scoped) preference does not
         // leak into later tests in this same run.
         await evaluate(window, `document.querySelector('#providerExecutionMode').value = ''`);
-        await evaluate(window, `document.querySelector('#providerToolchainsSave').click()`);
-        await waitFor(window, `!document.querySelector('#providerToolchainsDialog').open`, 'Provider Toolchains dialog did not close after resetting.');
+        await evaluate(window, `document.querySelector('#settingsSave').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings dialog did not close after resetting.');
     }, { skip: !driver.capabilities.providerExecutionModeSelector && 'sharedMemoryWorker/inProcess execution-mode selection has no web-edition equivalent' });
+
+    await run('Settings lists the controller bindings, binds a key before a run, makes two keys one control, and keeps the threshold', async () => {
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{
+                id: 1, name: 'Integrator', position: [0, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                states: [{ id: 2, name: 'X', symbol: 'x', initialValue: 0, unit: '' }],
+                sourceTerms: [{
+                    id: 3, state: 'x', expression: 'k',
+                    parameters: [{ id: 4, name: 'Drive', symbol: 'k', value: 0, unit: '', mode: 'live', control: { minimum: -10, maximum: 10, step: 0.1 } }],
+                    expressionModel: { latex: 'k', bindings: [{ kind: 'parameter', parameterId: 4, symbol: 'k' }], output: { stateId: 2 }, mathJson: 'k' }
+                }]
+            }],
+            edges: []
+        };
+        const key = (type, code) => evaluate(window, `window.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, { code: ${JSON.stringify(code)}, bubbles: true, cancelable: true }))`);
+        const rows = () => evaluate(window, `[...document.querySelectorAll('#controllerBindingList .controllerBindingRow')].map((row) => row.textContent.replace(/\\s+/g, ' ').trim())`);
+        // The model the scenarios after this one carry on with, put back at the end.
+        const previous = await evaluate(window, `({ document: window.__debugProject.serialize(), name: document.querySelector('.documentTitle').textContent })`);
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Keys.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The integrator did not load.');
+        await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
+
+        await evaluate(window, `document.querySelector('#settingsButton').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#controllerBindingList').textContent.trim()`), 'No control is bound yet.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#controllerBindParameter option')].map((option) => option.textContent)`), ['Drive (k)']);
+        assert.equal(await evaluate(window, `document.querySelector('#controllerThreshold').value`), '1', 'The threshold is 1% of the live range unless changed.');
+
+        // Bound before any run: the next key pressed drives Drive, and the key does nothing else meanwhile.
+        await evaluate(window, `document.querySelector('#controllerBindButton').click()`);
+        await waitFor(window, `document.querySelector('#controllerBindButton').textContent.startsWith('Move a control')`, 'Bind a control did not wait for a control.');
+        await key('keydown', 'KeyW');
+        await key('keyup', 'KeyW');
+        await waitFor(window, `document.querySelectorAll('#controllerBindingList .controllerBindingRow').length === 1`, 'The key was not bound.');
+        assert.deepEqual(await rows(), ['⌨ WKeyboard · drives Drive (k) Change…Remove']);
+        assert.equal(await evaluate(window, `document.querySelector('#settingsDialog').open`), true, 'Pressing a key to bind it closed Settings.');
+
+        // Its settings: a second key makes the two one control, ramping the value up and down.
+        await evaluate(window, `document.querySelector('#controllerBindingList [data-change]').click()`);
+        await waitFor(window, `document.querySelector('.inputBindingDialog')?.open`, 'The binding\'s settings did not open.');
+        await evaluate(window, `[...document.querySelectorAll('.inputBindingDialog footer button')].find((button) => button.textContent.startsWith('Add a key')).click()`);
+        await key('keydown', 'KeyS');
+        await key('keyup', 'KeyS');
+        await waitFor(window, `document.querySelector('.inputBindingDialog strong')?.textContent === '⌨ W / S'`, 'The second key was not added.');
+        assert.equal(await evaluate(window, `document.querySelector('.inputBindingDialog [name=kind]').value`), 'ramp');
+        await evaluate(window, `(() => { const dialog = document.querySelector('.inputBindingDialog'); dialog.querySelector('[name=rate]').value = '4'; dialog.querySelector('[name=label]').value = 'Throttle'; dialog.querySelector('[name=model]').checked = true; dialog.querySelector('button[type=submit]').click(); })()`);
+        await waitFor(window, `!document.querySelector('.inputBindingDialog')`, 'The binding\'s settings did not close.');
+        const [kept] = (await evaluate(window, `window.__debugSteering.steering.document`)).bindings;
+        assert.deepEqual([kept.label, kept.control, kept.mapping, kept.model], ['Throttle', { type: 'keys', up: 'KeyW', down: 'KeyS' }, { kind: 'ramp', rate: 4 }, 'Keys']);
+        await waitFor(window, `document.querySelector('#controllerBindingList .controllerBindingRow strong')?.textContent === 'Throttle'`, 'The list did not follow the change.');
+
+        // A binding for a parameter this model does not have waits, and says so; the threshold is kept as a fraction.
+        await evaluate(window, `window.__debugSteering.steering.save({ ...window.__debugSteering.steering.document, bindings: [...window.__debugSteering.steering.document.bindings, { id: 'elsewhere', device: { kind: 'keyboard' }, control: { type: 'key', code: 'KeyH' }, parameter: { symbol: 'heaterPower', name: 'Heater power' } }] })`);
+        await waitFor(window, `document.querySelectorAll('#controllerBindingList .controllerBindingRow').length === 2`, 'The second binding was not listed.');
+        assert.match((await rows())[1], /drives Heater power \(heaterPower\) · not in this model/);
+        await evaluate(window, `(() => { const input = document.querySelector('#controllerThreshold'); input.value = '0.5'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `window.__debugSteering.steering.document.threshold === 0.005`, 'The threshold was not kept.');
+
+        // Removed, they are gone; Cancel leaves the provider settings as they were and closes.
+        await evaluate(window, `[...document.querySelectorAll('#controllerBindingList [data-remove]')].forEach((button) => button.click())`);
+        await waitFor(window, `window.__debugSteering.steering.document.bindings.length === 0`, 'The bindings were not removed.');
+        await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
+        await evaluate(window, `document.querySelector('#settingsCancel').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(previous.document)}, ${JSON.stringify(`${previous.name}.kjt`)})`);
+        await waitFor(window, `document.querySelector('.documentTitle').textContent === ${JSON.stringify(previous.name)}`, 'The model from before was not put back.');
+    });
 
     await run('project properties edit the ownership details, and the defaults for new projects are kept', async () => {
         const setField = (host, name, value) => evaluate(window, `(() => {
@@ -5246,6 +5314,73 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
+    await run('the twin\'s sandbox follows a MIDI fader bound to the heater, and what was tried is kept as a draft scenario', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-steered-twin-'));
+        const projectPath = join(directory, 'rig.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        const beforeTwin = driver.allHandles();
+        await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
+        const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+        await waitFor(twin, `/Water temperature/.test(document.querySelector('#modelSummary').textContent)`, 'The twin window did not show the model.');
+        await evaluate(twin, `window.__debugSteering.steering.save({ bindings: [] })`);
+        const recording = await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8');
+        await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(recording)}, 'simulatedTankRigDrifting.csv')`);
+        await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The rig\'s readings were not matched.');
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed(300)`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        await waitFor(twin, `window.__debugTwinWindow.twin()?.cycles.length >= 2`, 'The twin made no moves.', 60000);
+
+        // The sandbox: the heater's input has a Bind… button; Follow the controls waits until something is bound.
+        await evaluate(twin, `document.querySelector('#trySomething').click()`);
+        await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && Boolean(document.querySelector('#sandboxInputs [data-bind]'))`, 'The sandbox has no Bind… button.');
+        assert.equal(await evaluate(twin, `document.querySelector('#sandboxFollowControls').hidden`), true, 'Follow the controls is offered with nothing bound.');
+
+        // A fader on a MIDI controller, turned once to bind it.
+        const fader = (value) => evaluate(twin, `window.__debugSteering.devices.midi('Faders', [0xB0, 7, ${value}])`);
+        await evaluate(twin, `window.__debugSteering.devices.connectMidi('Faders')`);
+        await evaluate(twin, `document.querySelector('#sandboxInputs [data-bind]').click()`);
+        await fader(0);
+        await fader(20);
+        await waitFor(twin, `document.querySelector('#sandboxInputs .inputBindingChip')?.textContent === '🎛 Control 7'`, 'The fader was not bound.');
+        await waitFor(twin, `!document.querySelector('#sandboxFollowControls').hidden`, 'Follow the controls was not offered once the fader was bound.');
+        const [kept] = (await evaluate(twin, `window.__debugSteering.steering.document`)).bindings;
+        assert.deepEqual([kept.device.kind, kept.control, kept.parameter.symbol], ['midi', { type: 'cc', channel: 1, number: 7 }, 'heaterPower']);
+        // The same binding reaches the project window, which keeps it for every model with a heater power.
+        await waitFor(opened, `window.__debugSteering.steering.document.bindings.length === 1`, 'The project window was not told of the binding.');
+
+        // Followed: the fader moves the field, and the sandbox runs ahead on its own, trying what the fader says.
+        await evaluate(twin, `document.querySelector('#sandboxPace').value = '3600'`);
+        await evaluate(twin, `document.querySelector('#sandboxFollow').click()`);
+        await waitFor(twin, `document.querySelector('#sandboxFollow').getAttribute('aria-pressed') === 'true' && document.querySelector('#sandboxRun').disabled`, 'Following did not start.');
+        for (const value of [0, 0, 64, 127]) {
+            await fader(value);
+            await new Promise((resolve) => setTimeout(resolve, 700));
+        }
+        assert.equal(await evaluate(twin, `document.querySelector('#sandboxInputs input[data-signal="heaterPower"]').value`), '2000', 'The field does not follow the fader.');
+        await waitFor(twin, `/^Following the controls: .* changes? tried/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead following the fader.', 30000);
+        await waitFor(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`, 'The sandbox\'s course was not drawn.', 15000);
+
+        // Paused, then back to live: what was tried, as the fader set it, is kept as a draft scenario.
+        await evaluate(twin, `document.querySelector('#sandboxFollow').click()`);
+        await waitFor(twin, `document.querySelector('#sandboxFollow').getAttribute('aria-pressed') === 'false' && !document.querySelector('#sandboxRun').disabled`, 'Pause did not hold the sandbox.');
+        await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent))`, 'What was tried was not kept.', 15000);
+        const scenarios = await evaluate(opened, `window.__debugParameterTuning.scenarios()`);
+        const tried = scenarios.at(-1)?.tried ?? [];
+        assert.ok(tried.length >= 2 && tried.every((step) => step.signal === 'heaterPower'), `What was tried: ${JSON.stringify(tried)}.`);
+        assert.equal(tried.at(-1).value, 2000, 'The last value tried is where the fader came to rest.');
+
+        await evaluate(twin, `window.__debugSteering.steering.save({ bindings: [] })`);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+        await rm(directory, { recursive: true, force: true });
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
     await run('a live twin follows an MQTT broker: listening finds the topics, and what arrives is recorded', async () => {
         // A broker in this process, and a gateway publishing the tank's readings as a lab's would: one topic each, JSON with the
         // reading's own time, a minute of the tank every 20 ms, for as long as the test needs.
@@ -6173,6 +6308,95 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `(async () => { await window.componentLibrary.removeUser(${JSON.stringify(saved.id)}); })()`);
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
     });
+
+    await run('a live parameter is steered with a gamepad, recorded by the size of each change, and the run repeated from its record to the bit', async () => {
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        // dx/dt = k, with k a live parameter from −10 to 10 in steps of 0.1: x is the area under how k was steered.
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{
+                id: 1, name: 'Integrator', position: [0, 0, 0], appearance: box,
+                states: [{ id: 2, name: 'X', symbol: 'x', initialValue: 0, unit: '' }],
+                sourceTerms: [{
+                    id: 3, state: 'x', expression: 'k',
+                    parameters: [{ id: 4, name: 'Drive', symbol: 'k', value: 0, unit: '', mode: 'live', control: { minimum: -10, maximum: 10, step: 0.1 } }],
+                    expressionModel: { latex: 'k', bindings: [{ kind: 'parameter', parameterId: 4, symbol: 'k' }], output: { stateId: 2 }, mathJson: 'k' }
+                }]
+            }],
+            edges: []
+        };
+        const pad = 'Test pad (STANDARD GAMEPAD Vendor: 0000 Product: 0000)';
+        const stick = (value) => evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.moveAxis(${JSON.stringify(pad)}, 1, ${value}); devices.poll(); })()`);
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Steered.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The integrator did not load.');
+        await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
+        // The pad is seen once before it is moved: a pad that turns up reads as where it is, not as a move.
+        await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(pad)}); devices.poll(); })()`);
+
+        await openRunDialog(window);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '8'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `!document.querySelector('#liveParameterButton').hidden`, 'The live controls were not offered during the run.', 10000);
+        await evaluate(window, `document.querySelector('#liveParameterButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows [data-bind]'))`, 'The live control has no Bind… button.');
+
+        // Bind…, then the stick pushed down: the stick now drives Drive, and says so on its chip.
+        await evaluate(window, `document.querySelector('#liveParameterRows [data-bind]').click()`);
+        await waitFor(window, `document.querySelector('#liveParameterRows [data-bind]').textContent.startsWith('Move a control')`, 'Bind… did not wait for a control.');
+        await stick(-1);
+        await waitFor(window, `document.querySelector('#liveParameterRows .inputBindingChip')?.textContent === '🎮 Left stick ↕'`, 'The stick was not bound.');
+        const [kept] = (await evaluate(window, `window.__debugSteering.steering.document`)).bindings;
+        assert.deepEqual([kept.device.kind, kept.control, kept.parameter, kept.model], ['gamepad', { type: 'axis', index: 1 }, { symbol: 'k', name: 'Drive' }, null]);
+
+        // Steered: sixty-two readings as the stick goes from the centre to most of the way up. The slider follows every one.
+        const readings = 62;
+        for (let index = 0; index <= readings; index += 1) {
+            await stick(Number((index * 0.01).toFixed(2)));
+            await new Promise((resolve) => setTimeout(resolve, 16));
+        }
+        await waitFor(window, `document.querySelector('#liveParameterRows input[type=range]').value === '5.9'`, 'The slider did not follow the stick.');
+        // Moved by hand, the slider takes over until the stick moves again.
+        await evaluate(window, `(() => { const slider = document.querySelector('#liveParameterRows input[type=range]'); slider.value = '5'; slider.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(window, `/the slider took over/.test(document.querySelector('#liveParameterRows .inputBindingChip').textContent)`, 'The chip did not say the slider took over.');
+        await stick(0.7);
+        await waitFor(window, `!/the slider took over/.test(document.querySelector('#liveParameterRows .inputBindingChip').textContent)`, 'Moving the stick again did not take the parameter back.');
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The steered run did not finish.', 30000);
+
+        // Recorded by the size of each change (a fiftieth of the range, at least), and once where the stick came to rest.
+        const steered = await evaluate(window, `window.__debugSteering.result()`);
+        const values = steered.interventions.map((change) => change.value);
+        assert.ok(steered.interventions.every((change) => change.kind === 'value' && change.parameterId === 4), 'Only values for Drive were recorded.');
+        assert.ok(values.length >= 4 && values.length < readings / 2, `${values.length} values were recorded for ${readings} readings.`);
+        assert.equal(values.at(-1), 6.7, 'Where the stick came to rest is the last value recorded.');
+        assert.ok(values.every((value) => Math.abs(value * 10 - Math.round(value * 10)) < 1e-9), `Values off the live steps: ${values.join(', ')}.`);
+
+        // Repeated from the record, with no stick: the changes at the same steps, and the same result to the bit. A repeat is a fork from
+        // the run's start, which the web edition, keeping no checkpoints to read back, does not offer.
+        if (!driver.capabilities.forks) {
+            assert.equal(await evaluate(window, `document.querySelector('#repeatFromRecord').hidden`), true, 'Repeat from the record is offered where a run cannot be forked.');
+        } else {
+            if (await evaluate(window, `document.querySelector('#controlHistoryPanel').hidden`)) await evaluate(window, `document.querySelector('#controlHistoryButton').click()`);
+            await waitFor(window, `!document.querySelector('#repeatFromRecord').hidden`, 'Repeat from the record was not offered for a finished run.');
+            await evaluate(window, `window.__debugSteering.devices.disconnectGamepad(${JSON.stringify(pad)}); window.__debugSteering.devices.poll()`);
+            await evaluate(window, `document.querySelector('#repeatFromRecord').click()`);
+            await waitFor(window, `document.querySelector('#runLaunchDialog').open`, 'Repeating did not open the Run dialog.');
+            assert.match(await evaluate(window, `document.querySelector('#runLaunchDescription').textContent`), new RegExp(`^Repeat the run from its start with its record: ${values.length} changes`));
+            await evaluate(window, `(() => { document.querySelector('#runOnlineMode').checked = false; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#startRun').click(); })()`);
+            await waitFor(window, `(() => { const result = window.__debugSteering.result(); return result && result.jobId !== ${JSON.stringify(steered.jobId)} && result.lifecycle === 'completed'; })()`, 'The repeat did not finish.', 15000);
+            await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The window did not leave the repeat\'s run.', 15000);
+            const repeated = await evaluate(window, `window.__debugSteering.result()`);
+            assert.deepEqual(repeated.interventions, steered.interventions, 'The repeat did not make the same changes at the same steps.');
+            assert.equal(repeated.samples.length, steered.samples.length);
+            assert.deepEqual(repeated.samples, steered.samples, 'The repeat differs from the run steered by hand.');
+        }
+
+        await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
+        // The window shows the run as over a moment before it lets go of it; results close only once it has.
+        await waitFor(window, `window.__debugSteering.result()?.running === false`, 'The window did not let go of the run.', 15000);
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+        await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
+    }, { skip: !driver.capabilities.heldCommands && 'needs a web engine that holds a command until a time; the engine in the web shell predates it (npm run build:web:threads, then build:webShell:threads)' });
 
     await run('a live parameter is given a waveform while a run is going', async () => {
         const box = { type: 'primitive', shape: 'box', color: '#888888' };

@@ -218,6 +218,7 @@ int main(int argc, char** argv) {
         capabilities->set_metis_version(konjugate::metisPartitionerVersion());
         for (const auto& id : optimizerBackendIds) capabilities->add_optimizer_backend_ids(id);
         for (const auto& mode : parameterScheduleModes) capabilities->add_parameter_schedule_modes(mode);
+        capabilities->set_held_commands(true);
         writeFramedMessage(std::cout, event);
         std::_Exit(0);
     }
@@ -242,7 +243,8 @@ int main(int argc, char** argv) {
                   << (konjugate::metisPartitionerAvailable() ? "true" : "false")
                   << ",\"version\":\"" << konjugate::metisPartitionerVersion() << "\"}"
                   << ",\"optimizerBackendIds\":[" << backendIdsJson.str() << "]"
-                  << ",\"parameterScheduleModes\":[" << scheduleModesJson.str() << "]}\n";
+                  << ",\"parameterScheduleModes\":[" << scheduleModesJson.str() << "]"
+                  << ",\"heldCommands\":true}\n";
         std::cout.flush();
         std::_Exit(0);
     }

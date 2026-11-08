@@ -22,6 +22,7 @@ import { createUserLibraryStore } from '../../userLibraryStore.mjs';
 import { bugReportUrl, formatBugReportEmail } from '../../bugReport.mjs';
 import { welcomeLinks } from '../../welcomeModel.mjs';
 import { normalizeOwnershipDefaults } from '../../ownership.mjs';
+import { normalizeInputBindings } from '../../inputBindings.mjs';
 
 const minimumUiZoom = 0.75;
 const maximumUiZoom = 1.5;
@@ -107,6 +108,33 @@ export const ownershipDefaults = {
             else window.localStorage.removeItem(ownershipDefaultsKey);
         } catch { /* storage blocked: the defaults hold for this page only */ }
         return kept;
+    }
+};
+
+// The controller bindings a person keeps (docs/proposals/humanInputBinding.md). In the browser they are kept in its own storage, shared by
+// its tabs of the web edition (another tab's change arrives as a storage event); storage that is blocked keeps them for this page only.
+const inputBindingsKey = 'konjugate.inputBindings';
+let inputBindingsInMemory = normalizeInputBindings(null);
+export const inputBindings = {
+    get: async () => {
+        try {
+            const text = window.localStorage.getItem(inputBindingsKey);
+            return text ? normalizeInputBindings(JSON.parse(text)) : inputBindingsInMemory;
+        } catch {
+            return inputBindingsInMemory;
+        }
+    },
+    set: async (document) => {
+        const kept = normalizeInputBindings(document);
+        inputBindingsInMemory = kept;
+        try { window.localStorage.setItem(inputBindingsKey, JSON.stringify(kept)); } catch { /* storage blocked: kept for this page only */ }
+        return kept;
+    },
+    onChanged: (callback) => {
+        window.addEventListener('storage', (event) => {
+            if (event.key !== inputBindingsKey) return;
+            try { callback(normalizeInputBindings(JSON.parse(event.newValue ?? 'null'))); } catch { /* not what was written */ }
+        });
     }
 };
 

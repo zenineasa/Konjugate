@@ -75,7 +75,7 @@
             <span class="windowControlDivider" aria-hidden="true"></span>
             <button id="assistantButton" class="titleAssistantControl" type="button" aria-label="Model assistant" data-tooltip="Model assistant" aria-expanded="false" aria-controls="assistantPanel">✦</button>
             <button id="parametersButton" class="titleAssistantControl" type="button" aria-label="Parameters table" data-tooltip="Parameters" aria-expanded="false" aria-controls="parametersPanel">☰</button>
-            <button id="providerToolchainsButton" class="titleAssistantControl" type="button" aria-label="Provider toolchains" data-tooltip="Provider toolchains" aria-haspopup="dialog">⚒</button>
+            <button id="settingsButton" class="titleAssistantControl" type="button" aria-label="Settings" data-tooltip="Settings: providers and controllers" aria-haspopup="dialog">⚒</button>
             <button id="connectionsButton" class="titleAssistantControl" type="button" aria-label="Connections" data-tooltip="Connections" aria-haspopup="dialog" hidden>⇄</button>
             <button id="diagnosticsButton" class="titleAssistantControl" type="button" aria-label="Diagnostics log" data-tooltip="Diagnostics log" aria-haspopup="dialog">⚠<span id="diagnosticsBadge" class="diagnosticsBadge" hidden></span></button>
             <span class="windowControlDivider" aria-hidden="true"></span>
@@ -469,10 +469,11 @@
         </form>
     </dialog>
 
-    <dialog id="providerToolchainsDialog" class="passwordDialog">
+    <dialog id="settingsDialog" class="passwordDialog settingsDialog" aria-labelledby="settingsTitle">
         <form method="dialog">
-            <span class="contextKicker">Providers</span>
-            <strong>Compiler &amp; interpreter</strong>
+            <span class="contextKicker">Konjugate</span>
+            <strong id="settingsTitle">Settings</strong>
+            <h3 class="settingsPartTitle">Providers</h3>
             <p>Override the C++ compiler or Python interpreter used to build and run inline providers, if auto-detection does not find the right one on this machine.</p>
             <section class="executionConfiguration">
                 <span class="configurationSectionTitle">C++ compiler</span>
@@ -512,8 +513,19 @@
                     </p>
                 </details>
             </section>
-            <div class="passwordError" id="providerToolchainsError" role="alert"></div>
-            <footer><button id="providerToolchainsCancel" type="button">Cancel</button><button id="providerToolchainsSave" class="doneButton" type="submit">Save</button></footer>
+            <h3 class="settingsPartTitle">Controllers</h3>
+            <p>Gamepads and joysticks, MIDI controllers and keys that steer live parameters while a run goes. A binding follows a parameter's symbol, so it drives that parameter in every model that has it. Changes here are kept as you make them.</p>
+            <p id="controllersMidiNote" class="assistantConfigurationStatus" hidden></p>
+            <section class="executionConfiguration">
+                <div id="controllerBindingList" class="controllerBindingList" aria-label="Controller bindings"></div>
+                <div class="controllerBindRow">
+                    <select id="controllerBindParameter" aria-label="Live parameter to bind a control to"></select>
+                    <button id="controllerBindButton" type="button">Bind a control</button>
+                </div>
+                <label class="controllerThreshold" title="A moving control is recorded when it has moved by this much since the value last recorded (or by one step, if that is more), and once more where it comes to rest"><span>Record a change once it is</span><input id="controllerThreshold" type="number" min="0.01" max="50" step="0.01" aria-label="Smallest change recorded, as a percentage of the live range"><span>% of the live range</span></label>
+            </section>
+            <div class="passwordError" id="settingsError" role="alert"></div>
+            <footer><button id="settingsCancel" type="button">Cancel</button><button id="settingsSave" class="doneButton" type="submit">Save</button></footer>
         </form>
     </dialog>
 
@@ -727,6 +739,7 @@
             <header><div><span class="contextKicker">Parameters changed during the run</span><strong>Control changes</strong></div><button id="closeControlHistoryPanel" type="button" aria-label="Close control changes">×</button></header>
             <div id="controlHistoryList" class="controlHistoryList"></div>
             <p id="controlHistoryEmpty" class="emptyEditorState" hidden>No control was changed during this run.</p>
+            <footer class="controlHistoryFooter"><button id="repeatFromRecord" type="button" hidden title="A new branch from the start of this run, with every change it recorded made again at the step it was made at: a run steered by hand repeats to the bit">Repeat from the record</button></footer>
         </aside>
 
         <aside id="assistantPanel" class="assistantPanel" aria-labelledby="assistantPanelTitle" hidden>

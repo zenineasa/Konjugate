@@ -170,7 +170,7 @@ export async function runScenarioBranches({ content, config, scenario, intervent
 
 // ---- window and IPC ---------------------------------------------------------------------------------
 
-// Whether the Python that runs inline providers (the one set under Provider toolchains, or found on the PATH) can
+// Whether the Python that runs inline providers (the one set under Settings › Providers, or found on the PATH) can
 // import the modules a launcher's providers need, so a window can say what is missing before a run fails on it. Each
 // module is imported for real, so a module that is installed but broken (built for another Python) counts as missing.
 // Runs in the temporary directory, so nothing in the current directory is imported in place of a module.
@@ -210,7 +210,7 @@ export async function checkPythonModules({ interpreter, chosen = false, modules,
     if (!Array.isArray(modules) || !modules.length || modules.length > maximumPythonModules || !modules.every((name) => typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(name) && name.length <= 100)) {
         throw new Error(`Name between 1 and ${maximumPythonModules} Python modules to check, each a module's import name.`);
     }
-    const where = chosen ? 'the Python set under Provider toolchains' : 'the Python found on the PATH (set another under Provider toolchains)';
+    const where = chosen ? 'the Python set under Settings' : 'the Python found on the PATH (set another under Settings)';
     const result = interpreter ? await run(interpreter, ['-c', pythonModuleCheck, ...modules]) : { code: -1, stdout: '', stderr: 'No Python was found.' };
     let answer = null;
     try { answer = result.code === 0 ? JSON.parse(result.stdout.trim().split('\n').at(-1)) : null; } catch { answer = null; }

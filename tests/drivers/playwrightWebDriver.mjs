@@ -155,6 +155,10 @@ export function createPlaywrightWebDriver(context, initialPage, { currentEngine 
             // shell carries one built from the current engine sources.
             parameterWaveforms: currentEngine,
             startPausedRuns: currentEngine,
+            // A web engine that holds a command until a time (EngineCommand.apply_at), which repeating a run from its record needs.
+            heldCommands: currentEngine,
+            // The web engine keeps no checkpoints to read back, so a result cannot be forked (nor repeated from its record, a fork from its start).
+            forks: false,
             // The web engine reports a fit only when it ends (webShims/engine.mjs), with no progress to show and no way to stop one part way.
             fitProgress: false,
             // src/renderer/webShims/projectFiles.mjs's openExampleGuide() opens the raw .md file

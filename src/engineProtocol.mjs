@@ -222,7 +222,9 @@ export function encodeEngineCommand(sequence, command) {
         encodedField(1, 0, encodeVarint(1)),
         encodedField(2, 0, encodeVarint(sequence)),
         encodedMessageField(payloadField, payload),
-        ...(command.batch ? [encodedField(12, 0, encodeVarint(command.batch))] : [])
+        ...(command.batch ? [encodedField(12, 0, encodeVarint(command.batch))] : []),
+        // Held by the run until it reaches this time (EngineCommand.apply_at); left out, it is carried out at once.
+        ...(command.applyAt > 0 ? [encodedDoubleField(13, command.applyAt)] : [])
     ]);
     if (message.length > 1024 * 1024) throw new Error('The engine command frame is too large.');
     const frame = new Uint8Array(message.length + 4);
@@ -586,6 +588,7 @@ export function decodeEngineEvent(buffer) {
                 if (item.number === 1 && item.wireType === 0) capabilities.metisAvailable = Boolean(item.value);
                 else if (item.number === 2 && item.wireType === 2) capabilities.metisVersion = decodeUtf8(item.value);
                 else if (item.number === 4 && item.wireType === 2) (capabilities.parameterScheduleModes ??= []).push(decodeUtf8(item.value));
+                else if (item.number === 5 && item.wireType === 0) capabilities.heldCommands = Boolean(item.value);
             }
             event.capabilities = capabilities;
         } else if (field.number === 3 && field.wireType === 2) {

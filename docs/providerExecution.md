@@ -28,7 +28,7 @@ Because `inProcess` gives up isolation entirely, it is meant to stay an explicit
 
 ## Choosing a mode
 
-A user can change the default in **Settings** (⚒ in the titlebar), under **Providers**, under **Advanced: C++ provider execution mode**; selecting **In-process (fastest, experimental)** shows an inline warning about the isolation tradeoff. The setting is a machine-local preference stored alongside the compiler/interpreter overrides (`providerToolchainStore.mjs`), not a per-project setting.
+A user can change the default in **Settings** (⚙ in the titlebar, or ⌘,), under **Providers**, under **Advanced: C++ provider execution mode**; selecting **In-process (fastest, experimental)** shows an inline warning about the isolation tradeoff. The setting is a machine-local preference stored alongside the compiler/interpreter overrides (`providerToolchainStore.mjs`), not a per-project setting.
 
 Precedence, from `engineAdapter.mjs`'s `startEngineRun()`:
 

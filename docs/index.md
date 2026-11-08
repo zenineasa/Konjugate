@@ -45,6 +45,7 @@ okf_version: "0.2"
 * [Causal Inference](causalInference.md) - Structure discovery and parameter tuning from measured time-series data
 * [Extensions Explorer](extensionsExplorer.md) - Discovering, installing, and managing extensions from the registry
 * [Hello World Add-on](helloWorldAddon.md) - Walkthrough of the minimal visualizer add-on
+* [Settings](settings.md) - The Settings sheet: its pages, what each keeps on this computer, how it opens, and how changes are kept
 * [Welcome](welcome.md) - Getting started overview and community links
 * [Causal Inference Help](causalInferenceInteractionHelp.md) - Interactive help documentation for structure discovery
 

@@ -24,9 +24,9 @@ The assistant panel keeps a scrollable transcript of the last five exchanges. Th
 
 ## Model configurations
 
-The selector below the assistant prompt chooses the active model configuration. The adjacent configuration button opens the model manager.
+The selector below the assistant prompt chooses the active model configuration. The adjacent ⚙ button opens the configurations in **Settings › Model assistant** ([Settings](settings.md); Settings also opens from ⚙ in the titlebar, or ⌘,).
 
-The manager provides:
+The page provides:
 
 - a searchable list of saved configurations;
 - a protected built-in demonstration configuration;
@@ -37,7 +37,7 @@ The manager provides:
 - configurable request timeouts;
 - seamless editing and deletion.
 
-Selecting a saved configuration in the assistant panel makes it active. Saving a configuration from the manager also selects it.
+Selecting a saved configuration in the assistant panel makes it active. Saving a configuration from Settings also selects it. Unlike the rest of Settings, a configuration is kept only when **Save configuration** is pressed, since its API key is stored only then; leaving the page or closing Settings with changes not saved asks first.
 
 ## Ollama
 

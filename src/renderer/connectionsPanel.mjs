@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// The Connections panel (docs/proposals/pushService.md, "On the screen"): the push service's one Start / Stop switch and its state,
+// Settings › Push service (docs/proposals/pushService.md, "On the screen"; once a panel of its own, now a page of Settings): the push service's one Start / Stop switch and its state,
 // on this computer only or on the network, encrypted, with the certificate scripts trust; the keys with Make and Revoke; and how to
 // send from a script: the simulated rig to try it, then JSON (nothing to install), protobuf and gRPC under their own headings.
 // Desktop only: a web page cannot listen on a port.
@@ -16,7 +16,7 @@ export function pushExamples({ host = '127.0.0.1', port = 8737, grpcPort = port 
     const base = `${encrypted ? 'https' : 'http'}://${address}:${port}`;
     const url = `${base}/v1/readings`;
     const target = `${address}:${grpcPort}`;
-    const pythonTrust = encrypted ? `\n# Trust exactly the certificate saved from Konjugate's Connections panel.\ncontext = ssl.create_default_context(cafile="${certificateFile}")\n` : '';
+    const pythonTrust = encrypted ? `\n# Trust exactly the certificate saved from Konjugate's Settings › Push service.\ncontext = ssl.create_default_context(cafile="${certificateFile}")\n` : '';
     const pythonOpen = encrypted ? 'urllib.request.urlopen(request, context=context)' : 'urllib.request.urlopen(request)';
     return [
         {
@@ -99,7 +99,7 @@ def readings():
         yield message
         time.sleep(1)
 ${encrypted ? `
-# Trust exactly the certificate saved from Konjugate's Connections panel.
+# Trust exactly the certificate saved from Konjugate's Settings › Push service.
 with open("${certificateFile}", "rb") as file:
     credentials = grpc.ssl_channel_credentials(root_certificates=file.read())
 ` : ''}
@@ -121,7 +121,7 @@ ${encrypted ? '#include <fstream>\n#include <sstream>\n' : ''}#include <grpcpp/g
 using namespace konjugate::push::v1;
 
 int main() {
-${encrypted ? `    // Trust exactly the certificate saved from Konjugate's Connections panel.
+${encrypted ? `    // Trust exactly the certificate saved from Konjugate's Settings › Push service.
     std::ifstream file("${certificateFile}");
     std::stringstream certificate;
     certificate << file.rdbuf();
@@ -161,7 +161,6 @@ export function pushServiceSentence(state) {
 }
 
 export class ConnectionsPanel {
-    #dialog;
     #api;
     #confirm;
     #copy;
@@ -172,24 +171,23 @@ export class ConnectionsPanel {
     #examplesShown = null;
     #certificate = null; // what is said about the certificate the service uses on the network, once asked for
 
-    // dialog: the panel's <dialog>. api: window.engine.pushService. confirm(message): asks before stopping a service a twin follows.
-    // copy(text): puts text on the clipboard.
-    constructor({ dialog, api, confirm = (message) => window.confirm(message), copy = (text) => navigator.clipboard.writeText(text) }) {
-        this.#dialog = dialog;
+    // page: Settings › Push service, the element holding the panel. api: window.engine.pushService. confirm(message): asks before stopping
+    // a service a twin follows. copy(text): puts text on the clipboard.
+    constructor({ page, api, confirm = (message) => window.confirm(message), copy = (text) => navigator.clipboard.writeText(text) }) {
         this.#api = api;
         this.#confirm = confirm;
         this.#copy = copy;
-        const find = (id) => dialog.querySelector(`#${id}`);
+        const find = (id) => page.querySelector(`#${id}`);
         this.parts = {
             port: find('pushServicePort'), grpcPort: find('pushServiceGrpcPort'), toggle: find('pushServiceToggle'), state: find('pushServiceState'),
             log: find('pushServiceLog'), keys: find('pushKeys'), keyName: find('pushKeyName'), keySignals: find('pushKeySignals'), keyAdd: find('pushKeyAdd'),
             made: find('pushKeyMade'), madeValue: find('pushKeyMadeValue'), madeCopy: find('pushKeyCopy'), keyStatus: find('pushKeyStatus'),
-            examples: find('pushExamples'), close: find('connectionsClose'), saveDemo: find('pushSaveDemoScripts'), saveDemoStatus: find('pushSaveDemoStatus'),
+            examples: find('pushExamples'), saveDemo: find('pushSaveDemoScripts'), saveDemoStatus: find('pushSaveDemoStatus'),
             network: find('pushServiceNetwork'), certificate: find('pushCertificate'), certificateText: find('pushCertificateText'),
             certificateSave: find('pushCertificateSave'), certificateChoose: find('pushCertificateChoose'), certificateKonjugate: find('pushCertificateKonjugate'),
             certificateStatus: find('pushCertificateStatus')
         };
-        const { port, toggle, keyAdd, madeCopy, close, examples, network, certificateSave, certificateChoose, certificateKonjugate } = this.parts;
+        const { port, toggle, keyAdd, madeCopy, examples, network, certificateSave, certificateChoose, certificateKonjugate } = this.parts;
         network.addEventListener('change', () => this.#showNetwork());
         this.parts.saveDemo.addEventListener('click', async () => {
             try {
@@ -206,13 +204,6 @@ export class ConnectionsPanel {
         toggle.addEventListener('click', () => this.#toggle());
         keyAdd.addEventListener('click', () => this.#addKey());
         madeCopy.addEventListener('click', () => this.#copy(this.#madeKey ?? ''));
-        close.addEventListener('click', () => dialog.close());
-        dialog.addEventListener('close', () => {
-            // A key is shown once: closing the panel puts it away.
-            this.#madeKey = null;
-            this.parts.made.hidden = true;
-            this.#renderExamples();
-        });
         examples.addEventListener('click', (event) => {
             const button = event.target.closest('[data-copy]');
             if (!button) return;
@@ -223,11 +214,18 @@ export class ConnectionsPanel {
         api.onState((state) => this.render(state));
     }
 
-    async open() {
+    // The page is shown: the service's state and keys, as they are now.
+    async show() {
         if (!this.#proto) this.#proto = await this.#api.proto().catch(() => '');
         this.render(await this.#api.state());
         await this.#refreshKeys();
-        if (!this.#dialog.open) this.#dialog.showModal();
+    }
+
+    // The page is left, or Settings closed: a key is shown once, so it is put away.
+    hidden() {
+        this.#madeKey = null;
+        this.parts.made.hidden = true;
+        this.#renderExamples();
     }
 
     render(state) {

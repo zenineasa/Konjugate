@@ -230,7 +230,7 @@ contextBridge.exposeInMainWorld('engine', {
         // The demonstration: the simulated rig's model and a recording of it ('steady' or 'drifting'), shipped with the app.
         demo: (variant) => ipcRenderer.invoke('liveTwinDemo', variant),
         // The twin's own window (docs/proposals/controlRoom.md): opened with the project's model and the twin's setup; what it
-        // changes in the setup comes back to be kept with the project; it may ask for the Connections panel, or a demonstration's model.
+        // changes in the setup comes back to be kept with the project; it may ask for Settings › Push service, or a demonstration's model.
         openWindow: (context) => ipcRenderer.invoke('twinOpenWindow', context),
         onSetupChanged: (callback) => ipcRenderer.on('twinSetupChanged', (_event, setup) => callback(setup)),
         // The twin window's own twin: its status for the toolbar chip, and the window brought to the front.
@@ -258,7 +258,7 @@ contextBridge.exposeInMainWorld('engine', {
         pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } }
     },
     // The push service (desktop only: a web page cannot listen): its state (listening, ports, clients, rate, the readings no twin
-    // followed), started and stopped from the Connections panel, and its keys, each shown once when it is made.
+    // followed), started and stopped from Settings › Push service, and its keys, each shown once when it is made.
     pushService: {
         available: true,
         state: () => ipcRenderer.invoke('pushServiceState'),

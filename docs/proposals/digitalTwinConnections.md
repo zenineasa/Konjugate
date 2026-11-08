@@ -166,7 +166,7 @@ Open question: what the sandbox assumes for the inputs it is not controlling, wi
 
 For a lab whose instrument script has nowhere to put its numbers and cannot write a file or publish to a broker, Konjugate can listen for observations itself: JSON over HTTP or WebSocket, from any script. It comes last in the order of work, and only if a lab needs it. The design to build from is [The push service](pushService.md).
 
-- **Started and stopped from the app.** A Connections panel with one Start / Stop switch and its state: stopped, or listening on an address and port with the number of clients and the rate of data. It shows how to connect, with a short copyable example in Python and in JavaScript. Opening a project never starts it.
+- **Started and stopped from the app.** A page of Settings (Settings › Push service) with one Start / Stop switch and its state: stopped, or listening on an address and port with the number of clients and the rate of data. It shows how to connect, with a short copyable example in Python and in JavaScript. Opening a project never starts it.
 - **Visible while on.** A toolbar chip, like the one for a running tuning, says "Listening on 127.0.0.1:PORT, 2 clients".
 - **A key for each client,** named after the rig or script that uses it, allowed to push only the signals it is given, and revocable on its own.
 - **Local or network, said plainly.** It listens on the loopback address by default, which is right when the script runs on the same computer. Listening on the network is a separate, warned choice, and it is offered only with an encrypted connection, since keys sent in plain HTTP can be read by anyone on the lab network.

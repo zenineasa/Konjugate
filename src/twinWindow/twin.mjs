@@ -215,7 +215,7 @@ $('#opcuaBrowse').addEventListener('click', () => browseOpcUa(false));
 
 async function refreshPushState() {
     const service = await api.pushService.state();
-    $('#pushState').textContent = service.listening ? `The push service is listening${service.encrypted ? ' on the network, encrypted' : ''}.` : 'The push service is not listening: start it in the Connections panel, and make a key for each script.';
+    $('#pushState').textContent = service.listening ? `The push service is listening${service.encrypted ? ' on the network, encrypted' : ''}.` : 'The push service is not listening: start it in Settings › Push service (in the project window), and make a key for each script.';
 }
 $('#pushConnections').addEventListener('click', () => api.openConnections());
 $('#pushRefresh').addEventListener('click', async () => {
@@ -224,7 +224,7 @@ $('#pushRefresh').addEventListener('click', async () => {
     state.source = { kind: 'push' };
     state.log = null;
     offerSignals(names.map((name) => ({ id: name, name, unit: '', values: [] })));
-    sourceStatus(names.length ? `${names.length} signal${names.length === 1 ? '' : 's'} the keys may send.` : 'No key may send anything yet: make one in the Connections panel.', names.length ? 'good' : 'warning');
+    sourceStatus(names.length ? `${names.length} signal${names.length === 1 ? '' : 's'} the keys may send.` : 'No key may send anything yet: make one in Settings › Push service.', names.length ? 'good' : 'warning');
 });
 
 // ---- Step 3: the mapping -------------------------------------------------------------------------------------------------------

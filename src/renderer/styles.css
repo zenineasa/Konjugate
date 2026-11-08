@@ -247,7 +247,7 @@ input, select, textarea { user-select: text; }
 
 /* Wider and taller than the Examples dialog it was modeled on: Discover's detail pane now carries
    screenshots and video links as well as a description, and 240px by 380px was too small for that.
-   Width and height follow the window (as .assistantConfigurationDialog does for width) so the dialog
+   Width and height follow the window (as the Settings sheet does) so the dialog
    stays on screen at any UI zoom, with the old 380px as the floor. */
 .extensionsDialog { --extensions-pane-height: clamp(380px, calc(100vh - 320px), 600px); width: min(980px, calc(100vw - 40px)); max-width: none; }
 .extensionsDialog .examplesExplorerBody { grid-template-columns: 1fr 360px; }
@@ -430,12 +430,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .executionAdvanced summary { color: #8499a3; font-size: 8px; cursor: pointer; user-select: none; }
 .executionAdvanced[open] summary { margin-bottom: 8px; color: #b8cbd1; }
 .executionAdvanced label:first-of-type { margin-top: 0; }
-.assistantConfigurationDialog { width: min(780px, calc(100vw - 40px)); max-width: none; }
-.assistantConfigurationDialog form { padding: 0; }
-.assistantConfigurationHeader { display: flex; align-items: center; justify-content: space-between; padding: 15px 17px 12px; border-bottom: 1px solid #263a44; }
-.assistantConfigurationHeader > span { display: block; }
-.assistantConfigurationHeader strong { margin-bottom: 0; }
-.assistantConfigurationHeader > button { width: 26px; height: 26px; padding: 0; color: #718690; background: transparent; border: 0; font-size: 15px; }
 .assistantConfigurationWorkspace { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 410px; }
 .assistantConfigurationWorkspace > aside { display: flex; flex-direction: column; gap: 9px; padding: 13px; background: #09141b; border-right: 1px solid #263a44; }
 .assistantConfigurationWorkspace > aside > button { width: 100%; height: 30px; border: 0; border-radius: 4px; font-size: 8px; }
@@ -454,7 +448,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantConfigurationStatus { min-height: 16px; padding-top: 6px; color: #718691; font-size: 8px; }
 .assistantConfigurationStatus.error { color: #d48288; }
 .assistantConfigurationStatus.warning { color: #d6a35f; }
-.assistantConfigurationDialog > form > footer { display: grid; grid-template-columns: auto 1fr auto auto; margin: 0; padding: 11px 17px; border-top: 1px solid #263a44; }
+.assistantConfigurationForm > footer { display: grid; grid-template-columns: auto 1fr auto auto; margin: 0; padding: 11px 17px; border-top: 1px solid #263a44; }
 .configurationModelControl { display: grid; gap: 5px; }
 .configurationModelField { display: grid; grid-template-columns: 1fr auto; }
 .passwordDialog .configurationModelField :is(input, select) { border-radius: 4px 0 0 4px; }
@@ -463,7 +457,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .toolchainPathRow { display: flex; gap: 5px; margin-top: 5px; }
 .toolchainPathRow input { flex: 1; min-width: 0; }
 .passwordDialog .toolchainPathRow button { padding: 0 9px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 7px; }
-.assistantConfigurationDialog footer #deleteAssistantConfiguration { color: #c17980; }
+.assistantConfigurationForm footer #deleteAssistantConfiguration { color: #c17980; }
 @media (max-width: 650px) {
     .assistantConfigurationWorkspace { grid-template-columns: 180px minmax(0, 1fr); }
 }
@@ -485,6 +479,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .windowControls .titleAssistantControl[aria-expanded="true"] { color: #a1f2ea; background: rgb(66 201 188 / 10%); }
 .windowControls .titleAssistantControl:disabled { color: #344751; cursor: default; }
 #diagnosticsButton { color: #5c7079; font-size: 12px; }
+.titleExtensionsButton svg { display: block; margin: auto; }
+.windowControls .titleExtensionsButton .extensionsUpdateBadge { color: #06201d; background: #82cfc8; }
+/* A pending restart is a dot beside the update count, so the two can show at once. */
+.windowControls .extensionsTitleRestartBadge { top: 7px; right: auto; left: 7px; min-width: 7px; width: 7px; height: 7px; padding: 0; }
 #extensionsButton .extensionsUpdateBadge { right: auto; left: 4px; color: #06201d; background: #82cfc8; }
 .diagnosticsBadge {
     position: absolute; top: 6px; right: 4px; min-width: 13px; height: 13px; padding: 0 3px;
@@ -533,6 +531,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .toolButton.active, .squareTool.active { color: var(--accent-bright); background: rgb(66 201 188 / 14%); border-color: rgb(66 201 188 / 38%); }
 .squareTool:disabled { color: #344852; background: transparent; border-color: transparent; cursor: default; opacity: .45; }
 .historyTool { font-size: 13px; }
+/* Edit and Organise sit in the strip as two groups; on a phone they float over the canvas as one (below). */
+.selectionActions { display: contents; }
 .clipboardTool { font-size: 14px; }
 .addonTool[hidden] { display: none; }
 .addonRail {
@@ -1456,8 +1456,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* Toolstrip: compact padding and buttons */
     .toolstrip { padding: 0 8px; gap: 4px; }
     .toolstripLeft { gap: 3px; }
-    .toolstripLeft .squareTool { width: 28px; }
-    .toolstripLeft .toolGroup { gap: 0; }
+    :is(.toolstripLeft, .modelToolGroup) .squareTool { width: 28px; }
+    .toolstripLeft .toolGroup, .modelToolGroup { gap: 0; }
     .labelControls { gap: 3px; padding: 2px; }
     .labelControls button { padding: 0 5px; font-size: 9.5px; }
 
@@ -1909,26 +1909,29 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* What a phone's strip keeps is what is used all the time: add, the library, undo and redo, the tool in use, and Run. The analyses
        and the label detail are in the menu, the other tools open from the one in use, and the actions on a selection appear, over the
        canvas, only while there is a selection to act on. */
-    #causalInferenceButton, #parameterTuningButton, .labelControls { display: none; }
+    #causalInferenceButton, #parameterTuningButton, #parametersButton, .labelControls { display: none; }
+    /* A group whose buttons are all in the menu goes with them. */
+    .fromDataToolGroup, .modelToolGroup:not(:has(> #liveTwinButton:not([hidden]))) { display: none; }
+    .toolstrip .modelToolGroup { padding: 0; background: none; border: 0; }
     .nodeResultPlot { height: 210px; }
     /* Without frames round each group, so the strip fits a phone's width without a scroll. */
     .toolstrip { gap: 3px; padding: 0 6px; }
     .toolstripLeft { gap: 6px; }
     .toolstripLeft .toolGroup { padding: 0; background: none; border: 0; }
-    .toolstripLeft .squareTool { width: 26px; }
+    :is(.toolstripLeft, .modelToolGroup) .squareTool { width: 26px; }
     .toolstrip .simulationReadout { padding: 0 5px; }
     #runButton { min-width: 0; margin-left: 0; padding: 0 9px; }
     /* A blur behind the strip would make it, and not the screen, what the floating groups below are placed against. */
     .toolstrip { background: rgb(9 18 24 / 97%); backdrop-filter: none; -webkit-backdrop-filter: none; }
-    .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
-        position: fixed; z-index: 41; top: calc(var(--title-height) + var(--tools-height) + 6px); left: 50%; translate: -50% 0;
+    .selectionActions:has(button:not(:disabled)) {
+        display: flex; gap: 6px; position: fixed; z-index: 41; top: calc(var(--title-height) + var(--tools-height) + 6px); left: 50%; translate: -50% 0;
         padding: 4px; background: rgb(14 25 34 / 98%); border-color: #3a4d58; border-radius: 10px; box-shadow: 0 10px 26px rgb(0 0 0 / 50%);
     }
     /* The sheets are in the canvas, which is a layer under the strip and what floats from it, so while one is up these are put away. */
-    body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .toolGroup[aria-label="Selection actions"],
+    body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .selectionActions,
     /* Not over an editor, which covers the canvas and has its own Delete. */
-    .toolGroup[aria-label="Selection actions"]:not(:has(> button:not(:disabled))),
-    body:has(#canvas > :is(.nodeEditor, .edgeEditor, .edgeBuilder):not(.hidden)) .toolGroup[aria-label="Selection actions"] { display: none; }
+    .selectionActions:not(:has(button:not(:disabled))),
+    body:has(#canvas > :is(.nodeEditor, .edgeEditor, .edgeBuilder):not(.hidden)) .selectionActions { display: none; }
 
     /* More controls than a phone is wide: the strip scrolls sideways, and Run stays in reach at its end. */
     .toolstrip { overflow-x: auto; scrollbar-width: none; }
@@ -1947,13 +1950,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
         box-shadow: -4px 0 16px rgb(0 0 0 / 24%);
     }
     .toolstripLeft { flex-direction: column; width: 100%; gap: 8px; }
-    .toolstripLeft .toolGroup { flex-direction: column; gap: 2px; }
+    .toolstripLeft .toolGroup, .toolstrip .modelToolGroup { flex-direction: column; gap: 2px; }
     .toolstrip .toolSpacer { flex: 1 1 auto; min-height: 0; }
     .toolstrip .simulationReadout { padding: 6px 5px; }
     #runButton { position: static; width: 30px; height: 30px; padding: 0; justify-content: center; font-size: 0; }
     #runButton span { font-size: 14px; }
     /* What opens beside the rail goes to its left, as columns. */
-    .toolGroup[aria-label="Selection actions"]:has(> button:not(:disabled)) {
+    .selectionActions:has(button:not(:disabled)) {
         top: calc(var(--title-height) + 8px); right: calc(var(--dock-width) + 6px); left: auto; translate: none; flex-direction: column;
     }
     [data-web-edition] .webEditionBanner { right: calc(var(--dock-width) + 8px); }
@@ -2017,13 +2020,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 
 /* Project properties, the defaults for new projects and the save-time override (docs/proposals/modelOwnership.md). */
 .passwordDialog.ownershipDialog { width: 420px; max-height: calc(100vh - 32px); overflow-y: auto; }
-/* The Connections panel (src/renderer/connectionsPanel.mjs): the push service's switch, its keys and the examples to copy. */
-.passwordDialog.connectionsDialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
-.connectionsDialog[hidden], #connectionsButton[hidden] { display: none; }
-.connectionsDialog :is(.connectionsRow, .connectionsKey, .connectionsKeyMade, .connectionsExample) button { height: 26px; padding: 0 10px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 8px; font-weight: 500; cursor: pointer; }
-.connectionsDialog .connectionsExample summary button { height: 20px; padding: 0 8px; font-size: 7px; }
-.connectionsDialog .connectionsRow button.doneButton { color: #09201e !important; background: var(--accent) !important; border-color: var(--accent) !important; font-weight: 700; }
-.connectionsDialog .connectionsRow :is(input, select) { height: 28px; font-size: 8px; }
+/* Settings › Push service (src/renderer/connectionsPanel.mjs): the push service's switch, its keys and the examples to copy. */
+.connectionsPage :is(.connectionsRow, .connectionsKey, .connectionsKeyMade, .connectionsExample) button { height: 26px; padding: 0 10px; color: #76c8c1; background: #172730; border: 1px solid #304650; border-radius: 4px; font-size: 8px; font-weight: 500; cursor: pointer; }
+.connectionsPage .connectionsExample summary button { height: 20px; padding: 0 8px; font-size: 7px; }
+.connectionsPage .connectionsRow button.doneButton { color: #09201e !important; background: var(--accent) !important; border-color: var(--accent) !important; font-weight: 700; }
+.connectionsPage .connectionsRow :is(input, select) { height: 28px; font-size: 8px; }
 .connectionsRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-top: 8px; }
 .connectionsRow > small { flex: 1; min-width: 90px; padding-bottom: 8px; color: #718691; font-size: 8px; }
 .passwordDialog .connectionsPort { margin-top: 0; }
@@ -2105,9 +2106,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .passwordDialog .inputBindingCheck { display: flex; align-items: center; gap: 7px; }
 .passwordDialog .inputBindingCheck input { width: 14px; height: 14px; padding: 0; accent-color: var(--accent); }
 .passwordDialog footer .inputBindingRemove { margin-right: auto; color: #d98b7f; border-color: #5a3530; }
-.settingsDialog { width: 380px; max-height: 88vh; overflow: auto; }
-.passwordDialog .settingsPartTitle { margin: 16px 0 6px; padding-top: 12px; color: #9fb4bd; border-top: 1px solid #1f313b; font-size: 9px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
-.passwordDialog .settingsPartTitle:first-of-type { margin-top: 10px; padding-top: 0; border-top: 0; }
 .controllerBindingList { display: grid; gap: 6px; }
 .controllerBindingList .emptyEditorState { margin: 0; }
 .controllerBindingRow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 7px 8px; background: #09141b; border: 1px solid #22343e; border-radius: 4px; }
@@ -2122,3 +2120,51 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .controlHistoryFooter button { height: 26px; padding: 0 10px; color: #cfe3e0; background: #12302f; border: 1px solid #2f6a62; border-radius: 4px; font-size: 8px; }
 .controlHistoryFooter button[hidden] { display: none; }
 .controlHistoryFooter:has(> button[hidden]) { display: none; }
+
+/* Settings (src/renderer/settingsSheet.mjs): the pages down the left and the open page on the right; on a phone, the list of pages,
+   then a page with a way back. It is a dialog like the others (.passwordDialog), only larger. */
+.passwordDialog.settingsSheet { width: min(900px, calc(100vw - 40px)); height: min(620px, calc(100vh - 40px)); max-width: none; max-height: none; overflow: hidden; }
+.settingsFrame { display: grid; grid-template-columns: 210px minmax(0, 1fr); height: 100%; }
+.settingsSidebar { display: flex; flex-direction: column; gap: 9px; min-height: 0; padding: 15px 11px; background: #09141b; border-right: 1px solid #22343e; }
+.passwordDialog .settingsSidebar > strong { margin: 0 4px 2px; font-size: 13px; }
+.settingsSidebar > input { width: 100%; }
+.settingsSidebarList { display: grid; align-content: start; gap: 2px; min-height: 0; overflow-y: auto; }
+.settingsSidebarItem { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 9px; color: #9fb3bb; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 9px; cursor: pointer; }
+.settingsSidebarItem:hover { color: #d2e0e4; background: #102029; }
+.settingsSidebarItem[aria-selected="true"] { color: #e3eef1; background: #15303a; border-color: #2f5560; }
+.settingsSidebarIcon { display: inline-grid; place-items: center; width: 20px; height: 20px; color: var(--accent); background: #10242a; border-radius: 5px; font-size: 12px; line-height: 1; }
+.settingsSearchEmpty { margin: 4px; color: #647984; font-size: 8px; }
+.settingsContent { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.settingsContentHeader { display: flex; align-items: center; gap: 10px; padding: 13px 17px 12px; border-bottom: 1px solid #22343e; }
+.passwordDialog .settingsContentHeader strong { flex: 1; margin: 0; font-size: 13px; }
+.settingsContentHeader button { height: 26px; padding: 0 8px; color: #8aa0a9; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.settingsContentHeader .settingsClose { width: 26px; padding: 0; font-size: 15px; }
+.settingsBack { display: none; color: var(--accent) !important; font-size: 9px; }
+.settingsPages { flex: 1; min-height: 0; overflow-y: auto; }
+.settingsPage { padding: 15px 18px 20px; }
+.settingsPage[hidden] { display: none; }
+.passwordDialog.settingsSheet :is(input, select) { font-size: 9px; }
+.settingsPage[data-settings-page="assistant"] { display: flex; flex-direction: column; min-height: 100%; padding: 0; }
+.settingsPage[data-settings-page="assistant"][hidden] { display: none; }
+.passwordDialog .assistantConfigurationForm { display: flex; flex: 1; flex-direction: column; padding: 0; }
+.assistantConfigurationForm .assistantConfigurationWorkspace { flex: 1; min-height: 360px; }
+/* Delete on the left when there is one, then room, then Test and Save. */
+.assistantConfigurationForm > footer { display: flex !important; align-items: center; gap: 7px; }
+.assistantConfigurationForm > footer > span { flex: 1; }
+.settingsGroup + .settingsGroup { margin-top: 16px; padding-top: 14px; border-top: 1px solid #1c2e37; }
+.passwordDialog .settingsValue { margin: 6px 0 10px; color: #c4d4d9; font-size: 9px; }
+.settingsRow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.settingsRow button { height: 28px; padding: 0 10px; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.settingsRow button:disabled { opacity: .45; cursor: default; }
+.settingsZoomRow output { min-width: 40px; color: #d2e0e4; text-align: center; font-size: 9px; font-variant-numeric: tabular-nums; }
+.settingsPage[data-settings-page="newProjects"] .ownershipDialog { max-width: 460px; }
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
+    /* The edges of the screen, not 100vw and 100vh: the web edition enlarges the whole page on a phone, which would enlarge those too. */
+    .passwordDialog.settingsSheet { inset: 0; width: auto; height: auto; max-height: none; margin: 0; border: 0; border-radius: 0; }
+    .settingsFrame { grid-template-columns: 1fr; }
+    .settingsSheet[data-view="list"] .settingsContent, .settingsSheet[data-view="page"] .settingsSidebar { display: none; }
+    .settingsSidebar { border-right: 0; }
+    .settingsSidebarItem { height: 42px; font-size: 10px; }
+    .settingsBack { display: inline-block; }
+    .assistantConfigurationForm .assistantConfigurationWorkspace { grid-template-columns: 1fr; }
+}

@@ -59,7 +59,7 @@ For the server: Node's own `http` and `https`, the `ws` package already installe
 
 ## On the screen
 
-- **A Connections panel,** opened from the live twin card and from the menu, with one Start / Stop switch, the state (stopped, or listening on an address with the number of clients and readings a second), the keys with Add, Revoke and last used, and the examples. Opening a project never starts it.
+- **A page of Settings** (Settings › Push service; at first a Connections panel of its own, opened from ⇄ in the titlebar), opened from Settings, from the chip, and from the twin's own window, with one Start / Stop switch, the state (stopped, or listening on an address with the number of clients and readings a second), the keys with Add, Revoke and last used, and the examples. Opening a project never starts it.
 - **A toolbar chip** while it is on, like the one for a running tuning: "Listening on 127.0.0.1:8737, 2 clients" (the clients of every front end together; the panel shows both ports and the clients of each). Clicking it opens the panel.
 
 ## Local or on the network
@@ -80,7 +80,7 @@ A web page cannot listen on a port. The web edition's live twin card does not of
 
 1. **The service and its contract,** with keys: `PushService`, `PushKeyStore`, `PushGate`, the two codecs and `protocol/pushReadings.proto` with its messages and the `ReadingPush` service, and the HTTP, WebSocket and gRPC front ends. Unit tests of every refusal (malformed JSON, a protobuf body that does not decode, an unsupported content type, a bad time, an unknown key, a signal not granted, a revoked key, the rate limit), written once and run against each front end, so the three are held to the same answers; a test that the same readings are taken identically whichever way they came; a test that a gRPC client sending faster than the readings are taken is slowed rather than buffered without limit; and a test that starts the service on free ports, sends from a real HTTP client, a real WebSocket in both encodings and a real gRPC client, and stops it cleanly, each client told why.
 2. **The live twin source,** `kind: 'push'`, with its recording, and an engine-backed test like the MQTT one: readings pushed over a minute of model time, the twin's moves the same as replaying the recording it wrote.
-3. **The app:** the utility process, the Connections panel, the chip, the source in the live twin card, and interaction tests for starting, adding a key, a twin following pushed readings, and stopping with a twin attached.
+3. **The app:** the utility process, the Connections panel (now Settings › Push service), the chip, the source in the live twin card, and interaction tests for starting, adding a key, a twin following pushed readings, and stopping with a twin attached.
 4. **`konjugate --cli serve`** and its key commands.
 5. **On the network,** with the certificate and its fingerprint. **Built**, with the demonstration: `examples/dataSources/pushTankRig.py` sends the simulated rig's readings to the service over HTTPS, trusting the saved certificate, and [tests/engine/liveTwinPushNetwork.mjs](../../tests/engine/liveTwinPushNetwork.mjs) runs it against this computer's network address and checks the live twin's moves against the rig's own log, to the bit.
 

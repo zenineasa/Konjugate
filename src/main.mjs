@@ -897,7 +897,7 @@ ipcMain.handle('twinFocusWindow', (event) => {
     twinWindow.focus();
     return true;
 });
-// The push service's Connections panel lives in the project window: the twin window asks it to open there.
+// The push service's page of Settings is in the project window: the twin window asks it to open there.
 ipcMain.handle('twinOpenConnections', (event) => {
     const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
     if (!projectWindow) return false;
@@ -3080,7 +3080,7 @@ ipcMain.handle('liveTwinBrowseOpcUa', async (_event, url, security, trustServer)
         throw error;
     }
 });
-// The push service (docs/proposals/pushService.md): started from the Connections panel in its own process, its keys in the app's own
+// The push service (docs/proposals/pushService.md): started from Settings › Push service, in its own process, its keys in the app's own
 // folder, what it takes published on a hub the live twins following pushed readings read from. Every window is told each change, for
 // the panel and the toolbar chip.
 const pushKeysDirectory = () => join(app.getPath('userData'), 'push');
@@ -3129,7 +3129,7 @@ ipcMain.handle('pushKeysRevoke', async (_event, name) => pushServiceHost().keys.
 ipcMain.handle('liveTwinStart', async (event, settings, source, projectPath = null) => {
     const owner = event.sender;
     await liveTwins.get(owner.id)?.stop();
-    if (source.kind === 'push' && !pushServiceHost().state().listening) throw new Error('The push service is not listening: start it in the Connections panel.');
+    if (source.kind === 'push' && !pushServiceHost().state().listening) throw new Error('The push service is not listening: start it in Settings › Push service.');
     if (source.kind === 'push') source = { kind: 'push', signals: source.signals, hub: pushServiceHost().hub, recordTo: await recordingPathFor(source, projectPath) };
     if (source.kind === 'mqtt' || source.kind === 'opcua') source = { ...source, recordTo: await recordingPathFor(source, projectPath), ...(source.kind === 'opcua' ? { pkiFolder: opcUaPkiFolder() } : {}) };
     const twin = new LiveTwin(settings, source, await engineOptions(), (update) => {

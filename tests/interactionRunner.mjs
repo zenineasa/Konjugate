@@ -678,6 +678,8 @@ export async function runInteractionTests(driver) {
 
     await run('model configurations expose all provider adapters without renderer credential access', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, 'The assistant\'s ⚙ did not open Settings › Model assistant.');
+        assert.equal(await evaluate(window, `document.querySelector('#settingsPageTitle').textContent`), 'Model assistant');
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [
             'localDemonstration', 'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'
         ]);
@@ -687,15 +689,17 @@ export async function runInteractionTests(driver) {
             document.querySelector('#assistantConfigurationName').value = 'Interaction Ollama';
             document.querySelector('#assistantConfigurationModel').value = '__custom__';
             document.querySelector('#assistantCustomModel').value = 'test-model';
-            document.querySelector('#assistantConfigurationDialog').querySelector('form').requestSubmit();
+            document.querySelector('#assistantConfigurationForm').requestSubmit();
         })()`);
         await waitFor(window, `[...document.querySelectorAll('#assistantConfiguration option')].some((option) => option.textContent.includes('Interaction Ollama'))`, 'Saved Ollama configuration did not appear.');
-        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationDialog').open`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#settingsDialog').open`), true, 'Saving a configuration closed Settings.');
         assert.equal(await evaluate(window, `[...document.querySelectorAll('#assistantConfigurationList button')].some((button) => button.textContent.includes('Interaction Ollama'))`), true);
         assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationUuid').value.length > 0`), true);
         await evaluate(window, `window.confirm = () => true; document.querySelector('#deleteAssistantConfiguration').click()`);
         await waitFor(window, `document.querySelectorAll('#assistantConfiguration option').length === 1`, 'Deleted configuration remained available.');
-        await evaluate(window, `document.querySelector('#cancelAssistantConfiguration').click(); document.querySelector('#closeAssistantPanel').click()`);
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiProviderCredentials && 'the credential-vault/provider-adapter architecture (window.aiProviders) has no web-edition equivalent' });
 
     await run('run configuration and node substeps are editable', async () => {
@@ -731,40 +735,125 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Updated numerical settings were not validated.');
     });
 
-    await run('advanced provider execution mode selector persists a choice and warns for in-process', async () => {
-        // Opening/saving this dialog awaits real IPC round trips before flipping dialog.open,
-        // so each step below waits for that observable state change rather than assuming a
-        // click's synchronous return means the async handler it triggered has finished.
+    await run('Settings is a sheet of pages: opened with ⌘, or Ctrl+,, searched, General\'s interface size, and the Extensions Explorer on a titlebar button of its own', async () => {
+        const visiblePage = () => evaluate(window, `[...document.querySelectorAll('[data-settings-page]')].filter((page) => !page.hidden).map((page) => page.dataset.settingsPage)`);
+        const sidebar = () => evaluate(window, `[...document.querySelectorAll('#settingsSidebarList .settingsSidebarItem')].map((item) => item.textContent.trim())`);
+        // The shortcut every application's settings have; metaKey and ctrlKey together answer on any platform.
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }))`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'The shortcut did not open Settings.');
+        // Push service only where the app can listen on a port: the desktop, not a web page.
+        const pages = ['⚙General', '✦Model assistant', '⚒Providers', '⌨\uFE0EControllers', ...(driver.kind === 'electron' ? ['⇄Push service'] : []), '❐New projects'];
+        assert.deepEqual(await sidebar(), pages);
+        // It opens where it was last (General the first time); General is chosen here, as a click in the sidebar chooses a page.
+        await evaluate(window, `document.querySelector('[data-settings-target="general"]').click()`);
+        assert.deepEqual(await visiblePage(), ['general']);
+        assert.equal(await evaluate(window, `document.querySelector('[data-settings-target="general"]').getAttribute('aria-selected')`), 'true');
+        await waitFor(window, `/^Konjugate \\d+\\.\\d+\\.\\d+/.test(document.querySelector('#settingsVersion').textContent)`, 'General did not show the version.');
+
+        // The interface size, as A− and A+ set it in the titlebar: both follow one another.
+        const zoom = async () => Number.parseInt(await evaluate(window, `document.querySelector('#settingsZoomValue').textContent`), 10);
+        await evaluate(window, `document.querySelector('#settingsZoomReset').click()`);
+        assert.equal(await zoom(), 100);
+        assert.equal(await evaluate(window, `document.querySelector('#settingsZoomReset').disabled`), true, 'Actual size is offered at actual size.');
+        await evaluate(window, `document.querySelector('#settingsZoomIn').click()`);
+        assert.equal(await zoom(), 110);
+        assert.equal(await evaluate(window, `document.querySelector('#zoomInButton').dataset.tooltip`), 'Zoom interface in · 110%', 'The titlebar does not follow Settings.');
+        await evaluate(window, `document.querySelector('#zoomOutButton').click()`);
+        assert.equal(await zoom(), 100, 'Settings does not follow the titlebar.');
+
+        // A search narrows the pages, by what a page is about as well as its title; Enter opens the first.
+        const search = (text) => evaluate(window, `(() => { const field = document.querySelector('#settingsSearch'); field.value = ${JSON.stringify(text)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await search('midi');
+        assert.deepEqual(await sidebar(), ['⌨\uFE0EControllers']);
+        await evaluate(window, `document.querySelector('#settingsSearch').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+        await waitFor(window, `!document.querySelector('[data-settings-page="controllers"]').hidden && document.querySelector('#settingsPageTitle').textContent === 'Controllers'`, 'Enter did not open the page found.');
+        await search('nothing like this');
+        assert.equal(await isRenderedVisible(window, '#settingsSearchEmpty'), true);
+        await search('');
+        assert.equal((await sidebar()).length, pages.length);
+
+        // Closed and opened again, it opens where it was.
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
         await evaluate(window, `document.querySelector('#settingsButton').click()`);
-        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings dialog did not open.');
+        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open again.');
+        assert.deepEqual(await visiblePage(), ['controllers'], 'Settings did not open on the page it was last on.');
+
+        // Escape closes it, as a dialog closes.
+        await evaluate(window, `document.querySelector('#settingsDialog').dispatchEvent(new Event('cancel', { cancelable: true }))`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Escape did not close Settings.');
+
+        // The Extensions Explorer is its own dialog, with a button of its own in the titlebar beside Settings, as well as the rail's.
+        assert.equal(await isRenderedVisible(window, '#extensionsTitleButton'), true);
+        await evaluate(window, `document.querySelector('#extensionsTitleButton').click()`);
+        await waitFor(window, `document.querySelector('#extensionsDialog').open && !document.querySelector('#settingsDialog').open`, 'The titlebar\'s Extensions button did not open the Explorer.');
+        await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+    });
+
+    await run('an update to an installed extension is shown on both Extensions buttons, the rail\'s and the titlebar\'s, and goes when there is none', async () => {
+        // The registry's answer, replaced for this test: one installed package with a newer release. Opening the Explorer asks again.
+        const answer = (updates) => evaluate(window, `(() => { window.__realCheckUpdates ??= window.extensions.checkUpdates; window.extensions.checkUpdates = async () => (${JSON.stringify(updates)}); })()`);
+        const badges = () => evaluate(window, `({
+            rail: document.querySelector('#extensionsUpdateBadge').hidden ? null : document.querySelector('#extensionsUpdateBadge').textContent,
+            title: document.querySelector('#extensionsTitleBadge').hidden ? null : document.querySelector('#extensionsTitleBadge').textContent,
+            railLabel: document.querySelector('#extensionsButton').getAttribute('aria-label'),
+            titleLabel: document.querySelector('#extensionsTitleButton').getAttribute('aria-label'),
+            titleTooltip: document.querySelector('#extensionsTitleButton').dataset.tooltip
+        })`);
+        const openAndClose = async () => {
+            await evaluate(window, `document.querySelector('#extensionsTitleButton').click()`);
+            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'The Explorer did not open.');
+            await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+        };
+        await answer([{ prefix: 'interaction.example', outdated: [{ packageId: 'interaction.example.one', installed: '1.0.0', latest: '1.1.0' }, { packageId: 'interaction.example.two', installed: '2.0.0', latest: '2.1.0' }] }]);
+        await openAndClose();
+        await waitFor(window, `!document.querySelector('#extensionsTitleBadge').hidden`, 'The titlebar\'s Extensions button did not show the updates.');
+        assert.deepEqual(await badges(), {
+            rail: '2', title: '2', railLabel: 'Manage extensions (2 updates available)',
+            titleLabel: 'Extensions (2 updates available)', titleTooltip: 'Extensions · 2 updates available'
+        });
+        // Nothing to update: both badges go.
+        await answer([]);
+        await openAndClose();
+        await waitFor(window, `document.querySelector('#extensionsTitleBadge').hidden && document.querySelector('#extensionsUpdateBadge').hidden`, 'The badges stayed with no update.');
+        assert.equal((await badges()).titleTooltip, 'Extensions');
+        await evaluate(window, `window.extensions.checkUpdates = window.__realCheckUpdates; delete window.__realCheckUpdates;`);
+    }, { skip: driver.kind !== 'playwright' && 'the desktop\'s window.extensions is the preload\'s, which a test cannot replace; the web edition\'s runs the same badge code' });
+
+    await run('advanced provider execution mode selector persists a choice and warns for in-process', async () => {
+        // Settings keeps a change as it is made, through a real IPC round trip, so each step waits for what it changes to show.
+        const openProviders = async () => {
+            await evaluate(window, `document.querySelector('#settingsButton').click()`);
+            await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+            await evaluate(window, `document.querySelector('[data-settings-target="providers"]').click()`);
+            await waitFor(window, `!document.querySelector('[data-settings-page="providers"]').hidden && document.querySelector('#toolchainCppDetected').textContent !== ''`, 'Settings › Providers did not open.');
+        };
+        const choose = (value) => evaluate(window, `(() => {
+            const select = document.querySelector('#providerExecutionMode');
+            select.value = ${JSON.stringify(value)};
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        const close = async () => {
+            await evaluate(window, `document.querySelector('#settingsClose').click()`);
+            await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        };
+        await openProviders();
         assert.equal(await evaluate(window, `document.querySelector('#providerExecutionMode').value`), '');
         assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), false);
-
-        await evaluate(window, `(() => {
-            const select = document.querySelector('#providerExecutionMode');
-            select.value = 'inProcess';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await choose('inProcess');
         assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), true);
-
-        await evaluate(window, `(() => {
-            const select = document.querySelector('#providerExecutionMode');
-            select.value = 'sharedMemoryWorker';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await choose('sharedMemoryWorker');
         assert.equal(await isRenderedVisible(window, '#providerExecutionModeWarning'), false);
-        await evaluate(window, `document.querySelector('#settingsSave').click()`);
-        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings dialog did not close after saving.');
+        assert.equal(await evaluate(window, `document.querySelector('#settingsSave')`), null, 'Settings has no Save: a change is kept as it is made.');
+        await waitFor(window, `window.providerToolchains.executionMode.get().then(({ executionMode }) => executionMode === 'sharedMemoryWorker')`, 'The execution mode was not kept.');
+        await close();
 
-        await evaluate(window, `document.querySelector('#settingsButton').click()`);
-        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings dialog did not reopen.');
+        await openProviders();
         assert.equal(await evaluate(window, `document.querySelector('#providerExecutionMode').value`), 'sharedMemoryWorker');
-
-        // Reset to Automatic so this machine-global (not project-scoped) preference does not
-        // leak into later tests in this same run.
-        await evaluate(window, `document.querySelector('#providerExecutionMode').value = ''`);
-        await evaluate(window, `document.querySelector('#settingsSave').click()`);
-        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings dialog did not close after resetting.');
+        // Back to Automatic, so this preference of the machine's (not the project's) does not reach later tests in this run.
+        await choose('');
+        await waitFor(window, `window.providerToolchains.executionMode.get().then(({ executionMode }) => executionMode === '')`, 'The execution mode was not reset.');
+        await close();
     }, { skip: !driver.capabilities.providerExecutionModeSelector && 'sharedMemoryWorker/inProcess execution-mode selection has no web-edition equivalent' });
 
     await run('Settings lists the controller bindings, binds a key before a run, makes two keys one control, and keeps the threshold', async () => {
@@ -791,6 +880,8 @@ export async function runInteractionTests(driver) {
 
         await evaluate(window, `document.querySelector('#settingsButton').click()`);
         await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+        await evaluate(window, `document.querySelector('[data-settings-target="controllers"]').click()`);
+        await waitFor(window, `!document.querySelector('[data-settings-page="controllers"]').hidden`, 'Settings › Controllers did not open.');
         assert.equal(await evaluate(window, `document.querySelector('#controllerBindingList').textContent.trim()`), 'No control is bound yet.');
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#controllerBindParameter option')].map((option) => option.textContent)`), ['Drive (k)']);
         assert.equal(await evaluate(window, `document.querySelector('#controllerThreshold').value`), '1', 'The threshold is 1% of the live range unless changed.');
@@ -825,11 +916,11 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `(() => { const input = document.querySelector('#controllerThreshold'); input.value = '0.5'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitFor(window, `window.__debugSteering.steering.document.threshold === 0.005`, 'The threshold was not kept.');
 
-        // Removed, they are gone; Cancel leaves the provider settings as they were and closes.
+        // Removed, they are gone; and Settings closes.
         await evaluate(window, `[...document.querySelectorAll('#controllerBindingList [data-remove]')].forEach((button) => button.click())`);
         await waitFor(window, `window.__debugSteering.steering.document.bindings.length === 0`, 'The bindings were not removed.');
         await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
-        await evaluate(window, `document.querySelector('#settingsCancel').click()`);
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
         await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
         await evaluate(window, `window.__debugProject.load(${JSON.stringify(previous.document)}, ${JSON.stringify(`${previous.name}.kjt`)})`);
         await waitFor(window, `document.querySelector('.documentTitle').textContent === ${JSON.stringify(previous.name)}`, 'The model from before was not put back.');
@@ -848,8 +939,8 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#ownershipButton').click()`);
         await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open.');
         await evaluate(window, `document.querySelector('#ownershipDefaultsOpen').click()`);
-        await waitFor(window, `document.querySelector('#ownershipDefaultsDialog').open && !document.querySelector('#ownershipDialog').open`, 'The defaults dialog did not replace Project properties.');
-        assert.equal(await evaluate(window, `document.querySelectorAll('#ownershipDefaultsFieldsHost [name]').length`), 7);
+        await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="newProjects"]').hidden && !document.querySelector('#ownershipDialog').open`, 'Settings › New projects did not replace Project properties.', 15000);
+        await waitFor(window, `document.querySelectorAll('#ownershipDefaultsFieldsHost [name]').length === 7`, 'The defaults\' fields were not shown.', 15000);
         assert.equal(await evaluate(window, `document.querySelector('#ownershipDefaultsFieldsHost [name="title"]') === null`), true);
         await setField('#ownershipDefaultsFieldsHost', 'owner', 'Acme Thermal Ltd');
         await setField('#ownershipDefaultsFieldsHost', 'license', 'custom');
@@ -857,9 +948,9 @@ export async function runInteractionTests(driver) {
         await setField('#ownershipDefaultsFieldsHost', 'licenseText', 'Internal use only');
         await setField('#ownershipDefaultsFieldsHost', 'license', 'MIT');
         assert.equal(await isRenderedVisible(window, '#ownershipDefaultsFieldsHost label[data-license="custom"]'), false);
-        await evaluate(window, `document.querySelector('#ownershipDefaultsSave').click()`);
-        // Saving the defaults returns to Project properties, showing this project's own, still-empty, details.
-        await waitFor(window, `document.querySelector('#ownershipDialog').open && !document.querySelector('#ownershipDefaultsDialog').open`, 'Project properties did not come back after the defaults were saved.');
+        // Kept as they are typed; closing Settings returns to Project properties, showing this project's own, still-empty, details.
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `document.querySelector('#ownershipDialog').open && !document.querySelector('#settingsDialog').open`, 'Project properties did not come back after Settings closed.', 15000);
         await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
         await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close.');
 
@@ -897,11 +988,11 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#ownershipButton').click()`);
         await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not open to clear the defaults.');
         await evaluate(window, `document.querySelector('#ownershipDefaultsOpen').click()`);
-        await waitFor(window, `document.querySelector('#ownershipDefaultsDialog').open`, 'The defaults dialog did not open to clear them.');
-        assert.equal(await evaluate(window, `document.querySelector('#ownershipDefaultsFieldsHost [name="owner"]').value`), 'Acme Thermal Ltd');
+        await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="newProjects"]').hidden`, 'Settings › New projects did not open to clear the defaults.', 15000);
+        await waitFor(window, `document.querySelector('#ownershipDefaultsFieldsHost [name="owner"]')?.value === 'Acme Thermal Ltd'`, 'The defaults kept before were not shown.');
         await setField('#ownershipDefaultsFieldsHost', 'owner', '');
         await setField('#ownershipDefaultsFieldsHost', 'license', '');
-        await evaluate(window, `document.querySelector('#ownershipDefaultsSave').click()`);
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
         await waitFor(window, `document.querySelector('#ownershipDialog').open`, 'Project properties did not come back after clearing the defaults.');
         await evaluate(window, `document.querySelector('#ownershipCancel').click()`);
         await waitFor(window, `!document.querySelector('#ownershipDialog').open`, 'Project properties did not close after clearing the defaults.');
@@ -1375,9 +1466,12 @@ export async function runInteractionTests(driver) {
         }))`);
         assert.ok(controls.length >= 5);
         assert.ok(controls.every((control) => control.label && control.tooltip && control.nativeTitle === null));
+        // In the order a model is worked on, and what works on the whole model at the other end, by Run.
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.toolstrip .toolGroup')].map((group) => group.getAttribute('aria-label'))`), [
-            'Create', 'History', 'Selection tools', 'Selection actions'
+            'Build', 'Build from data', 'History', 'Select', 'Transform', 'Edit', 'Organise', 'Model and data'
         ]);
+        assert.equal(await evaluate(window, `document.querySelector('#parametersButton').closest('.toolGroup').getAttribute('aria-label')`), 'Model and data', 'The parameters table is a model tool, not a titlebar one.');
+        assert.equal(await evaluate(window, `document.querySelector('#titleBar #parametersButton')`), null);
     });
 
     await run('canvas help reflects left-click inspection and right-click action controls', async () => {
@@ -5448,7 +5542,7 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
-    await run('the push service: started in the Connections panel, a key made, a live twin following what a script sends, and stopped with the twin attached', async () => {
+    await run('the push service: started in Settings, a key made, a live twin following what a script sends, and stopped with the twin attached', async () => {
         // A free port for the service (and the one after it for gRPC), found the way any program finds one.
         const port = await new Promise((resolve) => {
             const probe = createServer();
@@ -5465,10 +5559,12 @@ export async function runInteractionTests(driver) {
             await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
             const set = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
 
-            // The panel: started on the chosen port, gRPC on the next, the chip saying so.
-            assert.equal(await evaluate(opened, `document.querySelector('#connectionsButton').hidden`), false, 'The desktop offers the Connections panel.');
-            await evaluate(opened, `document.querySelector('#connectionsButton').click()`);
-            await waitFor(opened, `document.querySelector('#connectionsDialog').open`, 'The Connections panel did not open.');
+            // Settings › Push service: started on the chosen port, gRPC on the next, the chip saying so.
+            assert.equal(await evaluate(opened, `document.querySelector('#connectionsButton')`), null, 'The push service has no titlebar button of its own: it is a page of Settings.');
+            await evaluate(opened, `document.querySelector('#settingsButton').click()`);
+            await waitFor(opened, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+            await evaluate(opened, `document.querySelector('[data-settings-target="pushService"]').click()`);
+            await waitFor(opened, `!document.querySelector('[data-settings-page="pushService"]').hidden && /^Not listening/.test(document.querySelector('#pushServiceState').textContent)`, 'Settings › Push service did not open.');
             assert.match(await evaluate(opened, `document.querySelector('#pushServiceState').textContent`), /^Not listening/);
             assert.match(await evaluate(opened, `document.querySelector('#pushExamples details[open] code').textContent`), /urllib\.request/, 'The first example is plain Python sending JSON.');
             await set('#pushServicePort', String(port));
@@ -5487,8 +5583,8 @@ export async function runInteractionTests(driver) {
             assert.match(key, /^kjp_/);
             assert.match(await evaluate(opened, `document.querySelector('#pushExamples details[open] code').textContent`), new RegExp(key));
             assert.equal(await evaluate(opened, `document.querySelector('#pushKeys .connectionsKey[data-key="simulated rig"] small').textContent`), 'heaterPower, tankTemperature');
-            await evaluate(opened, `document.querySelector('#connectionsClose').click()`);
-            await waitFor(opened, `document.querySelector('#pushKeyMade').hidden`, 'Closing the panel did not put the key away.');
+            await evaluate(opened, `document.querySelector('#settingsClose').click()`);
+            await waitFor(opened, `document.querySelector('#pushKeyMade').hidden && !document.querySelector('#settingsDialog').open`, 'Closing Settings did not put the key away.');
 
             // A script sending the tank's readings as JSON, a minute of the tank every 20 ms.
             const epoch = Date.parse('2026-11-06T09:00:00Z') / 1000;
@@ -5519,14 +5615,20 @@ export async function runInteractionTests(driver) {
             assert.equal(refused, null, `A reading was refused: ${refused?.reason}`);
             await waitFor(opened, `/, 1 client/.test(document.querySelector('#pushServiceChipText').textContent)`, 'The chip did not count the script.', 5000);
 
+            // The twin window's link to the push service opens its page of Settings, in the project window.
+            await evaluate(twin, `document.querySelector('#pushConnections').click()`);
+            await waitFor(opened, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="pushService"]').hidden`, 'The twin window did not open Settings › Push service.');
+            await evaluate(opened, `document.querySelector('#settingsClose').click()`);
+            await waitFor(opened, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+
             // Stopping with the twin attached asks first, and the twin says why it stopped and where the readings are.
             await evaluate(opened, `(() => { window.__confirmed = []; window.confirm = (message) => { window.__confirmed.push(message); return true; }; })()`);
             await evaluate(opened, `document.querySelector('#pushServiceChip').click()`);
-            await waitFor(opened, `document.querySelector('#connectionsDialog').open`, 'The chip did not open the panel.');
+            await waitFor(opened, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="pushService"]').hidden`, 'The chip did not open Settings › Push service.');
             await evaluate(opened, `document.querySelector('#pushServiceToggle').click()`);
             await waitFor(opened, `document.querySelector('#pushServiceState').textContent.startsWith('Not listening')`, 'The push service did not stop.', 15000);
             assert.match(await evaluate(opened, `window.__confirmed[0] ?? ''`), /^1 live twin is following/);
-            await evaluate(opened, `document.querySelector('#connectionsClose').click()`);
+            await evaluate(opened, `document.querySelector('#settingsClose').click()`);
             await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.recordedTo)`, 'The twin did not say where the readings are.', 15000);
             assert.ok((await twinEvents(twin)).some((text) => /^bad: .*The twin stopped .*The push service stopped: Konjugate stopped listening/.test(text)), 'The twin says why it stopped.');
             assert.equal(await evaluate(opened, `document.querySelector('#pushServiceChip').hidden`), true, 'Stopped on purpose, the chip goes.');
@@ -5550,8 +5652,10 @@ export async function runInteractionTests(driver) {
             probe.listen(0, '127.0.0.1', () => { const { port: found } = probe.address(); probe.close(() => resolve(found)); });
         });
         const set = (selector, value) => evaluate(window, `(() => { const field = document.querySelector('${selector}'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-        await evaluate(window, `document.querySelector('#connectionsButton').click()`);
-        await waitFor(window, `document.querySelector('#connectionsDialog').open`, 'The Connections panel did not open.');
+        await evaluate(window, `document.querySelector('#settingsButton').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+        await evaluate(window, `document.querySelector('[data-settings-target="pushService"]').click()`);
+        await waitFor(window, `!document.querySelector('[data-settings-page="pushService"]').hidden`, 'Settings › Push service did not open.');
         await set('#pushServicePort', String(port));
         await evaluate(window, `(() => { const box = document.querySelector('#pushServiceNetwork'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitFor(window, `!document.querySelector('#pushCertificate').hidden`, 'Choosing the network did not show the certificate.', 15000);
@@ -5590,7 +5694,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#pushServiceState').textContent.startsWith('Not listening')`, 'The push service did not stop.', 15000);
         assert.equal(await evaluate(window, `document.querySelector('#pushServiceNetwork').disabled`), false, 'Stopped, the choice can be changed again.');
         await evaluate(window, `(() => { const box = document.querySelector('#pushServiceNetwork'); box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); window.confirm = () => true; })()`);
-        await evaluate(window, `document.querySelector('#connectionsClose').click()`);
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
     }, { skip: !driver.capabilities.multiWindow && 'the push service listens on a port, which a web page cannot; desktop only' });
 
     await run('a parameter linked to a shared parameter edits and unlinks through the edge editor', async () => {

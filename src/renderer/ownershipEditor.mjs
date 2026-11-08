@@ -124,17 +124,14 @@ export function editProjectProperties({ block, someoneElses = false }) {
     });
 }
 
-// The defaults for new projects: resolves the defaults to keep, or null for cancel.
-export function editOwnershipDefaults({ defaults }) {
-    const dialog = document.getElementById('ownershipDefaultsDialog');
-    const host = document.getElementById('ownershipDefaultsFieldsHost');
+// The defaults for new projects, as Settings › New projects shows them: the fields built in `host` and filled from `defaults`, and
+// `onChange(defaults)` told what to keep each time one is changed (they are kept as they are typed, as the rest of Settings is).
+export function showOwnershipDefaults(host, { defaults, onChange }) {
     buildFields(host, 'defaults');
     fillFields(host, defaults);
-    document.getElementById('ownershipDefaultsError').textContent = '';
-    return openDialog(dialog, {
-        submit: () => applyFields({}, host) ?? {},
-        cancel: document.getElementById('ownershipDefaultsCancel')
-    });
+    const changed = () => onChange(applyFields({}, host) ?? {});
+    host.oninput = changed;
+    host.onchange = changed;
 }
 
 // The save-time override: resolves { block } (what to write in this copy, which may be the project's own unchanged), { strip: true } to

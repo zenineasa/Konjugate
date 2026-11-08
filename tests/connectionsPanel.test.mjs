@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// What the Connections panel shows (src/renderer/connectionsPanel.mjs): the examples a person copies, written for the addresses, key
+// What Settings › Push service shows (src/renderer/connectionsPanel.mjs): the examples a person copies, written for the addresses, key
 // and signal in use, JSON first; and the sentence for the service's state.
 
 import assert from 'node:assert/strict';

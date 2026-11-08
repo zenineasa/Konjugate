@@ -63,7 +63,7 @@ export class PushGate {
         if (blockedUntil > now) throw new PushRefusal(429, 'Too many attempts with a wrong key from this address: try again in a minute.');
         if (!key) return this.#fail(address, now, new PushRefusal(401, 'Send the key as "Authorization: Bearer <key>".'));
         const record = await this.#keyStore.find(key);
-        if (!record) return this.#fail(address, now, new PushRefusal(401, 'This key is not one Konjugate knows. Make one in the Connections panel.'));
+        if (!record) return this.#fail(address, now, new PushRefusal(401, 'This key is not one Konjugate knows. Make one in Konjugate, under Settings › Push service.'));
         if (record.revoked) return this.#fail(address, now, new PushRefusal(401, `This key ("${record.name}") was revoked.`, { revoked: true }));
         this.#lastUsed.set(record.name, now);
         return { name: record.name, signals: new Set(record.signals), hash: record.hash, address };

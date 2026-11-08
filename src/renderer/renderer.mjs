@@ -18,7 +18,8 @@ import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeT
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
-import { editOwnershipDefaults, editProjectProperties, editSaveOwnership } from './ownershipEditor.mjs';
+import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
+import { createSettingsSheet } from './settingsSheet.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { tourModel } from '../tour/tourSteps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
@@ -244,6 +245,7 @@ window.diagnostics?.onIssue(addDiagnosticsEntry);
 // changing while this window stays open. Never cleared client-side -- only an actual restart does.
 function renderRestartPending(pending) {
     $('#extensionsRestartBadge').hidden = !pending;
+    $('#extensionsTitleRestartBadge').hidden = !pending;
     $('#extensionsRestartPendingNotice').hidden = !pending;
 }
 window.extensions?.restartPending().then(renderRestartPending);
@@ -741,14 +743,22 @@ function redo() {
 
 documentController.subscribe(updateHistoryControls);
 
+// The interface size, as the titlebar's A− and A+ and Settings › General show and set it.
+function updateUiZoomControls(factor = window.uiZoom.get()) {
+    const percent = Math.round(factor * 100);
+    const smallest = factor <= window.uiZoom.limits.minimum;
+    const largest = factor >= window.uiZoom.limits.maximum;
+    $('#zoomOutButton').disabled = smallest;
+    $('#zoomInButton').disabled = largest;
+    $('#zoomOutButton').dataset.tooltip = `Zoom interface out · ${percent}%`;
+    $('#zoomInButton').dataset.tooltip = `Zoom interface in · ${percent}%`;
+    $('#settingsZoomOut').disabled = smallest;
+    $('#settingsZoomIn').disabled = largest;
+    $('#settingsZoomReset').disabled = percent === 100;
+    $('#settingsZoomValue').textContent = `${percent}%`;
+}
+
 function initializeWindowControls() {
-    const updateUiZoomControls = (factor = window.uiZoom.get()) => {
-        const percent = Math.round(factor * 100);
-        $('#zoomOutButton').disabled = factor <= window.uiZoom.limits.minimum;
-        $('#zoomInButton').disabled = factor >= window.uiZoom.limits.maximum;
-        $('#zoomOutButton').dataset.tooltip = `Zoom interface out · ${percent}%`;
-        $('#zoomInButton').dataset.tooltip = `Zoom interface in · ${percent}%`;
-    };
     $('#zoomOutButton').addEventListener('click', () => updateUiZoomControls(window.uiZoom.decrease()));
     $('#zoomInButton').addEventListener('click', () => updateUiZoomControls(window.uiZoom.increase()));
     updateUiZoomControls();
@@ -6078,6 +6088,7 @@ function refreshParametersPanel() {
 function setParametersPanelOpen(open) {
     $('#parametersPanel').hidden = !open;
     $('#parametersButton').ariaExpanded = String(open);
+    $('#parametersButton').classList.toggle('active', open);
     if (open) refreshParametersPanel();
 }
 
@@ -7246,7 +7257,23 @@ async function testToolchainField(kind) {
 
 async function browseToolchainField(kind) {
     const path = await window.providerToolchains.browse(kind);
-    if (path) toolchainFields(kind).path.value = path;
+    if (!path) return;
+    toolchainFields(kind).path.value = path;
+    await keepToolchainField(kind);
+}
+
+// A path is kept once it has been checked, as it is typed or browsed to; blank goes back to what is found on this machine.
+async function keepToolchainField(kind) {
+    const { path, status } = toolchainFields(kind);
+    status.className = 'assistantConfigurationStatus';
+    status.textContent = path.value.trim() ? 'Checking…' : '';
+    try {
+        await window.providerToolchains.set(kind, path.value);
+        status.textContent = path.value.trim() ? 'Kept.' : 'The one found on this machine is used.';
+    } catch (error) {
+        status.className = 'assistantConfigurationStatus error';
+        status.textContent = `Not kept · ${error.message}`;
+    }
 }
 
 function updateProviderExecutionModeWarning() {
@@ -7259,20 +7286,85 @@ async function refreshProviderExecutionMode() {
     updateProviderExecutionModeWarning();
 }
 
-$('#settingsButton').addEventListener('click', async () => {
-    $('#settingsError').textContent = '';
-    await Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode()]);
-    $('#settingsDialog').showModal();
-    renderControllerSettings();
+// Settings (src/renderer/settingsSheet.mjs, its pages in src/renderer/settingsPages.mjs): what each page shows when it is opened,
+// and what must be settled before a page is left or the sheet closed.
+const settings = createSettingsSheet({
+    dialog: $('#settingsDialog'),
+    opened: {
+        general: refreshGeneralSettings,
+        assistant: prepareAssistantConfigurationPage,
+        providers: () => Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode()]),
+        controllers: renderControllerSettings,
+        pushService: () => connectionsPanel?.show(),
+        newProjects: refreshNewProjectSettings
+    },
+    left: { pushService: () => connectionsPanel?.hidden() },
+    // The push service listens on a port, which only the desktop app can.
+    has: (requirement) => requirement !== 'pushService' || Boolean(window.engine.pushService?.available),
+    canLeave: (page) => page !== 'assistant' || confirmAssistantConfigurationNavigation(),
+    beforeClose: () => keepNewProjectDefaults(),
+    onClosed: () => steering.stopBinding()
 });
-$('#settingsCancel').addEventListener('click', () => $('#settingsDialog').close());
-$('#settingsDialog').addEventListener('close', () => steering.stopBinding());
+// Opens Settings on a page (one of src/renderer/settingsPages.mjs's ids), or where it was last.
+const openSettings = (page) => settings.open(page);
+$('#settingsButton').addEventListener('click', () => openSettings());
+// ⌘, (Ctrl+, elsewhere), as an application's settings open on every platform.
+window.addEventListener('keydown', (event) => {
+    if (event.key !== ',' || !(isMac ? event.metaKey : event.ctrlKey) || event.altKey || event.shiftKey) return;
+    event.preventDefault();
+    openSettings();
+});
+
+// Settings › General: the version, the interface size, and the ways back to the Welcome window and the tour.
+async function refreshGeneralSettings() {
+    updateUiZoomControls();
+    try {
+        const { version } = await window.applicationInfo.get();
+        $('#settingsVersion').textContent = `Konjugate ${version}`;
+    } catch {
+        $('#settingsVersion').textContent = 'Konjugate';
+    }
+}
+$('#settingsZoomOut').addEventListener('click', () => updateUiZoomControls(window.uiZoom.decrease()));
+$('#settingsZoomIn').addEventListener('click', () => updateUiZoomControls(window.uiZoom.increase()));
+$('#settingsZoomReset').addEventListener('click', () => updateUiZoomControls(window.uiZoom.reset()));
+$('#settingsOpenWelcome').addEventListener('click', async () => { if (await settings.close()) window.applicationInfo.openWelcome(); });
+$('#settingsStartTour').addEventListener('click', async () => { if (await settings.close()) startTour(); });
+
+// Settings › New projects: the defaults a new project's ownership starts from, kept as they are typed (a moment after the last key,
+// and at once when Settings closes).
+let newProjectDefaultsPending = null;
+async function refreshNewProjectSettings() {
+    $('#ownershipDefaultsStatus').textContent = '';
+    showOwnershipDefaults($('#ownershipDefaultsFieldsHost'), {
+        defaults: await refreshOwnershipDefaults(),
+        onChange: (defaults) => {
+            clearTimeout(newProjectDefaultsPending?.timer);
+            newProjectDefaultsPending = { defaults, timer: setTimeout(() => keepNewProjectDefaults(), 400) };
+        }
+    });
+}
+async function keepNewProjectDefaults() {
+    const pending = newProjectDefaultsPending;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    newProjectDefaultsPending = null;
+    try {
+        ownershipDefaultsCache = await window.ownershipDefaults.set(pending.defaults);
+        $('#ownershipDefaultsStatus').className = 'assistantConfigurationStatus';
+        $('#ownershipDefaultsStatus').textContent = 'Kept for new projects.';
+    } catch (error) {
+        console.error(error);
+        $('#ownershipDefaultsStatus').className = 'assistantConfigurationStatus error';
+        $('#ownershipDefaultsStatus').textContent = `Not kept · ${error.message}`;
+    }
+}
 
 // Settings › Controllers (docs/proposals/humanInputBinding.md): every binding the person keeps, with its device's state and whether the
 // open model has its parameter, to change or remove; a control bound to any live parameter of the open model, run or no run; and how
-// big a change of a moving control must be to be recorded. Kept as they are made: the Save button is for the provider fields above.
+// big a change of a moving control must be to be recorded. Kept as they are made.
 function renderControllerSettings() {
-    if (!$('#settingsDialog').open) return;
+    if (settings.page !== 'controllers') return;
     const kept = steering.document;
     const modelName = filenameStem(currentProjectFilename);
     const live = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
@@ -7333,18 +7425,14 @@ $('#toolchainCppBrowse').addEventListener('click', () => browseToolchainField('c
 $('#toolchainPythonBrowse').addEventListener('click', () => browseToolchainField('python'));
 $('#toolchainCppTest').addEventListener('click', () => testToolchainField('cpp'));
 $('#toolchainPythonTest').addEventListener('click', () => testToolchainField('python'));
-$('#providerExecutionMode').addEventListener('change', updateProviderExecutionModeWarning);
-$('#settingsDialog').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const error = $('#settingsError');
-    error.textContent = '';
+$('#toolchainCppPath').addEventListener('change', () => keepToolchainField('cpp'));
+$('#toolchainPythonPath').addEventListener('change', () => keepToolchainField('python'));
+$('#providerExecutionMode').addEventListener('change', async () => {
+    updateProviderExecutionModeWarning();
     try {
-        await window.providerToolchains.set('cpp', $('#toolchainCppPath').value);
-        await window.providerToolchains.set('python', $('#toolchainPythonPath').value);
         await window.providerToolchains.executionMode.set($('#providerExecutionMode').value);
-        $('#settingsDialog').close();
-    } catch (submitError) {
-        error.textContent = submitError.message;
+    } catch (error) {
+        $('#statusText').textContent = `The execution mode was not kept · ${error.message}`;
     }
 });
 
@@ -7365,16 +7453,11 @@ refreshOwnershipDefaults().then((defaults) => {
     ownershipSettled = true;
 });
 
+// The defaults for new projects are a page of Settings; from Project properties, that page, and back once Settings is closed.
 async function editOwnershipDefaultsFlow() {
-    const defaults = await editOwnershipDefaults({ defaults: await refreshOwnershipDefaults() });
-    if (!defaults) return;
-    try {
-        ownershipDefaultsCache = await window.ownershipDefaults.set(defaults);
-        $('#statusText').textContent = 'Defaults for new projects saved';
-    } catch (error) {
-        console.error(error);
-        $('#statusText').textContent = `Defaults not saved · ${error.message}`;
-    }
+    await openSettings('newProjects');
+    await settings.closed();
+    await refreshOwnershipDefaults();
 }
 
 async function editProjectPropertiesFlow() {
@@ -9089,7 +9172,7 @@ window.engine.liveTwin?.onSetupChanged?.((setup) => {
     addonDataUnsaved = true;
     updateHistoryControls();
 });
-window.engine.liveTwin?.onOpenConnections?.(() => connectionsPanel?.open());
+window.engine.liveTwin?.onOpenConnections?.(() => openSettings('pushService'));
 // The twin window's place and size when it closed, kept with the twin's setup (a change of place is unsaved work, as a layout is).
 window.engine.liveTwin?.onBoundsChanged?.((bounds) => {
     if (!projectTwinSetup) return;
@@ -9684,13 +9767,12 @@ function applySavedReplaySetup(replay) {
     $('#parameterTuningReplayAnchor').checked = saved.anchor;
 }
 
-// The push service (docs/proposals/pushService.md): the Connections panel to start it and make keys, and a chip while it listens
-// (red with the reason if it ended unexpectedly). A twin follows what it takes from the twin's own window.
+// The push service (docs/proposals/pushService.md): Settings › Push service to start it and make keys (desktop only: a web page cannot
+// listen on a port), and a chip while it listens (red with the reason if it ended unexpectedly), which opens that page. A twin follows
+// what it takes from the twin's own window.
 const pushService = window.engine.pushService?.available ? window.engine.pushService : null;
-const connectionsPanel = pushService ? new ConnectionsPanel({ dialog: $('#connectionsDialog'), api: pushService }) : null;
-$('#connectionsButton').hidden = !connectionsPanel;
-$('#connectionsButton').addEventListener('click', () => connectionsPanel?.open());
-$('#pushServiceChip').addEventListener('click', () => connectionsPanel?.open());
+const connectionsPanel = pushService ? new ConnectionsPanel({ page: $('[data-settings-page="pushService"]'), api: pushService }) : null;
+$('#pushServiceChip').addEventListener('click', () => openSettings('pushService'));
 
 function showPushServiceState(state) {
     const chip = $('#pushServiceChip');
@@ -9700,7 +9782,7 @@ function showPushServiceState(state) {
     const where = state.encrypted ? `on the network${state.addresses?.length ? ` at ${state.addresses.find((address) => !address.includes(':')) ?? state.addresses[0]}:${state.port}` : ''}` : `on ${state.host}:${state.port}`;
     $('#pushServiceChipText').textContent = failed ? 'Push service stopped'
         : `Listening ${where}, ${state.clients ?? 0} client${state.clients === 1 ? '' : 's'}`;
-    chip.title = failed ? `The push service ended: ${state.failure} Open the Connections panel.` : 'The push service is listening: open the Connections panel';
+    chip.title = failed ? `The push service ended: ${state.failure} Open Settings › Push service.` : 'The push service is listening: open Settings › Push service';
 }
 
 if (pushService) {
@@ -10661,7 +10743,10 @@ function populateAssistantConfiguration(configuration = null) {
     }
 }
 
-function openAssistantConfigurationDialog() {
+// Settings › Model assistant, filled when it is opened. Settings can be opened on it before the assistant has ever been, so the
+// providers and configurations are read first if they have not been yet.
+async function prepareAssistantConfigurationPage() {
+    if (!assistantConfigurationCatalog?.providers?.length) await refreshAssistantConfigurations();
     const providers = assistantConfigurationCatalog.providers;
     $('#assistantConfigurationProvider').replaceChildren(...providers.map((provider) => {
         const option = new Option(provider.name, provider.id);
@@ -10670,7 +10755,6 @@ function openAssistantConfigurationDialog() {
     }));
     $('#searchAssistantConfigurations').value = '';
     populateAssistantConfiguration(activeConfigurationRecord());
-    $('#assistantConfigurationDialog').showModal();
 }
 
 function assistantConfigurationFormValue() {
@@ -10703,12 +10787,12 @@ async function discoverAssistantModels() {
         const models = await window.aiProviders.listDraftModels(
             assistantConfigurationFormValue(), $('#assistantConfigurationCredential').value || undefined
         );
-        if (revision !== assistantDiscoveryRevision || !$('#assistantConfigurationDialog').open) return;
+        if (revision !== assistantDiscoveryRevision || settings.page !== 'assistant') return;
         const selectedModel = selectedAssistantModel();
         setAssistantModelChoices(models, selectedModel || models[0]?.id || '');
         setAssistantConfigurationStatus(models.length ? '' : 'Connected, but no compatible models were found.', models.length ? 'neutral' : 'warning');
     } catch (error) {
-        if (revision !== assistantDiscoveryRevision || !$('#assistantConfigurationDialog').open) return;
+        if (revision !== assistantDiscoveryRevision || settings.page !== 'assistant') return;
         setAssistantConfigurationStatus(assistantConfigurationErrorMessage(error), 'error');
     }
 }
@@ -10902,7 +10986,7 @@ $('#assistantConfiguration').addEventListener('change', async () => {
     resetAssistantConversation();
     await window.aiProviders.setActiveConfiguration(activeAssistantConfigurationUuid).catch((error) => renderAssistantGenerationError(error.message));
 });
-$('#manageAssistantConfigurations').addEventListener('click', openAssistantConfigurationDialog);
+$('#manageAssistantConfigurations').addEventListener('click', () => openSettings('assistant'));
 $('#assistantConfigurationProvider').addEventListener('change', () => {
     syncAssistantProviderFields({ replaceEndpoint: true });
     setAssistantModelChoices([]);
@@ -10912,12 +10996,6 @@ $('#assistantConfigurationProvider').addEventListener('change', () => {
     }
 });
 $('#assistantConfigurationModel').addEventListener('change', syncAssistantCustomModel);
-$('#cancelAssistantConfiguration').addEventListener('click', () => {
-    if (confirmAssistantConfigurationNavigation()) $('#assistantConfigurationDialog').close();
-});
-$('#assistantConfigurationDialog').addEventListener('cancel', (event) => {
-    if (!confirmAssistantConfigurationNavigation()) event.preventDefault();
-});
 $('#newAssistantConfiguration').addEventListener('click', () => {
     if (!confirmAssistantConfigurationNavigation()) return;
     populateAssistantConfiguration();
@@ -10929,7 +11007,7 @@ $('#assistantConfigurationList').addEventListener('click', (event) => {
     const configuration = assistantConfigurationCatalog.configurations.find((item) => item.uuid === control.dataset.configurationUuid);
     if (configuration) populateAssistantConfiguration(configuration);
 });
-$('#assistantConfigurationDialog').addEventListener('submit', async (event) => {
+$('#assistantConfigurationForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     setAssistantConfigurationStatus('Saving configuration…');
     try { await saveAssistantConfiguration(); } catch (error) { setAssistantConfigurationStatus(error.message, 'error'); }
@@ -12717,6 +12795,11 @@ function renderPackageUpdatesBadge() {
     badge.textContent = String(count);
     const label = count ? `Manage extensions (${count} update${count === 1 ? '' : 's'} available)` : 'Manage extensions';
     $('#extensionsButton').setAttribute('aria-label', label);
+    // The titlebar's Extensions button says the same.
+    $('#extensionsTitleBadge').hidden = count === 0;
+    $('#extensionsTitleBadge').textContent = String(count);
+    $('#extensionsTitleButton').setAttribute('aria-label', count ? `Extensions (${count} update${count === 1 ? '' : 's'} available)` : 'Extensions');
+    $('#extensionsTitleButton').dataset.tooltip = count ? `Extensions · ${count} update${count === 1 ? '' : 's'} available` : 'Extensions';
     $('#extensionsButtonLabel').textContent = count ? `Extensions · ${count} update${count === 1 ? '' : 's'} available` : 'Extensions';
 }
 
@@ -13412,6 +13495,7 @@ $('#helpFeedbackOpenGitHub').addEventListener('click', () => window.helpFeedback
 $('#helpFeedbackClose').addEventListener('click', () => $('#helpFeedbackDialog').close());
 
 $('#extensionsButton').addEventListener('click', openExtensionsDialog);
+$('#extensionsTitleButton').addEventListener('click', openExtensionsDialog);
 $('#saveButton').addEventListener('click', () => saveProject());
 $('#saveEncryptedButton').addEventListener('click', async (event) => {
     if (!currentProjectPassword) {

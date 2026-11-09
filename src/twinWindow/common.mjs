@@ -70,6 +70,35 @@ export function trendOf(points) {
     return { word: perHour > 0 ? 'rising' : 'falling', kind: perHour > 0 ? 'rising' : 'falling', perHour };
 }
 
+// A change made at once within the last hour of data, as an input or a heater's heat flow makes one: { time, from, to, change }, or null.
+// A rate (rising, falling) is the wrong word for one: "steady" an hour after a heater went off, while the line shows it going off, reads
+// as a mistake. It counts when one step between two neighbouring points makes most of the movement over the hour, and is more than a
+// twentieth of the value's size. The point just before the hour is included, so a step at the hour's very edge is not missed.
+export function stepOf(points) {
+    if (points.length < 2) return null;
+    const latestTime = points.at(-1)[0];
+    const first = Math.max(0, points.findIndex(([time]) => time >= latestTime - 3600 - 1e-9) - 1);
+    const recent = points.slice(first);
+    let largest = null;
+    let movement = 0;
+    for (let index = 1; index < recent.length; index += 1) {
+        const change = recent[index][1] - recent[index - 1][1];
+        movement += Math.abs(change);
+        if (!largest || Math.abs(change) > Math.abs(largest.change)) largest = { time: recent[index][0], from: recent[index - 1][1], to: recent[index][1], change };
+    }
+    const values = recent.map(([, value]) => value);
+    const scale = Math.max(Math.abs(points.at(-1)[1]), Math.max(...values) - Math.min(...values));
+    if (!largest || !(scale > 0) || Math.abs(largest.change) < 0.05 * scale || Math.abs(largest.change) < 0.8 * movement) return null;
+    return largest;
+}
+
+// How long ago a time in the data was, in words: "just now", "12 min ago", "1 h ago", "1.5 h ago".
+export function ago(seconds) {
+    if (seconds < 60) return 'just now';
+    if (seconds < 3570) return `${Math.round(seconds / 60)} min ago`;
+    return `${Number((seconds / 3600).toFixed(1))} h ago`;
+}
+
 // Every parameter in a model, wherever it is, with who owns it: { parameter, owner }.
 export function modelParameters(model) {
     return [

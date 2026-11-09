@@ -13,8 +13,8 @@
 //             reading when not given), an estimate with the readings' `noise` (a standard deviation) when one is given; `members` the
 //             estimator's ensemble; `untracked` the tunable parameters the estimator leaves alone (every other one is tracked when a
 //             signal is estimated); `drift` { stateId: how far it may drift in an hour, beyond what the model says }
-//   layout    { order, wide, pinned, hidden, temperature, span, bounds }: the control room's tiles by measured signal's name, in
-//             order, those drawn twice as wide, pinned first, and hidden; temperatures shown in 'C' (the default) or 'K'; how much of
+//   layout    { order, tall, pinned, hidden, temperature, span, bounds }: the control room's strips by measured signal's name, in
+//             order, those drawn taller, pinned to the top, and hidden (`wide`, from when the room was tiles, is kept and unused); temperatures shown in 'C' (the default) or 'K'; how much of
 //             the past the plots show, 'all' or a span in seconds (four times the twin's window when not given); the window's place
 //             and size, { x, y, width, height, maximized }
 //   record    { startedAt, events: [{ at, kind, text, detail }] }: the last run's events, newest first
@@ -73,7 +73,7 @@ export function normalizeTwinSetup(raw) {
     const signalNames = (list) => [...new Set((Array.isArray(list) ? list : []).filter((name) => names.has(name)))];
     if (raw.layout && typeof raw.layout === 'object') {
         const layout = {};
-        for (const key of ['order', 'wide', 'pinned', 'hidden']) if (signalNames(raw.layout[key]).length) layout[key] = signalNames(raw.layout[key]);
+        for (const key of ['order', 'wide', 'tall', 'pinned', 'hidden']) if (signalNames(raw.layout[key]).length) layout[key] = signalNames(raw.layout[key]);
         if (raw.layout.temperature === 'C' || raw.layout.temperature === 'K') layout.temperature = raw.layout.temperature;
         // How much of the past the plots show: 'all', or a span in seconds; the twin's own recent span when not given.
         if (raw.layout.span === 'all' || positive(raw.layout.span)) layout.span = raw.layout.span;

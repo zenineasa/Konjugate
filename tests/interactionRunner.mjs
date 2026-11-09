@@ -5359,7 +5359,13 @@ export async function runInteractionTests(driver) {
         assert.equal(played.moves, 31, 'A one-hour window moving every ten minutes over six hours makes 31 moves.');
         assert.equal(played.last.now, 21600);
         assert.ok(Math.abs(played.last.jumps.tankTemperature.jump) < 0.2, `The true model jumps by little: ${played.last.jumps.tankTemperature.jump}.`);
-        assert.deepEqual(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.map((trace) => trace.name)`), ['Measured', 'Model', 'Forecast']);
+        assert.deepEqual(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.map((trace) => trace.name)`), ['Measured', 'Model, as each move ran it', 'Model', 'Forecast']);
+        // The model's past, as each move ran it, is kept: with everything shown, it runs from the start of the log to the latest window,
+        // so the model is seen staying in step for the whole six hours, and not only over its last hour.
+        await setField(twin, '#timeSpan', 'all');
+        const modelSpan = await evaluate(twin, `(() => { const plot = document.querySelector('#tiles .tile .plot'); const xs = (name) => plot.data.find((trace) => trace.name === name).x.filter((x) => x !== null); return { earlier: [Math.min(...xs('Model, as each move ran it')), Math.max(...xs('Model, as each move ran it'))], latest: Math.min(...xs('Model')) }; })()`);
+        assert.ok(modelSpan.earlier[0] < 0.2 && Math.abs(modelSpan.earlier[1] - modelSpan.latest) < 0.2, `The model's past runs from the start to the latest window (got ${JSON.stringify(modelSpan)}).`);
+        await setField(twin, '#timeSpan', 'recent');
         assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^The whole log has been played: 31 moves/);
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').textContent`), 'In step');
         assert.match(await evaluate(twin, `document.querySelector('#inferredRows').innerText`), /Ambient air · Temperature\s+carried by the model/, 'The room says what the readings do not reach.');
@@ -5698,7 +5704,8 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^Live · \d+ moves · keeping up easily$/);
         assert.match(await evaluate(twin, `document.querySelector('#healthTwin').title`), /times faster than real time, and the data arrives at 600×/);
         const plot = `document.querySelector('#tiles .tile .plot')`;
-        assert.equal(await evaluate(twin, `${plot}.layout.showlegend`), true, 'The tile has a legend.');
+        // One legend for the column, naming what is drawn: no band (nothing is estimated) and nothing tried.
+        assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('.trendLegend span:not([hidden])')].map((item) => item.textContent)`), ['Measured', 'Model', 'Forecast', 'Input']);
         assert.deepEqual(await evaluate(twin, `${plot}.data.filter((trace) => trace.showlegend !== false).map((trace) => trace.name)`), ['Measured', 'Model', 'Forecast']);
         assert.equal(await evaluate(twin, `${plot}.layout.yaxis.title.text`), '°C');
         assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), /^\d+(\.\d+)? °C$/);
@@ -5875,7 +5882,7 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent)) && document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'What was tried was not kept.');
 
-        // The layout, from a tile's options menu: the tile drawn wide, then pinned, kept with the project; the menu says what is on.
+        // The layout, from a strip's options menu: the strip drawn taller, then pinned, kept with the project; the menu says what is on.
         const tileMenu = async () => {
             await evaluate(twin, `document.querySelector('#tiles .tile .tileMenuButton').click()`);
             await waitFor(twin, `Boolean(document.querySelector('.tileMenu')) && document.querySelector('#tiles .tile .tileMenuButton').getAttribute('aria-expanded') === 'true'`, 'The tile\'s options did not open.');
@@ -5883,14 +5890,14 @@ export async function runInteractionTests(driver) {
         const choose = (label) => evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === ${JSON.stringify(label)}).click()`);
         const checked = (label) => evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === ${JSON.stringify(label)}).getAttribute('aria-checked')`);
         await tileMenu();
-        assert.equal(await checked('Draw twice as wide'), 'false');
-        await choose('Draw twice as wide');
+        assert.equal(await checked('Taller'), 'false');
+        await choose('Taller');
         assert.equal(await evaluate(twin, `Boolean(document.querySelector('.tileMenu'))`), false, 'Choosing closes the menu.');
-        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('wide')`), true);
-        await waitFor(opened, `JSON.stringify(window.__debugTwin.setup().layout?.wide) === '["tankTemperature"]'`, 'The layout was not kept with the project.');
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('tall')`), true);
+        await waitFor(opened, `JSON.stringify(window.__debugTwin.setup().layout?.tall) === '["tankTemperature"]'`, 'The layout was not kept with the project.');
         await tileMenu();
-        assert.equal(await checked('Draw twice as wide'), 'true');
-        await choose('Pin to the front');
+        assert.equal(await checked('Taller'), 'true');
+        await choose('Pin to the top');
         assert.equal(await evaluate(twin, `Boolean(document.querySelector('#tiles .tile .pinMark'))`), true, 'A pinned tile is marked.');
         await waitFor(opened, `JSON.stringify(window.__debugTwin.setup().layout?.pinned) === '["tankTemperature"]'`, 'The pin was not kept with the project.');
         // Escape closes the menu without choosing.
@@ -5898,11 +5905,24 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
         assert.equal(await evaluate(twin, `Boolean(document.querySelector('.tileMenu'))`), false);
 
+        // The line through the column at the pointer: every strip and input says its value at that time, and the latest again after.
+        const latest = await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`);
+        await evaluate(twin, `(() => { const plot = document.querySelector('#tiles .tile .plot'); const box = plot.getBoundingClientRect(); plot.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: box.left + 64 + 4, clientY: box.top + box.height / 2 })); })()`);
+        assert.equal(await evaluate(twin, `document.querySelector('#trendCursor').hidden`), false, 'Pointing at a time marks it through the column.');
+        assert.match(await evaluate(twin, `document.querySelector('#trendCursorTime').textContent`), /^at [\d.]+ h of data$/);
+        assert.notEqual(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), latest, 'The strip says its value at the time pointed at (the start of the span, cooler than now).');
+        assert.match(await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`), /W$/);
+        await evaluate(twin, `document.querySelector('#trendColumn').dispatchEvent(new PointerEvent('pointerleave'))`);
+        assert.equal(await evaluate(twin, `document.querySelector('#trendCursor').hidden`), true);
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), latest, 'The latest value comes back.');
+
         // How much of the past the plots show: by default four times the twin's window, not the whole log; a fixed span; everything.
-        const axis = () => evaluate(twin, `(() => { const plot = document.querySelector('#tiles .tile .plot'); return { range: plot._fullLayout.xaxis.range, title: plot._fullLayout.xaxis.title.text }; })()`);
+        // The time is read on the column's own axis, at its foot, which every strip shares.
+        const axis = () => evaluate(twin, `(() => { const plot = document.querySelector('#timeAxis'); return { range: plot._fullLayout.xaxis.range, title: plot._fullLayout.xaxis.title.text, strip: document.querySelector('#tiles .tile .plot')._fullLayout.xaxis.range }; })()`);
         const last = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).last;
         const unitOf = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
         let shown = await axis();
+        assert.deepEqual(shown.strip, shown.range, 'Each strip spans the time the axis shows.');
         assert.ok(Math.abs(shown.range[0] * unitOf[shown.title] - Math.max(0, last.now - 4 * (last.now - last.anchor))) < 1, `Recent starts four windows back (got ${JSON.stringify(shown)}).`);
         await setField(twin, '#timeSpan', '3600');
         shown = await axis();
@@ -5935,7 +5955,7 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `(window.__debugTwin.setup().record?.events.length ?? 0) > 10 && window.__debugTwin.setup().live.corrections.tankTemperature.estimate === true`, 'The record and the settings were not kept with the project.');
         await twin.close();
         // Where the room was, kept with the project for the next time it opens (on a second screen, say).
-        await waitFor(opened, `window.__debugTwin.setup().layout?.bounds?.width >= 900 && JSON.stringify(window.__debugTwin.setup().layout.wide) === '["tankTemperature"]'`, 'The room\'s place was not kept with the project.');
+        await waitFor(opened, `window.__debugTwin.setup().layout?.bounds?.width >= 900 && JSON.stringify(window.__debugTwin.setup().layout.tall) === '["tankTemperature"]'`, 'The room\'s place was not kept with the project.');
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });

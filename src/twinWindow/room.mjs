@@ -6,7 +6,7 @@
 // the twin has made. "Try something" opens a sandbox from now, which never changes the twin, and keeps what was tried as a draft
 // scenario. A change to the model in the project window is offered to the engineer to apply.
 
-import { $, $$, clock, cleanError, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, trendOf, valueAt } from './common.mjs';
+import { $, $$, ago, clock, cleanError, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, trendOf, valueAt } from './common.mjs';
 import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
 import { liveRange } from '../inputBindings.mjs';
 import { createHumanInput } from '../renderer/humanInput.mjs';
@@ -55,9 +55,14 @@ export function initRoom(given) {
         saveLayout();
         renderView();
     });
+    $('#trendColumn').addEventListener('pointermove', (event) => showCursor(event));
+    $('#trendColumn').addEventListener('pointerleave', () => hideCursor());
+    $('#trendScroll').addEventListener('scroll', () => hideCursor());
     $('#engineerToggle').addEventListener('click', () => {
         const on = $('#engineerToggle').getAttribute('aria-pressed') !== 'true';
         $('#engineerToggle').setAttribute('aria-pressed', String(on));
+        // The engineer's view takes the events' place in the sidebar while it is on.
+        $('#sidebar').classList.toggle('engineering', on);
         showEngineer(on);
         refreshBanner();
         // The tiles take the room that is left.
@@ -124,7 +129,7 @@ export function openRoom(run) {
     const parameter = (parameterId) => candidates.find((candidate) => candidate.kind === 'parameter' && candidate.id === parameterId);
     twin = {
         run, settings, running: true, cycles: [], firstIndex: 0, events: [], startedAt: new Date(), drift: 'good', drifts: {}, stats: { skipped: 0, recoveries: 0 }, view: null,
-        layout: { order: [], wide: [], pinned: [], hidden: [], ...structuredClone(run.layout ?? {}) },
+        layout: { order: [], wide: [], tall: [], pinned: [], hidden: [], ...structuredClone(run.layout ?? {}) },
         tiles: settings.mapping.filter((entry) => entry.role === 'output').map((entry) => ({
             signal: entry.signal, name: run.nameOf(entry.signal), target: state(entry.stateId), measured: new Map(), tolerance: settings.tolerances[entry.signal],
             estimated: Boolean(settings.corrections?.[entry.signal]?.estimate)
@@ -208,11 +213,11 @@ function saveLayout() {
 
 function buildTiles() {
     closeTileMenu();
-    const { wide, pinned, hidden } = twin.layout;
+    const { tall, pinned, hidden } = twin.layout;
     const shownTiles = orderedTiles().filter((tile) => !hidden.includes(tile.name));
     $('#tiles').replaceChildren(...shownTiles.map((tile) => {
         const label = tile.target?.label ?? tile.signal;
-        const section = element('section', { className: `tile${wide.includes(tile.name) ? ' wide' : ''}${pinned.includes(tile.name) ? ' pinned' : ''}`, draggable: true });
+        const section = element('section', { className: `tile${tall.includes(tile.name) ? ' tall' : ''}${pinned.includes(tile.name) ? ' pinned' : ''}`, draggable: true });
         section.dataset.signal = tile.signal;
         const toggle = (list) => () => {
             twin.layout[list] = twin.layout[list].includes(tile.name) ? twin.layout[list].filter((name) => name !== tile.name) : [...twin.layout[list], tile.name];
@@ -221,7 +226,7 @@ function buildTiles() {
             renderView();
         };
         const isPinned = pinned.includes(tile.name);
-        const pinMark = isPinned ? element('span', { className: 'pinMark', title: 'Pinned to the front', innerHTML: icon(pinIcon) }) : null;
+        const pinMark = isPinned ? element('span', { className: 'pinMark', title: 'Pinned to the top', innerHTML: icon(pinIcon) }) : null;
         const menuButton = element('button', { type: 'button', className: 'tileMenuButton', title: `Options for ${label}`, innerHTML: icon(moreIcon) });
         menuButton.setAttribute('aria-label', `Options for ${label}`);
         menuButton.setAttribute('aria-haspopup', 'menu');
@@ -229,16 +234,18 @@ function buildTiles() {
         menuButton.addEventListener('click', (event) => {
             event.stopPropagation();
             openTileMenu(menuButton, [
-                { label: 'Pin to the front', checked: isPinned, run: toggle('pinned') },
-                { label: 'Draw twice as wide', checked: wide.includes(tile.name), run: toggle('wide') },
+                { label: 'Pin to the top', checked: isPinned, run: toggle('pinned') },
+                { label: 'Taller', checked: tall.includes(tile.name), run: toggle('tall') },
                 null,
-                { label: 'Hide this tile', danger: true, run: toggle('hidden') }
+                { label: 'Hide this signal', danger: true, run: toggle('hidden') }
             ]);
         });
+        // A strip's header: its name, what the twin makes of it (the facts), its value (at the pointer, or the latest), its options.
         const header = element('header', {},
-            element('div', {}, element('span', { className: 'grip', textContent: '⋮⋮', title: 'Drag to move' }), pinMark, pinMark ? ' ' : null, element('strong', { textContent: label }), ' ', element('small', { textContent: tile.name })),
+            element('div', { className: 'stripName' }, element('span', { className: 'grip', textContent: '⋮⋮', title: 'Drag to move' }), pinMark, pinMark ? ' ' : null, element('strong', { textContent: label }), ' ', element('small', { textContent: tile.name })),
+            element('div', { className: 'facts' }),
             element('span', { className: 'tileEnd' }, element('span', { className: 'value', textContent: '—' }), menuButton));
-        section.append(header, element('div', { className: 'plot' }), element('div', { className: 'facts' }));
+        section.append(header, element('p', { className: 'tileWaiting', textContent: 'Waiting for the twin\'s first move.' }), element('div', { className: 'plot' }));
         // Dragged onto another tile, it takes that tile's place.
         section.addEventListener('dragstart', (event) => {
             event.dataTransfer.setData('text/plain', tile.name);
@@ -258,7 +265,7 @@ function buildTiles() {
     }));
     for (const tile of twin.tiles) if (hidden.includes(tile.name)) tile.element = null;
     $('#hiddenTiles').hidden = hidden.length === 0;
-    $('#hiddenTiles').textContent = `Show ${plural(hidden.length, 'hidden tile')}`;
+    $('#hiddenTiles').textContent = `Show ${plural(hidden.length, 'hidden signal')}`;
 }
 
 // The icons the room draws (24-unit paths, filled with the text colour).
@@ -355,12 +362,15 @@ function visibleTime(cycle) {
 
 function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     if (!tile.element) return;
+    $('.tileWaiting', tile.element)?.remove();
     const rows = cycle.window[tile.signal] ?? [];
     const shownAs = displayOf(tile.target?.unit);
     const measured = [...tile.measured].filter(([at]) => at <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([at, value]) => [at, shownAs.at(value)]);
     const latest = measured.at(-1)?.[1];
     const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
-    $('.value', tile.element).textContent = `${shown(latest)}${unit}`;
+    const value = $('.value', tile.element);
+    value.dataset.latest = `${shown(latest)}${unit}`;
+    if (!cursorTime) value.textContent = value.dataset.latest;
     const jump = cycle.jumps?.[tile.signal]?.jump;
     const trend = trendOfSignal(cycle, tile.signal);
     const leaning = Boolean(trend) && trend.direction !== 'none';
@@ -387,6 +397,18 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     const inSpan = (points) => points.filter((point) => point.time >= from);
     const hours = (points) => points.map((point) => point.time / time.divisor);
     const window = inSpan(rows.map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })));
+    // The model before this move's window, as each earlier move ran it: the stretch each move added after the one before it, one
+    // line broken between moves, so where a move corrected the model it is seen as a jump. Up to this window, which is drawn as now.
+    const earlier = { x: [], y: [] };
+    let previousNow = -Infinity;
+    for (const item of twin.cycles) {
+        if (item.index >= cycle.index) break;
+        const added = (item.window[tile.signal] ?? []).filter((row) => row.time > previousNow + 1e-9 && row.time <= Math.min(item.now, cycle.anchor) + 1e-9 && row.time >= from);
+        previousNow = item.now;
+        if (!added.length) continue;
+        if (earlier.x.length) { earlier.x.push(null); earlier.y.push(null); }
+        for (const row of added) { earlier.x.push(row.time / time.divisor); earlier.y.push(shownAs.at(row.simulated)); }
+    }
     const forecast = (cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }));
     const shownMeasured = measured.filter(([at]) => at >= from);
     const band = cycle.estimate?.band?.[tile.signal] ? inSpan(cycle.estimate.band[tile.signal]) : null;
@@ -397,17 +419,78 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
             { type: 'scatter', mode: 'lines', name: 'Band (10–90%)', x: hours(band), y: band.map((point) => shownAs.at(point.low)), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
         ] : []),
         { type: 'scatter', mode: 'markers', name: 'Measured', x: shownMeasured.map(([at]) => at / time.divisor), y: shownMeasured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
-        { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' } },
+        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, connectgaps: false, line: { width: 1.5, color: 'rgba(75,143,226,.7)' }, legendgroup: 'model', showlegend: false }] : []),
+        { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' }, legendgroup: 'model' },
         { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(forecast), y: forecast.map((point) => point.value), line: { width: 2, dash: 'dash', color: '#4b8fe2' } },
         ...(sandbox ? [{ type: 'scatter', mode: 'lines', name: 'Tried', x: hours(sandbox), y: sandbox.map((point) => point.value), line: { width: 2, dash: 'dot', color: '#9b8cf0' } }] : [])
     ];
+    // What the pointer line reads at a time: the measured readings drawn, else the model.
+    tile.drawn = { readings: shownMeasured, unit, model: [...earlier.x.map((x, index) => [x, earlier.y[index]]).filter(([x]) => x !== null).map(([x, y]) => [x * time.divisor, y]), ...window.map((point) => [point.time, point.value])] };
     globalThis.Plotly.react($('.plot', tile.element), traces, plotLayout({
-        margin: { l: 52, r: 10, t: 22, b: 28 },
-        showlegend: true, legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', font: { size: 10 }, bgcolor: 'rgba(0,0,0,0)' },
-        xaxis: { gridcolor: '#17252f', zeroline: false, title: { text: time.title, standoff: 2 }, range: [time.start / time.divisor, time.end / time.divisor] },
-        yaxis: { gridcolor: '#17252f', zeroline: false, title: { text: shownAs.unit, standoff: 4 } },
+        margin: stripMargin, showlegend: false, hovermode: false,
+        xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false, range: [time.start / time.divisor, time.end / time.divisor], fixedrange: true },
+        yaxis: { gridcolor: '#17252f', zeroline: false, nticks: 4, fixedrange: true, title: { text: shownAs.unit, standoff: 4, font: { size: 10 } } },
         shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: Math.max(cycle.anchor, time.start) / time.divisor, x1: cycle.now / time.divisor, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
     }), { displayModeBar: false, responsive: true });
+}
+
+// Every plot in the column has the same margins, so their time axes line up to the pixel: a time is in the same place in every strip.
+const stripMargin = { l: 64, r: 14, t: 6, b: 6 };
+
+// The column's one time axis, at its foot.
+function drawAxis(time) {
+    if (!globalThis.Plotly) return;
+    globalThis.Plotly.react($('#timeAxis'), [{ type: 'scatter', mode: 'lines', x: [time.start / time.divisor, time.end / time.divisor], y: [0, 0], line: { width: 0 }, hoverinfo: 'skip' }], plotLayout({
+        margin: { ...stripMargin, t: 0, b: 30 }, showlegend: false, hovermode: false,
+        xaxis: { gridcolor: '#17252f', zeroline: false, showgrid: false, range: [time.start / time.divisor, time.end / time.divisor], title: { text: time.title, standoff: 4, font: { size: 11 } }, fixedrange: true },
+        yaxis: { visible: false, fixedrange: true }
+    }), { displayModeBar: false, responsive: true, staticPlot: true });
+    twin.shownTime = time;
+}
+
+// ---- The line through the column at the pointer ----------------------------------------------------------------------------------
+// Pointed at, a time is marked through every strip, each strip's value at that time is shown in its header, and the time beneath.
+let cursorTime = null;
+const valueAtTime = (points, at) => {
+    let found = null;
+    for (const [time, value] of points) {
+        if (time > at + 1e-9) break;
+        found = value;
+    }
+    return found;
+};
+function showCursor(event) {
+    const time = twin?.shownTime;
+    const plot = event.target.closest?.('.plot');
+    if (!time || !plot) { hideCursor(); return; }
+    const box = plot.getBoundingClientRect();
+    const fraction = (event.clientX - box.left - stripMargin.l) / (box.width - stripMargin.l - stripMargin.r);
+    if (!(fraction >= 0 && fraction <= 1)) { hideCursor(); return; }
+    cursorTime = time.start + fraction * (time.end - time.start);
+    const column = $('#trendColumn').getBoundingClientRect();
+    const line = $('#trendCursor');
+    line.hidden = false;
+    $('#trendColumn').classList.add('pointing');
+    line.style.left = `${event.clientX - column.left}px`;
+    $('#trendCursorTime').textContent = dataTime(cursorTime);
+    for (const tile of twin.tiles) {
+        if (!tile.element || !tile.drawn) continue;
+        const read = valueAtTime(tile.drawn.readings, cursorTime) ?? valueAtTime(tile.drawn.model, cursorTime);
+        $('.value', tile.element).textContent = read === null ? '—' : `${shown(read)}${tile.drawn.unit}`;
+    }
+    for (const input of twin.inputs) {
+        if (!input.element || !input.drawn) continue;
+        const read = valueAtTime(input.drawn.readings, cursorTime);
+        $('.latest', input.element).textContent = read === null ? '—' : `${shown(read)}${input.drawn.unit}`;
+    }
+}
+function hideCursor() {
+    if (cursorTime === null && $('#trendCursor').hidden) return;
+    cursorTime = null;
+    $('#trendCursor').hidden = true;
+    $('#trendColumn').classList.remove('pointing');
+    for (const tile of twin?.tiles ?? []) if (tile.element) $('.value', tile.element).textContent = $('.value', tile.element).dataset.latest ?? '—';
+    for (const input of twin?.inputs ?? []) if (input.element) $('.latest', input.element).textContent = $('.latest', input.element).dataset.latest ?? '—';
 }
 
 // ---- Inputs and what the twin infers ---------------------------------------------------------------------------------------------
@@ -418,7 +501,7 @@ function renderInputs() {
     }
     $('#inputRows').replaceChildren(...twin.inputs.map((input) => {
         const row = element('div', { className: 'inputRow' },
-            element('div', {}, element('strong', { textContent: input.target?.label.replace(/^Shared · /, '') ?? input.signal }), element('small', { className: 'latest', textContent: '—' })),
+            element('header', {}, element('strong', { textContent: input.target?.label.replace(/^Shared · /, '') ?? input.signal }), element('small', { className: 'inputKind', textContent: 'input' }), element('span', { className: 'latest', textContent: '—' })),
             element('div', { className: 'plot' }));
         row.dataset.signal = input.signal;
         input.element = row;
@@ -431,7 +514,9 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         const shownAs = displayOf(input.target?.unit);
         const readings = [...input.readings].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([time, value]) => [time, shownAs.at(value)]);
         const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
-        $('.latest', input.element).textContent = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
+        $('.latest', input.element).dataset.latest = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
+        if (!cursorTime) $('.latest', input.element).textContent = $('.latest', input.element).dataset.latest;
+        input.drawn = { readings, unit };
         if (!globalThis.Plotly || !readings.length) continue;
         // Within the span, the value held from before it starting at its edge, and the last value held up to now, so a step is drawn
         // to the present.
@@ -444,9 +529,10 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         const pad = (high - low || Math.abs(high) || 1) * 0.15;
         globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
             plotLayout({
-                margin: { l: 46, r: 6, t: 8, b: 8 }, font: { color: '#9fb2bb', size: 10 }, xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false, range: [time.start / time.divisor, cycle.now / time.divisor] },
-                yaxis: { gridcolor: '#17252f', zeroline: false, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => shown(value)) }
-            }), { displayModeBar: false, responsive: true, staticPlot: true });
+                margin: stripMargin, showlegend: false, hovermode: false, font: { color: '#9fb2bb', size: 10 },
+                xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false, range: [time.start / time.divisor, time.end / time.divisor], fixedrange: true },
+                yaxis: { gridcolor: '#17252f', zeroline: false, fixedrange: true, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => `${shown(value)}${unit}`) }
+            }), { displayModeBar: false, responsive: true });
     }
 }
 
@@ -491,14 +577,18 @@ function drawInferred(cycle) {
         const latest = points.at(-1)[1];
         const spread = upTo(spreads).at(-1)?.[1];
         // Judged in the model's own units, since half a percent of a temperature in °C is not half a percent of it in kelvin.
-        const trend = trendOf(raw);
+        const step = stepOf(raw);
+        const stepUnit = shownAs.unit ? ` ${shownAs.unit}` : '';
+        const trend = step
+            ? { word: `${step.change < 0 ? 'dropped' : 'rose'} ${ago(raw.at(-1)[0] - step.time)}`, kind: step.change < 0 ? 'falling' : 'rising', said: `from ${readable(shownAs.at(step.from))}${stepUnit} to ${readable(shownAs.at(step.to))}${stepUnit}` }
+            : trendOf(raw);
         const units = shownAs.unit ? ` ${shownAs.unit}` : '';
         const number = element('div', { className: 'number', textContent: `${readable(latest)}${units}` });
         if (Number.isFinite(spread) && spread > 0) number.append(element('small', { textContent: ` ±${brief(spread)}` }));
         const made = element('div', { className: 'inferredRow' },
             element('div', {}, element('strong', { textContent: name }), element('small', { textContent: kind })),
             number,
-            element('span', { className: `trend ${trend.kind}`, textContent: trend.word, title: Number.isFinite(trend.perHour) ? `${trend.perHour > 0 ? '+' : ''}${shown(trend.perHour)}${units} an hour` : '' }),
+            element('span', { className: `trend ${trend.kind}`, textContent: trend.word, title: trend.said ?? (Number.isFinite(trend.perHour) ? `${trend.perHour > 0 ? '+' : ''}${shown(trend.perHour)}${units} an hour` : '') }),
             sparkline(points.slice(-120).map(([, value]) => value)));
         made.setAttribute('role', 'row');
         return made;
@@ -525,6 +615,10 @@ function renderView() {
     const time = visibleTime(cycle);
     for (const tile of twin.tiles) drawTile(tile, cycle, !following, time);
     drawInputs(cycle, time);
+    drawAxis(time);
+    // The legend names what is drawn: the band only while a signal is estimated, what was tried only in a sandbox.
+    $('#legendBand').hidden = !twin.tiles.some((tile) => tile.estimated);
+    $('#legendTried').hidden = !twin.sandbox || !following;
     drawInferred(cycle);
 }
 

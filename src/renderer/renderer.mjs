@@ -6520,12 +6520,16 @@ function applyLiveResult(jobId, result) {
     activeEngineJobId ??= jobId;
     const followLatest = !activeResult || activeResultSampleIndex >= activeResult.samples.length - 1;
     if (pendingRestart) {
+        // The engine's result holds the run it continues as well (see startSimulation's continuesJobId), the window's copy of that
+        // part stays the one shown: only what the engine has from the restart on is added to it.
+        const from = pendingRestart.checkpoint.time - 1e-9;
+        const since = (entries = [], timeOf = (entry) => entry.time) => entries.filter((entry) => timeOf(entry) >= from);
         result = {
             ...result,
-            samples: [...pendingRestart.samples, ...result.samples],
-            checkpoints: [...pendingRestart.checkpoints, ...result.checkpoints],
+            samples: [...pendingRestart.samples, ...since(result.samples)],
+            checkpoints: [...pendingRestart.checkpoints, ...since(result.checkpoints)],
             // The continued run starts from the model's own parameter values, which the record shows as a restart.
-            interventions: [...(pendingRestart.interventions ?? []), { time: pendingRestart.checkpoint.time, kind: 'restart' }, ...(result.interventions ?? [])]
+            interventions: [...(pendingRestart.interventions ?? []), { time: pendingRestart.checkpoint.time, kind: 'restart' }, ...since(result.interventions)]
         };
     }
     if (!activeResult || pendingRestart?.starting || pendingFork) {
@@ -6979,7 +6983,9 @@ async function startSimulation() {
             // A repeat is held before its first step until every recorded change is in: a fast run could otherwise be over before a
             // pause sent after its start was read.
             ...(runLaunchSettings.startPaused || pendingFork?.repeat?.length ? { startPaused: true } : {}),
-            ...(pendingFork ? { startCheckpoint: pendingFork.checkpoint } : pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {})
+            ...(pendingFork ? { startCheckpoint: pendingFork.checkpoint } : pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {}),
+            // Extended, not forked: the engine writes the run so far into this one's result, so it is one result from the start.
+            ...(pendingRestart && !pendingFork && previousResultSessionId ? { continuesJobId: previousResultSessionId } : {})
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
         activeEngineJobId = execution.jobId;

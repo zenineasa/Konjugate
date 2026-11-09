@@ -2821,6 +2821,83 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#passwordCancel').click()`);
     });
 
+    await run('a project is saved encrypted, its password changed (asking for the current one first) and its encryption removed', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-password-'));
+        const projectPath = join(directory, 'plain.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'thermalEquilibrium.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        try {
+            await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The project did not load.');
+            const answerPassword = async (password, { confirm = false } = {}) => {
+                await waitFor(opened, `document.querySelector('#passwordDialog').open`, 'The password dialog did not open.');
+                assert.equal(await evaluate(opened, `!document.querySelector('#confirmPasswordField').hidden`), confirm, confirm ? 'A new password is asked for twice.' : 'The current password is asked for once.');
+                await evaluate(opened, `(() => {
+                    for (const selector of ['#projectPassword', ${confirm ? `'#confirmProjectPassword'` : ''}].filter(Boolean)) {
+                        const field = document.querySelector(selector);
+                        field.value = ${JSON.stringify(password)};
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                    document.querySelector('#passwordDialog form').requestSubmit();
+                })()`);
+            };
+            const readsWith = async (path, password) => decodeProjectFile(await readFile(path), { password }).then(() => true, () => false);
+
+            // Saved encrypted, as a new file: the password twice, then where to save it (and, for a project with owner details, what
+            // this copy says about them).
+            const encrypted = await driver.captureExport(async () => {
+                await evaluate(opened, `document.querySelector('#saveEncryptedButton').click()`);
+                await answerPassword('firstPassword1', { confirm: true });
+                for (let attempt = 0; attempt < 20; attempt += 1) {
+                    if (await evaluate(opened, `document.querySelector('#saveOwnershipDialog').open`)) {
+                        await evaluate(opened, `document.querySelector('#saveOwnershipDialog form').requestSubmit()`);
+                        break;
+                    }
+                    if (/^Encrypted project saved/.test(await evaluate(opened, `document.querySelector('#statusText').textContent`))) break;
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                }
+            }, { fileName: 'locked.kjt' });
+            await waitFor(opened, `/^Encrypted project saved/.test(document.querySelector('#statusText').textContent)`, 'The encrypted save was not reported.');
+            assert.equal(await readsWith(encrypted.path, null), false, 'The saved file must not open without its password.');
+            assert.equal(await readsWith(encrypted.path, 'firstPassword1'), true);
+
+            // Each step below is waited on by what it reports, so the report of the step before is cleared first.
+            const clearStatus = () => evaluate(opened, `document.querySelector('#statusText').textContent = ''`);
+            // Changed: the current password first, asked again when wrong, then the new one twice.
+            await clearStatus();
+            await evaluate(opened, `document.querySelector('#saveEncryptedButton').click()`);
+            await waitFor(opened, `!document.querySelector('#encryptionMenu').classList.contains('hidden')`, 'An encrypted project\'s lock did not offer its menu.');
+            await evaluate(opened, `document.querySelector('#changePasswordButton').click()`);
+            await answerPassword('notThePassword');
+            await waitFor(opened, `document.querySelector('#passwordDialog').open && document.querySelector('#passwordError').textContent !== ''`, 'A wrong current password was not refused.');
+            await answerPassword('firstPassword1');
+            await answerPassword('secondPassword2', { confirm: true });
+            await waitFor(opened, `/^Encrypted project saved/.test(document.querySelector('#statusText').textContent) && !document.querySelector('#passwordDialog').open`, 'The new password was not saved.');
+            assert.equal(await readsWith(encrypted.path, 'firstPassword1'), false, 'The old password must no longer open it.');
+            assert.equal(await readsWith(encrypted.path, 'secondPassword2'), true);
+
+            // Cancelled at the current password, nothing changes.
+            await evaluate(opened, `document.querySelector('#saveEncryptedButton').click()`);
+            await evaluate(opened, `document.querySelector('#removeEncryptionButton').click()`);
+            await waitFor(opened, `document.querySelector('#passwordDialog').open`, 'Removing encryption did not ask for the password.');
+            await evaluate(opened, `document.querySelector('#passwordCancel').click()`);
+            assert.equal(await readsWith(encrypted.path, 'secondPassword2'), true);
+            assert.equal(await readsWith(encrypted.path, null), false);
+
+            // Removed: the current password, and the same file is saved without one.
+            await clearStatus();
+            await evaluate(opened, `document.querySelector('#saveEncryptedButton').click()`);
+            await evaluate(opened, `document.querySelector('#removeEncryptionButton').click()`);
+            await answerPassword('secondPassword2');
+            await waitFor(opened, `/^Project saved/.test(document.querySelector('#statusText').textContent)`, 'Removing the encryption did not save the project.');
+            assert.equal(await readsWith(encrypted.path, null), true, 'With its encryption removed, the file opens without a password.');
+        } finally {
+            if (!await opened.isDestroyed()) await closeWhenValidated(opened).catch(() => opened.close());
+            await rm(directory, { recursive: true, force: true });
+        }
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
     await run('project title editing applies camel case filenames', async () => {
         const rename = () => evaluate(window, `(() => { document.querySelector('.documentTitle').click(); const input = document.querySelector('.documentTitleInput'); input.value = 'My Test Model'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         // An earlier test saved this project, so renaming it saves it under the new name: the save dialog is answered with a file
@@ -4525,7 +4602,8 @@ export async function runInteractionTests(driver) {
 
         await waitFor(diagnosticWindow, `Boolean(document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]:not([hidden])'))`, 'Analysis toolstrip command did not appear during a live run.');
         await evaluate(diagnosticWindow, `document.querySelector('.addonTool[data-addon-id="konjugate.resultPlotViewer"][data-command-id="openAnalysis"]').click()`);
-        const analysisWindow = await driver.waitForNewHandle([...before, diagnosticWindow]);
+        // By its title: the example's own guide opens in a window of its own too, and may appear first.
+        const analysisWindow = await driver.waitForNewHandle([...before, diagnosticWindow], { titleIncludes: 'Results Analysis' });
         await waitFor(analysisWindow, `document.querySelectorAll('.signalOption').length > 0`, 'Results Analysis did not load signals during a live run.', 5000);
         await evaluate(analysisWindow, `(() => {
             const options = (id) => [...document.querySelector(id).options].map((option) => option.value);
@@ -4565,7 +4643,8 @@ export async function runInteractionTests(driver) {
             'Expected the scatter trail to stay unchanged while paused/running, since src/main.mjs visualizerSeek blocks seeking then -- if this now redraws, the seek gate has changed and this assertion needs updating.');
 
         await evaluate(diagnosticWindow, `document.querySelector('#simulationPauseResume').click()`);
-        await waitFor(diagnosticWindow, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete in the diagnostic window.', 15000);
+        // Up to 9 more seconds of real-time run after the pause, with room to spare on a busy machine.
+        await waitFor(diagnosticWindow, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete in the diagnostic window.', 30000);
         await waitFor(analysisWindow, `document.querySelector('.readOnlyBadge').textContent === 'Completed'`, 'Analysis window did not observe run completion.', 5000);
 
         // Compare two deliberately-targeted positions rather than "before vs. after one drag":
@@ -4787,6 +4866,51 @@ export async function runInteractionTests(driver) {
 
         await closeWhenValidated(diagnosticWindow);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own isolated diagnostic window; no web-edition equivalent' });
+
+    await run('each validation issue takes you to where it is: a relationship\'s equation, a node\'s states, the run settings', async () => {
+        // The thermal example with one mistake of each kind: an unknown symbol in the relationship's equation, a state's tuning range
+        // its initial value is outside, and an output interval that is not a whole number of time steps.
+        const document_ = JSON.parse(await decodeProjectFile(await readFile(join(process.cwd(), 'examples', 'thermalEquilibrium.kjt'))));
+        document_.edges[0].equation = String.raw`\mathrm{noSuchState}`;
+        delete document_.edges[0].equationModel;
+        document_.nodes[1].states[0].tuning = { minimum: 1000, maximum: 2000 };
+        document_.runConfigurations = [{ id: 9001, name: 'Default', globalTimeStep: 0.1, outputInterval: 0.15 }];
+        document_.activeRunConfigurationId = 9001;
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        const opened = await driver.waitForNewHandle(before);
+        try {
+            await waitFor(opened, `document.querySelector('.documentTitle')`, 'The new window did not finish loading.');
+            await evaluate(opened, `window.__debugProject.load(${JSON.stringify(document_)}, 'issues.kjt')`);
+            await waitFor(opened, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelectorAll('#validationIssues .validationIssue').length === 3`, 'The three issues were not listed.', 15000);
+            const issue = (kind) => `[...document.querySelectorAll('#validationIssues .validationIssue')].find((item) => item.querySelector('small').textContent.startsWith(${JSON.stringify(kind)}))`;
+            const follow = async (kind) => {
+                if (await evaluate(opened, `document.querySelector('#validationPanel').hidden`)) await evaluate(opened, `document.querySelector('#validationSummary').click()`);
+                await waitFor(opened, `!document.querySelector('#validationPanel').hidden && Boolean(${issue(kind)})`, `The ${kind} issue was not listed.`);
+                await evaluate(opened, `${issue(kind)}.click()`);
+                assert.equal(await evaluate(opened, `document.querySelector('#validationPanel').hidden`), true, 'Following an issue closes the list.');
+            };
+
+            // The relationship's equation: its editor, with the equation focused.
+            await follow('edge');
+            await waitFor(opened, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.activeElement?.id === 'editEdgeMathField'`, 'The equation issue did not open the relationship with its equation focused.');
+            assert.equal(await evaluate(opened, `document.querySelector('#editEdgeName').value`), 'Conduction');
+
+            // The node's states: its editor, with a state focused.
+            await follow('node');
+            await waitFor(opened, `!document.querySelector('#nodeEditor').classList.contains('hidden') && Boolean(document.activeElement?.closest('#nodeEditorStates'))`, 'The state issue did not open the node with its states focused.');
+            assert.equal(await evaluate(opened, `document.querySelector('#editNodeName').value`), 'Cold body', 'The node with the mistake is the one opened.');
+
+            // The run settings: the Run dialog, where the interval is set.
+            await follow('runConfiguration');
+            await waitFor(opened, `document.querySelector('#runLaunchDialog').open`, 'The run settings issue did not open the Run dialog.');
+            assert.equal(Number(await evaluate(opened, `document.querySelector('#runOutputInterval').value`)), 0.15);
+            await evaluate(opened, `document.querySelector('#runLaunchDialog').close()`);
+        } finally {
+            await evaluate(opened, `window.confirm = () => true`).catch(() => {});
+            await opened.close();
+        }
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own window; no web-edition equivalent' });
 
     await run('the stability-monitoring toggle suppresses during-run findings without disabling the post-run check', async () => {
         // Fresh window + the same "Growth" (dx/dt = level) fixture as the stability-findings test
@@ -6241,7 +6365,7 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(libraryWindow);
     }, { skip: !driver.capabilities.multiWindow && 'packages are installed on disk by the desktop app; the web edition has none' });
 
-    await run('a package is installed from a file: reviewed before anything is written, refused when this Konjugate cannot run it, then listed', async () => {
+    await run('a package is installed from a file (reviewed first, refused when this Konjugate cannot run it), then disabled, enabled and uninstalled', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-install-'));
         const packageId = 'interaction.installedNode';
         const pluginFile = async (name, extra = {}) => {
@@ -6299,12 +6423,142 @@ export async function runInteractionTests(driver) {
             assert.equal(await evaluate(window, `document.querySelector('[data-extensions-tab="plugin"]').classList.contains('active')`), true);
             assert.equal(await evaluate(window, `window.extensions.restartPending()`), true);
             assert.equal(await evaluate(window, `document.querySelector('#extensionsRestartPendingNotice').hidden`), false, 'A plugin loads at the next start, which the dialog says.');
+
+            // Disabled and enabled again from its detail, each at once; the state is the main process's, not only the dialog's.
+            const enabled = () => evaluate(window, `window.extensions.list().then((all) => all.find((entry) => entry.packageId === ${JSON.stringify(packageId)})?.enabled)`);
+            await evaluate(window, `document.querySelector('#extensionsToggleEnabled').click()`);
+            await waitFor(window, `/^Disabled interaction\.installedNode 1\.0\.0/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'Disabling was not reported.');
+            assert.equal(await enabled(), false);
+            await evaluate(window, `document.querySelector('#extensionsToggleEnabled').click()`);
+            await waitFor(window, `/^Enabled interaction\.installedNode 1\.0\.0/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'Enabling was not reported.');
+            assert.equal(await enabled(), true);
+
+            // Uninstalled, asked first: kept when the question is answered no, gone from the list and from disk when yes.
+            await evaluate(window, `(() => { window.__askedToConfirm = []; window.__confirmAnswer = false; window.confirm = (question) => { window.__askedToConfirm.push(question); return window.__confirmAnswer; }; })()`);
+            await evaluate(window, `document.querySelector('#extensionsUninstall').click()`);
+            await waitFor(window, `window.__askedToConfirm.length === 1`, 'Uninstall did not ask first.');
+            assert.match(await evaluate(window, `window.__askedToConfirm[0]`), /^Uninstall Installed Node 1\.0\.0\? This cannot be undone\./);
+            assert.deepEqual(await installed(), ['1.0.0'], 'Answering no must keep it.');
+            await evaluate(window, `window.__confirmAnswer = true; document.querySelector('#extensionsUninstall').click()`);
+            await waitFor(window, `/^Uninstalled interaction\.installedNode 1\.0\.0/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'Uninstalling was not reported.');
+            assert.deepEqual(await installed(), []);
+            assert.equal(await evaluate(window, `Boolean(document.querySelector('[data-package-key="plugin:${packageId}:1.0.0"]'))`), false, 'It should be gone from the list.');
+            await assert.rejects(readFile(join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages', 'plugins', packageId, '1.0.0', 'package.json')), 'Its files should be gone.');
         } finally {
+            await evaluate(window, `delete window.confirm; delete window.__askedToConfirm; delete window.__confirmAnswer`).catch(() => {});
             await evaluate(window, `window.extensions.uninstall('plugin', ${JSON.stringify(packageId)}, '1.0.0').catch(() => {})`);
             await evaluate(window, `document.querySelector('#extensionsDialog').open && document.querySelector('#extensionsDialog').close()`);
             await rm(directory, { recursive: true, force: true });
         }
     }, { skip: driver.kind !== 'electron' && 'installs through the desktop app\'s own file and review dialogs' });
+
+    await run('a run is extended, exported as CSV, forked from an earlier time and compared, then saved with its results and opened again with every branch', async () => {
+        // A copy of an example of its own: saving writes back to the file a project was opened from.
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-branches-'));
+        const projectPath = join(directory, 'branches.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'thermalEquilibrium.kjt')));
+        const openProject = async () => {
+            const before = driver.allHandles();
+            await driver.simulateOsFileOpen(projectPath);
+            const opened = await driver.waitForNewHandle(before);
+            await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The project did not load.');
+            return opened;
+        };
+        const timelineEnd = (handle) => evaluate(handle, `Number(document.querySelector('#resultTimeline').max)`);
+        // Closing a result asks first, in the window: answered.
+        const closeResultsIn = async (handle) => {
+            await evaluate(handle, `document.querySelector('#closeResults').click()`);
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            await evaluate(handle, `document.querySelector('#confirmCloseResults')?.click()`);
+            await waitFor(handle, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+        };
+        // The value shown at `time`, in seconds, as the timeline reads it: the start of an extended run must still be there.
+        const shownTimeAt = async (handle, time) => {
+            await evaluate(handle, `(() => { const timeline = document.querySelector('#resultTimeline'); timeline.value = '${time}'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            return evaluate(handle, `document.querySelector('#resultCurrentTime').value`);
+        };
+        let opened = await openProject();
+        try {
+            await openRunDialog(opened);
+            await evaluate(opened, `(() => { document.querySelector('#runTargetTime').value = '2'; document.querySelector('#startRun').click(); })()`);
+            await waitFor(opened, `!document.querySelector('#continueRun').hidden && Number(document.querySelector('#resultTimeline').max) === 2`, 'The first run did not complete.', 30000);
+
+            // Extended: the run goes on from where it ended, in the same result, not a new one.
+            await evaluate(opened, `document.querySelector('#continueRun').click()`);
+            await waitFor(opened, `document.querySelector('#runLaunchDialog').open`, 'Extend simulation did not open the Run dialog.');
+            assert.match(await evaluate(opened, `document.querySelector('#runLaunchDescription').textContent`), /^Continue from 2/);
+            await evaluate(opened, `(() => { document.querySelector('#runTargetTime').value = '4'; document.querySelector('#startRun').click(); })()`);
+            await waitFor(opened, `!document.querySelector('#continueRun').hidden && Number(document.querySelector('#resultTimeline').max) === 4`, 'The extended run did not reach 4 s.', 30000);
+            assert.equal(await evaluate(opened, `document.querySelector('#branchesButtonCount').textContent`), '', 'Extending is not a fork.');
+
+            // Exported from the toolbar: every state, every sample, from the start to the end of the extended run.
+            const exported = await driver.captureExport(() => evaluate(opened, `document.querySelector('#exportCsvButton').click()`), { extension: 'csv' });
+            const [header, ...rows] = exported.bytes.toString('utf8').trim().split('\n');
+            const stateCount = await evaluate(opened, `window.__debugProject.serialize().nodes.reduce((sum, node) => sum + node.states.length, 0)`);
+            assert.equal(header.split(',').length, stateCount + 1, 'A time column, then one column per state.');
+            const csvTimes = rows.map((row) => Number(row.split(',')[0]));
+            assert.deepEqual([csvTimes[0], csvTimes.at(-1)], [0, 4], `The CSV should span the whole extended run (it spans ${csvTimes[0]} to ${csvTimes.at(-1)} s in ${rows.length} rows).`);
+
+            // Forked at 1 s: a second branch, made the active one, running from there.
+            await evaluate(opened, `(() => { const timeline = document.querySelector('#resultTimeline'); timeline.value = '1'; timeline.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(opened, `document.querySelector('#branchesButton').click()`);
+            await waitFor(opened, `!document.querySelector('#branchesPanel').hidden && /^Fork at 1/.test(document.querySelector('#forkHereLabel').textContent)`, 'The branches panel did not offer a fork at 1 s.');
+            await evaluate(opened, `document.querySelector('#forkHereButton').click()`);
+            await waitFor(opened, `document.querySelector('#runLaunchDialog').open || !document.querySelector('#forkParameterPanel').hidden`, 'Fork here did not ask how to run the fork.');
+            if (await evaluate(opened, `!document.querySelector('#forkParameterPanel').hidden`)) {
+                await evaluate(opened, `document.querySelector('#confirmForkParameters').click()`);
+                await waitFor(opened, `document.querySelector('#runLaunchDialog').open`, 'The fork\'s Run dialog did not open.');
+            }
+            assert.match(await evaluate(opened, `document.querySelector('#runLaunchDescription').textContent`), /^Fork from 1/);
+            await evaluate(opened, `(() => { document.querySelector('#runTargetTime').value = '3'; document.querySelector('#startRun').click(); })()`);
+            await waitFor(opened, `document.querySelector('#branchesButtonCount').textContent === '2' && !document.querySelector('#continueRun').hidden && Number(document.querySelector('#resultTimeline').max) === 3`, 'The fork did not run to 3 s.', 30000);
+            assert.match(await evaluate(opened, `document.querySelector('#branchesButtonLabel').textContent`), /^Fork · 1/);
+
+            // Compared: with a node selected, checking the baseline adds its series beside the fork's.
+            await evaluate(opened, `document.querySelector('.objectLabel').click()`);
+            await waitFor(opened, `document.querySelector('#nodeResultPlot').data?.length > 0`, 'The selected node\'s results were not plotted.', 10000);
+            const tracesAlone = await evaluate(opened, `document.querySelector('#nodeResultPlot').data.length`);
+            await evaluate(opened, `document.querySelector('#branchesButton').click()`);
+            await waitFor(opened, `document.querySelectorAll('#branchTree .branchTreeItem').length === 2`, 'The branch tree did not list both branches.');
+            assert.equal(await evaluate(opened, `document.querySelector('#branchTree .branchTreeButton.active').textContent`), await evaluate(opened, `[...document.querySelectorAll('#branchTree .branchTreeButton')][1].textContent`), 'The fork is the active branch.');
+            await evaluate(opened, `(() => { const box = document.querySelector('#branchTree .branchCompareToggle:not(:disabled)'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(opened, `document.querySelector('#nodeResultPlot').data.length > ${tracesAlone}`, 'Comparing with the baseline did not add its series.', 10000);
+
+            // Switched back to the baseline: its own, longer result.
+            await evaluate(opened, `document.querySelector('#branchTree .branchTreeButton:not(.active)').click()`);
+            await waitFor(opened, `Number(document.querySelector('#resultTimeline').max) === 4`, 'Switching to the baseline did not show its result.');
+            assert.equal(await evaluate(opened, `document.querySelector('#branchesButtonLabel').textContent`), 'Baseline');
+
+            // Saved with its results: asked what to keep, model and results chosen.
+            await evaluate(opened, `document.querySelector('#saveButton').click()`);
+            await waitFor(opened, `document.querySelector('#saveContentDialog').open`, 'Saving a project with results did not ask what to keep.');
+            assert.equal(await evaluate(opened, `document.querySelector('#saveContentDialog input[value="modelAndResults"]').checked`), true, 'Model and results is offered first.');
+            await evaluate(opened, `document.querySelector('#saveContentDialog form').requestSubmit()`);
+            await waitFor(opened, `/saved with simulation results/.test(document.querySelector('#statusText').textContent)`, 'The project was not saved with its results.', 15000);
+            await closeResultsIn(opened);
+            await closeWhenValidated(opened);
+            for (let attempt = 0; attempt < 50 && !await opened.isDestroyed(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+            assert.equal(await opened.isDestroyed(), true, 'The saved project\'s window did not close.');
+            opened = null;
+
+            // Opened again: the results are there, both branches with them, the baseline active and the fork where it was made.
+            opened = await openProject();
+            await waitFor(opened, `document.querySelector('.resultMode b').textContent === 'Results' && document.querySelector('#branchesButtonCount').textContent === '2'`, 'The saved results and branches did not come back.', 15000);
+            assert.equal(await timelineEnd(opened), 4, 'The baseline opens active, with its whole result.');
+            assert.equal(await shownTimeAt(opened, 0.5), '0.5 s', 'The saved result keeps the run from its start, not only from where it was extended.');
+            await evaluate(opened, `document.querySelector('#branchesButton').click()`);
+            await waitFor(opened, `document.querySelectorAll('#branchTree .branchTreeItem').length === 2`, 'The reopened branch tree did not list both branches.');
+            await evaluate(opened, `document.querySelector('#branchTree .branchTreeButton:not(.active)').click()`);
+            await waitFor(opened, `Number(document.querySelector('#resultTimeline').max) === 3`, 'The reopened fork did not show its own result.');
+            assert.match(await evaluate(opened, `document.querySelector('#branchesButtonLabel').textContent`), /^Fork · 1/);
+        } finally {
+            if (opened && !await opened.isDestroyed()) {
+                await closeResultsIn(opened).catch(() => {});
+                await closeWhenValidated(opened).catch(() => opened.close());
+            }
+            await rm(directory, { recursive: true, force: true });
+        }
+    }, { skip: (!driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent') || (!driver.capabilities.forks && 'the web engine keeps no checkpoints to fork from') });
 
     await run('a node template places source terms with their own and shared parameters, as one undoable step', async () => {
         const pluginDirectory = join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages', 'plugins', 'example.stockpile', '0.1.0');

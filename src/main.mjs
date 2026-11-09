@@ -3233,7 +3233,13 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
         samples: result.samples?.length ? [result.samples.at(-1)] : [],
         checkpoints: []
     });
-    execution = await startEngineRun(content, configuration, await engineOptions(), {
+    // An extended run names the run it continues, by its job: its result file goes to the engine, which writes that run's earlier
+    // part into this one's, so the result holds the whole run. Only a result this window's own runs left is accepted.
+    const { continuesJobId, ...runConfiguration } = configuration ?? {};
+    const continued = continuesJobId ? completedEngineResults.get(continuesJobId) : null;
+    if (continuesJobId && !continued?.path) throw new Error('The run to extend is no longer available.');
+    if (continued) runConfiguration.continuesResultPath = continued.path;
+    execution = await startEngineRun(content, runConfiguration, await engineOptions(), {
         retainResult: true,
         onUpdate: (result) => {
             const job = activeEngineJobs.get(execution.jobId);

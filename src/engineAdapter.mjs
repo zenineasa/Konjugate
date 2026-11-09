@@ -2,7 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectFile } from './projectFile.mjs';
@@ -351,8 +351,17 @@ export async function startEngineRun(content, configuration, options, { onUpdate
     const resolvedContent = await resolveInstalledFmus(await resolveInstalledPlugins(content, options), options);
     await writeFile(inputPath, await encodeProjectFile(resolvedContent));
     const resolvedDocument = JSON.parse(resolvedContent);
+    // An extended run continues another's result (`continuesResultPath`, the main process's own): a copy in this job's folder,
+    // so the run it continues can be released at once without taking the file from under the engine.
+    const { continuesResultPath, ...engineConfiguration } = configuration;
+    let continuesResult;
+    if (continuesResultPath) {
+        continuesResult = join(directory, 'continuedResult.bin');
+        await copyFile(continuesResultPath, continuesResult);
+    }
     await writeFile(configurationPath, JSON.stringify({
-        ...configuration,
+        ...engineConfiguration,
+        ...(continuesResult ? { continuesResult } : {}),
         pacing: initialPacing,
         // During-run phase of docs/proposals/numericalStabilityDiagnostics.md: every interactive
         // run through this app monitors every node by default (Tier 1 is cheap by design

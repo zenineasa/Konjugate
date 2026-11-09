@@ -182,6 +182,61 @@ void atomicWrite(const std::filesystem::path& path, const std::string& content) 
     }
 }
 
+// A result file this engine wrote (docs/resultFileFormat.md), read whole: its header (state table, checkpoints, interventions) and
+// every sample, for a run that continues it (Simulation::prependContinuedResult).
+struct StoredResult {
+    protocol::ResultFile header;
+    std::vector<double> times;
+    std::vector<std::vector<double>> values;
+};
+
+std::uint32_t storedResultLength(const std::string& content, std::size_t offset) {
+    if (offset + 4 > content.size()) throw std::runtime_error("The result of the run to continue is truncated.");
+    return (static_cast<std::uint32_t>(static_cast<unsigned char>(content[offset])) << 24) |
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(content[offset + 1])) << 16) |
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(content[offset + 2])) << 8) |
+        static_cast<std::uint32_t>(static_cast<unsigned char>(content[offset + 3]));
+}
+
+StoredResult readStoredResult(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("The result of the run to continue could not be opened.");
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    const std::string content = buffer.str();
+    if (content.size() < 12 || content.compare(0, 4, "KJR\x02", 4) != 0 || content.compare(content.size() - 4, 4, "KJIX") != 0) {
+        throw std::runtime_error("The result of the run to continue is not a result file.");
+    }
+    StoredResult result;
+    const auto headerLength = storedResultLength(content, 4);
+    if (8 + static_cast<std::size_t>(headerLength) > content.size() || !result.header.ParseFromArray(content.data() + 8, static_cast<int>(headerLength))) {
+        throw std::runtime_error("The result of the run to continue has a header that cannot be read.");
+    }
+    const auto indexLengthOffset = content.size() - 8;
+    const auto indexLength = storedResultLength(content, indexLengthOffset);
+    if (indexLength > indexLengthOffset) throw std::runtime_error("The result of the run to continue has an index that cannot be read.");
+    protocol::ResultIndex index;
+    if (!index.ParseFromArray(content.data() + indexLengthOffset - indexLength, static_cast<int>(indexLength))) {
+        throw std::runtime_error("The result of the run to continue has an index that cannot be read.");
+    }
+    for (const auto& entry : index.batches()) {
+        // The offset is where the batch's 4-byte length begins; its payload follows (see writeResult).
+        const auto payloadOffset = entry.offset() + 4;
+        protocol::SampleBatch batch;
+        if (payloadOffset + entry.length() > content.size() || !batch.ParseFromArray(content.data() + payloadOffset, static_cast<int>(entry.length()))) {
+            throw std::runtime_error("The result of the run to continue has samples that cannot be read.");
+        }
+        const auto stateCount = static_cast<std::size_t>(batch.state_count());
+        for (int sample = 0; sample < batch.times_size(); ++sample) {
+            result.times.push_back(batch.times(sample));
+            std::vector<double> row(stateCount);
+            for (std::size_t state = 0; state < stateCount; ++state) row[state] = batch.values(static_cast<int>(static_cast<std::size_t>(sample) * stateCount + state));
+            result.values.push_back(std::move(row));
+        }
+    }
+    return result;
+}
+
 Pacing pacingFromTree(const boost::property_tree::ptree& tree, const Pacing& fallback = {}) {
     Pacing pacing;
     pacing.mode = pacingModeFromString(tree.get<std::string>(
@@ -763,6 +818,7 @@ private:
     void appendStreamRecord(const std::string& type, double time, const Values& recordStates, const std::string& uuid = {});
     ProviderCheckpointStates captureProviderStates();
     void restoreStartCheckpoint(const boost::property_tree::ptree& checkpoint);
+    void prependContinuedResult(const std::filesystem::path& path);
 
     const boost::property_tree::ptree& configuration;
     std::filesystem::path outputPath;
@@ -792,6 +848,8 @@ private:
     std::uint64_t synchronizationComputeNanoseconds = 0;
     std::vector<Sample> samples;
     std::vector<Checkpoint> checkpoints;
+    // The interventions of the run this one continues, before the restart: written first, so the result keeps the whole record.
+    std::vector<protocol::Intervention> continuedInterventions;
     std::vector<Sample> pendingEventSamples;
     std::unordered_set<EntityId> stabilityMonitoredNodeIds;
     std::optional<DuringRunStabilityMonitor> stabilityMonitor;
@@ -958,6 +1016,12 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, startTime);
     samples = {{startTime, states}};
     checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
+    // A run extended from its last checkpoint ("Extend simulation"): the run it continues, up to that checkpoint, comes first in
+    // this run's result, so the result file holds the whole run and not only the part since the restart -- what is exported,
+    // saved, forked from and read back is then all of it. The app passes a copy of that run's result file.
+    if (const auto continued = configuration.get_optional<std::string>("continuesResult"); continued && !sessionMode) {
+        prependContinuedResult(*continued);
+    }
     // During-run phase of docs/proposals/numericalStabilityDiagnostics.md -- entirely opt-in
     // (empty monitoredNodeIds, the default, makes observeGlobalStep() a no-op below) via the run
     // configuration's own stabilityMonitoring.nodeIds, not a project/schema concept: this is about
@@ -978,7 +1042,8 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     settledInterventions = runControl.interventions.size();
     if (!sessionMode) {
         appendStreamRecord("sample", startTime, states);
-        appendStreamRecord("checkpoint", startTime, states, checkpoints.front().uuid);
+        // This run's own first checkpoint: the last one so far, after any of a continued run's.
+        appendStreamRecord("checkpoint", startTime, states, checkpoints.back().uuid);
         return;
     }
     // A session: what it reports, how often it keeps a checkpoint, and which states it may not set.
@@ -1011,6 +1076,56 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         }
     }
     for (const auto index : executionPlan.algebraicStateIndexes) algebraicIndexes.insert(index);
+}
+
+// Everything of the continued run before this run's start: its samples, its checkpoints (so a fork can be made from any of them)
+// and its interventions. Its states are matched by id, so a result from another model is refused rather than misread.
+void Simulation::prependContinuedResult(const std::filesystem::path& path) {
+    const auto stored = readStoredResult(path);
+    const auto& table = stored.header.state_table().states();
+    if (static_cast<std::size_t>(table.size()) != states.size()) throw std::runtime_error("The run to continue does not match this model's states.");
+    std::vector<std::size_t> planIndex;
+    planIndex.reserve(states.size());
+    for (const auto& descriptor : table) {
+        const auto found = executionPlan.stateIndexes.find(descriptor.state_id());
+        if (found == executionPlan.stateIndexes.end()) throw std::runtime_error("The run to continue does not match this model's states.");
+        planIndex.push_back(found->second);
+    }
+    const auto toPlanOrder = [&](const auto& values) {
+        Values ordered(states.size());
+        for (std::size_t index = 0; index < planIndex.size() && index < static_cast<std::size_t>(values.size()); ++index) ordered[planIndex[index]] = values[static_cast<int>(index)];
+        return ordered;
+    };
+    const auto before = [&](double time) { return time < startTime - 1e-12; };
+    std::vector<Sample> earlierSamples;
+    for (std::size_t index = 0; index < stored.times.size(); ++index) {
+        if (!before(stored.times[index])) continue;
+        Values ordered(states.size());
+        for (std::size_t state = 0; state < planIndex.size() && state < stored.values[index].size(); ++state) ordered[planIndex[state]] = stored.values[index][state];
+        earlierSamples.push_back({stored.times[index], std::move(ordered)});
+    }
+    std::vector<Checkpoint> earlierCheckpoints;
+    for (const auto& checkpoint : stored.header.checkpoints()) {
+        if (!before(checkpoint.time())) continue;
+        ProviderCheckpointStates providerStates;
+        for (const auto& providerState : checkpoint.provider_states()) {
+            const auto& payload = providerState.payload();
+            std::vector<std::byte> bytes(payload.size());
+            std::transform(payload.begin(), payload.end(), bytes.begin(), [](char byte) { return static_cast<std::byte>(byte); });
+            providerStates.emplace_back(providerState.node_id(), std::move(bytes));
+        }
+        Checkpoint earlier;
+        earlier.uuid = checkpoint.uuid();
+        earlier.time = checkpoint.time();
+        earlier.states = toPlanOrder(checkpoint.values());
+        earlier.providerStates = std::move(providerStates);
+        earlierCheckpoints.push_back(std::move(earlier));
+    }
+    for (const auto& intervention : stored.header.interventions()) {
+        if (before(intervention.applied_time())) continuedInterventions.push_back(intervention);
+    }
+    samples.insert(samples.begin(), std::make_move_iterator(earlierSamples.begin()), std::make_move_iterator(earlierSamples.end()));
+    checkpoints.insert(checkpoints.begin(), std::make_move_iterator(earlierCheckpoints.begin()), std::make_move_iterator(earlierCheckpoints.end()));
 }
 
 void Simulation::restoreStartCheckpoint(const boost::property_tree::ptree& checkpoint) {
@@ -1218,6 +1333,7 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
     protocol::ResultFile result;
     result.set_result_version(2);
     result.set_metadata_json(json.str());
+    for (const auto& intervention : continuedInterventions) *result.add_interventions() = intervention;
     for (const auto& [appliedTime, command] : runControl.interventions) {
         auto* intervention = result.add_interventions();
         intervention->set_applied_time(appliedTime);

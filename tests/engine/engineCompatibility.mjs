@@ -594,6 +594,33 @@ const resumedResult = decodeResultFile(await readFile(join(directory, 'resumedRe
 assert.equal(resumedResult.samples.at(-1).states[0].value, wholeResult.samples.at(-1).states[0].value, 'A resumed run must end where the whole run ends.');
 assert.equal(resumedResult.execution.nodeMetrics[0].invocations, 1000);
 
+// Extended ("Extend simulation"), the run resumed from 1 s is given the result it continues, and its own result holds the whole run:
+// the samples and checkpoints before 1 s from that result, then its own, with nothing twice -- so what is exported, saved, forked
+// from and read back of an extended run is all of it.
+await writeFile(join(directory, 'firstSecondRun.json'), JSON.stringify({ name: 'First second', targetTime: 1, globalTimeStep: 0.001, outputInterval: 0.01 }));
+assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'firstSecondRun.json'), '--output', join(directory, 'firstSecond.bin')]), 0);
+const firstSecond = decodeResultFile(await readFile(join(directory, 'firstSecond.bin')));
+await writeFile(join(directory, 'extendedRun.json'), JSON.stringify({
+    name: 'Extended', targetTime: 2, globalTimeStep: 0.001, outputInterval: 0.01,
+    startCheckpoint: firstSecond.checkpoints.at(-1), continuesResult: join(directory, 'firstSecond.bin')
+}));
+assert.equal(await run(executable, ['run', input, '--configuration', join(directory, 'extendedRun.json'), '--output', join(directory, 'extended.bin')]), 0);
+const extended = decodeResultFile(await readFile(join(directory, 'extended.bin')));
+// Times to the nanosecond: a time reached by adding steps can differ from the same time reached another way in its last bits.
+const nanoseconds = (items) => items.map((item) => Math.round(item.time * 1e9));
+assert.equal(extended.samples.length, wholeResult.samples.length, 'An extended run keeps every sample from the start, once each.');
+assert.deepEqual(nanoseconds(extended.samples), nanoseconds(wholeResult.samples));
+assert.deepEqual(extended.samples.at(50).states, wholeResult.samples.at(50).states, 'The part before the restart is the continued run\'s own.');
+assert.equal(extended.samples.at(-1).states[0].value, wholeResult.samples.at(-1).states[0].value);
+assert.deepEqual(nanoseconds(extended.checkpoints), nanoseconds(wholeResult.checkpoints), 'Every checkpoint is kept, so a fork can be made from before the restart.');
+// A result that cannot be read is refused, rather than run as if there were nothing before the restart.
+await writeFile(join(directory, 'notAResult.bin'), 'not a result');
+await writeFile(join(directory, 'badContinuation.json'), JSON.stringify({
+    name: 'Bad', targetTime: 2, globalTimeStep: 0.001, outputInterval: 0.01,
+    startCheckpoint: firstSecond.checkpoints.at(-1), continuesResult: join(directory, 'notAResult.bin')
+}));
+assert.notEqual(await run(executable, ['run', input, '--configuration', join(directory, 'badContinuation.json'), '--output', join(directory, 'bad.bin')]), 0);
+
 const unsupportedInput = join(directory, 'project.unsupported');
 await writeFile(unsupportedInput, await encodeProjectFile(project));
 assert.equal(await run(executable, ['validate', unsupportedInput, '--report', report]), 3);

@@ -78,6 +78,8 @@ test('a plan that cannot be made says why', () => {
     refused({ mapping: mapping.map((entry) => ({ ...entry, stateId: null })) }, /Map at least one measured signal/);
     refused({}, /time step must be a positive/, { timeStep: 0 });
     refused({ log: log('0,1000,,293,,') }, /covers no time yet/);
+    refused({}, /no readings in that stretch/, { timeStep: 60, from: 300, to: 400 });
+    refused({}, /no readings in that stretch/, { timeStep: 60, from: 30, to: 30 });
     refused({ log: log('0,1000,,293,,bad', '60,,,293,,bad') }, /tankTemperature has no good readings/);
 });
 

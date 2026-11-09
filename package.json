@@ -44,6 +44,7 @@
         "generate:example-thumbnails": "npm run build:engine && node scripts/generateExampleThumbnails.mjs",
         "generate:welcome-assets": "node scripts/generateWelcomeAssets.mjs",
         "test:all": "npm test && npm run test:interaction",
+        "coverage": "npm run build:engine && node scripts/coverageReport.mjs",
         "build:engine": "node scripts/buildEngine.mjs",
         "build:engine:no-metis": "node scripts/buildEngine.mjs --no-metis",
         "build:engine:sanitize": "node scripts/buildEngine.mjs --sanitize",

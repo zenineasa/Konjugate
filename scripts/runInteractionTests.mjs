@@ -11,6 +11,9 @@ const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
 
 const userDataDirectory = await mkdtemp(join(tmpdir(), 'konjugate-interaction-'));
+// Coverage (scripts/coverageReport.mjs): the main process through Node's own NODE_V8_COVERAGE, the project window through the
+// driver (tests/drivers/electronWindowDriver.mjs).
+if (environment.KONJUGATE_INTERACTION_COVERAGE) environment.NODE_V8_COVERAGE = join(environment.KONJUGATE_INTERACTION_COVERAGE, 'main');
 environment.KONJUGATE_INTERACTION_USER_DATA = userDataDirectory;
 environment.KONJUGATE_INTERACTION_INSTALLED_ADDONS = (await installInteractionAddons(process.cwd(), userDataDirectory)).join(',');
 // --use-mock-keychain: listing model configurations asks Electron's safeStorage whether encryption is

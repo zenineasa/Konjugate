@@ -179,6 +179,7 @@ export function createLocalModelsSection({ root, api, endpoint = () => '', inUse
         find('#huggingFaceBrowser').hidden = !running;
         setState(!status ? 'Looking for Ollama…' : running ? `Ollama ${status.version ?? ''} is running`.replace('  ', ' ') : 'Ollama is not running');
         find('#localModelsState').classList.toggle('stopped', Boolean(status) && !running);
+        find('#localModelsState').dataset.state = !status ? 'looking' : running ? 'running' : 'stopped';
         if (running) {
             renderCards();
             if (find('#huggingFaceBrowser').open) renderResults();

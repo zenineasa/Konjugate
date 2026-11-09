@@ -9,7 +9,7 @@
 // into the shared handle/driver shape -- not new behavior.
 
 import { app, BrowserWindow, dialog } from 'electron';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,8 @@ import { join } from 'node:path';
 // same handle object -- scenario code compares handles by reference (e.g. `excluding: [window]`,
 // `candidate !== someHandle`), which only works if wrapping is idempotent.
 const handlesByWindow = new WeakMap();
+// The coverage being taken, when it is (see createRendererCoverage), so a handle can take a window's counts before closing it.
+let windowCoverage = null;
 
 function wrapWindow(win) {
     let handle = handlesByWindow.get(win);
@@ -65,6 +67,7 @@ function wrapWindow(win) {
             win.focus();
         },
         async close() {
+            await windowCoverage?.take(win);
             win.close();
         },
         async isDestroyed() {
@@ -103,11 +106,80 @@ function answerNativeDialogs() {
     dialog.showMessageBoxSync = (...args) => { record('message', args); return options(args).cancelId ?? 0; };
 }
 
+// With KONJUGATE_INTERACTION_COVERAGE set to a folder, every window's code is measured while the scenarios run (V8's precise
+// coverage, through each window's debugger) and written there as renderer-<n>.json files, for scripts/coverageReport.mjs. A
+// window is measured from when it is created, so its modules' top-level code counts; the project window, open before the
+// scenarios start, is loaded again once measuring has started. A window's counts are taken when the driver closes it, when it
+// closes by itself (taken as it starts to close, so a little at the very end may be missed), and from every window still open
+// when the scenarios finish. Taking counts resets them, so the files add up rather than repeat.
+function createRendererCoverage(directory) {
+    const measured = new Set();
+    const pending = new Set();
+    let written = 0;
+
+    async function begin(win) {
+        if (measured.has(win) || win.isDestroyed()) return;
+        measured.add(win);
+        const contents = win.webContents;
+        try {
+            if (!contents.debugger.isAttached()) contents.debugger.attach('1.3');
+            await contents.debugger.sendCommand('Profiler.enable');
+            await contents.debugger.sendCommand('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
+        } catch {
+            measured.delete(win);
+            return;
+        }
+        win.once('close', () => { take(win); });
+    }
+
+    // Takes the window's counts so far and writes them; never fails a scenario.
+    function take(win) {
+        if (!measured.has(win) || win.isDestroyed()) return Promise.resolve();
+        const contents = win.webContents;
+        const taking = (async () => {
+            try {
+                const { result } = await contents.debugger.sendCommand('Profiler.takePreciseCoverage');
+                // Numbered before anything else is awaited: two windows' counts taken at once must not share a file.
+                written += 1;
+                const file = join(directory, `renderer-${written}.json`);
+                await mkdir(directory, { recursive: true });
+                await writeFile(file, JSON.stringify({ result }));
+            } catch { /* the window went before its counts could be taken */ }
+        })();
+        pending.add(taking);
+        taking.finally(() => pending.delete(taking));
+        return taking;
+    }
+
+    return {
+        async start(mainWindow) {
+            app.on('browser-window-created', (_event, win) => { begin(win); });
+            for (const win of BrowserWindow.getAllWindows()) if (win !== mainWindow) await begin(win);
+            await begin(mainWindow);
+            await new Promise((resolve) => { mainWindow.webContents.once('did-finish-load', resolve); mainWindow.webContents.reload(); });
+        },
+        take,
+        async finish() {
+            await Promise.all(BrowserWindow.getAllWindows().map(take));
+            await Promise.all([...pending]);
+        }
+    };
+}
+
 export function createElectronDriver(mainWindow) {
     const mainHandle = wrapWindow(mainWindow);
     answerNativeDialogs();
+    const coverage = process.env.KONJUGATE_INTERACTION_COVERAGE ? createRendererCoverage(process.env.KONJUGATE_INTERACTION_COVERAGE) : null;
+    windowCoverage = coverage;
 
     return {
+        // Before the first scenario, and after the last.
+        async prepare() {
+            await coverage?.start(mainWindow);
+        },
+        async finish() {
+            await coverage?.finish();
+        },
         // The native dialogs asked for since the last call, each answered as cancelled.
         takeNativeDialogs() {
             return nativeDialogs.splice(0);

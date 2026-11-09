@@ -16,6 +16,10 @@ import { readDataLog } from '../src/dataLog.mjs';
 import { startRigServer } from './fixtures/opcuaRigServer.mjs';
 import { startFakeOllama } from './fixtures/fakeOllama.mjs';
 
+// What a scenario checks: what it is about, by ids, data attributes and state (a row's count, a control's value, a
+// [data-state]), and words only where the words are the point (a message's facts, a name the person typed, the cost a
+// setting states). A label or an empty list's sentence can be reworded without breaking a scenario.
+//
 // These 10 primitives, and every scenario below, operate on a "handle" -- a driver-produced
 // object wrapping either a live Electron BrowserWindow (tests/drivers/electronWindowDriver.mjs)
 // or a Playwright Page (tests/drivers/playwrightWebDriver.mjs) -- rather than a raw BrowserWindow
@@ -257,6 +261,7 @@ function sharedParameterTestProject({ withSourceTerm = false } = {}) {
 }
 
 export async function runInteractionTests(driver) {
+    await driver.prepare?.();
     const window = driver.mainHandle;
     // Add-ons that live in their own repositories are installed per run by the runner scripts (see
     // scripts/interactionAddons.mjs); a test needing one that wasn't found is skipped, not failed.
@@ -264,6 +269,10 @@ export async function runInteractionTests(driver) {
     const addonMissing = (addonId, repository) => !installedAddons.has(addonId) && `needs the ${addonId} add-on -- build ../${repository} (npm run build) or set KONJUGATE_INTERACTION_ADDONS`;
     let passedCount = 0;
     let skippedCount = 0;
+    // Every scenario runs, and the failures are listed together at the end, so one run finds them all. Set
+    // KONJUGATE_INTERACTION_STOP_ON_FAILURE=1 to stop at the first instead, as when the failure itself is being looked at.
+    const failures = [];
+    const stopOnFailure = process.env.KONJUGATE_INTERACTION_STOP_ON_FAILURE === '1';
     // The assistant's model in these tests: a fake Ollama server (tests/fixtures/fakeOllama.mjs) answering by fixed rules, through
     // the app's own Ollama provider. It starts with no model, so the scenario that sets the assistant up downloads one.
     const fakeOllama = driver.capabilities.aiAssistant ? await startFakeOllama({ models: [], pullSteps: 6, pullDelayMilliseconds: 60 }) : null;
@@ -294,9 +303,33 @@ export async function runInteractionTests(driver) {
             // would leave the failure unnamed: wrap those instead, keeping the original as the cause.
             const named = `${name}: ${error?.message ?? error}`;
             try { error.message = named; } catch { /* read-only */ }
-            if (error?.message !== named) throw new Error(named, { cause: error });
-            throw error;
+            const failure = error?.message === named ? error : new Error(named, { cause: error });
+            if (stopOnFailure) throw failure;
+            failures.push({ name, error: failure });
+            console.log(`✗ ${name}`);
+            console.error(failure);
+            await tidyAfterFailure();
         }
+    };
+    // What a failed scenario may have left behind, put away so the next one starts as the others do: windows it opened,
+    // dialogs and Settings left open, a simulation result left showing. Best effort: whatever cannot be put away is left.
+    const tidyAfterFailure = async () => {
+        for (const handle of driver.allHandles?.() ?? []) {
+            if (handle === window || handle._raw === window._raw) continue;
+            try { if (!await handle.isDestroyed()) await handle.close(); } catch { /* already gone */ }
+        }
+        try {
+            await evaluate(window, `(() => {
+                window.confirm = () => true;
+                for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+                document.querySelector('#closeAssistantPanel')?.click();
+                document.querySelector('#closeResults')?.click();
+            })()`);
+            // Closing a result asks first: answered here.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            await evaluate(window, `document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click()`);
+        } catch { /* the window may be gone */ }
+        driver.takeNativeDialogs?.();
     };
 
     await run('examples explorer loads a project copy', async () => {
@@ -522,7 +555,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await isRenderedVisible(window, '#assistantSetup'), true);
         assert.equal(await isRenderedVisible(window, '#assistantEmpty'), false);
         assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').disabled && document.querySelector('#generateAssistantProposal').disabled`), true, 'Nothing can be asked with no model.');
-        assert.equal(await evaluate(window, `document.querySelector('#assistantConfiguration').selectedOptions[0].textContent`), 'No model set up');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfiguration').disabled && document.querySelector('#assistantConfiguration').value === ''`), true, 'There is no model to choose.');
 
         // Ollama is asked where an Ollama configuration says it listens; here first somewhere nothing answers.
         const closedPort = await new Promise((resolve) => {
@@ -532,8 +565,8 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#assistantSetUpModel').click()`);
         await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, '"Set up a model…" did not open Settings › Model assistant.');
         await waitFor(window, `!document.querySelector('#localModelsMissing').hidden`, 'The page did not say Ollama is not running.');
-        assert.equal(await evaluate(window, `document.querySelector('#localModelsState').textContent`), 'Ollama is not running');
-        assert.equal(await evaluate(window, `document.querySelector('#openOllamaPage').textContent`), 'Open the Ollama website');
+        assert.equal(await evaluate(window, `document.querySelector('#localModelsState').dataset.state`), 'stopped');
+        assert.equal(await isRenderedVisible(window, '#openOllamaPage'), true, 'The way to Ollama\'s website is offered.');
         assert.equal(await evaluate(window, `document.querySelector('#localModelsCards').hidden && document.querySelector('#huggingFaceBrowser').hidden`), true);
         assert.equal(await evaluate(window, `window.localModels.openPage('https://example.com/installer.pkg')`), false, 'Only Ollama\'s download page and a model\'s page are opened.');
 
@@ -543,7 +576,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
         await evaluate(window, `document.querySelector('#manageAssistantConfigurations').click()`);
         await waitFor(window, `!document.querySelector('#localModelsCards').hidden`, 'The suggested models were not shown once Ollama was running.');
-        assert.equal(await evaluate(window, `document.querySelector('#localModelsState').textContent`), 'Ollama 0.12.0 is running');
+        assert.equal(await evaluate(window, `document.querySelector('#localModelsState').dataset.state`), 'running');
+        assert.match(await evaluate(window, `document.querySelector('#localModelsState').textContent`), /0\.12\.0/, 'The version Ollama reports is shown.');
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.localModelCard')].map((card) => [card.dataset.localModel, card.querySelector('.localModelBadge').textContent, card.querySelector('.localModelAction button').textContent])`), [
             ['qwen3.5:4b', 'Recommended', 'Download'], ['qwen3.5:2b', 'For slower computers', 'Download']
         ]);
@@ -960,7 +994,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
         await evaluate(window, `document.querySelector('[data-settings-target="controllers"]').click()`);
         await waitFor(window, `!document.querySelector('[data-settings-page="controllers"]').hidden`, 'Settings › Controllers did not open.');
-        assert.equal(await evaluate(window, `document.querySelector('#controllerBindingList').textContent.trim()`), 'No controls bound yet.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#controllerBindingList .controllerBindingRow').length === 0 && Boolean(document.querySelector('#controllerBindingList .settingsEmpty'))`), true, 'Nothing is bound yet, and the list says so.');
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#controllerBindParameter option')].map((option) => option.textContent)`), ['Drive (k)']);
         assert.equal(await evaluate(window, `document.querySelector('#controllerThreshold').value`), '1', 'The threshold is 1% of the live range unless changed.');
 
@@ -3598,7 +3632,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
     });
 
-    await run('edge group meshes a selection, saves a shared equation, and supports detach/delete/undo', async () => {
+    await run('edge group meshes a selection, edits its shared definition (parameters, a program, bindings), and supports detach, add, delete and undo', async () => {
         const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
         const nodeIdFor = (name) => `Number(${nodeLabel(name)}.closest('.node-label-container').dataset.node)`;
         // The move tool is active so #createNode's own "attach the gizmo to whatever was just
@@ -3724,22 +3758,132 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'Opening the edge group from its context menu failed.');
         assert.equal(await evaluate(window, `document.querySelectorAll('#groupMembersList .groupMemberRow').length`), 3);
 
+        // The group's one definition, edited in its card, reaches every edge of the mesh: a shared parameter, a program in place of
+        // the equation, its bindings and output, and back to the equation it had.
+        const groupName = await evaluate(window, `document.querySelector('#groupName').value`);
+        const savedGroup = () => evaluate(window, `(() => {
+            const document_ = window.__debugProject.serialize();
+            const group = document_.edgeGroups.find((candidate) => candidate.name === ${JSON.stringify(groupName)} && !candidate.deleted);
+            return { group, members: document_.edges.filter((edge) => edge.groupId === group.id) };
+        })()`);
+        const setField = (selector, value) => evaluate(window, `(() => {
+            const field = document.querySelector(${JSON.stringify(selector)});
+            field.value = ${JSON.stringify(value)};
+            field.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        const parameterField = (field) => `#groupParameterRows .parameterRow [data-field="${field}"]`;
+        const isHidden = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).hidden`);
+        assert.equal((await savedGroup()).members.length, 6);
+
+        await evaluate(window, `document.querySelector('#groupAddParameter').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupParameterRows .parameterRow').length === 1`, 'Adding a shared parameter did not add its row.');
+        await setField(parameterField('symbol'), 'gain');
+        await setField(parameterField('value'), '2.5');
+        let saved = await savedGroup();
+        assert.deepEqual(saved.group.definition.parameters.map(({ symbol, value }) => ({ symbol, value })), [{ symbol: 'gain', value: 2.5 }]);
+        assert.ok(saved.members.every((edge) => edge.parameters.some((parameter) => parameter.symbol === 'gain' && parameter.value === 2.5)),
+            'Every edge of the group should carry its shared parameter.');
+        // A symbol the model cannot use is refused, with the reason, and the one it had is kept.
+        await setField(parameterField('symbol'), 'Gain');
+        assert.notEqual(await evaluate(window, `document.querySelector('#editGroupError').textContent`), '', 'A symbol that is not valid should be refused with a reason.');
+        assert.equal(await evaluate(window, `document.querySelector(${JSON.stringify(parameterField('symbol'))}).value`), 'gain');
+        assert.equal((await savedGroup()).group.definition.parameters[0].symbol, 'gain');
+        // Live: its range fields show, and it is kept with a range.
+        await setField(parameterField('mode'), 'live');
+        assert.equal(await isHidden('#groupParameterRows .parameterControlFields'), false);
+        saved = await savedGroup();
+        assert.equal(saved.group.definition.parameters[0].mode, 'live');
+        assert.equal(typeof saved.group.definition.parameters[0].control, 'object');
+        assert.equal(await evaluate(window, `document.querySelector('#editGroupError').textContent`), '', 'An accepted change clears the refusal.');
+
+        // A program in place of the equation: the equation's fields go, the program's come, and every edge runs the program.
+        await setField('#groupImplementationKind', 'python');
+        await waitFor(window, `!document.querySelector('#groupProviderSection').hidden`, 'Choosing a program did not show its section.');
+        assert.equal(await isHidden('#groupEquationHeading'), true);
+        assert.equal(await isHidden('#groupReferenceHint'), true);
+        saved = await savedGroup();
+        assert.equal(saved.group.definition.implementation.kind, 'python');
+        assert.ok(saved.group.definition.implementation.source.trim(), 'A program starts from a template, not empty.');
+        assert.ok(saved.members.every((edge) => edge.implementation?.kind === 'python'), 'Every edge of the group should run its program.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#groupProviderBindingRows .providerBindingRow').length`), 0);
+        assert.ok(await evaluate(window, `Boolean(document.querySelector('#groupProviderBindingRows .emptyEditorState'))`));
+
+        // A binding: added with a key of its own, renamed, pointed at the shared parameter, then removed.
+        await evaluate(window, `document.querySelector('#groupAddProviderBinding').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupProviderBindingRows .providerBindingRow').length === 1`, 'Adding a binding did not add its row.');
+        assert.equal((await savedGroup()).group.definition.implementation.bindings.length, 1);
+        await setField('#groupProviderBindingRows .providerBindingRow [data-field="key"]', 'boost');
+        assert.equal((await savedGroup()).group.definition.implementation.bindings[0].key, 'boost');
+        const parameterReference = await evaluate(window, `[...document.querySelectorAll('#groupProviderBindingRows [data-field="reference"] option')].find((option) => option.value.startsWith('parameter:'))?.value ?? null`);
+        assert.ok(parameterReference, 'The shared parameter should be offered as a reference.');
+        await setField('#groupProviderBindingRows .providerBindingRow [data-field="reference"]', parameterReference);
+        saved = await savedGroup();
+        assert.deepEqual(saved.group.definition.implementation.bindings.map(({ key, kind }) => ({ key, kind })), [{ key: 'boost', kind: 'parameter' }]);
+        assert.equal(await evaluate(window, `document.querySelector('#groupProviderBindingRows [data-field="reference"]').value`), parameterReference, 'The binding row shows what it is bound to.');
+        await setField('#groupProviderOutputKey', 'heatFlow');
+        assert.equal((await savedGroup()).group.definition.implementation.output.key, 'heatFlow');
+        await evaluate(window, `document.querySelector('#groupProviderBindingRows .providerBindingRow .removeBuilderRow').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupProviderBindingRows .providerBindingRow').length === 0`, 'Removing the binding did not remove its row.');
+        assert.equal((await savedGroup()).group.definition.implementation.bindings.length, 0);
+
+        // Back to the equation: the program goes from the group and from every edge, and the equation it had is still there.
+        await setField('#groupImplementationKind', 'equation');
+        await waitFor(window, `document.querySelector('#groupProviderSection').hidden`, 'Choosing an equation did not hide the program.');
+        assert.equal(await isHidden('#groupEquationHeading'), false);
+        saved = await savedGroup();
+        assert.equal(saved.group.definition.implementation, null);
+        assert.match(saved.group.definition.equation, /sourceTemperature/);
+        assert.ok(saved.members.every((edge) => !edge.implementation), 'No edge of the group should still run the program.');
+        await evaluate(window, `document.querySelector('#groupParameterRows .parameterRow .removeBuilderRow').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupParameterRows .parameterRow').length === 0`, 'Removing the shared parameter did not remove its row.');
+        assert.equal((await savedGroup()).group.definition.parameters.length, 0);
+
         await evaluate(window, `[...document.querySelectorAll('#groupMembersList .groupMemberRow')].find((row) => row.textContent.includes('Group test C')).querySelector('.removeBuilderRow').click()`);
         await waitFor(window, `document.querySelectorAll('#groupMembersList .groupMemberRow').length === 2`, 'Detach did not remove the member row.');
         // Detaching C from the 3-member mesh un-groups its 4 edges (both directions to A and to
         // B) as ordinary edges -- nothing is deleted, so the total is still all 6 mesh edges.
         assert.equal(await relationshipCount(), before + 6, 'Detaching a member should leave its edges behind as ordinary edges, not delete them.');
 
+        // Adding it back, with it the only node selected: two new edges to each member, beside the ordinary ones it left behind;
+        // and undone, as one step.
+        assert.equal(await evaluate(window, `document.querySelector('#groupAddMember').disabled`), true, 'With no single non-member selected, there is nothing to add.');
+        const memberC = await evaluate(window, nodeIdFor('Group test C'));
+        await evaluate(window, `window.__debugTransform.selectExactly([${memberC}])`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeGroupEditor').classList.contains('hidden')`), false, 'Selecting one node should leave the group open.');
+        // The card reads the selection when it is drawn again, which any change to the group does.
+        const colourBefore = (await savedGroup()).group.color;
+        await setField('#groupColor', '#3366cc');
+        assert.notEqual((await savedGroup()).group.color, colourBefore);
+        await waitFor(window, `!document.querySelector('#groupAddMember').disabled`, 'Add member was not offered for the one selected node.');
+        await evaluate(window, `document.querySelector('#groupAddMember').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupMembersList .groupMemberRow').length === 3`, 'Add member did not add the node.');
+        assert.equal(await relationshipCount(), before + 10);
+        assert.equal((await savedGroup()).members.length, 6);
+        // And detached again: its 4 new edges, too, are left behind as ordinary edges.
+        await evaluate(window, `[...document.querySelectorAll('#groupMembersList .groupMemberRow')].find((row) => row.textContent.includes('Group test C')).querySelector('.removeBuilderRow').click()`);
+        await waitFor(window, `document.querySelectorAll('#groupMembersList .groupMemberRow').length === 2`, 'Detaching it again did not remove the member row.');
+        assert.equal(await relationshipCount(), before + 10);
+
         await evaluate(window, `document.querySelector('[data-delete-edge-group]').click()`);
         await waitFor(window, `document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'Deleting the group did not close its editor.');
         // Only the group's own remaining mesh (A<->B, the sole pair with both endpoints still
-        // members: 2 directed edges) is removed; C's 4 now-ordinary edges are untouched.
-        assert.equal(await relationshipCount(), before + 4, 'Deleting the group should remove only its remaining mesh edges, leaving the 4 detached ones.');
+        // members: 2 directed edges) is removed; C's 8 now-ordinary edges are untouched.
+        assert.equal(await relationshipCount(), before + 8, 'Deleting the group should remove only its remaining mesh edges, leaving the 8 detached ones.');
 
+        // Each step undone in turn (undo closes the card, so the group is read from the document).
+        const memberCount = async () => (await savedGroup()).group.memberNodeIds.length;
         await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await relationshipCount(), before + 6, 'Undoing the group deletion did not restore its edges.');
+        assert.equal(await relationshipCount(), before + 10, 'Undoing the group deletion did not restore its edges.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await memberCount(), 3, 'Undoing the second detach did not restore membership.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await relationshipCount(), before + 6, 'Undoing Add member did not take away the edges it made.');
+        assert.equal(await memberCount(), 2, 'Undoing Add member did not take the node out again.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal((await savedGroup()).group.color, colourBefore, 'Undoing the colour did not put the group\'s own back.');
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await relationshipCount(), before + 6, 'Undoing the detach did not restore membership.');
+        assert.equal(await memberCount(), 3);
 
         // Cleanup: delete the three throwaway nodes (and, with them, every mesh/detached edge)
         // so this test doesn't leave the canvas mutated for whatever runs after it.
@@ -4860,6 +5004,10 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningReplayTimeStep').value`), '60');
 
         const tolerance = `document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] input[data-field="tolerance"]')`;
+        // A tolerance has to be more than nothing: one that is not is put back as it was.
+        const suggestedTolerance = await evaluate(opened, `${tolerance}.value`);
+        await evaluate(opened, `(() => { const input = ${tolerance}; input.value = '-1'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(opened, `${tolerance}.value`), suggestedTolerance, 'A tolerance that is not positive should be put back.');
         await evaluate(opened, `(() => { const input = ${tolerance}; input.value = '0.2'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await evaluate(opened, `document.querySelector('#runParameterTuningReplay').click()`);
         await waitFor(opened, `window.__debugParameterTuning.replay() !== null`, 'The replay did not finish.', 30000);
@@ -4872,6 +5020,17 @@ export async function runInteractionTests(driver) {
         // A tighter tolerance judges the same run again, without running it.
         await evaluate(opened, `(() => { const input = ${tolerance}; input.value = '0.000001'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitFor(opened, `window.__debugParameterTuning.replay()[0].stretches.length > 0`, 'A tighter tolerance was not applied to the last run.');
+
+        // A stretch the recording does not reach is refused before anything runs, and says why.
+        const setReplayField = (selector, value) => evaluate(opened, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await setReplayField('#parameterTuningReplayFrom', '5');
+        await setReplayField('#parameterTuningReplayTo', '6');
+        await evaluate(opened, `document.querySelector('#runParameterTuningReplay').click()`);
+        await waitFor(opened, `/no readings in that stretch/.test(document.querySelector('#parameterTuningReplayStatus').textContent)`, 'A stretch past the end of the recording was not refused.');
+        assert.equal(await evaluate(opened, `window.__debugParameterTuning.replay()`), null, 'Nothing should have been replayed.');
+        assert.equal(await evaluate(opened, `document.querySelector('#runParameterTuningReplay').disabled`), false, 'A refused stretch leaves the replay ready to run again.');
+        await setReplayField('#parameterTuningReplayFrom', '');
+        await setReplayField('#parameterTuningReplayTo', '');
 
         // Comparing nothing cannot be replayed; and the model itself was never changed.
         await evaluate(opened, `(() => { const select = document.querySelector('.parameterTuningReplayRow[data-signal="tankTemperature"] select'); select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -5129,6 +5288,14 @@ export async function runInteractionTests(driver) {
         await describe('Heizung (%)', 'input', { name: 'heaterPower', unit: 'W', scale: '30' });
         await describe('Ventil', 'input', { name: 'inflowRate', unit: 'kg/s', values: 'OPEN=0.015, CLOSED=0' });
         await describe('Raum (°C)', 'input', { name: 'roomTemperature', unit: 'K', offset: '273.15' });
+        // Read with no column said to hold the time, the card asks for one, and reads nothing.
+        await set(`${column('Datum')} select`, '');
+        await set(`${column('Uhrzeit')} select`, '');
+        await evaluate(opened, `document.querySelector('#loggerRead').click()`);
+        assert.match(await evaluate(opened, `document.querySelector('#loggerStatus').textContent`), /hold the time/);
+        assert.equal(await evaluate(opened, `document.querySelector('#parameterTuningReplaySection').hidden`), true, 'Nothing should have been read.');
+        await set(`${column('Datum')} select`, 'time');
+        await set(`${column('Uhrzeit')} select`, 'time');
         await evaluate(opened, `document.querySelector('#loggerRead').click()`);
         await waitFor(opened, `/^Read: /.test(document.querySelector('#loggerStatus').textContent)`, 'The logger\'s file was not read.');
         const told = await evaluate(opened, `document.querySelector('#loggerStatus').textContent`);
@@ -7298,5 +7465,11 @@ export async function runInteractionTests(driver) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (after the last test, a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
     await fakeOllama?.close();
-    console.log(`Interaction tests: ${passedCount} passed, ${skippedCount} skipped, ${passedCount + skippedCount} total`);
+    await driver.finish?.();
+    console.log(`Interaction tests: ${passedCount} passed, ${failures.length} failed, ${skippedCount} skipped, ${passedCount + failures.length + skippedCount} total`);
+    if (failures.length) {
+        console.log(`\nFailed (${failures.length}):`);
+        for (const { name, error } of failures) console.log(`  ✗ ${name}\n      ${String(error?.message ?? error).split('\n').slice(0, 3).join('\n      ')}`);
+        throw new Error(`${failures.length} interaction test${failures.length === 1 ? '' : 's'} failed: ${failures.map((failure) => failure.name).join('; ')}`);
+    }
 }

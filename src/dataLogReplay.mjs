@@ -102,7 +102,12 @@ export function replayPlan(document, log, mapping, { timeStep, anchor = true, fr
     if (!Number.isFinite(start)) throw new ReplayError(from === null ? 'The mapped signals have no readings yet.' : 'The mapped signals have no readings in that stretch.');
     if (from !== null) start = from;
     if (to !== null) end = Math.min(end, to);
-    if (!(end > start)) throw new ReplayError('The log covers no time yet: it needs readings at two different times.');
+    // With a stretch chosen, an input held from before it can still count as a reading: past the end of the recording, the stretch
+    // is what has nothing in it, not the log.
+    if (!(end > start)) {
+        throw new ReplayError(from === null && to === null ? 'The log covers no time yet: it needs readings at two different times.'
+            : 'The mapped signals have no readings in that stretch.');
+    }
 
     const run = structuredClone(document);
     for (const entry of inputs) {

@@ -87,6 +87,24 @@ export function initRoom(given) {
     $('#sandboxRun').addEventListener('click', () => runSandbox());
     $('#sandboxBack').addEventListener('click', () => closeSandbox());
     $('#scenariosToggle').addEventListener('click', () => { $('#scenarioList').hidden = !$('#scenarioList').hidden; });
+    // A status chip shortened to fit says all of itself when pointed at, unless it already has a tooltip of its own saying more.
+    const chipTitles = new MutationObserver((changes) => {
+        for (const change of changes) {
+            const chip = change.target.nodeType === Node.ELEMENT_NODE ? change.target : change.target.parentElement;
+            if (!chip?.classList.contains('healthItem') || (chip.title && chip.title !== chip.dataset.textTitle)) continue;
+            chip.title = chip.textContent;
+            chip.dataset.textTitle = chip.textContent;
+        }
+    });
+    for (const chip of $$('#health .healthItem')) chipTitles.observe(chip, { childList: true, characterData: true, subtree: true });
+    $('#timeSpan').addEventListener('change', () => {
+        if (!twin) return;
+        const value = $('#timeSpan').value;
+        if (value === 'recent') delete twin.layout.span;
+        else twin.layout.span = value === 'all' ? 'all' : Number(value);
+        saveLayout();
+        renderView();
+    });
     $('#temperatureUnit').addEventListener('click', () => {
         if (!twin) return;
         twin.layout.temperature = twin.layout.temperature === 'K' ? 'C' : 'K';
@@ -120,6 +138,9 @@ export function openRoom(run) {
     };
     buildTiles();
     refreshTemperatureButton();
+    // A span kept with the project that this menu does not offer (written by hand, say) is still used; the menu then shows Recent.
+    $('#timeSpan').value = String(twin.layout.span ?? 'recent');
+    if (!$('#timeSpan').value) $('#timeSpan').value = 'recent';
     $('#healthTwin').className = 'healthItem';
     $('#healthTwin').textContent = 'Starting the twin…';
     $('#healthSource').className = 'healthItem';
@@ -186,16 +207,11 @@ function saveLayout() {
 }
 
 function buildTiles() {
+    closeTileMenu();
     const { wide, pinned, hidden } = twin.layout;
     const shownTiles = orderedTiles().filter((tile) => !hidden.includes(tile.name));
     $('#tiles').replaceChildren(...shownTiles.map((tile) => {
-        const tool = (label, title, pressed, action) => {
-            const button = element('button', { type: 'button', textContent: label, title });
-            button.setAttribute('aria-label', title);
-            if (pressed !== null) button.setAttribute('aria-pressed', String(pressed));
-            button.addEventListener('click', action);
-            return button;
-        };
+        const label = tile.target?.label ?? tile.signal;
         const section = element('section', { className: `tile${wide.includes(tile.name) ? ' wide' : ''}${pinned.includes(tile.name) ? ' pinned' : ''}`, draggable: true });
         section.dataset.signal = tile.signal;
         const toggle = (list) => () => {
@@ -204,13 +220,24 @@ function buildTiles() {
             saveLayout();
             renderView();
         };
+        const isPinned = pinned.includes(tile.name);
+        const pinMark = isPinned ? element('span', { className: 'pinMark', title: 'Pinned to the front', innerHTML: icon(pinIcon) }) : null;
+        const menuButton = element('button', { type: 'button', className: 'tileMenuButton', title: `Options for ${label}`, innerHTML: icon(moreIcon) });
+        menuButton.setAttribute('aria-label', `Options for ${label}`);
+        menuButton.setAttribute('aria-haspopup', 'menu');
+        menuButton.setAttribute('aria-expanded', 'false');
+        menuButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openTileMenu(menuButton, [
+                { label: 'Pin to the front', checked: isPinned, run: toggle('pinned') },
+                { label: 'Draw twice as wide', checked: wide.includes(tile.name), run: toggle('wide') },
+                null,
+                { label: 'Hide this tile', danger: true, run: toggle('hidden') }
+            ]);
+        });
         const header = element('header', {},
-            element('div', {}, element('span', { className: 'grip', textContent: '⋮⋮', title: 'Drag to move' }), element('strong', { textContent: tile.target?.label ?? tile.signal }), ' ', element('small', { textContent: tile.name })),
-            element('span', { className: 'tileTools' },
-                tool('⇔', `Draw ${tile.target?.label ?? tile.signal} twice as wide`, wide.includes(tile.name), toggle('wide')),
-                tool('📌', `Pin ${tile.target?.label ?? tile.signal} first`, pinned.includes(tile.name), toggle('pinned')),
-                tool('✕', `Hide ${tile.target?.label ?? tile.signal}`, null, toggle('hidden'))),
-            element('span', { className: 'value', textContent: '—' }));
+            element('div', {}, element('span', { className: 'grip', textContent: '⋮⋮', title: 'Drag to move' }), pinMark, pinMark ? ' ' : null, element('strong', { textContent: label }), ' ', element('small', { textContent: tile.name })),
+            element('span', { className: 'tileEnd' }, element('span', { className: 'value', textContent: '—' }), menuButton));
         section.append(header, element('div', { className: 'plot' }), element('div', { className: 'facts' }));
         // Dragged onto another tile, it takes that tile's place.
         section.addEventListener('dragstart', (event) => {
@@ -234,6 +261,62 @@ function buildTiles() {
     $('#hiddenTiles').textContent = `Show ${plural(hidden.length, 'hidden tile')}`;
 }
 
+// The icons the room draws (24-unit paths, filled with the text colour).
+const pinIcon = 'M16 3l5 5-2 1-3 3 1 5-2 2-4-4-5 5-1-1 5-5-4-4 2-2 5 1 3-3z';
+const moreIcon = 'M5 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z';
+const checkIcon = 'M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6 11-11-1.4-1.4z';
+const icon = (path) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
+
+// A tile's options, as a menu under its button: items { label, checked, danger, run }, null for a divider. One menu is open at a time;
+// it closes on a choice, Escape, a click elsewhere, or the window changing size, and gives the focus back to its button.
+let openMenu = null;
+function closeTileMenu({ refocus = false } = {}) {
+    if (!openMenu) return;
+    const { menu, button, cleanup } = openMenu;
+    openMenu = null;
+    cleanup();
+    menu.remove();
+    button.setAttribute('aria-expanded', 'false');
+    if (refocus && button.isConnected) button.focus();
+}
+
+function openTileMenu(button, items) {
+    const reopening = openMenu?.button === button;
+    closeTileMenu();
+    if (reopening) return;
+    const menu = element('div', { className: 'tileMenu' });
+    menu.setAttribute('role', 'menu');
+    for (const item of items) {
+        if (!item) { menu.append(element('hr')); continue; }
+        const choice = element('button', { type: 'button', className: item.danger ? 'danger' : '', innerHTML: `${item.checked ? icon(checkIcon) : '<span></span>'}<span></span>` });
+        choice.lastChild.textContent = item.label;
+        choice.setAttribute('role', item.checked === undefined ? 'menuitem' : 'menuitemcheckbox');
+        if (item.checked !== undefined) choice.setAttribute('aria-checked', String(item.checked));
+        choice.addEventListener('click', () => { closeTileMenu(); item.run(); });
+        menu.append(choice);
+    }
+    document.body.append(menu);
+    const place = button.getBoundingClientRect();
+    menu.style.top = `${Math.min(place.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
+    menu.style.left = `${Math.max(8, place.right - menu.offsetWidth)}px`;
+    const choices = [...menu.querySelectorAll('button')];
+    const onKey = (event) => {
+        if (event.key === 'Escape') { event.preventDefault(); closeTileMenu({ refocus: true }); return; }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+        const at = choices.indexOf(document.activeElement);
+        choices[(at + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length].focus();
+    };
+    const onPointer = (event) => { if (!menu.contains(event.target) && event.target !== button) closeTileMenu(); };
+    const onResize = () => closeTileMenu();
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer, true);
+    window.addEventListener('resize', onResize);
+    openMenu = { menu, button, cleanup: () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onPointer, true); window.removeEventListener('resize', onResize); } };
+    button.setAttribute('aria-expanded', 'true');
+    choices[0]?.focus();
+}
+
 // Moves a tile to where another is: before it, or after it when coming from in front.
 export function moveTile(name, ontoName) {
     if (!twin || name === ontoName) return;
@@ -249,11 +332,32 @@ export function moveTile(name, ontoName) {
     renderView();
 }
 
-function drawTile(tile, cycle, past) {
+// What the plots show of time at a move: from `start` to `end` in seconds of data, with the unit their axis is read in. The span is the
+// room's choice (the Show menu): four times the twin's window by default, so the plots keep what a person is watching at a readable
+// scale however long the twin has run; a fixed span; or everything since the first reading. It always runs on to the forecast's end.
+function visibleTime(cycle) {
+    const firstOf = (map) => map.keys().next().value;
+    const firsts = [...twin.tiles.map((tile) => firstOf(tile.measured)), ...twin.inputs.map((input) => firstOf(input.readings))].filter(Number.isFinite);
+    const first = firsts.length ? Math.min(...firsts) : cycle.anchor;
+    const ends = [
+        ...twin.tiles.map((tile) => cycle.forecast?.[tile.signal]?.at(-1)?.time),
+        ...Object.values(twin.sandbox?.series ?? {}).map((series) => series.at(-1)?.time)
+    ].filter(Number.isFinite);
+    const end = Math.max(cycle.now, ...ends);
+    const span = twin.layout.span ?? 'recent';
+    const length = span === 'all' ? Infinity : span === 'recent' ? 4 * (cycle.now - cycle.anchor) : span;
+    const start = length > 0 && Number.isFinite(length) ? Math.max(first, cycle.now - length) : first;
+    const shown = Math.max(end - start, 1);
+    const unit = shown < 180 ? { divisor: 1, title: 'seconds' } : shown < 3 * 3600 ? { divisor: 60, title: 'minutes' }
+        : shown < 3 * 86400 ? { divisor: 3600, title: 'hours' } : { divisor: 86400, title: 'days' };
+    return { start, end, ...unit };
+}
+
+function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     if (!tile.element) return;
     const rows = cycle.window[tile.signal] ?? [];
     const shownAs = displayOf(tile.target?.unit);
-    const measured = [...tile.measured].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([time, value]) => [time, shownAs.at(value)]);
+    const measured = [...tile.measured].filter(([at]) => at <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([at, value]) => [at, shownAs.at(value)]);
     const latest = measured.at(-1)?.[1];
     const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
     $('.value', tile.element).textContent = `${shown(latest)}${unit}`;
@@ -278,17 +382,21 @@ function drawTile(tile, cycle, past) {
         if (total) facts.append(element('span', { textContent: `${Math.round((outside / total) * 100)}% of readings outside the band (about 20% is honest)`, title: `${outside} of ${total} readings fell outside the twin's 10th to 90th percentile` }));
     }
     if (!globalThis.Plotly) return;
-    const hours = (points) => points.map((point) => point.time / 3600);
-    const window = rows.map((row) => ({ time: row.time, value: shownAs.at(row.simulated) }));
+    // Only what is in the span is drawn (a little before it too, so a line enters from the edge): the plot stays readable, and quick.
+    const from = time.start - (time.end - time.start) * 0.02;
+    const inSpan = (points) => points.filter((point) => point.time >= from);
+    const hours = (points) => points.map((point) => point.time / time.divisor);
+    const window = inSpan(rows.map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })));
     const forecast = (cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }));
-    const band = cycle.estimate?.band?.[tile.signal] ?? null;
+    const shownMeasured = measured.filter(([at]) => at >= from);
+    const band = cycle.estimate?.band?.[tile.signal] ? inSpan(cycle.estimate.band[tile.signal]) : null;
     const sandbox = !past ? (twin.sandbox?.series?.[tile.signal] ?? null)?.map((point) => ({ time: point.time, value: shownAs.at(point.value) })) ?? null : null;
     const traces = [
         ...(band ? [
             { type: 'scatter', mode: 'lines', name: 'Band', x: hours(band), y: band.map((point) => shownAs.at(point.high)), line: { width: 0 }, hoverinfo: 'skip', showlegend: false },
             { type: 'scatter', mode: 'lines', name: 'Band (10–90%)', x: hours(band), y: band.map((point) => shownAs.at(point.low)), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
         ] : []),
-        { type: 'scatter', mode: 'markers', name: 'Measured', x: measured.map(([time]) => time / 3600), y: measured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
+        { type: 'scatter', mode: 'markers', name: 'Measured', x: shownMeasured.map(([at]) => at / time.divisor), y: shownMeasured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
         { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' } },
         { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(forecast), y: forecast.map((point) => point.value), line: { width: 2, dash: 'dash', color: '#4b8fe2' } },
         ...(sandbox ? [{ type: 'scatter', mode: 'lines', name: 'Tried', x: hours(sandbox), y: sandbox.map((point) => point.value), line: { width: 2, dash: 'dot', color: '#9b8cf0' } }] : [])
@@ -296,9 +404,9 @@ function drawTile(tile, cycle, past) {
     globalThis.Plotly.react($('.plot', tile.element), traces, plotLayout({
         margin: { l: 52, r: 10, t: 22, b: 28 },
         showlegend: true, legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', font: { size: 10 }, bgcolor: 'rgba(0,0,0,0)' },
-        xaxis: { gridcolor: '#17252f', zeroline: false, title: { text: 'hours', standoff: 2 } },
+        xaxis: { gridcolor: '#17252f', zeroline: false, title: { text: time.title, standoff: 2 }, range: [time.start / time.divisor, time.end / time.divisor] },
         yaxis: { gridcolor: '#17252f', zeroline: false, title: { text: shownAs.unit, standoff: 4 } },
-        shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: cycle.anchor / 3600, x1: cycle.now / 3600, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
+        shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: Math.max(cycle.anchor, time.start) / time.divisor, x1: cycle.now / time.divisor, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
     }), { displayModeBar: false, responsive: true });
 }
 
@@ -318,22 +426,25 @@ function renderInputs() {
     }));
 }
 
-function drawInputs(cycle) {
+function drawInputs(cycle, time = visibleTime(cycle)) {
     for (const input of twin.inputs) {
         const shownAs = displayOf(input.target?.unit);
         const readings = [...input.readings].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]).map(([time, value]) => [time, shownAs.at(value)]);
         const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
         $('.latest', input.element).textContent = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
         if (!globalThis.Plotly || !readings.length) continue;
-        // The last value held up to now, so a step is drawn to the present.
-        const x = [...readings.map(([time]) => time / 3600), cycle.now / 3600];
-        const y = [...readings.map(([, value]) => value), readings.at(-1)[1]];
+        // Within the span, the value held from before it starting at its edge, and the last value held up to now, so a step is drawn
+        // to the present.
+        const before = readings.filter(([at]) => at < time.start).at(-1);
+        const within = [...(before ? [[time.start, before[1]]] : []), ...readings.filter(([at]) => at >= time.start)];
+        const x = [...within.map(([at]) => at / time.divisor), cycle.now / time.divisor];
+        const y = [...within.map(([, value]) => value), within.at(-1)[1]];
         const low = Math.min(...y);
         const high = Math.max(...y);
         const pad = (high - low || Math.abs(high) || 1) * 0.15;
         globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
             plotLayout({
-                margin: { l: 46, r: 6, t: 8, b: 8 }, font: { color: '#9fb2bb', size: 10 }, xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false },
+                margin: { l: 46, r: 6, t: 8, b: 8 }, font: { color: '#9fb2bb', size: 10 }, xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false, range: [time.start / time.divisor, cycle.now / time.divisor] },
                 yaxis: { gridcolor: '#17252f', zeroline: false, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => shown(value)) }
             }), { displayModeBar: false, responsive: true, staticPlot: true });
     }
@@ -411,8 +522,9 @@ function renderView() {
     $('#timeLabel').textContent = following ? `Following now · ${Number((cycle.now / 3600).toFixed(2))} h` : `${dataTime(cycle.now)} · ${plural(behind, 'move')} ago`;
     $('#timeFollow').hidden = following;
     $('#tiles').classList.toggle('past', !following);
-    for (const tile of twin.tiles) drawTile(tile, cycle, !following);
-    drawInputs(cycle);
+    const time = visibleTime(cycle);
+    for (const tile of twin.tiles) drawTile(tile, cycle, !following, time);
+    drawInputs(cycle, time);
     drawInferred(cycle);
 }
 

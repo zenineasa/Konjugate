@@ -54,3 +54,10 @@ test('the engineer\'s settings, the room\'s layout and the last run\'s events ar
     assert.deepEqual(setup.record, { startedAt: '2026-11-07T10:00:00Z', events: [{ at: '2026-11-07T10:05:00Z', kind: 'bad', text: 'Drifting', detail: 'past the warning' }] });
     assert.equal(normalizeTwinSetup({ source: { kind: 'push' }, mapping: [], layout: { bounds: { x: 0, y: 0, width: 10, height: 10 } } }).layout, undefined, 'A window too small to use is not kept.');
 });
+
+test('how much of the past the room\'s plots show is kept: everything, or a span in seconds', () => {
+    const span = (value) => normalizeTwinSetup({ source: { kind: 'push' }, mapping: [], layout: { span: value } }).layout?.span;
+    assert.equal(span('all'), 'all');
+    assert.equal(span(3600), 3600);
+    for (const unusable of [0, -60, Infinity, 'recent', '3600', null]) assert.equal(span(unusable), undefined, `${String(unusable)} is not a span.`);
+});

@@ -5875,10 +5875,45 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent)) && document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'What was tried was not kept.');
 
-        // The layout: the tile drawn wide, kept with the project.
-        await evaluate(twin, `document.querySelector('#tiles .tile .tileTools button').click()`);
+        // The layout, from a tile's options menu: the tile drawn wide, then pinned, kept with the project; the menu says what is on.
+        const tileMenu = async () => {
+            await evaluate(twin, `document.querySelector('#tiles .tile .tileMenuButton').click()`);
+            await waitFor(twin, `Boolean(document.querySelector('.tileMenu')) && document.querySelector('#tiles .tile .tileMenuButton').getAttribute('aria-expanded') === 'true'`, 'The tile\'s options did not open.');
+        };
+        const choose = (label) => evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === ${JSON.stringify(label)}).click()`);
+        const checked = (label) => evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === ${JSON.stringify(label)}).getAttribute('aria-checked')`);
+        await tileMenu();
+        assert.equal(await checked('Draw twice as wide'), 'false');
+        await choose('Draw twice as wide');
+        assert.equal(await evaluate(twin, `Boolean(document.querySelector('.tileMenu'))`), false, 'Choosing closes the menu.');
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('wide')`), true);
         await waitFor(opened, `JSON.stringify(window.__debugTwin.setup().layout?.wide) === '["tankTemperature"]'`, 'The layout was not kept with the project.');
+        await tileMenu();
+        assert.equal(await checked('Draw twice as wide'), 'true');
+        await choose('Pin to the front');
+        assert.equal(await evaluate(twin, `Boolean(document.querySelector('#tiles .tile .pinMark'))`), true, 'A pinned tile is marked.');
+        await waitFor(opened, `JSON.stringify(window.__debugTwin.setup().layout?.pinned) === '["tankTemperature"]'`, 'The pin was not kept with the project.');
+        // Escape closes the menu without choosing.
+        await tileMenu();
+        await evaluate(twin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+        assert.equal(await evaluate(twin, `Boolean(document.querySelector('.tileMenu'))`), false);
+
+        // How much of the past the plots show: by default four times the twin's window, not the whole log; a fixed span; everything.
+        const axis = () => evaluate(twin, `(() => { const plot = document.querySelector('#tiles .tile .plot'); return { range: plot._fullLayout.xaxis.range, title: plot._fullLayout.xaxis.title.text }; })()`);
+        const last = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).last;
+        const unitOf = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
+        let shown = await axis();
+        assert.ok(Math.abs(shown.range[0] * unitOf[shown.title] - Math.max(0, last.now - 4 * (last.now - last.anchor))) < 1, `Recent starts four windows back (got ${JSON.stringify(shown)}).`);
+        await setField(twin, '#timeSpan', '3600');
+        shown = await axis();
+        assert.equal(shown.title, 'minutes', 'An hour and its forecast are read in minutes.');
+        assert.ok(Math.abs(shown.range[0] - (last.now - 3600) / 60) < 0.01, `The last hour is shown (got ${JSON.stringify(shown)}).`);
+        await waitFor(opened, `window.__debugTwin.setup().layout?.span === 3600`, 'The span was not kept with the project.');
+        await setField(twin, '#timeSpan', 'all');
+        shown = await axis();
+        assert.ok(Math.abs(shown.range[0]) < 1e-9, 'Everything starts at the first reading.');
+        await setField(twin, '#timeSpan', 'recent');
+        await waitFor(opened, `window.__debugTwin.setup().layout?.span === undefined`, 'Recent, the default, is not kept as a choice.');
 
         // Time scrubbed back to the first move, and following again.
         await evaluate(twin, `(() => { const scrub = document.querySelector('#timeScrub'); scrub.value = '0'; scrub.dispatchEvent(new Event('input')); })()`);

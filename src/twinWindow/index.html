@@ -100,6 +100,15 @@
                 <span id="timeLabel">Following now</span>
                 <button id="timeFollow" type="button" hidden>Follow now</button>
             </div>
+            <label class="spanControl"><span>Show</span><select id="timeSpan" aria-label="How much of the past the plots show" title="How much of the past the plots show">
+                <option value="recent" title="Four times the twin's window, and the forecast">Recent</option>
+                <option value="900">Last 15 minutes</option>
+                <option value="3600">Last hour</option>
+                <option value="21600">Last 6 hours</option>
+                <option value="86400">Last day</option>
+                <option value="604800">Last week</option>
+                <option value="all">Everything</option>
+            </select></label>
             <button id="hiddenTiles" type="button" hidden></button>
             <button id="temperatureUnit" type="button" hidden>°C</button>
             <button id="trySomething" type="button" title="A copy of the twin from now, to try what an input would do; the twin itself is not changed">Try something…</button>

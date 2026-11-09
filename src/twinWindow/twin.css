@@ -86,9 +86,16 @@ input:focus, select:focus { border-color: var(--accent); }
 .setupFooter button { height: 38px; padding: 0 20px; font-size: 14px; }
 
 .room { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 16px 10px; gap: 10px; }
-.health { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.healthItem { display: flex; gap: 8px; align-items: center; padding: 6px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
-.healthItem::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+/* One row: the status chips give way (shortened, with an ellipsis) before the controls do; a narrow window wraps instead. */
+.health { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; }
+.health > * { flex: none; }
+.health > .healthItem { flex: 0 1 auto; min-width: 48px; }
+/* Whether the twin is in step is short and the one read at a glance: kept whole. The source's name gives way first. */
+.health > #healthDrift { flex: none; }
+.health > #healthSource { flex-shrink: 3; }
+.healthItem { display: block; padding: 6px 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+.healthItem::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 8px; vertical-align: 0; border-radius: 50%; background: var(--faint); }
+@media (max-width: 960px) { .health { flex-wrap: wrap; } }
 .healthItem.good::before { background: var(--good); box-shadow: 0 0 8px rgb(79 191 143 / 60%); }
 .healthItem.lean::before { background: var(--lean); box-shadow: 0 0 8px rgb(224 161 76 / 60%); }
 .healthItem.bad::before { background: var(--bad); box-shadow: 0 0 8px rgb(212 112 122 / 60%); }
@@ -135,8 +142,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .roomMain { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400; }
 .timeControl { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
-.timeControl input { width: 180px; height: 20px; padding: 0; accent-color: var(--accent); }
-#timeLabel { min-width: 120px; }
+.timeControl input { width: 140px; height: 20px; padding: 0; accent-color: var(--accent); }
+#timeLabel { min-width: 120px; white-space: nowrap; }
 .banner { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 12px; background: rgb(224 161 76 / 10%); border: 1px solid #6b5230; border-radius: 8px; }
 .banner span { flex: 1; min-width: 240px; }
 .sandboxBar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 12px; background: rgb(155 140 240 / 8%); border: 1px solid #4a4380; border-radius: 8px; }
@@ -145,13 +152,21 @@ button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400
 .field.inline { display: flex; gap: 6px; align-items: center; }
 .field.inline input { width: 80px; }
 
-.tile header .tileTools { display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
-.tile:hover header .tileTools, .tile:focus-within header .tileTools { opacity: 1; }
-.tileTools button { width: 24px; height: 22px; padding: 0; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
-.tileTools button[aria-pressed="true"] { color: var(--accent); }
+/* A tile's options: one button, always there, opening a small menu (pin, wide, hide). */
+.tile header .tileEnd { display: flex; align-items: center; gap: 6px; flex: none; }
+.tileMenuButton { display: grid; place-items: center; width: 26px; height: 24px; padding: 0; color: var(--muted); background: transparent; border-color: transparent; }
+.tileMenuButton:hover, .tileMenuButton[aria-expanded="true"] { color: var(--text); background: var(--panelRaised); border-color: #2c4250; }
+.tileMenuButton svg, .pinMark svg, .tileMenu svg { width: 14px; height: 14px; fill: currentColor; }
+.pinMark { display: inline-grid; place-items: center; color: var(--accent); align-self: center; }
+.tileMenu { position: fixed; z-index: 30; min-width: 200px; padding: 4px; background: var(--panelRaised); border: 1px solid #2c4250; border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.tileMenu button { display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 10px; text-align: left; background: transparent; border-color: transparent; }
+.tileMenu button:hover, .tileMenu button:focus-visible { background: #1b2e3a; border-color: transparent; outline: 0; }
+.tileMenu button.danger { color: #f08b80; }
+.tileMenu hr { margin: 4px 2px; border: 0; border-top: 1px solid var(--line); }
+.spanControl { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.spanControl select { height: 30px; }
 .tile header .grip { cursor: grab; color: var(--faint); margin-right: 4px; user-select: none; }
 .tile.wide { grid-column: span 2; }
-.tile.pinned header strong::before { content: "📌 "; font-size: 11px; }
 .tile.dragging { opacity: .4; }
 .tile.dropTarget { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .tile .jumps { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }

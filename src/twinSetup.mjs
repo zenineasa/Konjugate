@@ -13,8 +13,9 @@
 //             reading when not given), an estimate with the readings' `noise` (a standard deviation) when one is given; `members` the
 //             estimator's ensemble; `untracked` the tunable parameters the estimator leaves alone (every other one is tracked when a
 //             signal is estimated); `drift` { stateId: how far it may drift in an hour, beyond what the model says }
-//   layout    { order, wide, pinned, hidden, temperature, bounds }: the control room's tiles by measured signal's name, in order,
-//             those drawn twice as wide, pinned first, and hidden; temperatures shown in 'C' (the default) or 'K'; the window's place
+//   layout    { order, wide, pinned, hidden, temperature, span, bounds }: the control room's tiles by measured signal's name, in
+//             order, those drawn twice as wide, pinned first, and hidden; temperatures shown in 'C' (the default) or 'K'; how much of
+//             the past the plots show, 'all' or a span in seconds (four times the twin's window when not given); the window's place
 //             and size, { x, y, width, height, maximized }
 //   record    { startedAt, events: [{ at, kind, text, detail }] }: the last run's events, newest first
 
@@ -74,6 +75,8 @@ export function normalizeTwinSetup(raw) {
         const layout = {};
         for (const key of ['order', 'wide', 'pinned', 'hidden']) if (signalNames(raw.layout[key]).length) layout[key] = signalNames(raw.layout[key]);
         if (raw.layout.temperature === 'C' || raw.layout.temperature === 'K') layout.temperature = raw.layout.temperature;
+        // How much of the past the plots show: 'all', or a span in seconds; the twin's own recent span when not given.
+        if (raw.layout.span === 'all' || positive(raw.layout.span)) layout.span = raw.layout.span;
         const bounds = raw.layout.bounds;
         if (bounds && ['x', 'y', 'width', 'height'].every((key) => finite(bounds[key])) && bounds.width >= 400 && bounds.height >= 300) {
             layout.bounds = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height), maximized: bounds.maximized === true };

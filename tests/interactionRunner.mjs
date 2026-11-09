@@ -5692,7 +5692,17 @@ export async function runInteractionTests(driver) {
 
         // The drifting rig's readings against the vessel's model match nothing: one click opens the rig's model in the project window,
         // matches the readings to it, and goes into the control room.
+        // The demonstrations are in the title bar's More menu, out of the setup's way; the dialog says the project will be replaced.
+        await evaluate(twin, `document.querySelector('#moreMenu').click()`);
+        await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open.');
+        const demonstrations = `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…')`;
+        assert.equal(await evaluate(twin, `${demonstrations}.disabled`), false);
+        await evaluate(twin, `${demonstrations}.click()`);
+        await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open.');
+        assert.match(await evaluate(twin, `document.querySelector('#demosDialog .hint').textContent`), /replacing the current project/);
+        assert.equal(await evaluate(twin, `document.querySelectorAll('#demosDialog [data-demo]').length`), 4);
         await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
+        assert.equal(await evaluate(twin, `document.querySelector('#demosDialog').open`), false, 'Choosing one closes the dialog.');
         await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'simulatedTankRig'`, 'The rig\'s model did not open in the project window.', 15000);
         await waitFor(twin, `!document.querySelector('#room').hidden`, 'The demonstration did not go into the control room.', 15000);
         assert.match(await evaluate(twin, `document.querySelector('#fileName').textContent`), /^simulatedTankRigDrifting\.csv \(a demonstration recording\)$/, 'The file field says what is playing.');
@@ -5747,10 +5757,18 @@ export async function runInteractionTests(driver) {
         const opened = await driver.waitForNewHandle(before);
         await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
         const twin = await openTwinWindow(opened);
+        // From the setup's own line under the sources.
+        await evaluate(twin, `document.querySelector('#openDemos').click()`);
+        await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open from the setup.');
         await evaluate(twin, `document.querySelector('[data-demo="house"]').click()`);
         await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'smartHouse'`, 'The house\'s model did not open in the project window.', 15000);
         await waitFor(twin, `!document.querySelector('#room').hidden`, 'The house did not go into the control room.', 15000);
         assert.match(await evaluate(twin, `document.querySelector('#healthSource').textContent`), /^smartHouse\.csv, played at 1200×$/);
+        // While the twin runs, a demonstration is not offered: it starts from the setup.
+        await evaluate(twin, `document.querySelector('#moreMenu').click()`);
+        await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open in the room.');
+        assert.equal(await evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…').disabled`), true);
+        await evaluate(twin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#tiles .tile strong')].map((name) => name.textContent)`), ['Living room · Air temperature', 'Bedroom · Air temperature', 'Kitchen · Air temperature']);
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow strong')].map((name) => name.textContent)`), ['Outdoor temperature', 'Solar gain', 'Living room heater', 'Bedroom heater', 'Kitchen heater']);
         await waitFor(twin, `/Floor slab · Temperature/.test(document.querySelector('#inferredRows').textContent)`, 'The floor slab was not among what the twin infers.', 30000);
@@ -5785,6 +5803,8 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(twin, `document.querySelector('#modelSummary').textContent`), /Heater power/, 'The shared parameter to drive is offered.');
 
         // A plant's names: the suggestions fill in the mapping, with the units converted.
+        await evaluate(twin, `document.querySelector('#openDemos').click()`);
+        await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open from the setup.');
         await evaluate(twin, `document.querySelector('[data-demo="plant"]').click()`);
         await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow').length === 2`, 'The plant\'s signals were not offered.');
         const row = (name) => `document.querySelector('#mappingRows .mappingRow[data-signal="${name}"]')`;

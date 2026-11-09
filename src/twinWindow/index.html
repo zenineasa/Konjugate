@@ -14,8 +14,25 @@
 <body>
     <header class="titleBar">
         <div class="title"><img src="../../assets/icon.svg" alt=""><strong>Live twin</strong><span id="projectName"></span></div>
+        <div class="titleTools"><button id="moreMenu" type="button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg></button></div>
         <div class="windowControls"><button id="minimize" type="button" aria-label="Minimize">−</button><button id="maximize" type="button" aria-label="Maximize">□</button><button id="close" class="close" type="button" aria-label="Close">×</button></div>
     </header>
+
+    <!-- The demonstrations: a model, a recording made for it, and its twin running, from nothing in one click. Each replaces the project
+         in the project window, which asks about unsaved work first. -->
+    <dialog id="demosDialog" class="demosDialog" aria-labelledby="demosTitle">
+        <form method="dialog">
+            <h2 id="demosTitle">Demonstrations</h2>
+            <p class="hint">A twin running with no equipment: each opens its own model in the project window, <strong>replacing the current project</strong> (you are asked to save it first if it has unsaved changes), and runs the twin on a recording made for it.</p>
+            <div class="demoChoices">
+                <button type="button" data-demo="steady"><strong>The simulated rig</strong><small>A heated water tank and its recording: the twin in step with it.</small></button>
+                <button type="button" data-demo="drifting"><strong>A rig that drifts</strong><small>The same tank losing heat faster than the model says, until the room warns of the drift.</small></button>
+                <button type="button" data-demo="house"><strong>A house</strong><small>Three rooms with their heaters and thermostats, the weather and the sun, a day in a minute; the bedroom window is left open in the afternoon.</small></button>
+                <button type="button" data-demo="plant"><strong>A plant's names</strong><small>The rig's readings under a plant's tag names and units (TK1_TT101_PV in °C), to see them matched to the model and converted.</small></button>
+            </div>
+            <footer><button type="submit" value="cancel">Cancel</button></footer>
+        </form>
+    </dialog>
 
     <!-- The setup: the model, where its readings come from, and how they map to it. Kept with the project. -->
     <main id="setup" class="setup">
@@ -27,19 +44,13 @@
 
         <section class="step" id="stepSource">
             <h2><span class="stepNumber">2</span>Where the readings come from</h2>
-            <div class="tryRow">
-                <span>Try it without equipment:</span>
-                <button type="button" data-demo="steady" class="primary">The simulated rig</button>
-                <button type="button" data-demo="drifting">A rig that drifts</button>
-                <button type="button" data-demo="house" title="Three rooms, each with its heater and thermostat, the weather outside and the sun through the windows, a day in a minute; the bedroom window is left open in the afternoon">A house</button>
-                <button type="button" data-demo="plant" title="The simulated rig's readings with a plant's tag names and units (TK1_TT101_PV in °C, TK1_JI101_PV in kW), to see the mapping matched and converted">A plant's names</button>
-            </div>
             <div class="sourceTiles" role="group" aria-label="Where the readings come from">
                 <button type="button" data-source="file"><strong>A log file</strong><small>one a logger is writing, or a finished recording</small></button>
                 <button type="button" data-source="mqtt"><strong>An MQTT broker</strong><small>topics your instruments publish to</small></button>
                 <button type="button" data-source="opcua"><strong>An OPC UA server</strong><small>a PLC, or the gateway in front of your instruments</small></button>
                 <button type="button" data-source="push"><strong>A script sending readings</strong><small>to Konjugate's push service</small></button>
             </div>
+            <p class="demoLink">No equipment at hand? <button id="openDemos" type="button" class="linkButton">See a demonstration</button></p>
             <div id="sourceForm" class="sourceForm" hidden>
                 <div data-form="file" hidden>
                     <div class="field"><span>Data log</span><div class="fileChoice"><button id="fileChoose" type="button">Choose a log file…</button><span id="fileName">none chosen</span><input id="fileInput" type="file" accept=".csv,.txt" hidden></div></div>

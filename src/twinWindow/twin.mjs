@@ -15,7 +15,7 @@ import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMat
 import { normalizeTwinSetup, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
 import { $, $$, cleanError, shown, sparkline } from './common.mjs';
-import { abandonRoom, closeRoom, currentTwin, handleEvent, initRoom, modelChanged, openRoom } from './room.mjs';
+import { abandonRoom, closeRoom, currentTwin, handleEvent, initRoom, modelChanged, openRoom, openTileMenu } from './room.mjs';
 import { initEngineer } from './engineer.mjs';
 
 const api = window.twin;
@@ -149,8 +149,20 @@ function continueDemo() {
     if (variant !== 'plant' && state.rows.some((row) => row.target && row.role === 'output')) startTwin();
 }
 
+// The title bar's More menu: the demonstrations, kept out of the setup's way since each replaces the project. While a twin runs it is
+// stopped first from the room, so the item says so instead.
+$('#moreMenu').addEventListener('click', (event) => {
+    event.stopPropagation();
+    const running = Boolean(currentTwin()?.running);
+    openTileMenu($('#moreMenu'), [
+        { label: 'Demonstrations…', disabled: running, title: running ? 'Stop the twin first: a demonstration starts from the setup' : '', run: () => $('#demosDialog').showModal() }
+    ]);
+});
+$('#openDemos').addEventListener('click', () => $('#demosDialog').showModal());
+
 for (const button of $$('[data-demo]')) {
     button.addEventListener('click', async () => {
+        if ($('#demosDialog').open) $('#demosDialog').close();
         try {
             const variant = button.dataset.demo;
             const demo = await api.liveTwin.demo(variant);

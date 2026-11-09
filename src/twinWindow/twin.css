@@ -32,6 +32,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .titleBar .title { display: flex; gap: 8px; align-items: center; }
 .titleBar img { width: 18px; height: 18px; }
 .titleBar #projectName { color: var(--muted); }
+.titleTools { display: flex; height: 100%; margin-left: auto; -webkit-app-region: no-drag; }
+.titleTools button { display: grid; place-items: center; width: 40px; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--muted); }
+.titleTools button:hover, .titleTools button[aria-expanded="true"] { color: var(--text); background: #142432; }
+.titleTools svg { width: 16px; height: 16px; fill: currentColor; }
 .windowControls { display: flex; height: 100%; -webkit-app-region: no-drag; }
 .windowControls button { width: 44px; height: 100%; border: 0; border-radius: 0; background: transparent; color: var(--muted); }
 .windowControls button:hover { background: #142432; }
@@ -51,7 +55,6 @@ input:focus, select:focus { border-color: var(--accent); }
 .chip small { color: var(--muted); }
 .chip.input { border-color: #3c5f7a; }
 
-.tryRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; color: var(--muted); }
 .sourceTiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
 .sourceTiles button { display: grid; gap: 3px; height: auto; padding: 12px 14px; text-align: left; background: var(--panel); }
 .sourceTiles button[aria-pressed="true"] { background: rgb(66 201 188 / 8%); border-color: #47736f; }
@@ -336,3 +339,19 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .inputBindingDialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .inputBindingDialog .inputBindingRemove { margin-right: auto; color: var(--bad); }
 .inputBindingDialog .doneButton { color: var(--accentText); background: var(--accent); border-color: var(--accent); font-weight: 650; }
+
+/* The demonstrations, out of the setup's way: a quiet line under the sources, and a dialog of the four. */
+.demoLink { margin: 10px 0 0; color: var(--muted); font-size: 12.5px; }
+.linkButton { height: auto; padding: 0; color: var(--accent); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.linkButton:hover:not(:disabled) { color: #6fe0d4; border: 0; }
+.demosDialog { width: min(560px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 1px solid #3a4d58; border-radius: 10px; box-shadow: 0 20px 55px rgb(0 0 0 / 60%); }
+.demosDialog::backdrop { background: rgb(2 7 11 / 62%); }
+.demosDialog form { display: grid; gap: 12px; padding: 20px; }
+.demosDialog h2 { margin: 0; font-size: 16px; }
+.demosDialog .hint { margin: 0; color: var(--muted); }
+.demosDialog .hint strong { color: var(--text); font-weight: 600; }
+.demoChoices { display: grid; gap: 8px; }
+.demoChoices button { display: grid; gap: 2px; height: auto; padding: 10px 12px; text-align: left; }
+.demoChoices button small { color: var(--muted); font-size: 12px; }
+.demoChoices button:hover:not(:disabled) { border-color: var(--accent); }
+.demosDialog footer { display: flex; justify-content: flex-end; }

@@ -274,8 +274,9 @@ const moreIcon = 'M5 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0
 const checkIcon = 'M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6 11-11-1.4-1.4z';
 const icon = (path) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
 
-// A tile's options, as a menu under its button: items { label, checked, danger, run }, null for a divider. One menu is open at a time;
-// it closes on a choice, Escape, a click elsewhere, or the window changing size, and gives the focus back to its button.
+// A menu under its button (a strip's options, the title bar's More): items { label, checked, danger, disabled, title, run }, null for a
+// divider. One menu is open at a time; it closes on a choice, Escape, a click elsewhere, or the window changing size, and gives the focus
+// back to its button.
 let openMenu = null;
 function closeTileMenu({ refocus = false } = {}) {
     if (!openMenu) return;
@@ -287,7 +288,7 @@ function closeTileMenu({ refocus = false } = {}) {
     if (refocus && button.isConnected) button.focus();
 }
 
-function openTileMenu(button, items) {
+export function openTileMenu(button, items) {
     const reopening = openMenu?.button === button;
     closeTileMenu();
     if (reopening) return;
@@ -299,6 +300,8 @@ function openTileMenu(button, items) {
         choice.lastChild.textContent = item.label;
         choice.setAttribute('role', item.checked === undefined ? 'menuitem' : 'menuitemcheckbox');
         if (item.checked !== undefined) choice.setAttribute('aria-checked', String(item.checked));
+        if (item.title) choice.title = item.title;
+        choice.disabled = Boolean(item.disabled);
         choice.addEventListener('click', () => { closeTileMenu(); item.run(); });
         menu.append(choice);
     }
@@ -306,7 +309,7 @@ function openTileMenu(button, items) {
     const place = button.getBoundingClientRect();
     menu.style.top = `${Math.min(place.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
     menu.style.left = `${Math.max(8, place.right - menu.offsetWidth)}px`;
-    const choices = [...menu.querySelectorAll('button')];
+    const choices = [...menu.querySelectorAll('button:not(:disabled)')];
     const onKey = (event) => {
         if (event.key === 'Escape') { event.preventDefault(); closeTileMenu({ refocus: true }); return; }
         if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;

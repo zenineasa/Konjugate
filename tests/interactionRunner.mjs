@@ -935,6 +935,131 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.extensions.checkUpdates = window.__realCheckUpdates; delete window.__realCheckUpdates;`);
     }, { skip: driver.kind !== 'playwright' && 'the desktop\'s window.extensions is the preload\'s, which a test cannot replace; the web edition\'s runs the same badge code' });
 
+    await run('Extensions: Discover lists the registry by domain, shows an entry and installs it; installed packages are updated one at a time or all together', async () => {
+        // The registry is this site's own copy, read for real. What is installed, what has an update and what installing does are
+        // stood in for (the web edition's window.extensions can be replaced; the desktop's is the preload's): the packages themselves
+        // are not on a local build's copy, and an update needs a release newer than what is installed.
+        const registry = JSON.parse(await readFile(join(process.cwd(), 'out', 'webShellThreads', 'registry', 'index.json'), 'utf8'));
+        const listed = Object.entries(registry.prefixes).filter(([, entry]) => entry.packages?.length && entry.downloadUrl);
+        const installedPackage = (packageId, name, version) => ({ packageType: 'addon', packageId, name, version, source: 'installed', permissions: [], manifest: {}, installPath: null, enabled: true });
+        await evaluate(window, `(() => {
+            window.__realExtensions = { list: window.extensions.list, checkUpdates: window.extensions.checkUpdates, installFromRegistry: window.extensions.installFromRegistry };
+            window.__fakeInstalled = ${JSON.stringify([
+                installedPackage('konjugate.helloWorld', 'Hello World', '1.0.0'),
+                installedPackage('konjugate.resultPlotViewer', 'Results Analysis', '1.0.0'),
+                { ...installedPackage('konjugate.fintech.engine', 'Fintech Engine', '1.0.0'), packageType: 'plugin' }
+            ])};
+            window.__updates = [];
+            window.__installCalls = [];
+            window.__installAnswer = () => [];
+            window.extensions.list = async () => [...await window.__realExtensions.list(), ...window.__fakeInstalled];
+            window.extensions.checkUpdates = async () => structuredClone(window.__updates);
+            window.extensions.installFromRegistry = async (entry) => { window.__installCalls.push(entry.prefix); return window.__installAnswer(entry); };
+        })()`);
+        const notice = () => evaluate(window, `document.querySelector('#extensionsRestartNotice').textContent`);
+        const openExplorer = async (mode) => {
+            if (await evaluate(window, `document.querySelector('#extensionsDialog').open`)) await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+            await evaluate(window, `document.querySelector('#extensionsTitleButton').click()`);
+            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'The Explorer did not open.');
+            await evaluate(window, `document.querySelector('.extensionsTab[data-extensions-mode="${mode}"]').click()`);
+        };
+        try {
+            // Discover: every entry that offers something to install, and its domains as filters.
+            await openExplorer('discover');
+            await waitFor(window, `document.querySelectorAll('#extensionsResults .discoverItem').length === ${listed.length}`, 'Discover did not list the registry.', 10000);
+            const domains = [...new Set(listed.map(([, entry]) => entry.domain).filter(Boolean))];
+            assert.equal(await evaluate(window, `document.querySelectorAll('#extensionsDomains button').length`), domains.length + 1, 'All, then one filter per domain.');
+            const robotics = listed.filter(([, entry]) => entry.domain === 'robotics').map(([prefix]) => prefix).sort();
+            await evaluate(window, `document.querySelectorAll('#extensionsDomains button')[${domains.indexOf('robotics') + 1}].click()`);
+            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#extensionsResults .discoverItem')].map((item) => item.dataset.discoverPrefix).sort()`), robotics);
+            await evaluate(window, `document.querySelectorAll('#extensionsDomains button')[0].click()`);
+            assert.equal(await evaluate(window, `document.querySelectorAll('#extensionsResults .discoverItem').length`), listed.length);
+
+            // An entry's detail: what it is, its packages, its screenshot, and whether it is installed.
+            const select = (prefix) => evaluate(window, `document.querySelector('#extensionsResults .discoverItem[data-discover-prefix="${prefix}"]').click()`);
+            const pose = registry.prefixes['konjugate.poseVisualizer'];
+            await select('konjugate.poseVisualizer');
+            await waitFor(window, `!document.querySelector('#extensionsDiscoverDetailContent').hidden`, 'The entry\'s detail did not open.');
+            assert.equal(await evaluate(window, `document.querySelector('#extensionsDiscoverDetailTitle').textContent`), pose.title);
+            assert.equal(await evaluate(window, `document.querySelectorAll('#extensionsDiscoverDetailPackages li').length`), pose.packages.length);
+            assert.equal(await evaluate(window, `document.querySelector('#extensionsDiscoverInstall').disabled`), false);
+            await waitFor(window, `[...document.querySelectorAll('#extensionsDiscoverScreenshots figure')].some((figure) => !figure.hidden && figure.querySelector('img').src.startsWith('data:'))`, 'The entry\'s screenshot was not shown.', 10000);
+            await select('konjugate.helloWorld');
+            await waitFor(window, `document.querySelector('#extensionsDiscoverInstall').disabled && !document.querySelector('#extensionsDiscoverDetailStatus').hidden`, 'An installed entry was offered to install again.');
+            await select('konjugate.fintech');
+            await waitFor(window, `/1 of 2/.test(document.querySelector('#extensionsDiscoverDetailStatus').textContent) && !document.querySelector('#extensionsDiscoverInstall').disabled`, 'A bundle with one of its two packages installed was not shown as partly installed.');
+
+            // Installed from the registry, with what the publisher check found; and a failed install said, with the button back.
+            await select('konjugate.poseVisualizer');
+            await evaluate(window, `window.__installAnswer = () => [{ packageType: 'addon', packageId: 'konjugate.poseVisualizer', version: '1.0.6', verification: { status: 'verified' } }]`);
+            await evaluate(window, `document.querySelector('#extensionsDiscoverInstall').click()`);
+            await waitFor(window, `/^Installed konjugate\\.poseVisualizer 1\\.0\\.6 \\(verified\\)/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'Installing from Discover was not reported.');
+            assert.deepEqual(await evaluate(window, `window.__installCalls`), ['konjugate.poseVisualizer'], 'The selected entry, and only it, is installed.');
+            await evaluate(window, `window.__installAnswer = () => { throw new Error('The download did not match the size the registry recorded.'); }`);
+            await evaluate(window, `document.querySelector('#extensionsDiscoverInstall').click()`);
+            await waitFor(window, `/^Installation failed: The download did not match/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'A failed install was not reported.');
+            assert.equal(await evaluate(window, `document.querySelector('#extensionsDiscoverInstall').disabled`), false, 'The button is usable again after a failure.');
+
+            // Two installed packages with newer releases: listed under Updates.
+            const updatesFor = (...prefixes) => evaluate(window, `window.__updates = ${JSON.stringify([
+                { prefix: 'konjugate.helloWorld', latestVersion: '1.1.0', outdated: [{ packageId: 'konjugate.helloWorld', installedVersion: '1.0.0' }] },
+                { prefix: 'konjugate.resultPlotViewer', latestVersion: '2.0.0', outdated: [{ packageId: 'konjugate.resultPlotViewer', installedVersion: '1.0.0' }] }
+            ])}.filter((update) => ${JSON.stringify(prefixes)}.includes(update.prefix))`);
+            // An install of an entry moves its stand-in package to `version`, and the update it answered goes.
+            const installAs = (versions) => evaluate(window, `window.__installAnswer = (entry) => {
+                const answer = ${JSON.stringify(versions)}[entry.prefix];
+                if (answer instanceof Object && answer.error) throw new Error(answer.error);
+                const packageId = entry.packages[0].packageId;
+                window.__fakeInstalled.find((item) => item.packageId === packageId).version = answer;
+                window.__updates = window.__updates.filter((update) => update.prefix !== entry.prefix || answer !== update.latestVersion);
+                return [{ packageType: 'addon', packageId, version: answer, verification: { status: 'verified' } }];
+            }`);
+            await updatesFor('konjugate.helloWorld', 'konjugate.resultPlotViewer');
+            await openExplorer('installed');
+            await waitFor(window, `!document.querySelector('#extensionsUpdatesShow').hidden`, 'The Explorer did not offer the updates.');
+            await evaluate(window, `document.querySelector('#extensionsUpdatesShow').click()`);
+            await waitFor(window, `document.querySelectorAll('#extensionsResults [data-package-key]').length === 2`, 'Updates did not list the two outdated packages.');
+
+            // One updated from its detail: kept selected at its new version.
+            await evaluate(window, `window.__installCalls = []`);
+            await installAs({ 'konjugate.helloWorld': '1.1.0' });
+            await evaluate(window, `document.querySelector('#extensionsResults [data-package-key="addon:konjugate.helloWorld:1.0.0"]').click()`);
+            await waitFor(window, `!document.querySelector('#extensionsUpdate').hidden && !document.querySelector('#extensionsUpdate').disabled`, 'Update was not offered for the outdated package.');
+            await evaluate(window, `document.querySelector('#extensionsUpdate').click()`);
+            await waitFor(window, `/^Updated konjugate\\.helloWorld 1\\.1\\.0/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'The update was not reported.');
+            assert.deepEqual(await evaluate(window, `window.__installCalls`), ['konjugate.helloWorld']);
+            assert.equal(await evaluate(window, `document.querySelector('#extensionsDetailVersion').textContent`), '1.1.0', 'The package stays selected, at its new version.');
+
+            // A release tagged newer whose package is still the old version: said plainly, not claimed as an update.
+            await installAs({ 'konjugate.resultPlotViewer': '1.0.0' });
+            await evaluate(window, `document.querySelector('#extensionsResults [data-package-key="addon:konjugate.resultPlotViewer:1.0.0"]')?.click()`);
+            await waitFor(window, `!document.querySelector('#extensionsUpdate').hidden && !document.querySelector('#extensionsUpdate').disabled`, 'Update was not offered for the second package.');
+            await evaluate(window, `document.querySelector('#extensionsUpdate').click()`);
+            await waitFor(window, `/nothing was actually updated/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'A release that did not change the version was reported as an update.');
+
+            // Update all: each entry in turn, one failure said and the others still done.
+            for (const item of ['konjugate.helloWorld', 'konjugate.resultPlotViewer']) await evaluate(window, `window.__fakeInstalled.find((entry) => entry.packageId === ${JSON.stringify(item)}).version = '1.0.0'`);
+            await updatesFor('konjugate.helloWorld', 'konjugate.resultPlotViewer');
+            await evaluate(window, `window.__installCalls = []`);
+            await installAs({ 'konjugate.helloWorld': '1.1.0', 'konjugate.resultPlotViewer': { error: 'The release has no package for this platform.' } });
+            await openExplorer('installed');
+            await waitFor(window, `!document.querySelector('#extensionsUpdateAll').hidden && !document.querySelector('#extensionsUpdateAll').disabled`, 'Update all was not offered.');
+            await evaluate(window, `document.querySelector('#extensionsUpdateAll').click()`);
+            await waitFor(window, `/Could not update konjugate\\.resultPlotViewer/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'Update all did not report its outcome.', 10000);
+            const told = await notice();
+            assert.match(told, /^Updated konjugate\.helloWorld 1\.1\.0\./, 'The one that worked is said to be updated.');
+            assert.match(told, /Could not update konjugate\.resultPlotViewer: The release has no package for this platform\./);
+            assert.deepEqual((await evaluate(window, `window.__installCalls`)).sort(), ['konjugate.helloWorld', 'konjugate.resultPlotViewer']);
+            assert.equal(await evaluate(window, `document.querySelector('#extensionsUpdateAll').textContent`), 'Update all', 'The button is itself again once done.');
+        } finally {
+            await evaluate(window, `(() => {
+                if (window.__realExtensions) Object.assign(window.extensions, window.__realExtensions);
+                for (const name of ['__realExtensions', '__fakeInstalled', '__updates', '__installCalls', '__installAnswer']) delete window[name];
+                if (document.querySelector('#extensionsDialog').open) document.querySelector('#extensionsDialog').close();
+            })()`);
+        }
+    }, { skip: driver.kind !== 'playwright' && 'the desktop\'s window.extensions is the preload\'s, which a test cannot replace; the web edition\'s runs the same Discover and update code' });
+
     await run('advanced provider execution mode selector persists a choice and warns for in-process', async () => {
         // Settings keeps a change as it is made, through a real IPC round trip, so each step waits for what it changes to show.
         const openProviders = async () => {

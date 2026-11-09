@@ -8,7 +8,68 @@
 // mouse events; downloads arrive as events, not a stubbed native save dialog), documented inline
 // below where the two diverge.
 
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const sourceRoot = resolve(fileURLToPath(new URL('../../src', import.meta.url)));
+
+// With KONJUGATE_INTERACTION_COVERAGE set to a folder, each page's code is measured while the scenarios run (Chromium's precise
+// coverage, through Playwright) and written there as web-<n>.json, in the same form as the desktop's, for
+// scripts/coverageReport.mjs. The web shell serves src/ files unchanged at the same paths (scripts/buildWebShell.mjs), so a script
+// is counted against its file under src/ when, and only when, its text is that file's: a shell built from older sources is left
+// out, not miscounted. A page is measured from when it opens; its counts are taken when the driver closes it and from every page
+// still open when the scenarios finish. Workers (the web engine's) are not measured.
+function createPageCoverage(directory) {
+    const measured = new Set();
+    const hadScripts = new WeakSet();
+    let written = 0;
+    let leftOut = 0;
+    async function begin(page) {
+        if (measured.has(page)) return;
+        measured.add(page);
+        await page.coverage.startJSCoverage({ resetOnNavigation: false }).catch(() => measured.delete(page));
+    }
+    // `after`: the scenario that just ran, said when a page that was measured gives back nothing, which means its counts were
+    // lost (the browser swapped the page's process, say) rather than that nothing ran.
+    async function take(page, after = null) {
+        if (!measured.has(page) || page.isClosed()) return;
+        measured.delete(page);
+        let entries;
+        try { entries = await page.coverage.stopJSCoverage(); } catch { return; }
+        if (entries.length) hadScripts.add(page);
+        else if (after && hadScripts.has(page)) console.warn(`Coverage: ${page.url()} gave back no scripts after "${after}".`);
+        const result = [];
+        for (const entry of entries) {
+            let path;
+            try { path = join(sourceRoot, decodeURIComponent(new URL(entry.url).pathname)); } catch { continue; }
+            if (!path.startsWith(sourceRoot + '/')) continue;
+            const text = await readFile(path, 'utf8').catch(() => null);
+            if (text === null) continue;
+            if (text !== entry.source) { leftOut += 1; continue; }
+            result.push({ url: pathToFileURL(path).href, functions: entry.functions });
+        }
+        written += 1;
+        const file = join(directory, `web-${written}.json`);
+        await mkdir(directory, { recursive: true });
+        await writeFile(file, JSON.stringify({ result }));
+    }
+    return {
+        begin, take,
+        // Each open page's counts so far, then measured again from here: a page whose counts are lost loses one scenario's.
+        async afterScenario(pages, name) {
+            for (const page of pages) {
+                await take(page, name);
+                if (!page.isClosed()) await begin(page);
+            }
+        },
+        async finish(pages) {
+            for (const page of pages) await take(page);
+            if (leftOut) console.warn(`Coverage: ${leftOut} script${leftOut === 1 ? '' : 's'} left out, served from older sources than src/ (rebuild the web shell).`);
+        }
+    };
+}
+let pageCoverage = null;
 
 // Electron's sendInputEvent modifiers are lowercase ('shift'); Playwright's keyboard API expects
 // its own key names ('Shift'). Only 'shift' is used anywhere in interactionRunner.mjs today, but
@@ -84,6 +145,7 @@ function wrapPage(page) {
             await page.bringToFront();
         },
         async close() {
+            await pageCoverage?.take(page);
             await page.close();
         },
         async isDestroyed() {
@@ -104,13 +166,28 @@ function wrapPage(page) {
 // (waveform schedules, the startPaused run setting and the changes it records) can be tested.
 export function createPlaywrightWebDriver(context, initialPage, { currentEngine = false } = {}) {
     const trackedPages = new Set([initialPage]);
-    context.on('page', (page) => trackedPages.add(page));
+    pageCoverage = process.env.KONJUGATE_INTERACTION_COVERAGE ? createPageCoverage(process.env.KONJUGATE_INTERACTION_COVERAGE) : null;
+    context.on('page', (page) => { trackedPages.add(page); pageCoverage?.begin(page); });
 
     const mainHandle = wrapPage(initialPage);
 
     return {
         kind: 'playwright',
         mainHandle,
+        // Before the first scenario, and after the last: the first page is loaded again once measuring has started, so its
+        // modules' top-level code counts.
+        async prepare() {
+            if (!pageCoverage) return;
+            await pageCoverage.begin(initialPage);
+            await initialPage.reload({ waitUntil: 'load' });
+            await initialPage.waitForSelector('.documentTitle', { timeout: 30000 });
+        },
+        async afterScenario(name) {
+            await pageCoverage?.afterScenario([...trackedPages].filter((page) => !page.isClosed()), name);
+        },
+        async finish() {
+            await pageCoverage?.finish([...trackedPages].filter((page) => !page.isClosed()));
+        },
         allHandles() {
             return [...trackedPages].map(wrapPage);
         },
@@ -132,7 +209,10 @@ export function createPlaywrightWebDriver(context, initialPage, { currentEngine 
         },
         async captureExport(trigger, { maxAttempts = 100, intervalMs = 25 } = {}) {
             const page = initialPage;
-            const downloadPromise = page.waitForEvent('download', { timeout: maxAttempts * intervalMs });
+            // No download in time is said the way the desktop driver says no file written, so a test can tell "nothing was
+            // exported" from a failure the same way in both editions.
+            const downloadPromise = page.waitForEvent('download', { timeout: maxAttempts * intervalMs })
+                .catch(() => { throw new Error('Export did not write a file: no download started.'); });
             await trigger();
             const download = await downloadPromise;
             const path = await download.path();

@@ -63,10 +63,12 @@ konjugate --cli validate <project.kjt>
 
 In the development tree (unpackaged), invoke it as `electron . --cli run ...` from the repo root; the packaged/installed `konjugate` binary accepts the same `--cli run|validate ...` arguments directly.
 
-- `--target-time <seconds>` is required for `run`; the project's default run configuration is used unless `--configuration` names or numbers a specific one.
+- `--target-time <seconds>` is required for `run`; the project's active run configuration is used unless `--configuration` names or numbers a specific one. A project that keeps no run configuration (most of the bundled examples) runs with the one the app gives it when it opens: "Default", a 0.01 s step and a 0.1 s output interval.
 - `--output-kjt <path>` writes the original project with the result embedded, in the same format Konjugate itself saves when you keep a run's results (see [Embedded binary result storage](resultFileFormat.md)) -- reopen it in the app to inspect the run visually.
 - `--output-csv <path>` writes a plain CSV: one `time (s)` column, then one column per state headed `Node — State (unit)`, one row per sample. This is not a separate converter reading the binary segment back out -- it calls the exact same conversion function (`resultSignalsToCsv` in `src/resultExport.mjs`) the in-app "Export CSV" button uses, so CLI and GUI output are guaranteed to agree. Pass either or both flags; if neither is given, the run still executes but nothing is written.
 - `validate` prints the validation report as JSON to stdout, exit code `0` if valid, `2` if it found blocking errors.
+- A project saved with a password is read with the password in the `KONJUGATE_PASSWORD` environment variable, never a flag, so it stays out of shell history and the process list.
+- Exit codes: `0` done, `1` the project could not be read or the engine failed, `2` the command was wrong (usage, `--target-time`, an unknown `--configuration`) or `validate` found blocking errors. [tests/cliMode.e2e.mjs](../tests/cliMode.e2e.mjs) checks each of these against the app itself (`npm run test:cli`).
 
 ### The push service from the command line
 

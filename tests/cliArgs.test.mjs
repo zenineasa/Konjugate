@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { matchRunConfiguration, parseCliFlags } from '../src/cliArgs.mjs';
+import { defaultRunConfiguration, matchRunConfiguration, parseCliFlags } from '../src/cliArgs.mjs';
 
 test('parseCliFlags reads --flag value pairs', () => {
     assert.deepEqual(parseCliFlags(['--target-time', '10', '--configuration', 'Default']), {
@@ -45,6 +45,8 @@ test('matchRunConfiguration falls back to the first configuration if the active 
     assert.equal(matchRunConfiguration(runConfigurations, 999, undefined), runConfigurations[0]);
 });
 
-test('matchRunConfiguration returns null for a project with no run configurations', () => {
-    assert.equal(matchRunConfiguration([], 1, undefined), null);
+test('a project that keeps no run configuration runs with the one the app gives it, unless one was asked for by name', () => {
+    assert.deepEqual(matchRunConfiguration([], 1, undefined), { ...defaultRunConfiguration });
+    assert.equal(matchRunConfiguration([], 1, undefined).globalTimeStep, 0.01);
+    assert.equal(matchRunConfiguration([], 1, 'Fine'), null);
 });

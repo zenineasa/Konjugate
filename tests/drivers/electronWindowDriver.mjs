@@ -90,8 +90,10 @@ function wrapWindow(win) {
 // open cancelled, a message box with its cancel button. Each is recorded, so the runner can say which test asked for one. A test
 // that needs an answer (captureExport) sets its own for as long as it needs it.
 const nativeDialogs = [];
+// A dialog's options: Electron takes them second when a window is given first.
+const dialogOptions = (args) => (args[0] && typeof args[0] === 'object' && !('webContents' in args[0]) ? args[0] : args[1]) ?? {};
 function answerNativeDialogs() {
-    const options = (args) => (args[0] && typeof args[0] === 'object' && !('webContents' in args[0]) ? args[0] : args[1]) ?? {};
+    const options = dialogOptions;
     const record = (kind, args) => nativeDialogs.push({ kind, title: options(args).title ?? options(args).message ?? '' });
     dialog.showSaveDialog = async (...args) => { record('save', args); return { canceled: true, filePath: undefined }; };
     dialog.showOpenDialog = async (...args) => { record('open', args); return { canceled: true, filePaths: [] }; };
@@ -219,6 +221,31 @@ export function createElectronDriver(mainWindow) {
                 return { path: exportPath, bytes };
             } finally {
                 dialog.showSaveDialog = originalShowSaveDialog;
+            }
+        },
+        // While `trigger` runs, an open dialog is answered with `open` (a path) and a message box with the button labelled
+        // `button`, as a person choosing them would. Returns what each dialog asked, its message and detail, for the test to read.
+        async answerDialogs({ open = null, button = null }, trigger) {
+            const originalOpen = dialog.showOpenDialog;
+            const originalMessage = dialog.showMessageBox;
+            const asked = [];
+            if (open) dialog.showOpenDialog = async (...args) => {
+                asked.push({ kind: 'open', title: dialogOptions(args).title ?? '' });
+                return { canceled: false, filePaths: [open] };
+            };
+            if (button) dialog.showMessageBox = async (...args) => {
+                const { message = '', detail = '', buttons = [] } = dialogOptions(args);
+                asked.push({ kind: 'message', message, detail, buttons });
+                const response = buttons.indexOf(button);
+                if (response < 0) throw new Error(`The dialog "${message}" has no ${button} button (it has ${buttons.join(', ')}).`);
+                return { response, checkboxChecked: false };
+            };
+            try {
+                await trigger();
+                return asked;
+            } finally {
+                dialog.showOpenDialog = originalOpen;
+                dialog.showMessageBox = originalMessage;
             }
         },
         async simulateOsFileOpen(path) {

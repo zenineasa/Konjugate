@@ -71,7 +71,8 @@ import { publicNoticeOf, stampProjectContent } from './ownership.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from './shapeLibraryCatalog.mjs';
 
-if ((process.argv.includes('--interaction-test') || process.argv.includes('--generate-example-thumbnails')) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
+// A test's own profile folder, so a test run never reads or writes the person's own (tests/cliMode.e2e.mjs runs --cli with it too).
+if (['--interaction-test', '--generate-example-thumbnails', '--cli'].some((flag) => process.argv.includes(flag)) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
 }
 
@@ -2913,13 +2914,8 @@ async function runCliMode() {
     const document = JSON.parse(bundle.content);
     const runConfigurations = document.runConfigurations ?? [];
     const runConfiguration = matchRunConfiguration(runConfigurations, document.activeRunConfigurationId, flags.configuration);
-    if (flags.configuration && !runConfiguration) {
-        console.error(`No run configuration named or numbered "${flags.configuration}".`);
-        app.exit(2);
-        return;
-    }
     if (!runConfiguration) {
-        console.error('The project has no run configurations.');
+        console.error(`No run configuration named or numbered "${flags.configuration}".`);
         app.exit(2);
         return;
     }

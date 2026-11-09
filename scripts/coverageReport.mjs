@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // A map of what the tests run, file by file under src/: the lines the unit tests run, the lines the interaction tests run (the
-// main process and every window), and the lines neither does. It is a map for deciding what to test next and what is
+// main process and every window, the command line, and the web edition's pages), and the lines neither does. It is a map for deciding what to test next and what is
 // tested twice, not a target: no number here passes or fails anything.
 //
 //   npm run coverage            runs both suites with coverage on (the interaction suite takes several minutes), then reports
@@ -157,6 +157,19 @@ if (folderArgument) {
     const unit = spawnSync('node', ['--test'], { cwd: root, stdio: 'inherit', env: { ...process.env, NODE_V8_COVERAGE: join(folder, 'unit') } });
     console.log('Interaction tests, with coverage (several minutes)…');
     const interaction = spawnSync('node', [join(root, 'scripts', 'runInteractionTests.mjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, KONJUGATE_INTERACTION_COVERAGE: join(folder, 'interaction') } });
-    if (unit.status || interaction.status) console.log('\nSome tests failed; the coverage is of what ran.');
+    // The command line runs the app itself, so it is counted with the interaction tests.
+    console.log('Command-line tests, with coverage…');
+    const cli = spawnSync('node', ['--test', join(root, 'tests', 'cliMode.e2e.mjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, NODE_V8_COVERAGE: join(folder, 'interaction', 'cli') } });
+    // The web edition's suite, counted with the interaction tests, when its shell has been built (npm run build:web:threads, then
+    // npm run build:webShell:threads; not done here, as building the web engine takes minutes). A shell built from older sources
+    // than src/ is measured only where its files still match.
+    let web = { status: 0 };
+    if (existsSync(join(root, 'out', 'webShellThreads', 'renderer', 'index.html'))) {
+        console.log('Interaction tests in the web edition, with coverage (several minutes)…');
+        web = spawnSync('node', [join(root, 'scripts', 'runWebInteractionTests.mjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, KONJUGATE_INTERACTION_COVERAGE: join(folder, 'interaction', 'web') } });
+    } else {
+        console.log('No web shell built, so the web edition is not measured: npm run build:web:threads && npm run build:webShell:threads.');
+    }
+    if (unit.status || interaction.status || cli.status || web.status) console.log('\nSome tests failed; the coverage is of what ran.');
     await report(folder);
 }

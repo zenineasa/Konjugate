@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { Aedes } from 'aedes';
 import mqtt from 'mqtt';
 import { readDataLog } from '../src/dataLog.mjs';
+import { createPackageArchive } from '../src/packageArchive.mjs';
 import { startRigServer } from './fixtures/opcuaRigServer.mjs';
 import { startFakeOllama } from './fixtures/fakeOllama.mjs';
 
@@ -310,6 +311,8 @@ export async function runInteractionTests(driver) {
             console.error(failure);
             await tidyAfterFailure();
         }
+        // Coverage, when it is on, is taken a scenario at a time where the driver needs it (the web edition's).
+        await driver.afterScenario?.(name);
     };
     // What a failed scenario may have left behind, put away so the next one starts as the others do: windows it opened,
     // dialogs and Settings left open, a simulation result left showing. Best effort: whatever cannot be put away is left.
@@ -6237,6 +6240,71 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(libraryWindow, `Boolean(document.querySelector('[data-template-id="futureNode"]'))`), false, 'the incompatible plugin\'s template must not load');
         await closeWhenValidated(libraryWindow);
     }, { skip: !driver.capabilities.multiWindow && 'packages are installed on disk by the desktop app; the web edition has none' });
+
+    await run('a package is installed from a file: reviewed before anything is written, refused when this Konjugate cannot run it, then listed', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-install-'));
+        const packageId = 'interaction.installedNode';
+        const pluginFile = async (name, extra = {}) => {
+            const path = join(directory, name);
+            await writeFile(path, createPackageArchive({
+                packageManifest: { format: 'konjugate-package', formatVersion: 1, packageType: 'plugin', packageId, name: 'Installed Node', version: '1.0.0', contents: { manifest: 'plugin.json' }, ...extra },
+                contributionManifest: { pluginId: packageId, name: 'Installed Node', version: '1.0.0', apiVersion: 1, permissions: [], contributes: [{ kind: 'component', componentId: 'installedNode', apiVersion: 1, entry: 'installedNode.json' }] },
+                files: { 'installedNode.json': JSON.stringify({ id: 'installedNode', kind: 'node', name: 'Installed node', domains: ['showcase'], description: 'A test node.', states: [{ symbol: 'level', label: 'Level', initialValue: 1 }] }) }
+            }));
+            return path;
+        };
+        const installed = () => evaluate(window, `window.extensions.list().then((all) => all.filter((entry) => entry.packageId === ${JSON.stringify(packageId)}).map((entry) => entry.version))`);
+        const notice = () => evaluate(window, `document.querySelector('#extensionsRestartNotice').textContent`);
+        const plugin = await pluginFile('installedNode.kjp');
+        try {
+            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
+            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'The Extensions dialog did not open.');
+
+            // Reviewed first: what it is and what it may do. Cancelled there, nothing is installed.
+            let asked = await driver.answerDialogs({ open: plugin, button: 'Cancel' }, async () => {
+                assert.equal(await evaluate(window, `window.extensions.install()`), null);
+            });
+            assert.deepEqual(asked.map((entry) => entry.kind), ['open', 'message']);
+            assert.match(asked[1].message, /Install Installed Node\?/);
+            assert.match(asked[1].detail, /Installed Node 1\.0\.0/);
+            assert.match(asked[1].detail, /Permissions: none/);
+            assert.deepEqual(await installed(), [], 'Cancelling the review must install nothing.');
+
+            // Refused before the review, with the reason, when this Konjugate cannot run it; or when it is not a package at all.
+            const future = await pluginFile('futureNode.kjp', { minimumKonjugateVersion: '999.0.0' });
+            asked = await driver.answerDialogs({ open: future, button: 'Install' }, async () => {
+                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
+                await waitFor(window, `/^Installation failed/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'A package needing a newer Konjugate was not refused.');
+            });
+            assert.match(await notice(), /999\.0\.0/);
+            assert.deepEqual(asked.map((entry) => entry.kind), ['open'], 'A package that cannot run is not offered for review.');
+            const notAPackage = join(directory, 'notes.zip');
+            await writeFile(notAPackage, 'not a package');
+            await driver.answerDialogs({ open: notAPackage, button: 'Install' }, async () => {
+                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
+                await waitFor(window, `/Only \.kja add-ons/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'A file that is not a package was not refused.');
+            });
+            assert.deepEqual(await installed(), []);
+
+            // Installed: written where packages live, listed and selected in its own tab, and a restart asked for.
+            asked = await driver.answerDialogs({ open: plugin, button: 'Install' }, async () => {
+                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
+                await waitFor(window, `/^Installed interaction\.installedNode 1\.0\.0/.test(document.querySelector('#extensionsRestartNotice').textContent)`, 'The package was not installed.');
+            });
+            assert.deepEqual(asked.map((entry) => entry.kind), ['open', 'message']);
+            assert.deepEqual(await installed(), ['1.0.0']);
+            const onDisk = JSON.parse(await readFile(join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages', 'plugins', packageId, '1.0.0', 'package.json'), 'utf8'));
+            assert.equal(onDisk.packageId, packageId);
+            await waitFor(window, `document.querySelector('[data-package-key="plugin:${packageId}:1.0.0"]')?.classList.contains('selected')`, 'The installed package was not shown, selected, in the list.');
+            assert.equal(await evaluate(window, `document.querySelector('[data-extensions-tab="plugin"]').classList.contains('active')`), true);
+            assert.equal(await evaluate(window, `window.extensions.restartPending()`), true);
+            assert.equal(await evaluate(window, `document.querySelector('#extensionsRestartPendingNotice').hidden`), false, 'A plugin loads at the next start, which the dialog says.');
+        } finally {
+            await evaluate(window, `window.extensions.uninstall('plugin', ${JSON.stringify(packageId)}, '1.0.0').catch(() => {})`);
+            await evaluate(window, `document.querySelector('#extensionsDialog').open && document.querySelector('#extensionsDialog').close()`);
+            await rm(directory, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind !== 'electron' && 'installs through the desktop app\'s own file and review dialogs' });
 
     await run('a node template places source terms with their own and shared parameters, as one undoable step', async () => {
         const pluginDirectory = join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'packages', 'plugins', 'example.stockpile', '0.1.0');

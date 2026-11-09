@@ -104,7 +104,7 @@ Run the JavaScript and native suites with:
 npm run test:all
 ```
 
-The interaction suite runs every scenario and lists the ones that failed at the end, so one run finds them all; it exits with an error if any did. To run some scenarios only, set `KONJUGATE_INTERACTION_ONLY` to part of a scenario's name (several separated by `||`). To stop at the first failure instead, as when looking at one, set `KONJUGATE_INTERACTION_STOP_ON_FAILURE=1`. A scenario checks what it is about by ids, data attributes and state, and words only where the words are the point (see the top of `tests/interactionRunner.mjs`).
+That is the unit tests, the interaction suite, and the command line run end to end (`tests/cliMode.e2e.mjs`, also `npm run test:cli`). The interaction suite runs every scenario and lists the ones that failed at the end, so one run finds them all; it exits with an error if any did. To run some scenarios only, set `KONJUGATE_INTERACTION_ONLY` to part of a scenario's name (several separated by `||`). To stop at the first failure instead, as when looking at one, set `KONJUGATE_INTERACTION_STOP_ON_FAILURE=1`. A scenario checks what it is about by ids, data attributes and state, and words only where the words are the point (see the top of `tests/interactionRunner.mjs`).
 
 ### Coverage
 
@@ -112,7 +112,7 @@ The interaction suite runs every scenario and lists the ones that failed at the 
 npm run coverage
 ```
 
-Runs the unit tests and the interaction suite with V8's coverage on and writes `out/coverage/report.txt`: for each file under `src/`, the share of its lines of code the unit tests run, the interaction tests run, either runs, and how many neither runs (each such line is listed in `notRun.json`). `node scripts/coverageReport.mjs out/coverage` reports again from what is there. It is a map for deciding what to test next, not a target, and nothing passes or fails on it. It measures every window the scenarios open (each project window, the twin's, the example guide, the provider editor). What it does not see: the add-on launcher's own process, the push service's process, and the web edition, which the desktop run does not load, so those read as not run even where the web suite or a scenario exercises them.
+Runs the unit tests and the interaction suite with V8's coverage on and writes `out/coverage/report.txt`: for each file under `src/`, the share of its lines of code the unit tests run, the interaction tests run, either runs, and how many neither runs (each such line is listed in `notRun.json`). `node scripts/coverageReport.mjs out/coverage` reports again from what is there. It is a map for deciding what to test next, not a target, and nothing passes or fails on it. It measures every window the scenarios open (each project window, the twin's, the example guide, the provider editor), the command line, and, when a web shell has been built (`npm run build:web:threads && npm run build:webShell:threads`), the web edition's suite in Chromium, counted against a `src/` file only where the shell serves that file unchanged. What it does not see: the web engine's worker, the add-on launcher's own process, the push service's process, and the provider editor's renderer (its window is opened, but its code does not reach the report yet), so those read as not run even where a scenario exercises them.
 
 The dependency-free partitioner remains an intentionally separate test path:
 

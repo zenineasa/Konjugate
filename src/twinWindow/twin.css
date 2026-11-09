@@ -354,4 +354,5 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .demoChoices button { display: grid; gap: 2px; height: auto; padding: 10px 12px; text-align: left; }
 .demoChoices button small { color: var(--muted); font-size: 12px; }
 .demoChoices button:hover:not(:disabled) { border-color: var(--accent); }
-.demosDialog footer { display: flex; justify-content: flex-end; }
+.demosDialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.demosDialog footer .field.inline { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }

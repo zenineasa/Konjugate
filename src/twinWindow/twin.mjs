@@ -138,7 +138,7 @@ $('#fileSpeed').addEventListener('change', () => { if (state.log) state.log.spee
 // that drifts go straight into the control room once matched; a plant's names stay on the mapping, which is what they are there to
 // show.
 // The demonstration's model is open when its first room or tank is among the model's quantities.
-const demoMarkers = { house: 'Living room · Air temperature' };
+const demoMarkers = { house: 'Living room · Air temperature', motor: 'Motor · Speed' };
 const demoModelOpen = (variant) => state.candidates.some((candidate) => candidate.label === (demoMarkers[variant] ?? 'Water tank · Water temperature'));
 
 // A demonstration whose readings are matched goes into the control room, unless it is there to show the mapping.
@@ -167,7 +167,9 @@ for (const button of $$('[data-demo]')) {
             const variant = button.dataset.demo;
             const demo = await api.liveTwin.demo(variant);
             chooseSourceTile('file');
-            const speed = demo.speed ?? '600';
+            // The pace chosen in the dialog, or the demonstration's own: real time for the motor, fast for the slow systems.
+            const pace = $('#demoPace').value;
+            const speed = pace === 'own' ? (demo.speed ?? '600') : pace;
             if ([...$('#fileSpeed').options].some((option) => option.value === speed)) $('#fileSpeed').value = speed;
             state.demoPending = variant;
             offerLog(demo.log.content, { fileName: demo.log.fileName, speed, demo: true });
@@ -177,7 +179,7 @@ for (const button of $$('[data-demo]')) {
             }
             // The demonstration's readings against another model match nothing: its model is opened in the project window, and the
             // readings matched to it when it comes. Should the project decline (unsaved work kept), the button does it again.
-            const whose = variant === 'house' ? 'house' : 'rig';
+            const whose = { house: 'house', motor: 'motor' }[variant] ?? 'rig';
             sourceStatus(`These are the simulated ${whose}'s readings: opening the ${whose}'s model in the project window to compare them with…`, 'warning');
             const open = Object.assign(document.createElement('button'), { type: 'button', textContent: `Open the ${whose}'s model` });
             open.addEventListener('click', () => api.openDemoModel(variant));

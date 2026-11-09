@@ -3111,14 +3111,16 @@ ipcMain.handle('liveTwinDemo', async (_event, variant = 'steady') => {
     // 'plant' is the steady recording as a plant's logger would keep it (instrument tags, kW and °C), for the twin's setup to match;
     // 'house' a house of three rooms, their heaters, the weather and the sun, a day of it (scripts/generateHouseTwin.mjs), for a room
     // with many signals.
-    const projectFileName = variant === 'house' ? 'smartHouse.kjt' : 'simulatedTankRig.kjt';
-    const logFileName = { drifting: 'simulatedTankRigDrifting.csv', plant: 'simulatedTankRigPlant.csv', house: 'smartHouse.csv' }[variant] ?? 'simulatedTankRig.csv';
+    // 'motor' a DC motor that answers its voltage within half a second (scripts/generateMotorTwin.mjs), played in real time, to steer by hand.
+    const projectFileName = { house: 'smartHouse.kjt', motor: 'dcMotor.kjt' }[variant] ?? 'simulatedTankRig.kjt';
+    const logFileName = { drifting: 'simulatedTankRigDrifting.csv', plant: 'simulatedTankRigPlant.csv', house: 'smartHouse.csv', motor: 'dcMotor.csv' }[variant] ?? 'simulatedTankRig.csv';
     return {
         project: await decodeProjectForRenderer(await readFile(join(folder, projectFileName))),
         projectFileName,
         log: { content: await readFile(join(folder, logFileName), 'utf8'), fileName: logFileName },
-        // A day of the house at 1200× is a minute and a bit; six hours of the rig at 600× a little less.
-        speed: variant === 'house' ? '1200' : '600'
+        // A day of the house at 1200× is a minute and a bit; six hours of the rig at 600× a little less; the motor's three minutes as
+        // they happened, since it is there to be steered.
+        speed: { house: '1200', motor: '1' }[variant] ?? '600'
     };
 });
 // Konjugate's own OPC UA certificate, and the servers it has been told to trust, in the app's own folder.

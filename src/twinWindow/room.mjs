@@ -6,7 +6,7 @@
 // the twin has made. "Try something" opens a sandbox from now, which never changes the twin, and keeps what was tried as a draft
 // scenario. A change to the model in the project window is offered to the engineer to apply.
 
-import { $, $$, ago, clock, cleanError, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, trendOf, valueAt } from './common.mjs';
+import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, trendOf, valueAt } from './common.mjs';
 import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
 import { liveRange } from '../inputBindings.mjs';
 import { createHumanInput } from '../renderer/humanInput.mjs';
@@ -612,7 +612,7 @@ function renderView() {
     const behind = twin.cycles.length - 1 - twin.cycles.indexOf(cycle);
     $('#timeScrub').max = String(twin.cycles.length - 1);
     $('#timeScrub').value = String(following ? twin.cycles.length - 1 : twin.view);
-    $('#timeLabel').textContent = following ? `Following now · ${Number((cycle.now / 3600).toFixed(2))} h` : `${dataTime(cycle.now)} · ${plural(behind, 'move')} ago`;
+    $('#timeLabel').textContent = following ? `Following now · ${dataClock(cycle.now)}` : `${dataTime(cycle.now)} · ${plural(behind, 'move')} ago`;
     $('#timeFollow').hidden = following;
     $('#tiles').classList.toggle('past', !following);
     const time = visibleTime(cycle);
@@ -794,7 +794,7 @@ async function applyModelChange() {
         twin.baseline = model;
         twin.settings = { ...twin.settings, document: model };
         twin.pending = null;
-        addEvent('info', 'The model\'s change was applied to the twin', `${said}; it starts again from the move at ${Number((at.anchor / 3600).toFixed(2))} h${outcome.added.length ? `, ${plural(outcome.added.length, 'new state')} at ${outcome.added.length === 1 ? 'its' : 'their'} initial value${outcome.added.length === 1 ? '' : 's'}` : ''}`, at.now);
+        addEvent('info', 'The model\'s change was applied to the twin', `${said}; it starts again from the move at ${dataClock(at.anchor)}${outcome.added.length ? `, ${plural(outcome.added.length, 'new state')} at ${outcome.added.length === 1 ? 'its' : 'their'} initial value${outcome.added.length === 1 ? '' : 's'}` : ''}`, at.now);
         engineerOpened(twin);
     } catch (error) {
         addEvent('bad', 'The model\'s change was not applied', cleanError(error));
@@ -873,7 +873,7 @@ async function runSandbox() {
         const result = await host.api.liveTwin.sandboxRunFor(seconds);
         takeSandboxResult(sandbox, result);
         $('#sandboxStatus').className = 'status good';
-        $('#sandboxStatus').textContent = `Ran ahead to ${Number((result.time / 3600).toFixed(2))} h${result.tried.length ? ` with ${result.tried.map((step) => `${step.signal} ${step.value}`).join(', ')}` : ' with nothing changed'}.`;
+        $('#sandboxStatus').textContent = `Ran ahead to ${dataClock(result.time)}${result.tried.length ? ` with ${result.tried.map((step) => `${step.signal} ${step.value}`).join(', ')}` : ' with nothing changed'}.`;
         renderView();
     } catch (error) {
         $('#sandboxStatus').className = 'status warning';
@@ -936,7 +936,7 @@ async function followControls() {
                     if (performance.now() - drawnAt > 250) {
                         drawnAt = performance.now();
                         $('#sandboxStatus').className = 'status good';
-                        $('#sandboxStatus').textContent = `Following the controls: ${Number((result.time / 3600).toFixed(2))} h${result.tried.length ? `, ${result.tried.length} ${result.tried.length === 1 ? 'change' : 'changes'} tried` : ''}.`;
+                        $('#sandboxStatus').textContent = `Following the controls: ${dataClock(result.time)}${result.tried.length ? `, ${result.tried.length} ${result.tried.length === 1 ? 'change' : 'changes'} tried` : ''}.`;
                         renderView();
                     }
                 }

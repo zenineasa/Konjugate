@@ -39,6 +39,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'opcuaSource
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'twinSetup.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'twinModelChange.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'houseTwin.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'motorTwin.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinOpcUa.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'labTrial.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowCorrections.mjs'), executable]);

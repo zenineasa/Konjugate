@@ -10,7 +10,10 @@ export const cleanError = (error) => String(error?.message ?? error).replace(/^E
 export const readable = (value) => (Number.isFinite(value) ? Number(value.toPrecision(4)).toString() : '—');
 export const shown = (value) => (Number.isFinite(value) ? Number(value.toPrecision(5)).toString() : '—');
 export const clock = (date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-export const dataTime = (seconds) => `at ${Number((seconds / 3600).toFixed(2))} h of data`;
+// A time in the data, in the unit that reads at its size: seconds for a motor's, minutes, hours for a tank's or a house's.
+export const dataClock = (seconds) => (Math.abs(seconds) < 60 ? `${Number(seconds.toFixed(1))} s`
+    : Math.abs(seconds) < 3600 ? `${Number((seconds / 60).toFixed(1))} min` : `${Number((seconds / 3600).toFixed(2))} h`);
+export const dataTime = (seconds) => `at ${dataClock(seconds)} of data`;
 export const plural = (count, word, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
 
 export function element(tag, properties = {}, ...children) {

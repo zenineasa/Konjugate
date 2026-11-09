@@ -5,7 +5,7 @@
 // model (an undoable edit in the project window), so there is one model; the warning is taken at once; what a move does with each
 // measured signal, the parameters the estimator tracks, and the twin's timing take effect when it starts again.
 
-import { $, $$, cleanError, element, shown, tunableParameters, withValues } from './common.mjs';
+import { $, $$, cleanError, dataClock, element, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
 
 let host = null;
@@ -136,7 +136,7 @@ async function setParameter(parameter, value, fields) {
     }
     const kept = await keepInModel(twin, [{ parameterId: parameter.parameterId, value }]);
     parameter.value = value;
-    addEvent('info', `${parameter.name} set from ${shown(from)} to ${shown(value)}${parameter.unit ? ` ${parameter.unit}` : ''}`, `the twin runs on with it from the move at ${Number((at.anchor / 3600).toFixed(2))} h; ${kept}`, at.now);
+    addEvent('info', `${parameter.name} set from ${shown(from)} to ${shown(value)}${parameter.unit ? ` ${parameter.unit}` : ''}`, `the twin runs on with it from the move at ${dataClock(at.anchor)}; ${kept}`, at.now);
 }
 
 // Values kept in the model, in the project window (an undoable edit there); the twin's own copy follows, and the model's change that
@@ -171,7 +171,7 @@ async function runRefit() {
     }
     refit = { running: true, plan };
     refreshButtons(twin);
-    $('#refitStatus').textContent = `Refitting on the window from ${Number((plan.anchor / 3600).toFixed(2))} h to ${Number((plan.now / 3600).toFixed(2))} h…`;
+    $('#refitStatus').textContent = `Refitting on the window from ${dataClock(plan.anchor)} to ${dataClock(plan.now)}…`;
     try {
         const result = await host.api.fit(JSON.stringify(plan.document), plan.csv, { backend: 'nlopt-bobyqa', maxIterations: 400 });
         if (!result.available) throw new Error('The native fitting engine is unavailable.');
@@ -182,7 +182,7 @@ async function runRefit() {
             const state = states.get(entry.parameterId);
             const parameter = parameters.get(entry.parameterId);
             return state
-                ? `${state.node.name} · ${state.state.name} at ${Number((plan.anchor / 3600).toFixed(2))} h: ${shown(state.state.initialValue)} → ${shown(entry.value)}`
+                ? `${state.node.name} · ${state.state.name} at ${dataClock(plan.anchor)}: ${shown(state.state.initialValue)} → ${shown(entry.value)}`
                 : `${parameter?.name ?? entry.parameterId}: ${shown(parameter?.value)} → ${shown(entry.value)}${parameter?.unit ? ` ${parameter.unit}` : ''}`;
         });
         $('#refitRows').replaceChildren(...refit.rows.map((text) => element('div', { textContent: text })));
@@ -225,8 +225,8 @@ async function applyRefit(keep) {
         renderTunable(twin);
     }
     $('#refitStatus').className = 'status good';
-    $('#refitStatus').textContent = `Applied from the move at ${Number((plan.anchor / 3600).toFixed(2))} h.`;
-    addEvent('info', 'A refit was applied to the twin', `${rows.join('; ')}; it runs on from the move at ${Number((plan.anchor / 3600).toFixed(2))} h${kept}`, plan.now);
+    $('#refitStatus').textContent = `Applied from the move at ${dataClock(plan.anchor)}.`;
+    addEvent('info', 'A refit was applied to the twin', `${rows.join('; ')}; it runs on from the move at ${dataClock(plan.anchor)}${kept}`, plan.now);
 }
 
 // ---- The warning --------------------------------------------------------------------------------------------------------------------

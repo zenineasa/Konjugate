@@ -25,12 +25,23 @@
             <h2 id="demosTitle">Demonstrations</h2>
             <p class="hint">A twin running with no equipment: each opens its own model in the project window, <strong>replacing the current project</strong> (you are asked to save it first if it has unsaved changes), and runs the twin on a recording made for it.</p>
             <div class="demoChoices">
-                <button type="button" data-demo="steady"><strong>The simulated rig</strong><small>A heated water tank and its recording: the twin in step with it.</small></button>
-                <button type="button" data-demo="drifting"><strong>A rig that drifts</strong><small>The same tank losing heat faster than the model says, until the room warns of the drift.</small></button>
-                <button type="button" data-demo="house"><strong>A house</strong><small>Three rooms with their heaters and thermostats, the weather and the sun, a day in a minute; the bedroom window is left open in the afternoon.</small></button>
-                <button type="button" data-demo="plant"><strong>A plant's names</strong><small>The rig's readings under a plant's tag names and units (TK1_TT101_PV in °C), to see them matched to the model and converted.</small></button>
+                <button type="button" data-demo="motor"><strong>A motor, in real time</strong><small>A DC motor answering its voltage within half a second, three minutes of an operator at its controller, its bearing warming halfway. Made to steer: open Try something and bind a joystick or keys to its voltage. Plays in real time.</small></button>
+                <button type="button" data-demo="steady"><strong>The simulated rig</strong><small>A heated water tank and six hours of its recording: the twin in step with it. Plays at 600×.</small></button>
+                <button type="button" data-demo="drifting"><strong>A rig that drifts</strong><small>The same tank losing heat faster than the model says, until the room warns of the drift. Plays at 600×.</small></button>
+                <button type="button" data-demo="house"><strong>A house</strong><small>Three rooms with their heaters and thermostats, the weather and the sun, a day of it; the bedroom window is left open in the afternoon. Plays at 1200×.</small></button>
+                <button type="button" data-demo="plant"><strong>A plant's names</strong><small>The rig's readings under a plant's tag names and units (TK1_TT101_PV in °C), to see them matched to the model and converted. Plays at 600×.</small></button>
             </div>
-            <footer><button type="submit" value="cancel">Cancel</button></footer>
+            <footer>
+                <label class="field inline"><span>Data arrives</span><select id="demoPace" aria-label="How fast the demonstration's recording arrives">
+                    <option value="own" selected>At its own pace</option>
+                    <option value="1">In real time (a second a second)</option>
+                    <option value="10">10×</option>
+                    <option value="60">60× (a minute a second)</option>
+                    <option value="600">600× (an hour in six seconds)</option>
+                    <option value="1200">1200× (a day in 72 seconds)</option>
+                </select></label>
+                <button type="submit" value="cancel">Cancel</button>
+            </footer>
         </form>
     </dialog>
 
@@ -57,6 +68,7 @@
                     <label class="field"><span>Data arrives</span><select id="fileSpeed">
                         <option value="follow">As the file grows (a logger is writing it)</option>
                         <option value="1">In real time</option>
+                        <option value="10">10×</option>
                         <option value="60">60× (a minute a second)</option>
                         <option value="600" selected>600× (an hour in six seconds)</option>
                         <option value="1200">1200× (a day in 72 seconds)</option>

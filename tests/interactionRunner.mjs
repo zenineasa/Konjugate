@@ -5433,7 +5433,7 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#refitRun').click()`);
         await waitFor(twin, `!document.querySelector('#refitApply').hidden`, 'The refit did not finish.', 60000);
         const refitRow = await evaluate(twin, `document.querySelector('#refitRows').textContent`);
-        const room = refitRow.match(/Ambient air · Temperature at [\d.]+ h: 293\.15 → ([\d.]+)/);
+        const room = refitRow.match(/Ambient air · Temperature at [\d.]+ (?:s|min|h): 293\.15 → ([\d.]+)/);
         const refittedLoss = refitRow.match(/Heat loss coefficient: 20 → ([\d.]+) W\/K/);
         assert.ok(refittedLoss && Math.abs(Number(refittedLoss[1]) - 20) < 1, `The heat loss is refitted near the truth: ${refitRow}`);
         assert.ok(room && Math.abs(Number(room[1]) - 293.15) < 0.5, `The room is fitted at the window's anchor, and found again near the truth: ${refitRow}`);
@@ -5700,7 +5700,7 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `${demonstrations}.click()`);
         await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open.');
         assert.match(await evaluate(twin, `document.querySelector('#demosDialog .hint').textContent`), /replacing the current project/);
-        assert.equal(await evaluate(twin, `document.querySelectorAll('#demosDialog [data-demo]').length`), 4);
+        assert.equal(await evaluate(twin, `document.querySelectorAll('#demosDialog [data-demo]').length`), 5);
         await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
         assert.equal(await evaluate(twin, `document.querySelector('#demosDialog').open`), false, 'Choosing one closes the dialog.');
         await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'simulatedTankRig'`, 'The rig\'s model did not open in the project window.', 15000);
@@ -5786,6 +5786,49 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
 
+    await run('a motor in real time: the demonstration made to be steered runs at a second a second, a move every second, read in seconds', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-motor-'));
+        const projectPath = join(directory, 'rig.kjt');
+        await writeFile(projectPath, await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRig.kjt')));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length === 3`, 'The rig model did not load.');
+        const twin = await openTwinWindow(opened);
+        await evaluate(twin, `document.querySelector('#openDemos').click()`);
+        await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open.');
+        assert.equal(await evaluate(twin, `document.querySelector('#demoPace').value`), 'own', 'Each demonstration plays at its own pace unless asked otherwise.');
+        const startedAt = Date.now();
+        await evaluate(twin, `document.querySelector('[data-demo="motor"]').click()`);
+        await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'dcMotor'`, 'The motor\'s model did not open in the project window.', 15000);
+        // Its twin is set up with the project: the recording's two signals mapped, and timing for a system that answers in a second.
+        assert.deepEqual(await evaluate(opened, `(() => { const live = window.__debugTwin.setup().live; return [live.window, live.stride, live.horizon]; })()`), [5, 1, 5]);
+        await waitFor(twin, `!document.querySelector('#room').hidden`, 'The motor did not go into the control room.', 15000);
+        assert.equal(await evaluate(twin, `document.querySelector('#healthSource').textContent`), 'dcMotor.csv, played at 1×');
+        // A second a second: the first move once five seconds of readings are in, then one a second.
+        await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 4`, 'The motor\'s twin made no moves.', 30000);
+        const { last, moves } = await evaluate(twin, `window.__debugTwinWindow.summary()`);
+        const elapsed = (Date.now() - startedAt) / 1000;
+        assert.ok(last.now <= elapsed + 1, `The recording arrived no faster than real time (${last.now} s of data in ${elapsed.toFixed(1)} s).`);
+        assert.equal(last.now - last.anchor, 5, 'A five-second window.');
+        assert.ok(Math.abs(last.jumps.motorSpeed.jump) < 0.67, `In step with the motor before its bearing warms (jump ${last.jumps.motorSpeed.jump}).`);
+        assert.ok(moves >= 4);
+        // Read in seconds, the scale it runs at: the axis, the time followed, and when its first move came.
+        assert.equal(await evaluate(twin, `document.querySelector('#timeAxis')._fullLayout.xaxis.title.text`), 'seconds');
+        assert.match(await evaluate(twin, `document.querySelector('#timeLabel').textContent`), /^Following now · [\d.]+ s$/);
+        assert.ok((await twinEvents(twin)).some((text) => /its first move is made.*at 5 s of data/.test(text)), 'The first move, at five seconds of data.');
+        // The current, which nothing measures, inferred; the voltage the input to steer in a sandbox.
+        await waitFor(twin, `/Motor · Current/.test(document.querySelector('#inferredRows').textContent)`, 'The motor\'s current was not inferred.');
+        assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow strong')].map((name) => name.textContent)`), ['Voltage']);
+        await evaluate(twin, `document.querySelector('#trySomething').click()`);
+        await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && /Voltage/.test(document.querySelector('#sandboxInputs').textContent)`, 'The sandbox did not offer the voltage to steer.', 15000);
+        await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
+        await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
     await run('the twin\'s own window: a plant\'s names matched to the model with their units converted, and the control room running', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-twinwindow-'));
         const projectPath = join(directory, 'rig.kjt');
@@ -5805,7 +5848,10 @@ export async function runInteractionTests(driver) {
         // A plant's names: the suggestions fill in the mapping, with the units converted.
         await evaluate(twin, `document.querySelector('#openDemos').click()`);
         await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open from the setup.');
+        // The pace chosen before it starts is the one it plays at.
+        await setField(twin, '#demoPace', '1200');
         await evaluate(twin, `document.querySelector('[data-demo="plant"]').click()`);
+        await waitFor(twin, `document.querySelector('#fileSpeed').value === '1200'`, 'The chosen pace was not taken for the recording (the plant\'s own is 600×).');
         await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow').length === 2`, 'The plant\'s signals were not offered.');
         const row = (name) => `document.querySelector('#mappingRows .mappingRow[data-signal="${name}"]')`;
         assert.equal(await evaluate(twin, `${row('TK1_TT101_PV')}.querySelector('[data-field="role"]').value`), 'output');
@@ -5929,7 +5975,7 @@ export async function runInteractionTests(driver) {
         const latest = await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`);
         await evaluate(twin, `(() => { const plot = document.querySelector('#tiles .tile .plot'); const box = plot.getBoundingClientRect(); plot.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: box.left + 64 + 4, clientY: box.top + box.height / 2 })); })()`);
         assert.equal(await evaluate(twin, `document.querySelector('#trendCursor').hidden`), false, 'Pointing at a time marks it through the column.');
-        assert.match(await evaluate(twin, `document.querySelector('#trendCursorTime').textContent`), /^at [\d.]+ h of data$/);
+        assert.match(await evaluate(twin, `document.querySelector('#trendCursorTime').textContent`), /^at [\d.]+ (?:s|min|h) of data$/);
         assert.notEqual(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), latest, 'The strip says its value at the time pointed at (the start of the span, cooler than now).');
         assert.match(await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`), /W$/);
         await evaluate(twin, `document.querySelector('#trendColumn').dispatchEvent(new PointerEvent('pointerleave'))`);

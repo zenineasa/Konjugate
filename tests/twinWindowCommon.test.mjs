@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ago, stepOf, trendOf } from '../src/twinWindow/common.mjs';
+import { ago, dataClock, dataTime, stepOf, trendOf } from '../src/twinWindow/common.mjs';
 
 // A point a minute, for `hours` hours, valued by `at(time)`.
 const series = (hours, at) => Array.from({ length: hours * 60 + 1 }, (_, minute) => [minute * 60, at(minute * 60)]);
@@ -29,4 +29,13 @@ test('how long ago, in words', () => {
     assert.equal(ago(40 * 60), '40 min ago');
     assert.equal(ago(3600), '1 h ago');
     assert.equal(ago(1.5 * 3600), '1.5 h ago');
+});
+
+test('a time in the data is read in the unit that suits it: a motor in seconds, a tank in hours', () => {
+    assert.equal(dataClock(16), '16 s');
+    assert.equal(dataClock(2.25), '2.3 s');
+    assert.equal(dataClock(750), '12.5 min');
+    assert.equal(dataClock(3600), '1 h');
+    assert.equal(dataClock(9600), '2.67 h');
+    assert.equal(dataTime(5), 'at 5 s of data');
 });

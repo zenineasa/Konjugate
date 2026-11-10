@@ -395,14 +395,15 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     facts.replaceChildren();
     const upTo = twin.cycles.filter((item) => item.index <= cycle.index);
     const jumps = upTo.map((item) => item.jumps?.[tile.signal]?.jump).filter(Number.isFinite).slice(-60);
+    facts.append(element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${brief(shownAs.by(jump))}${unit}` : '—'}`));
+    // The drift's state first: on a narrow strip the facts after it shrink and end in an ellipsis, and this is the one to keep.
+    if (alarm) facts.append(element('span', { className: 'state', textContent: 'drifting past the warning' }));
+    else if (leaning) facts.append(element('span', { className: 'state', textContent: `leaning ${trend.direction} the readings` }));
     facts.append(
-        element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${brief(shownAs.by(jump))}${unit}` : '—'}`),
         // The two thresholds, named as the events name them: how far one move's jump may go before the strip leans, and how far the
         // corrections may keep to one side, on average a move, before the room warns.
         element('span', { textContent: `jump within ±${brief(shownAs.by(tile.tolerance))}${unit} a move`, title: 'A move whose jump is larger than this leans the strip amber' }),
         ...(Number.isFinite(twin.settings.alertAt) && twin.settings.alertAt > 0 ? [element('span', { textContent: `warns at ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit} a move on average`, title: 'When the model\'s corrections keep to one side by more than this, on average a move, the room warns of a drift' })] : []));
-    if (alarm) facts.append(element('span', { textContent: 'drifting past the warning' }));
-    else if (leaning) facts.append(element('span', { textContent: `leaning ${trend.direction} the readings` }));
     // An estimated signal: how many readings fell outside the band the twin expected, where about one in five is honest.
     if (tile.estimated) {
         const outside = upTo.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.outside ?? 0), 0);
@@ -420,7 +421,10 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     // window hid the earlier moves' corrections within it, and read as an hour of the model running away to a step at now.)
     const earlier = { x: [], y: [] };
     let previousNow = -Infinity;
+    // Where the twin took new values (a refit applied, or a parameter set): the start of the stretch of the first move made with them.
+    const changes = [];
     for (const item of twin.cycles) {
+        if (item.refit && Number.isFinite(previousNow) && item.index <= cycle.index && previousNow >= from) changes.push(previousNow);
         if (item.index >= cycle.index) break;
         const added = (item.window[tile.signal] ?? []).filter((row) => row.time >= previousNow - 1e-9 && row.time <= item.now + 1e-9 && row.time >= from);
         previousNow = item.now;
@@ -450,8 +454,13 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
         margin: stripMargin, showlegend: false, hovermode: false,
         xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false, range: [time.start / time.divisor, time.end / time.divisor], fixedrange: true },
         yaxis: { gridcolor: '#17252f', zeroline: false, nticks: 4, fixedrange: true, title: { text: shownAs.unit, standoff: 4, font: { size: 10 } } },
-        shapes: [{ type: 'rect', xref: 'x', yref: 'paper', x0: Math.max(cycle.anchor, time.start) / time.divisor, x1: cycle.now / time.divisor, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' }]
+        shapes: [
+            { type: 'rect', xref: 'x', yref: 'paper', x0: Math.max(cycle.anchor, time.start) / time.divisor, x1: cycle.now / time.divisor, y0: 0, y1: 1, fillcolor: 'rgba(57,135,229,.10)', line: { width: 0 }, layer: 'below' },
+            ...changes.map((at) => ({ type: 'line', xref: 'x', yref: 'paper', x0: at / time.divisor, x1: at / time.divisor, y0: 0, y1: 1, line: { color: '#42c9bc', width: 1, dash: 'dot' } }))
+        ],
+        annotations: changes.map((at) => ({ x: at / time.divisor, y: 1, xref: 'x', yref: 'paper', text: 'new values', showarrow: false, xanchor: 'left', yanchor: 'top', xshift: 3, font: { size: 10, color: '#42c9bc' } }))
     }), { displayModeBar: false, responsive: true });
+    tile.changes = changes;
 }
 
 // Every plot in the column has the same margins, so their time axes line up to the pixel: a time is in the same place in every strip.

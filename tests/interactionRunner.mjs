@@ -5437,8 +5437,16 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#refitApply').click()`);
         await waitFor(twin, `/^Applied from the move at /.test(document.querySelector('#refitStatus').textContent)`, 'The refit was not applied.', 15000);
         await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.last?.refit)`, 'The next move did not say a refit was applied.', 30000);
+        // Where the new values took effect is marked on the strip, so the drop that follows reads as the refit's doing.
+        await waitFor(twin, `document.querySelector('#tiles .tile .plot').layout.annotations?.some((note) => note.text === 'new values')`, 'Where the refit took effect is not marked.', 15000);
+        // A refit that finishes once the twin has stopped (a log played to its end while it ran) is not offered to apply, and says why;
+        // what it found can still be kept in the model.
+        await evaluate(twin, `document.querySelector('#refitRun').click()`);
+        await waitFor(twin, `document.querySelector('#refitRows').children.length > 0`, 'The second refit did not finish.', 60000);
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
         await waitFor(twin, `window.__debugTwinWindow.summary()?.running === false`, 'The live twin did not stop.', 15000);
+        await waitFor(twin, `document.querySelector('#refitApply').hidden && /^The twin has stopped/.test(document.querySelector('#refitStatus').textContent)`, 'Apply was still offered with the twin stopped.');
+        assert.equal(await evaluate(twin, `document.querySelector('#refitKeep').textContent`), 'Keep in the model');
 
         // The scenario renamed and deleted from the room's list.
         await waitFor(twin, `document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'The scenario was not listed.');

@@ -134,6 +134,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .tile .plot { flex: 1; min-height: 0; }
 .tileWaiting { position: absolute; inset: 50% 0 auto; margin: 0; transform: translateY(-50%); text-align: center; color: var(--muted); pointer-events: none; }
 .tile .facts { flex: 1 1 auto; display: flex; flex-wrap: nowrap; gap: 14px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.tile .facts > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tile .facts > span.jumps, .tile .facts > span.state { flex: none; }
 .tile .tileEnd { margin-left: auto; }
 
 /* The inputs, at the foot of the column: a short step strip each, in its own units, on the same time axis. */
@@ -240,7 +242,8 @@ button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400
 .engineer h3 { margin: 0 0 4px; font-size: 13px; }
 .engineer h4 { margin: 10px 0 2px; font-size: 12.5px; }
 .engineer .hint { margin: 0 0 8px; font-size: 12px; }
-.engineer .row { display: flex; gap: 8px; margin-top: 6px; }
+.engineer .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.engineer .row button { white-space: nowrap; }
 .tunableRow { display: grid; grid-template-columns: 1fr 96px; gap: 4px 8px; align-items: center; margin-bottom: 8px; }
 .tunableRow label { font-size: 12.5px; }
 .tunableRow small { color: var(--muted); }
@@ -290,7 +293,8 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 /* The health strip's buttons: quiet until they are wanted; the Engineer switch lit when on; Stop says what it does. */
 .health button { height: 30px; background: transparent; border-color: var(--line); color: var(--text); }
 .health button:hover:not(:disabled) { background: var(--panelRaised); border-color: #3a5866; }
-.health button[aria-pressed="true"] { color: var(--accentText); background: var(--accent); border-color: var(--accent); }
+.health button[aria-pressed="true"], .health button[aria-pressed="true"]:hover:not(:disabled) { color: var(--accentText); background: var(--accent); border-color: var(--accent); }
+.health button[aria-pressed="true"]:hover:not(:disabled) { filter: brightness(1.08); }
 #roomStop { color: #f0b3b9; border-color: #5a3238; }
 #roomStop:hover:not(:disabled) { background: rgb(212 112 122 / 14%); border-color: var(--bad); }
 .healthItem { font-variant-numeric: tabular-nums; }

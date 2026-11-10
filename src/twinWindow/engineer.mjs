@@ -74,6 +74,18 @@ function refreshButtons(twin) {
     $('#refitRun').disabled = !twin.running || !twin.cycles.length || Boolean(refit?.running);
     for (const field of $$('#tunableRows input')) field.disabled = !twin.running || !twin.cycles.length;
     $('#restartTwin').disabled = !dirty;
+    // What a refit found: applied to the twin while it runs. Once it has stopped (a log played to its end while the fit ran) there is
+    // no twin to run on with it, so Apply is not offered, and says why; the values can still be kept in the model, for its next run.
+    if (refit?.report) {
+        const parameters = refit.plan.tunable.some((entry) => entry.kind === 'parameter');
+        $('#refitApply').hidden = !twin.running;
+        $('#refitKeep').hidden = !parameters;
+        $('#refitKeep').textContent = twin.running ? 'Apply, and keep in the model' : 'Keep in the model';
+        if (!twin.running) {
+            $('#refitStatus').className = 'status warning';
+            $('#refitStatus').textContent = `The twin has stopped, so it cannot run on with these values${parameters ? '; they can still be kept in the model, for its next run' : ''}.`;
+        }
+    }
 }
 
 function markDirty() {
@@ -188,8 +200,6 @@ async function runRefit() {
         $('#refitRows').replaceChildren(...refit.rows.map((text) => element('div', { textContent: text })));
         $('#refitStatus').className = 'status good';
         $('#refitStatus').textContent = 'Apply it to run the twin on from that window with these values.';
-        $('#refitApply').hidden = !twin.running;
-        $('#refitKeep').hidden = !twin.running || !plan.tunable.some((entry) => entry.kind === 'parameter');
     } catch (error) {
         refit = null;
         $('#refitStatus').className = 'status warning';
@@ -210,6 +220,18 @@ async function applyRefit(keep) {
     const { plan, report, rows } = refit;
     $('#refitApply').hidden = true;
     $('#refitKeep').hidden = true;
+    // Stopped: kept in the model only, for the twin's next run.
+    if (!twin.running) {
+        if (!keep) return;
+        refit = null;
+        const parameterIds = new Set(plan.tunable.filter((entry) => entry.kind === 'parameter').map((entry) => entry.id));
+        const kept = await keepInModel(twin, report.finalParameters.filter((entry) => parameterIds.has(entry.parameterId)));
+        renderTunable(twin);
+        $('#refitStatus').className = 'status good';
+        $('#refitStatus').textContent = 'Kept in the model, for the twin\'s next run.';
+        addEvent('info', 'What a refit found is kept in the model', `${rows.join('; ')}; ${kept}`, plan.now);
+        return;
+    }
     try {
         await host.api.liveTwin.applyRefit(report.finalParameters, plan.cycle);
     } catch (error) {

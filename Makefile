@@ -120,7 +120,7 @@ endif
 	icons iconsPng iconsWindows iconsMacos iconsWeb cleanIcons \
 	engine \
 	installDependencies checkPackaging packageApp packageMacos packageWindows packageLinux \
-	distributable distributableMacos distributableWindows distributableWindowsPortable distributableWindowsMsix distributableLinux \
+	distributable distributableMacos distributableWindows distributableWindowsPortable distributableWindowsMsix distributableLinux distributableLinuxDeb createDeb \
 	verifyPackagedEngine verifyPackagedInteraction verifyPackage \
 	build cleanPackage clean
 
@@ -414,6 +414,16 @@ else
 endif
 	rm -rf $(releaseDir)/$(appName).AppDir
 	@echo "Created $(releaseDir)/$(appImageName)"
+	@$(MAKE) createDeb
+
+# The .deb for Debian and Ubuntu, wrapped from the same package folder as the AppImage. Needs dpkg-deb.
+distributableLinuxDeb: packageLinux
+	@$(MAKE) createDeb
+
+# Only the wrapping, for distributableLinux, which has just packaged the app itself.
+createDeb:
+	@command -v dpkg-deb >/dev/null 2>&1 || { echo "dpkg-deb is required to create a .deb (install dpkg-dev, or build on Debian or Ubuntu)."; exit 1; }
+	node scripts/createDebPackage.mjs $(packageDir)/$(appName)-linux-$(hostArch) $(releaseDir) $(hostArch)
 
 cleanPackage:
 	$(RM) $(packageDir) $(releaseDir)

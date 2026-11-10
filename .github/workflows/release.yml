@@ -287,6 +287,8 @@ jobs:
                       echo
                       assetLink '*-x86_64.AppImage' 'Linux (x86_64)'
                       assetLink '*-aarch64.AppImage' 'Linux (arm64)'
+                      assetLink '*_amd64.deb' 'Debian and Ubuntu (x86_64)'
+                      assetLink '*_arm64.deb' 'Debian and Ubuntu (arm64)'
                       assetLink '*-setup.exe' 'Windows'
                       assetLink '*-arm64.dmg' 'macOS (Apple silicon)'
                       assetLink '*-x64.dmg' 'macOS (Intel)'

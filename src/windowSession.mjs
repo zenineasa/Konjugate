@@ -7,7 +7,9 @@
 //   1. at the new anchor (now minus the window W), compare the model's prediction with the measurement there: the jump;
 //   2. go back to the checkpoint at the anchor, set each measured state to its measurement, keep the model's own value elsewhere;
 //   3. run the window to now on the inputs that were really applied, and compare with what was measured;
-//   4. run on to the horizon H for the forecast, with the inputs held at their last value.
+//   4. at now, set each measured state toward its latest reading as at the anchor, and run on to the horizon H from there for the
+//      forecast, with the inputs held at their last value: the forecast starts where the system is, not where the window's run,
+//      corrected only at its anchor, has drifted to by now.
 //
 // One cycle is one batch of commands to one engine process that stays running, so a cycle costs no start-up. Log times are counted
 // from the log's first reading, which is time 0 of the session. Each cycle sees only the readings up to its own now, so what a
@@ -221,6 +223,12 @@ export class WindowSession {
     }
 
     // The measurement at a time: the reading there, or between the readings either side of it; null with none on both sides.
+    // The latest good reading at or before `now`, if one is within a stride of it: what the forecast starts from.
+    #latestReading(signal, now) {
+        const reading = this.#goodReadings(signal, now).filter((candidate) => candidate.time <= now + 1e-9).at(-1);
+        return reading && now - reading.time <= this.stride + 1e-9 ? reading : null;
+    }
+
     #measurementAt(signal, time, upTo) {
         const readings = this.#goodReadings(signal, upTo);
         const exact = readings.find((reading) => Math.abs(reading.time - time) < 1e-9);
@@ -229,6 +237,23 @@ export class WindowSession {
         if (after <= 0) return null;
         const value = interpolate(readings.slice(after - 1, after + 1), time);
         return Number.isFinite(value) ? value : null;
+    }
+
+    // How each measured state is set at now for the forecast, as at the anchor: toward its latest reading by the signal's gain, from the
+    // model's own value at now (the last sample of the run to now). Not for a signal estimated (the estimator's band is its forecast),
+    // watched only, computed by the model, or with no reading within a stride of now.
+    #correctionsAtNow(replies, now, computed) {
+        const samples = replies.flatMap((reply) => reply.samples);
+        const atNow = [...samples].reverse().find((sample) => Math.abs(sample.time - now) < 1e-9);
+        const result = {};
+        this.outputs.forEach((entry, outputIndex) => {
+            const model = atNow ? atNow.values[outputIndex] : NaN;
+            const reading = this.#latestReading(entry.signal, now);
+            const gain = this.corrections[entry.signal]?.gain ?? 1;
+            const skip = this.corrections[entry.signal]?.estimate || computed.has(entry.stateId) || gain === 0 || !reading || !Number.isFinite(model);
+            result[entry.signal] = { stateId: entry.stateId, model, reading: reading?.value ?? null, applied: skip ? null : model + gain * (reading.value - model) };
+        });
+        return result;
     }
 
     // The input readings a cycle with this now has not yet sent, as commands; a reading corrected after it was sent is sent again
@@ -282,6 +307,7 @@ export class WindowSession {
         const estimating = this.estimated.length > 0 && this.#ensemble !== null && previous !== null;
         let replies;
         let analysis = null;
+        let forecastFrom = {};
         for (let attempt = 0; ; attempt += 1) {
             try {
                 if (!this.#engine) await this.#startEngine();
@@ -291,16 +317,23 @@ export class WindowSession {
                 const start = estimating
                     ? [...this.#parameterCommands(analysis.mean), { type: 'restoreState', time: anchor, values: analysis.mean.slice(0, this.#engine.stateIds.length), providerStates: previous.restored.providerStates }]
                     : [...this.#catchUp(index, previous), { type: 'restoreCheckpoint', time: anchor, overrides }];
-                replies = await this.#engine.run([
+                // Two checkpoints are taken: the next anchor's, for the next move, and now's, for the forecast to start from.
+                const nextAnchor = anchor + this.stride;
+                const toNow = await this.#engine.run([
                     ...this.#inputCommands(now),
                     ...start,
-                    // The only checkpoint a cycle needs is the next anchor's, so it is the only one taken.
-                    { type: 'advanceTo', time: anchor + this.stride, takeCheckpoints: true },
-                    { type: 'advanceTo', time: now },
+                    { type: 'advanceTo', time: nextAnchor, takeCheckpoints: true },
+                    ...(now > nextAnchor + 1e-9 ? [{ type: 'advanceTo', time: now - this.timeStep }, { type: 'advanceTo', time: now, takeCheckpoints: true }] : [])
+                ]);
+                forecastFrom = this.#correctionsAtNow(toNow, now, computed);
+                const onward = await this.#engine.run([
+                    { type: 'restoreCheckpoint', time: now, overrides: Object.values(forecastFrom).filter((entry) => entry.applied !== null).map((entry) => ({ stateId: entry.stateId, value: entry.applied })) },
                     { type: 'advanceTo', time: end },
                     // The estimator's members run the next stride again from this anchor, so they need its input readings.
-                    { type: 'retainCheckpointsFrom', time: this.estimated.length ? anchor : anchor + this.stride }
+                    { type: 'retainCheckpointsFrom', time: this.estimated.length ? anchor : nextAnchor }
                 ]);
+                // The restore at now is not the move's: the move's is the anchor's, the first one.
+                replies = [...toNow, { ...onward[0], values: [] }, ...onward.slice(1)];
                 break;
             } catch (error) {
                 if (!(error instanceof EngineSessionError) || this.#engine?.alive || attempt > 0) throw error;
@@ -336,6 +369,9 @@ export class WindowSession {
             restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),
             wallSeconds, computeSeconds, checkpointsTaken, corrections,
+            // Where the forecast starts, for each measured signal: the model at now, the latest reading, and the value set (null when
+            // the signal is watched, estimated, computed or has no recent reading, and the forecast runs on from the model).
+            forecastFrom: Object.fromEntries(Object.entries(forecastFrom).map(([signal, { stateId, ...entry }]) => [signal, entry])),
             // A refit applied since the last move: the parameters it changed, and the states it set at that move's anchor.
             ...(this.#refit ? { refit: this.#refit } : {}),
             // Which states the data reaches: those compared with a measurement, and those the model carries alone, unchecked.
@@ -546,7 +582,8 @@ export class WindowSession {
                 const measured = this.#measurementAt(entry.signal, 0, this.#anchor(index) + this.window);
                 return measured === null ? [] : [{ stateId: entry.stateId, value: measured }];
             }) };
-        return [from, { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true }];
+        // Only the state it reaches matters: its samples, at every step of what may be hours, are not kept.
+        return [from, { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true, discardSamples: true }];
     }
 
     // The model's own series for a signal in a cycle, from the restored value at the anchor through the window and the forecast, at
@@ -601,7 +638,7 @@ export class WindowSession {
         await this.#engine.run([
             ...this.#inputCommands(last.now),
             { type: 'restoreState', time: state.time, values: state.values, providerStates: state.providerStates },
-            { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true }
+            { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true, discardSamples: true }
         ]);
     }
 
@@ -725,7 +762,7 @@ export class WindowSession {
                 await this.#engine.run([
                     ...this.#inputCommands(target.now),
                     { type: 'restoreState', time: from.time, values, providerStates },
-                    { type: 'advanceTo', time: this.#anchor(this.#nextCycle), takeCheckpoints: true }
+                    { type: 'advanceTo', time: this.#anchor(this.#nextCycle), takeCheckpoints: true, discardSamples: true }
                 ]);
                 this.#restartFrom = from;
                 this.#ensemble = null;

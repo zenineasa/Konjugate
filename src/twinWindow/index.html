@@ -39,6 +39,7 @@
                     <option value="60">60× (a minute a second)</option>
                     <option value="600">600× (an hour in six seconds)</option>
                     <option value="1200">1200× (a day in 72 seconds)</option>
+                    <option value="Infinity">As fast as it can go (to see how it ends)</option>
                 </select></label>
                 <button type="submit" value="cancel">Cancel</button>
             </footer>
@@ -118,20 +119,6 @@
             <span id="healthSource" class="healthItem"></span>
             <span id="healthDrift" class="healthItem"></span>
             <span class="spacer"></span>
-            <div class="timeControl" title="Scrub back through the moves the twin has made">
-                <input id="timeScrub" type="range" min="0" max="0" value="0" step="1" aria-label="Which move to show">
-                <span id="timeLabel">Following now</span>
-                <button id="timeFollow" type="button" hidden>Follow now</button>
-            </div>
-            <label class="spanControl"><span>Show</span><select id="timeSpan" aria-label="How much of the past the plots show" title="How much of the past the plots show">
-                <option value="recent" title="Four times the twin's window, and the forecast">Recent</option>
-                <option value="900">Last 15 minutes</option>
-                <option value="3600">Last hour</option>
-                <option value="21600">Last 6 hours</option>
-                <option value="86400">Last day</option>
-                <option value="604800">Last week</option>
-                <option value="all">Everything</option>
-            </select></label>
             <button id="hiddenTiles" type="button" hidden></button>
             <button id="temperatureUnit" type="button" hidden>°C</button>
             <button id="trySomething" type="button" title="A copy of the twin from now, to try what an input would do; the twin itself is not changed">Try something…</button>
@@ -166,9 +153,25 @@
             <!-- One column of strips on one time axis: every measured signal, then the inputs at the foot, then the axis. A line through
                  them all follows the pointer, and each strip says its value there. -->
             <div class="trendColumn" id="trendColumn">
-                <div class="trendLegend" aria-hidden="true">
-                    <span><i class="measured"></i>Measured</span><span><i class="model"></i>Model</span><span><i class="forecast"></i>Forecast</span>
-                    <span id="legendBand" hidden><i class="band"></i>Band (10–90%)</span><span id="legendTried" hidden><i class="tried"></i>Tried</span><span><i class="input"></i>Input</span>
+                <div class="trendHeader">
+                    <div class="trendLegend" aria-hidden="true">
+                        <span><i class="measured"></i>Measured</span><span><i class="model"></i>Model</span><span><i class="forecast"></i>Forecast</span>
+                        <span id="legendBand" hidden><i class="band"></i>Band (10–90%)</span><span id="legendTried" hidden><i class="tried"></i>Tried</span><span><i class="input"></i>Input</span>
+                    </div>
+                    <div class="timeControl" title="Scrub back through the moves the twin has made">
+                        <input id="timeScrub" type="range" min="0" max="0" value="0" step="1" aria-label="Which move to show">
+                        <span id="timeLabel">Following now</span>
+                        <button id="timeFollow" type="button" hidden>Follow now</button>
+                    </div>
+                    <label class="spanControl"><span>Show</span><select id="timeSpan" aria-label="How much of the past the plots show" title="How much of the past the plots show">
+                        <option value="recent" title="Four times the twin's window, and the forecast">Recent</option>
+                        <option value="900">Last 15 minutes</option>
+                        <option value="3600">Last hour</option>
+                        <option value="21600">Last 6 hours</option>
+                        <option value="86400">Last day</option>
+                        <option value="604800">Last week</option>
+                        <option value="all">Everything</option>
+                    </select></label>
                 </div>
                 <div class="trendScroll" id="trendScroll">
                     <div id="tiles" class="tiles"></div>

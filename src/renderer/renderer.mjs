@@ -7772,6 +7772,7 @@ async function loadProjectDocument(document, {
     await discardResultPlayback();
     discardAssistantProposal();
     hideAssistantPanel();
+    demonstrationProject = false;
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
@@ -9179,7 +9180,7 @@ window.engine.liveTwin?.onSetupChanged?.((setup) => {
     const normalized = normalizeTwinSetup(bounds ? { ...setup, layout: { ...(setup?.layout ?? {}), bounds } } : setup);
     if (JSON.stringify(normalized) === JSON.stringify(projectTwinSetup)) return;
     projectTwinSetup = normalized;
-    addonDataUnsaved = true;
+    if (!demonstrationProject) addonDataUnsaved = true;
     updateHistoryControls();
 });
 window.engine.liveTwin?.onOpenConnections?.(() => openSettings('pushService'));
@@ -9189,7 +9190,7 @@ window.engine.liveTwin?.onBoundsChanged?.((bounds) => {
     const next = normalizeTwinSetup({ ...projectTwinSetup, layout: { ...(projectTwinSetup.layout ?? {}), bounds } });
     if (JSON.stringify(next) === JSON.stringify(projectTwinSetup)) return;
     projectTwinSetup = next;
-    addonDataUnsaved = true;
+    if (!demonstrationProject) addonDataUnsaved = true;
     updateHistoryControls();
 });
 // What the twin window asks of this one (src/twinWindow/): values kept in the model, as an undoable edit here, and the project's
@@ -9242,10 +9243,15 @@ documentController.subscribe(() => {
 });
 // For the interaction tests: the twin setup the project keeps.
 window.__debugTwin = { setup: () => structuredClone(projectTwinSetup) };
+// A demonstration's model is opened as it ships: nothing in it is the person's own work until they change the model, so it opens saved
+// (Save still asks where, since it has no file of its own), and what its twin keeps in it as it runs (its setup, layout and record) is
+// not counted as unsaved, so another demonstration can follow it without a prompt. Saved under a name, it is a project like any other.
+let demonstrationProject = false;
 window.engine.liveTwin?.onLoadDemoModel?.(async (variant) => {
     if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
     const demo = await window.engine.liveTwin.demo(variant);
-    await loadProjectDocument(JSON.parse(demo.project.content), { fileName: demo.projectFileName, saved: false });
+    await loadProjectDocument(JSON.parse(demo.project.content), { fileName: demo.projectFileName, saved: true });
+    demonstrationProject = true;
     openTwinWindow();
 });
 
@@ -12448,6 +12454,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
         projectOwnership = savedOwnership;
         savedCopyOwnership = copyOwnership === undefined ? null : { path: result.path, block: copyOwnership };
         addonDataUnsaved = false;
+        demonstrationProject = false;
         documentController.markSaved();
         $('#statusText').textContent = `${result.encrypted ? 'Encrypted project' : 'Project'} saved${result.includesResults ? ' with simulation results' : ' · model only'}`;
         return true;

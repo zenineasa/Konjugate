@@ -94,6 +94,15 @@ await cycleEqualsFreshRun({ name: 'The PI-controlled tank', document: controlled
     await session.advanceTo(3600, { takeCheckpoints: true });
     const once = async () => (await session.run([{ type: 'restoreCheckpoint', time: 1200, overrides: [{ stateId: 2, value: 301 }] }, { type: 'advanceTo', time: 7200 }]))[1].samples;
     const first = await once();
+    // An advance that asks not to keep its samples (a catch-up: only the state it reaches matters) is answered with none, and the next
+    // advance's samples are its own, complete.
+    const [, discarded, kept] = await session.run([
+        { type: 'restoreCheckpoint', time: 1200, overrides: [{ stateId: 2, value: 301 }] },
+        { type: 'advanceTo', time: 3600, discardSamples: true },
+        { type: 'advanceTo', time: 7200 }
+    ]);
+    assert.deepEqual(discarded.samples, [], 'A catch-up keeps no samples.');
+    assert.deepEqual(kept.samples, first.filter((sample) => sample.time > 3600), 'The advance after it has its own samples, as without the catch-up.');
     for (let index = 0; index < 100; index += 1) await once();
     const before = rss();
     for (let index = 0; index < 1000; index += 1) assert.deepEqual(await once(), first, `Rewind ${index} gave different samples.`);

@@ -8,6 +8,8 @@
 //
 // What a command answers with:
 //   advanceTo(time, { takeCheckpoints })   { time, samples: [{ time, values }], checkpointsTaken } with `values` in the order of
+//                                          (an advanceTo command with `discardSamples: true` answers with none, and none is kept as it
+//                                          runs: a catch-up over hours at a fine step reports millions, which nothing reads)
 //                                     `reportedStateIds`; checkpoints are kept on the way only when asked for
 //   restoreCheckpoint(time, overrides) and restoreState(...)   { time, values, providerStates } with `values` in the order of `stateIds`
 //   appendInputs, retainFrom          { time }
@@ -82,6 +84,9 @@ export class EngineSession {
                         this.#algebraicStateIds = event.sessionInfo.algebraicStateIds;
                         readyResolve();
                     } else if (event.sampleBatch) {
+                        // The samples belong to the earliest advance still running; one that asked not to have them is not given them.
+                        const running = [...this.#pending.values()].find((waiting) => waiting.wantsSamples);
+                        if (running?.discardSamples) continue;
                         const { times, stateCount, values } = event.sampleBatch;
                         times.forEach((time, index) => this.#samples.push({ time, values: values.slice(index * stateCount, (index + 1) * stateCount) }));
                     } else if (event.sessionReply) {
@@ -133,8 +138,9 @@ export class EngineSession {
         const batch = commands.length > 1 ? ++this.#batch : 0;
         const answers = commands.map((command) => {
             const sequence = ++this.#sequence;
-            const answered = new Promise((resolve, reject) => this.#pending.set(sequence, { resolve, reject, wantsSamples: command.type === 'advanceTo' }));
-            this.#child.stdin.write(encodeEngineCommand(sequence, { ...command, batch }));
+            const answered = new Promise((resolve, reject) => this.#pending.set(sequence, { resolve, reject, wantsSamples: command.type === 'advanceTo', discardSamples: command.discardSamples === true }));
+            const { discardSamples, ...sent } = command;
+            this.#child.stdin.write(encodeEngineCommand(sequence, { ...sent, batch }));
             return answered;
         });
         return Promise.all(answers);

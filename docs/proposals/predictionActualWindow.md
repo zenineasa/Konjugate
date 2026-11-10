@@ -28,7 +28,7 @@ Time splits into three zones around the present moment.
 
 - **Settled.** Before the anchor, the model has been brought into agreement with the actual data. This part is a record and is not recomputed unless a late correction arrives from the source.
 - **Comparison window.** From the anchor to now, the model runs forward from its anchored state, driven by what the real system actually did (measured inputs and the operators' actions), and its output is compared with what was measured. This is where the model and the data are allowed to disagree.
-- **Forecast.** From now to the horizon, there is no data, only the model, starting from the state it reached at now. A [sandbox](digitalTwinConnections.md#detaching-to-try-things) is a forecast in which the person chooses the inputs.
+- **Forecast.** From now to the horizon, there is no data, only the model, starting from the state at now with each measured state set toward its latest reading, as the anchor's are (by the signal's gain; not for a signal watched only, computed by the model, or estimated, whose band is its forecast). Started from where the model's run reached at now instead, a system drifting from the model had its forecast begin a window's drift away from where it was: with the rig drifting, 3.5 °C off the reading at the end of six hours. The move records where it started (`forecastFrom`: the model at now, the reading, the value set), and the room draws the forecast from there. A [sandbox](digitalTwinConnections.md#detaching-to-try-things) is a forecast in which the person chooses the inputs.
 
 This is a well-known structure under other names: moving-horizon estimation and receding-horizon control use a window like this, and data assimilation in weather forecasting does the same with a cycle of "analysis" and "forecast". The name here keeps to what the person sees.
 
@@ -41,7 +41,7 @@ The window has a fixed length W and moves by a stride S. Each time the data has 
 1. **Record the jump.** Before anything is reset, note how far the model's prediction at the new anchor is from the measurement there. This is the measure of how wrong the model was over the stride it just ran unaided.
 2. **Reset at the new anchor.** Each measured state is set to its measured value (or a short average of it, so one noisy sample does not become a step in the state); every other state keeps the value the model reached there.
 3. **Run the window,** from the new anchor to now, on the actual inputs, and record the difference from the measurements.
-4. **Run the forecast** from now to the horizon.
+4. **Run the forecast** from now to the horizon, from the state at now with the measured states set toward their latest readings (a checkpoint at now, restored with them set).
 
 Between moves, as each new batch of data arrives, the model only extends: it carries on from where it was to the time of the new data, and no earlier step is repeated. A late or corrected observation from the source for a time inside the window reruns the window from a checkpoint at or before that time.
 

@@ -385,7 +385,10 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     const jumps = upTo.map((item) => item.jumps?.[tile.signal]?.jump).filter(Number.isFinite).slice(-60);
     facts.append(
         element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${brief(shownAs.by(jump))}${unit}` : '—'}`),
-        element('span', { textContent: `tolerance ±${brief(shownAs.by(tile.tolerance))}${unit}` }));
+        // The two thresholds, named as the events name them: how far one move's jump may go before the strip leans, and how far the
+        // corrections may keep to one side, on average a move, before the room warns.
+        element('span', { textContent: `jump within ±${brief(shownAs.by(tile.tolerance))}${unit} a move`, title: 'A move whose jump is larger than this leans the strip amber' }),
+        ...(Number.isFinite(twin.settings.alertAt) && twin.settings.alertAt > 0 ? [element('span', { textContent: `warns at ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit} a move on average`, title: 'When the model\'s corrections keep to one side by more than this, on average a move, the room warns of a drift' })] : []));
     if (alarm) facts.append(element('span', { textContent: 'drifting past the warning' }));
     else if (leaning) facts.append(element('span', { textContent: `leaning ${trend.direction} the readings` }));
     // An estimated signal: how many readings fell outside the band the twin expected, where about one in five is honest.
@@ -400,19 +403,20 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     const inSpan = (points) => points.filter((point) => point.time >= from);
     const hours = (points) => points.map((point) => point.time / time.divisor);
     const window = inSpan(rows.map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })));
-    // The model before this move's window, as each earlier move ran it: the stretch each move added after the one before it, one
-    // line broken between moves, so where a move corrected the model it is seen as a jump. Up to this window, which is drawn as now.
+    // The model before this move's window, as each earlier move ran it: the stretch each move added after the one before it, joined into
+    // one line that jumps straight up or down where a move set it right (each move's stretch starts at the time the one before ended).
+    // Up to this window, which is drawn as now.
     const earlier = { x: [], y: [] };
     let previousNow = -Infinity;
     for (const item of twin.cycles) {
         if (item.index >= cycle.index) break;
-        const added = (item.window[tile.signal] ?? []).filter((row) => row.time > previousNow + 1e-9 && row.time <= Math.min(item.now, cycle.anchor) + 1e-9 && row.time >= from);
+        const added = (item.window[tile.signal] ?? []).filter((row) => row.time >= previousNow - 1e-9 && row.time <= Math.min(item.now, cycle.anchor) + 1e-9 && row.time >= from);
         previousNow = item.now;
-        if (!added.length) continue;
-        if (earlier.x.length) { earlier.x.push(null); earlier.y.push(null); }
         for (const row of added) { earlier.x.push(row.time / time.divisor); earlier.y.push(shownAs.at(row.simulated)); }
     }
-    const forecast = (cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }));
+    // The forecast from where the system is: the state set at now toward the latest reading (src/windowSession.mjs), its line starting there.
+    const startsAt = cycle.forecastFrom?.[tile.signal]?.applied;
+    const forecast = [...(Number.isFinite(startsAt) ? [{ time: cycle.now, value: shownAs.at(startsAt) }] : []), ...(cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }))];
     const shownMeasured = measured.filter(([at]) => at >= from);
     const band = cycle.estimate?.band?.[tile.signal] ? inSpan(cycle.estimate.band[tile.signal]) : null;
     const sandbox = !past ? (twin.sandbox?.series?.[tile.signal] ?? null)?.map((point) => ({ time: point.time, value: shownAs.at(point.value) })) ?? null : null;
@@ -422,7 +426,7 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
             { type: 'scatter', mode: 'lines', name: 'Band (10–90%)', x: hours(band), y: band.map((point) => shownAs.at(point.low)), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
         ] : []),
         { type: 'scatter', mode: 'markers', name: 'Measured', x: shownMeasured.map(([at]) => at / time.divisor), y: shownMeasured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
-        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, connectgaps: false, line: { width: 1.5, color: 'rgba(75,143,226,.7)' }, legendgroup: 'model', showlegend: false }] : []),
+        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, line: { width: 1.5, color: 'rgba(75,143,226,.75)' }, legendgroup: 'model', showlegend: false }] : []),
         { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' }, legendgroup: 'model' },
         { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(forecast), y: forecast.map((point) => point.value), line: { width: 2, dash: 'dash', color: '#4b8fe2' } },
         ...(sandbox ? [{ type: 'scatter', mode: 'lines', name: 'Tried', x: hours(sandbox), y: sandbox.map((point) => point.value), line: { width: 2, dash: 'dot', color: '#9b8cf0' } }] : [])
@@ -473,6 +477,8 @@ function showCursor(event) {
     const column = $('#trendColumn').getBoundingClientRect();
     const line = $('#trendCursor');
     line.hidden = false;
+    // From the top of the strips (under the column's header, however tall it wraps) to the axis.
+    line.style.top = `${$('#trendScroll').offsetTop}px`;
     $('#trendColumn').classList.add('pointing');
     line.style.left = `${event.clientX - column.left}px`;
     $('#trendCursorTime').textContent = dataTime(cursorTime);
@@ -675,7 +681,7 @@ function cycleEvents(cycle, stats) {
         const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
         const jumps = `the model is put right by ${brief(shownAs.by(Math.abs(trend.mean)))}${unit} a move on average`;
         const advice = estimating ? '' : '. An engineer can refit on the latest window to find what changed, or estimate the signal and track the tunable parameters as it goes';
-        if (drift === 'bad') addEvent('bad', `${name} is drifting past the warning`, `${jumps}; the warning is ${brief(shownAs.by(twin.settings.alertAt * (tile.tolerance ?? 0)))}${unit}${advice}`, cycle.now);
+        if (drift === 'bad') addEvent('bad', `${name} is drifting past the warning`, `${jumps}; it warns at ${brief(shownAs.by(twin.settings.alertAt * (tile.tolerance ?? 0)))}${unit} a move on average${advice}`, cycle.now);
         else if (drift === 'lean') addEvent('lean', `${name} is leaning ${trend.direction} the readings`, jumps, cycle.now);
         else addEvent('good', `${name} is back in step with the readings`, '', cycle.now);
     }

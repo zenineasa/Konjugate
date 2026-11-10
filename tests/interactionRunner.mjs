@@ -279,8 +279,16 @@ export async function runInteractionTests(driver) {
     const fakeOllama = driver.capabilities.aiAssistant ? await startFakeOllama({ models: [], pullSteps: 6, pullDelayMilliseconds: 60 }) : null;
     // One substring of a test's name, or several separated by "||" to run those tests in the order they appear.
     const only = process.env.KONJUGATE_INTERACTION_ONLY?.split('||').filter(Boolean);
+    // How long each scenario takes, said on its line and the slowest listed at the end: the suite is kept quick by seeing where its time goes.
+    const durations = [];
+    let startedAt = 0;
     const run = async (name, task, { skip } = {}) => {
         if (only?.length && !only.some((fragment) => name.includes(fragment))) return;
+        const took = () => {
+            const seconds = (performance.now() - startedAt) / 1000;
+            durations.push({ name, seconds });
+            return `${seconds.toFixed(1)} s`;
+        };
         if (skip) {
             console.log(`○ ${name} (skipped: ${skip})`);
             skippedCount += 1;
@@ -294,9 +302,10 @@ export async function runInteractionTests(driver) {
                 await window.focus();
                 await waitFor(window, `!document.hidden`, 'The project window stayed hidden.');
             }
+            startedAt = performance.now();
             await task();
             passedCount += 1;
-            console.log(`✓ ${name}`);
+            console.log(`✓ ${name} · ${took()}`);
             // A native dialog the test did not expect was answered for it, not left on the screen: said, so it can be looked at.
             for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
         } catch (error) {
@@ -307,7 +316,7 @@ export async function runInteractionTests(driver) {
             const failure = error?.message === named ? error : new Error(named, { cause: error });
             if (stopOnFailure) throw failure;
             failures.push({ name, error: failure });
-            console.log(`✗ ${name}`);
+            console.log(`✗ ${name} · ${took()}`);
             console.error(failure);
             await tidyAfterFailure();
         }
@@ -4191,9 +4200,10 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
         await clickElement(window, nodeLabel('Import test A'));
         await waitFor(window, `document.querySelector('#editNodeName').value === 'Import test A'`, 'Clicking "Import test A" did not open its node editor.');
-        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))`);
-        assert.equal(await evaluate(window, `document.querySelector('#nodeEditor').classList.contains('hidden')`), true,
-            'Deleting a node should close the editor that was open on it.');
+        // The key goes to the canvas, as a person presses it with no field in use: the editor may have put the focus in its name field by
+        // now, where Delete edits the text instead (which, depending on when the focus moved, once made this fail now and then).
+        await evaluate(window, `(() => { document.activeElement?.blur?.(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+        await waitFor(window, `document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Deleting a node should close the editor that was open on it.');
     });
 
     await run('causal inference with curvature allowed recovers a quadratic edge equation', async () => {
@@ -4268,6 +4278,10 @@ export async function runInteractionTests(driver) {
         // addNode operations), not the generic assistant/manual default of a box.
         const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
         await waitFor(window, `Boolean(${nodeLabel('columnP')})`, 'The label for the newly-created "columnP" node did not render.');
+        // The view eases to take in the new nodes: clicked once its label has stopped moving, not where it was a moment before.
+        await waitForStableRect(window,
+            `(() => { const rect = ${nodeLabel('columnP')}?.getBoundingClientRect(); return rect && JSON.stringify([rect.left, rect.top, rect.width, rect.height].map(Math.round)); })()`,
+            'The new columnP node\'s label did not settle.', 6000);
         await clickElement(window, nodeLabel('columnP'));
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'columnP'`, 'Clicking the new columnP node did not open its node editor.');
         assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'sphere',
@@ -5701,6 +5715,9 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open.');
         assert.match(await evaluate(twin, `document.querySelector('#demosDialog .hint').textContent`), /replacing the current project/);
         assert.equal(await evaluate(twin, `document.querySelectorAll('#demosDialog [data-demo]').length`), 5);
+        // At 1200× rather than its own 600×: the drift comes about eight seconds in, with the log still playing, so the twin is live when
+        // its warning, its red edge, its event and the project window's chip are looked at.
+        await setField(twin, '#demoPace', '1200');
         await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
         assert.equal(await evaluate(twin, `document.querySelector('#demosDialog').open`), false, 'Choosing one closes the dialog.');
         await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'simulatedTankRig'`, 'The rig\'s model did not open in the project window.', 15000);
@@ -5709,10 +5726,8 @@ export async function runInteractionTests(driver) {
 
         // The control room warns once the drift passes the default warning, on the health strip and on the tile.
         await waitFor(twin, `document.querySelector('#healthDrift').textContent === 'Drifting past the warning'`, 'The control room did not warn of the drift.', 120000);
-        // How it keeps up, in words (the engine's own speed is in the tooltip); a legend and a unit on the tile; temperatures in °C,
-        // or in kelvin as the model keeps them.
-        assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^Live · \d+ moves · keeping up easily$/);
-        assert.match(await evaluate(twin, `document.querySelector('#healthTwin').title`), /times faster than real time, and the data arrives at 600×/);
+        // A legend and a unit on the tile; temperatures in °C, or in kelvin as the model keeps them. (How it keeps up, in words, is checked
+        // on the motor, which is still running when it is looked at.)
         const plot = `document.querySelector('#tiles .tile .plot')`;
         // One legend for the column, naming what is drawn: no band (nothing is estimated) and nothing tried.
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('.trendLegend span:not([hidden])')].map((item) => item.textContent)`), ['Measured', 'Model', 'Forecast', 'Input']);
@@ -5734,7 +5749,7 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`), /^\d[\d.]* W$/);
         assert.equal(await evaluate(twin, `document.querySelector('#inputRows .inputRow .plot svg') !== null`), true, 'Drawn as a timeline.');
         const inferred = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' '))`);
-        assert.ok(inferred.length > 0 && inferred.every((text) => /carried by the model/.test(text) && /(steady|rising|falling|—)/.test(text)), 'Each unmeasured state with its value and trend.');
+        assert.ok(inferred.length > 0 && inferred.every((text) => /carried by the model/.test(text) && /(steady|rising|falling|dropped|rose|—)/.test(text)), 'Each unmeasured state with its value and trend (or the step it took).');
         const events = await evaluate(twin, `[...document.querySelectorAll('#eventsList li')].map((item) => item.className + ': ' + item.innerText.replace(/\\s+/g, ' '))`);
         assert.match(events.at(-1), /^info: .*The twin started/);
         assert.ok(events.some((text) => /^good: .*The twin is live/.test(text)));
@@ -5760,25 +5775,31 @@ export async function runInteractionTests(driver) {
         // From the setup's own line under the sources.
         await evaluate(twin, `document.querySelector('#openDemos').click()`);
         await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations did not open from the setup.');
+        // As fast as it can go: the bedroom drifting while the others stay in step is what is checked, not the minute it takes at 1200×.
+        await setField(twin, '#demoPace', 'Infinity');
         await evaluate(twin, `document.querySelector('[data-demo="house"]').click()`);
         await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'smartHouse'`, 'The house\'s model did not open in the project window.', 15000);
         await waitFor(twin, `!document.querySelector('#room').hidden`, 'The house did not go into the control room.', 15000);
-        assert.match(await evaluate(twin, `document.querySelector('#healthSource').textContent`), /^smartHouse\.csv, played at 1200×$/);
-        // While the twin runs, a demonstration is not offered: it starts from the setup.
-        await evaluate(twin, `document.querySelector('#moreMenu').click()`);
-        await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open in the room.');
-        assert.equal(await evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…').disabled`), true);
-        await evaluate(twin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+        assert.match(await evaluate(twin, `document.querySelector('#healthSource').textContent`), /^smartHouse\.csv, played at full speed$/);
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#tiles .tile strong')].map((name) => name.textContent)`), ['Living room · Air temperature', 'Bedroom · Air temperature', 'Kitchen · Air temperature']);
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow strong')].map((name) => name.textContent)`), ['Outdoor temperature', 'Solar gain', 'Living room heater', 'Bedroom heater', 'Kitchen heater']);
         await waitFor(twin, `/Floor slab · Temperature/.test(document.querySelector('#inferredRows').textContent)`, 'The floor slab was not among what the twin infers.', 30000);
         // The bedroom, its window open from 14:00, drifts past the warning; the living room and the kitchen do not.
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li.bad')].some((item) => /Bedroom · Air temperature is drifting past the warning/.test(item.textContent))`, 'The bedroom did not drift past the warning.', 120000);
+        // Each room judged on its own, seen at the move the bedroom first drifted (scrubbed back to; at full speed the day is over and its
+        // window shut by the time it is looked at): the bedroom's strip red, the others' not.
+        const drifted = await evaluate(twin, `(() => {
+            const twin = window.__debugTwinWindow.twin();
+            const bedroom = twin.tiles.find((tile) => tile.target?.label === 'Bedroom · Air temperature').signal;
+            return twin.cycles.findIndex((cycle) => cycle.trends?.[bedroom]?.alarm);
+        })()`);
+        assert.ok(drifted >= 0, 'A move where the bedroom drifted past the warning.');
+        await setField(twin, '#timeScrub', String(drifted), 'input');
+        assert.equal(await evaluate(twin, `document.querySelector('#tiles').classList.contains('past')`), true);
         const tileState = (name) => evaluate(twin, `[...document.querySelectorAll('#tiles .tile')].find((tile) => tile.querySelector('strong').textContent === ${JSON.stringify(name)}).className`);
         assert.match(await tileState('Bedroom · Air temperature'), /\bbad\b/);
         assert.doesNotMatch(await tileState('Living room · Air temperature'), /\bbad\b/);
         assert.doesNotMatch(await tileState('Kitchen · Air temperature'), /\bbad\b/);
-        assert.match(await evaluate(twin, `document.querySelector('#healthDrift').title`), /^Bedroom · Air temperature/);
         assert.equal((await twinEvents(twin)).filter((text) => /^bad: .*drifting past the warning/.test(text)).length, 1, 'Only the bedroom.');
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
         await twin.close();
@@ -5805,6 +5826,14 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(opened, `(() => { const live = window.__debugTwin.setup().live; return [live.window, live.stride, live.horizon]; })()`), [5, 1, 5]);
         await waitFor(twin, `!document.querySelector('#room').hidden`, 'The motor did not go into the control room.', 15000);
         assert.equal(await evaluate(twin, `document.querySelector('#healthSource').textContent`), 'dcMotor.csv, played at 1×');
+        // How it keeps up, in words (the engine's own speed, and the data's, in the tooltip).
+        await waitFor(twin, `/^Live · \\d+ moves? · keeping up easily$/.test(document.querySelector('#healthTwin').textContent)`, 'The motor\'s twin did not say how it keeps up.', 20000);
+        assert.match(await evaluate(twin, `document.querySelector('#healthTwin').title`), /times faster than real time, and the data arrives at 1×/);
+        // While the twin runs, a demonstration is not offered: it starts from the setup.
+        await evaluate(twin, `document.querySelector('#moreMenu').click()`);
+        await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open in the room.');
+        assert.equal(await evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…').disabled`), true);
+        await evaluate(twin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
         // A second a second: the first move once five seconds of readings are in, then one a second.
         await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 4`, 'The motor\'s twin made no moves.', 30000);
         const { last, moves } = await evaluate(twin, `window.__debugTwinWindow.summary()`);
@@ -5823,6 +5852,25 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#trySomething').click()`);
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && /Voltage/.test(document.querySelector('#sandboxInputs').textContent)`, 'The sandbox did not offer the voltage to steer.', 15000);
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
+        // A demonstration's project is not the person's work: what its twin keeps in it as it runs leaves it saved, so another
+        // demonstration follows it from the room's More menu with no question asked, and goes into its room.
+        const unsaved = await evaluate(opened, `(({ dirty, addonDataUnsaved }) => ({ dirty, addonDataUnsaved }))(window.__debugTour.blockers())`);
+        assert.deepEqual(unsaved, { dirty: false, addonDataUnsaved: false }, 'The motor\'s twin running left its demonstration project unchanged.');
+        await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        driver.takeNativeDialogs?.();
+        await evaluate(twin, `document.querySelector('#moreMenu').click()`);
+        await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open in the stopped room.');
+        await evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…').click()`);
+        await evaluate(twin, `document.querySelector('[data-demo="house"]').click()`);
+        await waitFor(opened, `document.querySelector('.documentTitle').textContent === 'smartHouse'`, 'The house did not follow the motor.', 15000);
+        assert.deepEqual(driver.takeNativeDialogs?.() ?? [], [], 'No question about unsaved work.');
+        await waitFor(twin, `!document.querySelector('#room').hidden && /smartHouse\.csv/.test(document.querySelector('#healthSource').textContent)`, 'The house did not go into its room.', 20000);
+        // With its own timing, not the motor's: a project's twin settings are its own, and the house keeps none, so it has the defaults (an
+        // hour's window). Given the motor's five seconds and millisecond step, a day of the house at 1200× once fell hopelessly behind,
+        // and its catch-ups filled the app's memory.
+        await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 1`, 'The house\'s twin made no move.', 30000);
+        const houseMove = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).last;
+        assert.equal(houseMove.now - houseMove.anchor, 3600, 'The house runs with an hour\'s window, not the motor\'s five seconds.');
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
         await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
@@ -5900,8 +5948,8 @@ export async function runInteractionTests(driver) {
         const drifting = await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8');
         await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(drifting)}, 'simulatedTankRigDrifting.csv')`);
         await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The rig\'s readings were not matched.');
-        // Slow enough to work in the room while the recording plays: six hours in a little over a minute.
-        await evaluate(twin, `window.__debugTwinWindow.setSpeed(300)`);
+        // Slow enough to work in the room while the recording plays (six hours in 36 seconds), quick enough to make its first move in six.
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed(600)`);
         await evaluate(twin, `document.querySelector('#openRoom').click()`);
         await waitFor(twin, `window.__debugTwinWindow.twin()?.cycles.length >= 2`, 'The twin made no moves.', 60000);
         const heatLossOf = async () => evaluate(opened, `window.__debugProject.serialize().edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value`);
@@ -6012,6 +6060,8 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `(() => { const choice = document.querySelector('#correctionRows select'); choice.value = 'estimate'; choice.dispatchEvent(new Event('change')); })()`);
         assert.equal(await evaluate(twin, `document.querySelector('#trackBlock').hidden`), false, 'The tunable parameters are offered to track.');
         assert.equal(await evaluate(twin, `document.querySelector('#trackRows input[data-parameter-id="10"]').checked`), true);
+        // Started again as fast as it can go: what the estimator finds is checked, not the minute the log takes at 300×.
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed('Infinity')`);
         await evaluate(twin, `document.querySelector('#restartTwin').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /started again with the engineer's settings/.test(item.textContent) && /estimating tankTemperature/.test(item.textContent))`, 'The twin was not started again.', 30000);
         await waitFor(twin, `/The whole log has been played/.test(document.querySelector('#healthTwin').textContent)`, 'The tracking twin did not play the recording.', 240000);
@@ -6042,7 +6092,7 @@ export async function runInteractionTests(driver) {
         const recording = await readFile(join(process.cwd(), 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8');
         await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(recording)}, 'simulatedTankRigDrifting.csv')`);
         await waitFor(twin, `document.querySelectorAll('#mappingRows .mappingRow.confident').length === 2`, 'The rig\'s readings were not matched.');
-        await evaluate(twin, `window.__debugTwinWindow.setSpeed(300)`);
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed(1200)`);
         await evaluate(twin, `document.querySelector('#openRoom').click()`);
         await waitFor(twin, `window.__debugTwinWindow.twin()?.cycles.length >= 2`, 'The twin made no moves.', 60000);
 
@@ -8034,6 +8084,11 @@ export async function runInteractionTests(driver) {
     for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (after the last test, a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
     await fakeOllama?.close();
     await driver.finish?.();
+    const total = durations.reduce((sum, entry) => sum + entry.seconds, 0);
+    if (durations.length > 1) {
+        console.log(`\nThe slowest scenarios, of ${total.toFixed(0)} s in all:`);
+        for (const { name, seconds } of [...durations].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${seconds.toFixed(1).padStart(6)} s  ${name.slice(0, 110)}`);
+    }
     console.log(`Interaction tests: ${passedCount} passed, ${failures.length} failed, ${skippedCount} skipped, ${passedCount + failures.length + skippedCount} total`);
     if (failures.length) {
         console.log(`\nFailed (${failures.length}):`);

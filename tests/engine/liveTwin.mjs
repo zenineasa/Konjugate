@@ -116,7 +116,7 @@ try {
     assert.equal(steady.cycles.length, expectedCycles, `Every anchor gets its cycle: ${steady.cycles.length} of ${expectedCycles}.`);
     assert.ok(steady.stats.realTimeFactor > 10 * speed, `The twin runs far faster than the data arrives: ${steady.stats.realTimeFactor} model seconds a wall second.`);
     assert.ok(steady.stats.cycleSeconds.median < 0.05, `A cycle takes ${steady.stats.cycleSeconds.median} s.`);
-    assert.ok(steady.cycles.every((cycle) => cycle.checkpointsTaken === 1), 'Each cycle keeps one checkpoint, the next anchor\'s, and asks the providers for nothing more.');
+    assert.ok(steady.cycles.every((cycle) => cycle.checkpointsTaken === 2), 'Each cycle keeps two checkpoints, the next anchor\'s and now\'s for the forecast, and asks the providers for nothing more.');
     const steadyJumps = jumpsOf(steady.cycles);
     const largest = Math.max(...steadyJumps.map(([, jump]) => Math.abs(jump)));
     assert.ok(largest < 1, `With the true tank every jump is within the noise: the largest is ${largest.toFixed(3)} K.`);
@@ -128,9 +128,10 @@ try {
     const predicted = early.forecast.tankTemperature.find((sample) => sample.time === early.now + horizon).value;
     const measured = later.window.tankTemperature.find((row) => row.time === early.now + horizon).measured;
     assert.ok(Math.abs(predicted - measured) < 0.6, `The forecast an hour ahead was ${predicted.toFixed(2)} K; the log then said ${measured.toFixed(2)} K.`);
-    // The fresh run reproduces the session's cycle exactly.
+    // The fresh run reproduces the session's window exactly. (Its forecast starts again at now, from the latest reading, so it is not
+    // the fresh run's continuation: checked below.)
     const { cycle: checked, samples: fresh } = steady.collected.fresh;
-    const sessionSamples = [...checked.window.tankTemperature.map((row) => ({ time: row.time, value: row.simulated })), ...checked.forecast.tankTemperature];
+    const sessionSamples = checked.window.tankTemperature.map((row) => ({ time: row.time, value: row.simulated }));
     for (const sample of sessionSamples) {
         const match = fresh.find((candidate) => Math.abs(candidate.time - sample.time) < 1e-9);
         assert.ok(match && match.value === sample.value, `A fresh run from the logged state gives ${match?.value} at ${sample.time} s; the session gave ${sample.value}.`);
@@ -141,6 +142,14 @@ try {
     const driftingJumps = jumpsOf(drifting.cycles);
     assert.ok(slope(driftingJumps) * 3600 > 0.1, `With the tank drifting the jumps grow: ${(slope(driftingJumps) * 3600).toFixed(3)} K an hour.`);
     assert.equal(drifting.cycles.at(-1).trend.direction, 'above', 'The model predicts warmer than the drifting tank turns out.');
+    // The forecast starts where the tank is: from its latest reading, not from where the window's run, corrected only at the anchor, has
+    // drifted to by now. With the tank drifting, that gap is large by the end; the forecast's first step is within the noise of the reading.
+    const lastDrifting = drifting.cycles.at(-1);
+    const from = lastDrifting.forecastFrom.tankTemperature;
+    const firstForecast = lastDrifting.forecast.tankTemperature[0].value;
+    assert.ok(Math.abs(from.model - from.reading) > 1, `By the end the window's run is well clear of the drifting tank: ${from.model.toFixed(2)} K against ${from.reading.toFixed(2)} K.`);
+    assert.equal(from.applied, from.reading, 'The forecast starts from the reading (the gain is 1).');
+    assert.ok(Math.abs(firstForecast - from.reading) < 0.5, `The forecast's first step is at the reading: ${firstForecast.toFixed(2)} K against ${from.reading.toFixed(2)} K.`);
 
     // The engine killed mid-session: recovered, and the cycles are the same as without it.
     const crashed = await liveTwin({

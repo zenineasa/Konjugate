@@ -106,7 +106,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .spacer { flex: 1; }
 /* The column: a strip for every measured signal, the inputs at the foot, one time axis under them, on one panel. */
 .trendColumn { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 8px 0 4px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.trendLegend { display: flex; flex-wrap: wrap; gap: 16px; padding: 0 12px 6px 4px; color: var(--muted); font-size: 11px; }
+/* The column's own header: its legend, and the time it shows (the moves to scrub back through, and how much of the past). */
+.trendHeader { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 14px 6px 4px; }
+.trendLegend { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 11px; }
+.trendHeader .timeControl input { width: 160px; }
 .trendLegend span { display: inline-flex; align-items: center; gap: 6px; }
 .trendLegend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid #4b8fe2; }
 .trendLegend i.measured { width: 4px; height: 4px; border: 0; border-radius: 50%; background: #e0894c; }

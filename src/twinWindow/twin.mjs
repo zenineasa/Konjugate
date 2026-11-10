@@ -57,7 +57,7 @@ function renderModel() {
         ...states.map(chip),
         ...(parameters.length ? [Object.assign(document.createElement('span'), { className: 'hint', textContent: ` and ${parameters.length} shared parameter${parameters.length === 1 ? '' : 's'} to drive with inputs:` }), ...parameters.map(chip)] : [])
     );
-    if (!states.length) summary.replaceChildren(Object.assign(document.createElement('p'), { className: 'status warning modelEmpty', textContent: 'The model has no states, so there is nothing to compare with readings. Add a node with a state in the project window, or try the simulated rig below.' }));
+    if (!states.length) summary.replaceChildren(Object.assign(document.createElement('p'), { className: 'status warning modelEmpty', textContent: 'The model has no states, so there is nothing to compare with readings. Add a node with a state in the project window, or see a demonstration (the link under the sources below).' }));
 }
 
 // ---- Step 2: the source --------------------------------------------------------------------------------------------------------
@@ -163,6 +163,9 @@ $('#openDemos').addEventListener('click', () => $('#demosDialog').showModal());
 for (const button of $$('[data-demo]')) {
     button.addEventListener('click', async () => {
         if ($('#demosDialog').open) $('#demosDialog').close();
+        // Chosen from the room of a twin that has finished, the setup is shown again: the demonstration's progress, and its model being
+        // opened (or the project asking about unsaved work), are said there.
+        if (!$('#room').hidden) closeRoom();
         try {
             const variant = button.dataset.demo;
             const demo = await api.liveTwin.demo(variant);
@@ -579,8 +582,12 @@ api.liveTwin.onEvent((update) => handleEvent(update));
 
 // ---- The window's context ------------------------------------------------------------------------------------------------------
 api.onContext(async (context) => {
+    // The setup kept with this project; one kept from before is kept only while it is the same project (a context sent again, before the
+    // project has saved the setup). Another project, a demonstration's say, starts from its own or none: never from the one before, whose
+    // timing (a motor's five-second window and millisecond step, given a house's day of data) can be far from what it needs.
+    const sameProject = state.context && context.projectPath === state.context.projectPath && context.projectName === state.context.projectName;
     state.context = context;
-    state.saved = normalizeTwinSetup(context.setup) ?? state.saved;
+    state.saved = normalizeTwinSetup(context.setup) ?? (sameProject ? state.saved : null);
     state.memory = await api.memory.get().catch(() => ({}));
     renderModel();
     if (currentTwin()) return;

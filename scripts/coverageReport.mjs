@@ -164,11 +164,18 @@ if (folderArgument) {
     // npm run build:webShell:threads; not done here, as building the web engine takes minutes). A shell built from older sources
     // than src/ is measured only where its files still match.
     let web = { status: 0 };
-    if (existsSync(join(root, 'out', 'webShellThreads', 'renderer', 'index.html'))) {
+    // The shell is assembled again first (a copy of src/, quick), so what the web edition runs is today's code and is counted; a shell
+    // left from before would be measured only where its files still match, and the rest would read as not run. Assembling refuses when
+    // the web engine is older than the engine's sources (building that takes minutes, so it is not done here), and then it is said.
+    const shell = existsSync(join(root, 'out', 'engineWebThreads'))
+        ? spawnSync('node', [join(root, 'scripts', 'buildWebShell.mjs'), 'threads'], { cwd: root, stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' })
+        : { status: 1, stderr: 'No web engine built.' };
+    if (shell.status === 0) {
         console.log('Interaction tests in the web edition, with coverage (several minutes)…');
         web = spawnSync('node', [join(root, 'scripts', 'runWebInteractionTests.mjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, KONJUGATE_INTERACTION_COVERAGE: join(folder, 'interaction', 'web') } });
     } else {
-        console.log('No web shell built, so the web edition is not measured: npm run build:web:threads && npm run build:webShell:threads.');
+        const reason = (shell.stderr ?? '').split('\n').find((line) => /Error:|No web engine/.test(line))?.replace(/^.*Error: /, '') ?? 'the web shell could not be assembled.';
+        console.log(`The web edition is not measured: ${reason.trim()} (npm run build:web:threads builds the web engine.)`);
     }
     if (unit.status || interaction.status || cli.status || web.status) console.log('\nSome tests failed; the coverage is of what ran.');
     await report(folder);

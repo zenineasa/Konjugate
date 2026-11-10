@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, session, shell, utilityProcess } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, screen, session, shell, utilityProcess, webContents } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
@@ -74,6 +74,14 @@ import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, 
 // A test's own profile folder, so a test run never reads or writes the person's own (tests/cliMode.e2e.mjs runs --cli with it too).
 if (['--interaction-test', '--generate-example-thumbnails', '--cli'].some((flag) => process.argv.includes(flag)) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
+}
+// A test run that dies of a fatal error (running out of memory, say) leaves Node's report of it, with the JavaScript stack at that moment,
+// in KONJUGATE_INTERACTION_REPORTS: what was allocating is then known, not guessed.
+if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_REPORTS && process.report) {
+    process.report.directory = process.env.KONJUGATE_INTERACTION_REPORTS;
+    process.report.reportOnFatalError = true;
+    // And on SIGUSR2, which the interaction suite's memory watchdog sends when this process grows past its warning level.
+    process.report.reportOnSignal = true;
 }
 
 // A --cli invocation is a one-shot batch job (run/validate a project, write output, exit), not
@@ -2249,7 +2257,15 @@ ipcMain.handle('projectMergeFmus', async (event) => {
 });
 
 ipcMain.handle('projectConfirmDiscard', async (event) => {
-    const result = await dialog.showMessageBox(getWindowFromEvent(event), {
+    // Asked on the window's behalf by another (the twin's opening a demonstration), the prompt is a sheet on a window that may be behind
+    // it: brought to the front, so the question is seen.
+    const asking = getWindowFromEvent(event);
+    if (asking && !asking.isDestroyed()) {
+        if (asking.isMinimized()) asking.restore();
+        asking.show();
+        asking.focus();
+    }
+    const result = await dialog.showMessageBox(asking, {
         type: 'warning',
         title: 'Unsaved changes',
         message: 'Discard unsaved changes?',
@@ -3066,6 +3082,20 @@ ipcMain.handle('engineFitDiscard', (event) => {
 // Live twins (src/liveTwinHost.mjs): at most one per window, its events sent to that window as they come. A window that closes
 // ends its twin, and the engines it started with it.
 const liveTwins = new Map();
+// For the interaction suite's memory log (KONJUGATE_INTERACTION_MEMORY_LOG=1): what this process holds, every fifteen seconds, so a
+// collection that keeps growing is seen by name.
+if (process.argv.includes('--interaction-test') && process.env.KONJUGATE_INTERACTION_MEMORY_LOG === '1') {
+    setInterval(() => {
+        const samples = [...completedEngineResults.values()].reduce((sum, stored) => sum + (stored.result?.samples?.length ?? 0), 0);
+        const heap = process.memoryUsage();
+        const twinsHeld = [...liveTwins.entries()].map(([ownerId, twin]) => {
+            const owner = webContents.fromId(ownerId);
+            return `#${ownerId}${owner && !owner.isDestroyed() ? '' : ' (window gone)'} ${twin.session?.cycles?.length ?? '?'} moves${twin.session?.sandbox ? ' +sandbox' : ''}`;
+        }).join(', ');
+        console.error(`  [held] twins: ${twinsHeld || 'none'}`);
+        console.error(`  [held] heap ${Math.round(heap.heapUsed / 1048576)} MB (external ${Math.round(heap.external / 1048576)} MB) · results ${completedEngineResults.size} (${samples} samples) · jobs ${activeEngineJobs.size} · twins ${liveTwins.size} · windows ${BrowserWindow.getAllWindows().length} · validations ${activeValidationOperations.size} · fits ${activeFittingOperations.size} · inference ${activeInferenceOperations.size} · twin requests ${twinRequests.size}`);
+    }, 15000).unref();
+}
 const liveTwinFor = (event) => {
     const twin = liveTwins.get(event.sender.id);
     if (!twin) throw new Error('There is no live twin running.');

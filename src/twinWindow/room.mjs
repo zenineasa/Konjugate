@@ -539,6 +539,9 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         $('.latest', input.element).dataset.latest = readings.length ? `${shown(readings.at(-1)[1])}${unit}` : 'nothing received yet';
         if (!cursorTime) $('.latest', input.element).textContent = $('.latest', input.element).dataset.latest;
         input.drawn = { readings, unit };
+        // What was tried in the sandbox (while following now): the value it started from, each change and when, held to where it has run.
+        const sandbox = twin.view === null ? twin.sandbox : null;
+        const tried = sandbox ? triedInput(sandbox, input.signal).map(([at, value]) => [at, shownAs.at(value)]) : [];
         if (!globalThis.Plotly || !readings.length) continue;
         // Within the span, the value held from before it starting at its edge, and the last value held up to now, so a step is drawn
         // to the present.
@@ -546,16 +549,29 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         const within = [...(before ? [[time.start, before[1]]] : []), ...readings.filter(([at]) => at >= time.start)];
         const x = [...within.map(([at]) => at / time.divisor), cycle.now / time.divisor];
         const y = [...within.map(([, value]) => value), within.at(-1)[1]];
-        const low = Math.min(...y);
-        const high = Math.max(...y);
+        const low = Math.min(...y, ...tried.map(([, value]) => value));
+        const high = Math.max(...y, ...tried.map(([, value]) => value));
         const pad = (high - low || Math.abs(high) || 1) * 0.15;
-        globalThis.Plotly.react($('.plot', input.element), [{ type: 'scatter', mode: 'lines', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }],
+        const traces = [{ type: 'scatter', mode: 'lines', name: 'Received', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }];
+        if (tried.length > 1) traces.push({ type: 'scatter', mode: 'lines', name: 'Tried', x: tried.map(([at]) => at / time.divisor), y: tried.map(([, value]) => value), line: { shape: 'hv', width: 2, dash: 'dot', color: '#d6ccff' } });
+        globalThis.Plotly.react($('.plot', input.element), traces,
             plotLayout({
                 margin: stripMargin, showlegend: false, hovermode: false, font: { color: '#9fb2bb', size: 10 },
                 xaxis: { gridcolor: '#17252f', zeroline: false, showticklabels: false, range: [time.start / time.divisor, time.end / time.divisor], fixedrange: true },
                 yaxis: { gridcolor: '#17252f', zeroline: false, fixedrange: true, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => `${shown(value)}${unit}`) }
             }), { displayModeBar: false, responsive: true });
     }
+}
+
+// An input as the sandbox has it: [[time, value]] from its start, each change tried, and the last held to where it has run; empty when
+// the sandbox has not run, or knows nothing of the input.
+function triedInput(sandbox, signal) {
+    const reached = sandbox.startedAt + sandbox.ranFor;
+    const start = sandbox.startInputs?.[signal];
+    const steps = sandbox.tried.filter((step) => step.signal === signal).map((step) => [step.time, step.value]);
+    if (!(reached > sandbox.startedAt) || (!Number.isFinite(start) && !steps.length)) return [];
+    const points = [...(Number.isFinite(start) ? [[sandbox.startedAt, start]] : []), ...steps];
+    return [...points, [reached, points.at(-1)[1]]];
 }
 
 function parameterInfo(parameterId) {
@@ -943,8 +959,20 @@ function refreshFollowOffer() {
 // grows. It runs on the sandbox's own engine; the live twin is never touched. A slow model falls behind the pace and simply runs as
 // fast as it can, rather than leaping ahead to catch up.
 async function followControls() {
-    const sandbox = twin?.sandbox;
-    if (!sandbox || sandbox.following) return;
+    if (!twin?.sandbox || twin.sandbox.following) return;
+    // Started again from the live twin's latest move when the live twin has moved on since the copy was made: steered in real time, what
+    // is done must be drawn at the right-hand edge as it is done, not back where Try something was opened, behind the live data and soon
+    // scrolled away. What was tried in the copy before is kept as a draft, as Back to live keeps it; what the fields say is carried over.
+    const latest = twin.cycles.at(-1)?.now;
+    if (twin.running && Number.isFinite(latest) && twin.sandbox.startedAt + twin.sandbox.ranFor < latest - 1e-9) {
+        const fields = Object.fromEntries($$('#sandboxInputs input').map((field) => [field.dataset.signal, field.value]));
+        await closeSandbox();
+        await openSandbox();
+        if (!twin?.sandbox) return;
+        for (const field of $$('#sandboxInputs input')) if (fields[field.dataset.signal] !== undefined) field.value = fields[field.dataset.signal];
+        refreshFollowOffer();
+    }
+    const sandbox = twin.sandbox;
     const following = { queue: [], startedWall: performance.now(), startedModel: sandbox.startedAt + sandbox.ranFor };
     // What the fields say as it starts goes first: a value typed or moved before.
     for (const field of $$('#sandboxInputs input')) {
@@ -1000,7 +1028,8 @@ async function followControls() {
     })();
 }
 
-// Pause holds the sandbox where it is; Run ahead and Follow the controls carry on from there.
+// Pause holds the sandbox where it is; Run ahead carries on from there, and so does Follow the controls unless the live twin has moved
+// on meanwhile (then it starts again from the latest move).
 async function stopFollowing() {
     const following = twin?.sandbox?.following;
     if (!following) return;
@@ -1025,7 +1054,8 @@ export async function closeSandbox() {
         try {
             const kept = await host.askProject('keepScenario', {
                 logFileName: twin.run.logFileName ?? '', startedAt: sandbox.startedAt, ranFor: sandbox.ranFor,
-                settings: { window: twin.settings.window, stride: twin.settings.stride, horizon: twin.settings.horizon }, tried, document: twin.settings.document
+                settings: { window: twin.settings.window, stride: twin.settings.stride, horizon: twin.settings.horizon }, tried, document: twin.settings.document,
+                inputs: Object.fromEntries(twin.inputs.map((input) => [input.signal, { name: input.target?.label.replace(/^Shared · /, '') ?? input.signal, unit: input.target?.unit ?? '' }]))
             });
             if (kept?.kept) addEvent('info', `What was tried is kept as a draft scenario, "${kept.name}"`, kept.dropped ? `the oldest, "${kept.dropped}", made room for it` : 'with the project', sandbox.startedAt);
         } catch (error) {
@@ -1055,7 +1085,7 @@ async function refreshScenarios() {
         const remove = element('button', { type: 'button', textContent: 'Delete', className: 'small' });
         remove.addEventListener('click', () => host.askProject('deleteScenario', { id: scenario.id }).then(refreshScenarios));
         const row = element('div', { className: 'scenarioRow' }, name, remove,
-            element('small', { textContent: `From ${dataTime(scenario.startedAt).replace(/^at /, '')}${scenario.logFileName ? ` of ${scenario.logFileName}` : ''}, run ahead ${Math.round(scenario.ranFor / 60)} min${scenario.modelChanged ? '. The model has changed since.' : '.'}` }));
+            element('small', { textContent: `From ${dataTime(scenario.startedAt).replace(/^at /, '')}${scenario.logFileName ? ` of ${scenario.logFileName}` : ''}, run ahead ${dataClock(scenario.ranFor)}${scenario.modelChanged ? '. The model has changed since.' : '.'}` }));
         row.dataset.scenarioId = scenario.id;
         return row;
     }));

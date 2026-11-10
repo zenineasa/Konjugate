@@ -40,12 +40,31 @@ export function normalizeScenarios(raw) {
     }));
 }
 
+// A time in the data, in the unit that reads at its size (as the twin's window reads it: seconds for a motor, hours for a house).
+export const dataClock = (seconds) => (Math.abs(seconds) < 60 ? `${Number(seconds.toFixed(1))} s`
+    : Math.abs(seconds) < 3600 ? `${Number((seconds / 60).toFixed(1))} min` : `${Number((seconds / 3600).toFixed(2))} h`);
+
+// What was tried, in words, for a draft's name: each input by its own name and unit (`inputs`: signal → { name, unit }), each value with
+// when it applied ("Voltage 12 V at 14 s, 0 V at 17 s"); an input moved more than three times, by its range and when ("Heater power,
+// 37 changes between 0 and 2000 W from 3.2 h to 4 h"), since a fader followed gives a change every few hundredths of a second.
+export function describeTried(tried, inputs = {}) {
+    const signals = [...new Set(tried.map((step) => step.signal))];
+    return signals.map((signal) => {
+        const steps = tried.filter((step) => step.signal === signal);
+        const name = inputs[signal]?.name || signal;
+        const unit = inputs[signal]?.unit ? ` ${inputs[signal].unit}` : '';
+        const value = (number) => Number(Number(number).toPrecision(4));
+        if (steps.length <= 3) return `${name} ${steps.map((step) => `${value(step.value)}${unit} at ${dataClock(step.time)}`).join(', ')}`;
+        const values = steps.map((step) => step.value);
+        return `${name}, ${steps.length} changes between ${value(Math.min(...values))} and ${value(Math.max(...values))}${unit} from ${dataClock(steps[0].time)} to ${dataClock(steps.at(-1).time)}`;
+    }).join('; ');
+}
+
 // A draft scenario from what a sandbox did, or null when nothing was done in it (such a sandbox is not kept).
-export function draftScenario({ id, now = new Date(), logFileName = '', startedAt, ranFor, settings, tried, document }) {
+export function draftScenario({ id, now = new Date(), logFileName = '', startedAt, ranFor, settings, tried, document, inputs = {} }) {
     if (!tried?.length) return null;
-    const hours = (seconds) => `${Math.round(seconds / 60)} min`;
     return normalizeScenarios([{
-        id, name: `Tried at ${hours(startedAt)}: ${tried.map((step) => `${step.signal} ${step.value}`).join(', ')}`,
+        id, name: `Tried from ${dataClock(startedAt)}: ${describeTried(tried, inputs)}`,
         createdAt: now.toISOString(), logFileName, startedAt, ranFor, settings, tried, modelFingerprint: modelFingerprint(document)
     }])[0];
 }

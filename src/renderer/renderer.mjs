@@ -9206,7 +9206,9 @@ const twinRequestHandlers = {
         if (!scenario) return { kept: false };
         const { scenarios, dropped } = withScenario(projectScenarios, scenario);
         projectScenarios = scenarios;
-        addonDataUnsaved = true;
+        // A draft kept on its own in a demonstration is not the person's work, as the twin's setup there is not: the next demonstration
+        // follows with no question about unsaved changes. (Saved, the project is the person's, and its drafts are kept as any.)
+        if (!demonstrationProject) addonDataUnsaved = true;
         updateHistoryControls();
         return { kept: true, name: scenario.name, dropped: dropped?.name ?? null };
     },

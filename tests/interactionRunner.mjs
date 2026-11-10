@@ -5862,13 +5862,21 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(twin, `document.querySelector('#sandboxPace').value`), '1');
         assert.match(await evaluate(twin, `document.querySelector('#sandboxStatus').textContent`), /^From \d[^,]* of data\.$/);
         await setField(twin, '#sandboxMinutes', '60', 'input');
+        await setField(twin, '#sandboxInputs input[data-signal="motorVoltage"]', '0', 'input');
         const ranAt = Date.now();
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
         await waitFor(twin, `/^Ran ahead to /.test(document.querySelector('#sandboxStatus').textContent)`, 'An hour of the motor did not come back.', 60000);
         const tried = await evaluate(twin, `(() => { const trace = document.querySelector('#tiles .tile .plot').data.find((item) => item.name === 'Tried'); return { points: trace.x.length, last: trace.x.at(-1) }; })()`);
         assert.ok(tried.points <= 2100, `What was tried is drawn from ${tried.points} points, not millions.`);
         assert.ok(Date.now() - ranAt < 30000, `An hour of the motor ran ahead in ${((Date.now() - ranAt) / 1000).toFixed(1)} s.`);
+        // The voltage tried is on the Voltage strip, dotted, beside the voltage received: the cause of what the speed does.
+        const triedVoltage = await evaluate(twin, `(() => { const trace = document.querySelector('#inputRows .inputRow .plot').data.find((item) => item.name === 'Tried'); return trace ? trace.y : null; })()`);
+        assert.ok(triedVoltage && triedVoltage.at(-1) === 0, `The voltage tried is drawn on its strip: ${JSON.stringify(triedVoltage)}.`);
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
+        // Kept as a draft named in the motor's terms: its input's name and unit, and times in seconds.
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent))`, 'What was tried was not kept.', 15000);
+        const draftEvent = (await twinEvents(twin)).find((text) => /kept as a draft scenario/.test(text));
+        assert.match(draftEvent, /"Tried from \d+(\.\d)? s: Voltage 0 V at \d+(\.\d)? s"/);
         // A demonstration's project is not the person's work: what its twin keeps in it as it runs leaves it saved, so another
         // demonstration follows it from the room's More menu with no question asked, and goes into its room.
         const unsaved = await evaluate(opened, `(({ dirty, addonDataUnsaved }) => ({ dirty, addonDataUnsaved }))(window.__debugTour.blockers())`);
@@ -6133,8 +6141,14 @@ export async function runInteractionTests(driver) {
 
         // Followed: the fader moves the field, and the sandbox runs ahead on its own, trying what the fader says.
         await evaluate(twin, `document.querySelector('#sandboxPace').value = '3600'`);
+        // The live twin has moved on since Try something was opened: following starts the copy again from its latest move, so what is
+        // steered is drawn at the right-hand edge, not behind the live data.
+        const openedFrom = await evaluate(twin, `window.__debugTwinWindow.twin().sandbox.startedAt`);
+        await waitFor(twin, `window.__debugTwinWindow.twin().cycles.at(-1).now > ${openedFrom}`, 'The live twin did not move on.', 30000);
+        const liveAt = await evaluate(twin, `window.__debugTwinWindow.twin().cycles.at(-1).now`);
         await evaluate(twin, `document.querySelector('#sandboxFollow').click()`);
         await waitFor(twin, `document.querySelector('#sandboxFollow').getAttribute('aria-pressed') === 'true' && document.querySelector('#sandboxRun').disabled`, 'Following did not start.');
+        assert.ok(await evaluate(twin, `window.__debugTwinWindow.twin().sandbox.startedAt`) >= liveAt, 'Following started from the live twin\'s latest move.');
         for (const value of [0, 0, 64, 127]) {
             await fader(value);
             await new Promise((resolve) => setTimeout(resolve, 700));

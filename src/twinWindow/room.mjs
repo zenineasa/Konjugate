@@ -962,10 +962,18 @@ async function followControls() {
     if (!twin?.sandbox || twin.sandbox.following) return;
     // Started again from the live twin's latest move when the live twin has moved on since the copy was made: steered in real time, what
     // is done must be drawn at the right-hand edge as it is done, not back where Try something was opened, behind the live data and soon
-    // scrolled away. What was tried in the copy before is kept as a draft, as Back to live keeps it; what the fields say is carried over.
+    // scrolled away. What was tried in the copy before is kept as a draft, as Back to live keeps it; what the person changed in the fields is
+    // carried over.
     const latest = twin.cycles.at(-1)?.now;
     if (twin.running && Number.isFinite(latest) && twin.sandbox.startedAt + twin.sandbox.ranFor < latest - 1e-9) {
-        const fields = Object.fromEntries($$('#sandboxInputs input').map((field) => [field.dataset.signal, field.value]));
+        // Only what the person changed is carried over: a field still showing what the old copy had (its start, or its last value tried)
+        // takes the new move's input instead. Carried whole, a voltage read during a ramp at 11 s was applied at 18 s, a change nobody
+        // made, while the motor was receiving 12 V.
+        const old = twin.sandbox;
+        const had = (signal) => old.tried.filter((step) => step.signal === signal).at(-1)?.value ?? old.startInputs?.[signal];
+        const fields = Object.fromEntries($$('#sandboxInputs input')
+            .filter((field) => field.value.trim() !== '' && Number(field.value) !== had(field.dataset.signal))
+            .map((field) => [field.dataset.signal, field.value]));
         await closeSandbox();
         await openSandbox();
         if (!twin?.sandbox) return;

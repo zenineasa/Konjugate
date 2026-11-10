@@ -5861,6 +5861,21 @@ export async function runInteractionTests(driver) {
         // Steered by hand, it follows the controls in real time, the pace its data arrives at.
         assert.equal(await evaluate(twin, `document.querySelector('#sandboxPace').value`), '1');
         assert.match(await evaluate(twin, `document.querySelector('#sandboxStatus').textContent`), /^From \d[^,]* of data\.$/);
+        // A key bound to the voltage, then Follow pressed after the live twin has moved on, the voltage still ramping: the copy starts again
+        // from the latest move with that move's voltage, and nothing is tried that nobody chose. (The field's old value, read earlier in
+        // the ramp, was once carried over and applied.)
+        await evaluate(twin, `window.__debugSteering.steering.save({ ...window.__debugSteering.steering.document, bindings: [{ id: 'motorKey', device: { kind: 'keyboard' }, control: { type: 'key', code: 'ArrowUp' }, parameter: { symbol: 'voltage', name: 'Voltage' } }] })`);
+        await waitFor(twin, `!document.querySelector('#sandboxFollowControls').hidden`, 'Follow the controls was not offered once a key was bound.');
+        const openedAt = await evaluate(twin, `window.__debugTwinWindow.twin().sandbox.startedAt`);
+        await waitFor(twin, `window.__debugTwinWindow.twin().cycles.at(-1).now >= ${openedAt} + 2`, 'The motor\'s twin did not move on.', 15000);
+        await evaluate(twin, `document.querySelector('#sandboxFollow').click()`);
+        await waitFor(twin, `document.querySelector('#sandboxFollow').getAttribute('aria-pressed') === 'true' && window.__debugTwinWindow.twin().sandbox.startedAt > ${openedAt}`, 'Following did not start again from the latest move.');
+        const restarted = await evaluate(twin, `(() => { const sandbox = window.__debugTwinWindow.twin().sandbox; return { field: document.querySelector('#sandboxInputs input[data-signal="motorVoltage"]').value, start: sandbox.startInputs.motorVoltage, tried: sandbox.tried.length }; })()`);
+        await evaluate(twin, `document.querySelector('#sandboxFollow').click()`);
+        await waitFor(twin, `document.querySelector('#sandboxFollow').getAttribute('aria-pressed') === 'false'`, 'Pause did not hold the sandbox.');
+        assert.deepEqual(restarted, { field: String(restarted.start), start: restarted.start, tried: 0 }, 'The restarted copy has the latest move\'s voltage, and nothing tried.');
+        assert.equal((await evaluate(twin, `window.__debugTwinWindow.twin().sandbox.tried`)).length, 0, 'Nothing tried that nobody chose.');
+        await evaluate(twin, `window.__debugSteering.steering.save({ ...window.__debugSteering.steering.document, bindings: [] })`);
         await setField(twin, '#sandboxMinutes', '60', 'input');
         await setField(twin, '#sandboxInputs input[data-signal="motorVoltage"]', '0', 'input');
         const ranAt = Date.now();

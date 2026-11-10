@@ -26,6 +26,13 @@ Rather than requiring users to manually assemble large system-level formulations
 <p>New here? Watch the introduction above, or follow the full <a href="https://www.youtube.com/watch?v=eDHksSqKhFs&list=PLRaxEsOU31bE">On-Ramp series</a> on YouTube, starting from Episode 1.</p>
 </div>
 
+<div align="center">
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset="assets/ForReadme/downloads-dark.svg">
+	<img src="assets/ForReadme/downloads-light.svg" alt="Konjugate installer downloads, split by platform and totalled release by release" width="800">
+</picture>
+</div>
+
 ## Why build another simulation software?
 
 This is a natural question. As an engineer, I have come across, used and even developed several simulation tools. Modern simulation platforms are extremely powerful and have enabled remarkable advances across many engineering disciplines.

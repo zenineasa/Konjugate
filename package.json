@@ -74,6 +74,7 @@
         "distribute": "make distributable",
         "version:bump": "node scripts/bumpVersion.mjs",
         "generate:app-metainfo": "node scripts/generateAppMetainfo.mjs",
+        "generate:release-stats": "node scripts/releaseStats.mjs",
         "clean": "make clean"
     },
     "devDependencies": {

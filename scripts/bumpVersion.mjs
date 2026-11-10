@@ -6,6 +6,11 @@
 // real release build, not before. Chained here instead, since they're done together every time
 // anyway.
 //
+// It also redraws the ReadMe's downloads chart (see scripts/releaseStats.mjs). That's done here
+// because a bump is run regularly from the maintainer's machine; the release being bumped to isn't
+// published yet, so it isn't counted until the next one.
+// Offline or rate-limited, that step only warns.
+//
 // Usage: node scripts/bumpVersion.mjs <newVersion>  (e.g. node scripts/bumpVersion.mjs 1.1.3)
 
 import { execFileSync } from 'node:child_process';
@@ -31,3 +36,4 @@ await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 4)}\n`);
 console.log(`package.json: ${previousVersion} -> ${newVersion}`);
 
 execFileSync('node', [join(root, 'generateAppMetainfo.mjs')], { cwd: projectRoot, stdio: 'inherit' });
+execFileSync('node', [join(root, 'releaseStats.mjs')], { cwd: projectRoot, stdio: 'inherit' });

@@ -7,6 +7,7 @@
 
 import { $, $$, cleanError, dataClock, element, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
+import { timingProblem } from '../twinSetup.mjs';
 
 let host = null;
 let on = false;
@@ -76,7 +77,7 @@ function refreshButtons(twin) {
         : !twin.cycles.length ? 'Wait for the twin\'s first move: a refit is fitted on its latest window'
         : refit?.running ? 'A refit is running' : 'Fit the tunable values to the latest window';
     for (const field of $$('#tunableRows input')) field.disabled = !twin.running || !twin.cycles.length;
-    $('#restartTwin').disabled = !dirty;
+    $('#restartTwin').disabled = !dirty || Boolean(timingProblem(liveFromForm(twin)));
     // What a refit found: applied to the twin while it runs. Once it has stopped (a log played to its end while the fit ran) there is
     // no twin to run on with it, so Apply is not offered, and says why; the values can still be kept in the model, for its next run.
     if (refit?.report) {
@@ -91,13 +92,17 @@ function refreshButtons(twin) {
     }
 }
 
+// Settings changed, to be taken when the twin starts again; timing it could not run with is said at once, and the twin is not stopped
+// for it.
 function markDirty() {
     dirty = true;
-    $('#restartTwin').disabled = false;
     const twin = currentTwin();
-    $('#restartNote').textContent = twin?.run.source.kind === 'recording'
+    const problem = twin ? timingProblem(liveFromForm(twin)) : null;
+    $('#restartTwin').disabled = Boolean(problem);
+    $('#restartNote').className = problem ? 'status warning' : 'status';
+    $('#restartNote').textContent = problem ?? (twin?.run.source.kind === 'recording'
         ? 'Taken when the twin starts again: the recording is played again from its start.'
-        : 'Taken when the twin starts again: it follows its source again from now.';
+        : 'Taken when the twin starts again: it follows its source again from now.');
 }
 
 // ---- Tunable parameters ------------------------------------------------------------------------------------------------------------
@@ -141,6 +146,8 @@ async function setParameter(parameter, value, fields) {
         for (const field of fields) field.value = String(parameter.value);
         return;
     }
+    // The field's change said again with the value it already has (a field committing once more as it loses focus): nothing to set.
+    if (value === parameter.value) return;
     const at = twin.cycles.at(-1);
     const from = parameter.value;
     let applied;
@@ -150,8 +157,9 @@ async function setParameter(parameter, value, fields) {
         addEvent('bad', `${parameter.name} could not be set`, cleanError(error));
         return;
     }
-    const kept = await keepInModel(twin, [{ parameterId: parameter.parameterId, value }]);
     parameter.value = value;
+    for (const field of fields) field.value = String(field.type === 'number' ? Number(value.toPrecision(6)) : value);
+    const kept = await keepInModel(twin, [{ parameterId: parameter.parameterId, value }]);
     // Said at the one time the strips mark it: where the twin's record starts with it.
     const takesEffect = Number.isFinite(applied?.takesEffect) ? applied.takesEffect : at.now;
     addEvent('info', `${parameter.name} set from ${shown(from)} to ${shown(value)}${parameter.unit ? ` ${parameter.unit}` : ''}`, `the twin runs on with it from ${dataClock(takesEffect)} of data; ${kept}`, takesEffect);
@@ -370,6 +378,7 @@ async function restart() {
     const twin = currentTwin();
     if (!twin || !dirty) return;
     const live = liveFromForm(twin);
+    if (timingProblem(live)) return markDirty();
     dirty = false;
     $('#restartTwin').disabled = true;
     $('#restartNote').textContent = '';

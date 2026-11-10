@@ -26,8 +26,8 @@ export function tankRigProject() {
     // A day, at the rig's one-minute thermometer interval; a replay sets its own length from the log.
     project.runConfigurations = [{ id: 30, name: 'One day', globalTimeStep: 60, outputInterval: 60 }];
     // The heater's heat flow follows the shared heater power: a state the heater node sets from it at every instant, which the
-    // heater input to the tank reads as in the Tank Calibration example. A live twin then shows the heat flow as the heater is
-    // switched, among what it infers, rather than the fixed value it would otherwise carry.
+    // heater input to the tank reads as in the Tank Calibration example. A live twin's model then heats the tank as the heater is
+    // switched, rather than at the fixed value the state would otherwise carry (and shows it with the inputs, as the heater's power).
     const heater = project.nodes.find((node) => node.name === 'Electric heater');
     heater.sourceTerms = [{
         id: 13, state: 'qDot', expression: 'heaterPower', setsValue: true,

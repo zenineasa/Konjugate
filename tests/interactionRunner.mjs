@@ -5374,6 +5374,15 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `window.__debugTwin.setup()?.live?.corrections?.tankTemperature?.gain === 0`, 'Watching was not kept with the project.');
         await setField(twin, '#correctionRows select', 'nudge');
         assert.equal(await evaluate(twin, `document.querySelector('#correctionRows input:not([data-noise])').hidden`), false, 'A nudge asks how far.');
+        // Timing the twin cannot run with is said as it is typed, in the engineer's terms, and the twin is not stopped for it.
+        const [windowWas, strideWas] = await evaluate(twin, `[document.querySelector('#timingWindow').value, document.querySelector('#timingStride').value]`);
+        await setField(twin, '#timingWindow', '20');
+        await setField(twin, '#timingStride', '30');
+        assert.equal(await evaluate(twin, `document.querySelector('#restartTwin').disabled`), true, 'Start again is not offered with timing that cannot run.');
+        assert.match(await evaluate(twin, `document.querySelector('#restartNote').textContent`), /^The twin moves at least once a window: with a 20 min window, move every 20 min or less \(now every 30 min\)\.$/);
+        await setField(twin, '#timingWindow', windowWas);
+        await setField(twin, '#timingStride', strideWas);
+        assert.equal(await evaluate(twin, `document.querySelector('#restartTwin').disabled`), false);
 
         // Estimated: the readings weighed against the model by an ensemble of twelve, the states and the tracked heat loss with their
         // spreads, the forecast with its band, the honesty of the band said, and the choice kept with the project.
@@ -5391,7 +5400,7 @@ export async function runInteractionTests(driver) {
         const inferred = await evaluate(twin, `document.querySelector('#inferredRows').innerText`);
         assert.match(inferred, /Heat loss coefficient\s+a parameter, tracked\s+[\d.]+ W\/K\s*±/);
         assert.match(inferred, /Ambient air · Temperature\s+estimated\s+[\d.]+ °C\s*±/);
-        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .facts').textContent`), /\d+% of readings outside the band \(about 20% is honest\)/);
+        assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .facts').textContent`), /band (honest|too narrow|too wide) · \d+% outside/);
         await waitFor(opened, `window.__debugTwin.setup()?.live?.corrections?.tankTemperature?.estimate === true && window.__debugTwin.setup().live.members === 12`, 'The estimate was not kept with the project.');
         await setField(twin, '#correctionRows select', 'reset');
         assert.equal(await evaluate(twin, `document.querySelector('#trackBlock').hidden`), true);
@@ -5408,7 +5417,7 @@ export async function runInteractionTests(driver) {
         await setField(twin, '#sandboxInputs input[data-signal="heaterPower"]', '0');
         await setField(twin, '#sandboxMinutes', '90');
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
-        await waitFor(twin, `/^Ran ahead to .* with heaterPower 0/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
+        await waitFor(twin, `/^Ran ahead to .* with Heater power 0 W\./.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn beside the forecast.');
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(opened, `window.__debugParameterTuning.scenarios().length === 1`, 'Going back to live did not keep the scenario.', 15000);
@@ -5728,10 +5737,10 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`), /^3\d\d(\.\d+)? K$/, 'In kelvin, as the model keeps them.');
         await waitFor(opened, `window.__debugTwin.setup()?.layout?.temperature === 'K'`, 'The choice was not kept with the project.');
         await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
-        // The heater's heat flow follows the heater as it is switched, not the value it started at.
-        const heatFlow = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' ')).find((text) => /Heat flow/.test(text))`);
-        const heater = await evaluate(twin, `document.querySelector('#inputRows .inputRow .latest').textContent`);
-        assert.equal(heatFlow.match(/ ([\d.]+) W /)?.[1], heater.replace(/ W$/, ''), `The heat flow follows the heater: ${heatFlow}, the heater ${heater}.`);
+        // The heater's heat flow is the heater's power, set from it at every instant: the input strip shows it, and it is not listed
+        // again among what no sensor measures.
+        const inferredNames = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow strong')].map((name) => name.textContent)`);
+        assert.ok(inferredNames.length > 0 && !inferredNames.some((name) => /Heat flow/.test(name)), `The heat flow is the heater's input, not inferred: ${inferredNames.join(', ')}.`);
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').classList.contains('bad')`), true);
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile').classList.contains('bad')`), true, 'The tile says so across the room.');
         // Under the tiles: the heater's power as it was set, what the twin infers of what no sensor measures, and the events.
@@ -5750,8 +5759,8 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `document.querySelector('#liveTwinChip').hidden`, 'The chip stayed after the twin stopped.');
         // Another take: the demonstration's model changed since (its heat loss kept in it, as Keep in the model after a refit leaves it),
         // and the demonstration picked again. It opens its model as it ships rather than going on with the changed one, so every take
-        // starts from the same model: here, with the change unsaved, the project window asks first (the test's dialogs are cancelled),
-        // and the setup offers to carry on with the model as it is.
+        // starts from the same model; and since the change was the demonstration's, not the person's, without asking (a prompt the
+        // project window raised sat behind the twin's, and the take stalled).
         const heatLossOf = () => evaluate(opened, `window.__debugProject.serialize().edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value`);
         const shipped = await heatLossOf();
         driver.takeNativeDialogs?.();
@@ -5760,13 +5769,12 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#moreMenu').click()`);
         await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open in the stopped room.');
         await evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…').click()`);
+        assert.equal(await evaluate(twin, `Boolean(document.querySelector('.tileMenu'))`), false, 'The menu closes as the demonstrations open.');
         await setField(twin, '#demoPace', 'Infinity');
         await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
-        await waitFor(twin, `[...document.querySelectorAll('#sourceStatus button')].some((button) => button.textContent === 'Carry on with the model as it is')`, 'The setup did not offer to carry on with the changed model.', 15000);
-        if (driver.takeNativeDialogs) assert.equal(driver.takeNativeDialogs().length, 1, 'Opening the model as it ships asked about the unsaved change.');
-        assert.notEqual(await heatLossOf(), shipped, 'Declined, the changed model stays.');
-        await evaluate(twin, `[...document.querySelectorAll('#sourceStatus button')].find((button) => button.textContent === 'Carry on with the model as it is').click()`);
-        await waitFor(twin, `!document.querySelector('#room').hidden && (window.__debugTwinWindow.summary()?.moves ?? 0) >= 1`, 'Carried on, the demonstration did not go into the room.', 30000);
+        await waitFor(opened, `window.__debugProject.serialize().edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value === ${shipped}`, 'The second take did not start from the model as it ships.', 15000);
+        if (driver.takeNativeDialogs) assert.equal(driver.takeNativeDialogs().length, 0, 'The demonstration\'s own change went without a prompt.');
+        await waitFor(twin, `!document.querySelector('#room').hidden && (window.__debugTwinWindow.summary()?.moves ?? 0) >= 1`, 'The second take did not go into the room.', 30000);
         await waitFor(twin, `window.__debugTwinWindow.summary()?.running === false`, 'The second take did not play through.', 60000);
         await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
@@ -6038,7 +6046,7 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && document.querySelector('#sandboxInputs input') !== null`, 'The sandbox did not open.');
         await evaluate(twin, `(() => { const field = document.querySelector('#sandboxInputs input'); field.value = '0'; })()`);
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
-        await waitFor(twin, `/Ran ahead to .* with heaterPower 0/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000);
+        await waitFor(twin, `/Ran ahead to .* with Heater power 0 W/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000);
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn on the tile.');
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent)) && document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'What was tried was not kept.');
@@ -6087,8 +6095,9 @@ export async function runInteractionTests(driver) {
         assert.ok(Math.abs(shown.range[0] * unitOf[shown.title] - Math.max(0, last.now - 4 * (last.now - last.anchor))) < 1, `Recent starts four windows back (got ${JSON.stringify(shown)}).`);
         await setField(twin, '#timeSpan', '3600');
         shown = await axis();
-        assert.equal(shown.title, 'minutes', 'An hour and its forecast are read in minutes.');
-        assert.ok(Math.abs(shown.range[0] - (last.now - 3600) / 60) < 0.01, `The last hour is shown (got ${JSON.stringify(shown)}).`);
+        // In hours, as the room's words give a time past an hour of data ("Following now · 2.5 h", the events), so the two agree.
+        assert.equal(shown.title, 'hours', 'An hour and its forecast, hours into the data, are read in hours.');
+        assert.ok(Math.abs(shown.range[0] - (last.now - 3600) / 3600) < 0.001, `The last hour is shown (got ${JSON.stringify(shown)}).`);
         await waitFor(opened, `window.__debugTwin.setup().layout?.span === 3600`, 'The span was not kept with the project.');
         await setField(twin, '#timeSpan', 'all');
         shown = await axis();
@@ -6110,7 +6119,7 @@ export async function runInteractionTests(driver) {
         // Started again as fast as it can go: what the estimator finds is checked, not the minute the log takes at 300×.
         await evaluate(twin, `window.__debugTwinWindow.setSpeed('Infinity')`);
         await evaluate(twin, `document.querySelector('#restartTwin').click()`);
-        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /started again with the engineer's settings/.test(item.textContent) && /estimating tankTemperature/.test(item.textContent))`, 'The twin was not started again.', 30000);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /started again with the engineer's settings/.test(item.textContent) && /estimating Water tank · Water temperature/.test(item.textContent))`, 'The twin was not started again.', 30000);
         await waitFor(twin, `/The whole log has been played/.test(document.querySelector('#healthTwin').textContent)`, 'The tracking twin did not play the recording.', 240000);
         const tracked = await evaluate(twin, `[...document.querySelectorAll('#inferredRows .inferredRow')].map((row) => row.innerText.replace(/\\s+/g, ' ')).find((text) => /Heat loss coefficient/.test(text))`);
         assert.match(tracked ?? '', /a parameter, tracked .*±.* rising/, `The heat loss is tracked, rising: ${tracked}`);

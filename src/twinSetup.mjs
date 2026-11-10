@@ -100,3 +100,19 @@ export function twinSessionMapping(setup) {
     const conversions = Object.fromEntries(setup.mapping.filter((entry) => entry.target && entry.conversion).map((entry) => [entry.name, entry.conversion]));
     return { mapping, conversions };
 }
+
+// What is wrong with a twin's timing, in the engineer's terms (null when it can run): every span a whole number of time steps, a move
+// at least once a window (each move's anchor is then in a stretch the model ran on real inputs), and the window a whole number of the
+// time between moves. All in seconds.
+export function timingProblem({ window, stride, horizon, timeStep }) {
+    const span = (seconds) => (seconds % 60 === 0 ? `${seconds / 60} min` : `${Number(seconds.toPrecision(4))} s`);
+    const whole = (value, of) => Math.abs(value / of - Math.round(value / of)) <= 1e-9 * Math.max(1, Math.abs(value / of));
+    if (!positive(timeStep)) return 'The time step must be a positive number of seconds.';
+    for (const [label, value] of [['window', window], ['time between moves', stride], ['forecast', horizon]]) {
+        if (!positive(value)) return `The ${label} must be longer than nothing.`;
+        if (!whole(value, timeStep)) return `The ${label} (${span(value)}) must be a whole number of time steps (${span(timeStep)} each).`;
+    }
+    if (stride > window) return `The twin moves at least once a window: with a ${span(window)} window, move every ${span(window)} or less (now every ${span(stride)}).`;
+    if (!whole(window, stride)) return `The window must hold a whole number of moves: ${span(window)} is not a multiple of ${span(stride)} (try ${span(Math.max(1, Math.round(window / stride)) * stride)}).`;
+    return null;
+}

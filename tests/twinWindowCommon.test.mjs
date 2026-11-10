@@ -32,6 +32,20 @@ test('a trend is read at the twin\'s own time scale: a motor settled a minute ag
     assert.equal(stepOf(current, 5), null);
 });
 
+test('a slow change in kelvin, and an estimate that scatters, are read by where they go', () => {
+    // Outdoors, in kelvin, falling from 8 °C to -0.5 °C over a day: a third of a kelvin an hour, a tiny share of 280 K.
+    const outdoor = series(24, (time) => 273.15 + 8 - 8.5 * (time / (24 * 3600)));
+    assert.equal(trendOf(outdoor, 3 * 3600).word, 'falling');
+    // An estimate rising from 20 °C to 22.5 °C over twelve hours, scattering by a tenth of a kelvin from one point to the next.
+    const estimate = series(12, (time) => 293.15 + 2.5 * (time / (12 * 3600)) + (Math.round(time / 60) % 2 ? 0.1 : -0.1));
+    assert.equal(trendOf(estimate, 3 * 3600).word, 'rising');
+    // Settled, scattering about the same value: steady, however large the scatter is beside the slope.
+    const settled = series(12, (time) => 293.15 + (Math.round(time / 60) % 2 ? 0.1 : -0.1));
+    assert.equal(trendOf(settled, 3 * 3600).word, 'steady');
+    // A level settled to within a millimetre of a metre.
+    assert.equal(trendOf(series(3, (time) => 1 + 0.0002 * Math.sin(time / 600)), 3600).word, 'steady');
+});
+
 test('how long ago, in words', () => {
     assert.equal(ago(20), 'just now');
     // At a motor's scale (a five-second window), seconds.

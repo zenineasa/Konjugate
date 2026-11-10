@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normalizeTwinSetup, twinSessionMapping } from '../src/twinSetup.mjs';
+import { normalizeTwinSetup, timingProblem, twinSessionMapping } from '../src/twinSetup.mjs';
 
 test('a setup keeps its source, its usable mapping entries and its settings, and drops the rest', () => {
     const setup = normalizeTwinSetup({
@@ -60,4 +60,13 @@ test('how much of the past the room\'s plots show is kept: everything, or a span
     assert.equal(span('all'), 'all');
     assert.equal(span(3600), 3600);
     for (const unusable of [0, -60, Infinity, 'recent', '3600', null]) assert.equal(span(unusable), undefined, `${String(unusable)} is not a span.`);
+});
+
+test('timing the twin cannot run with is said in the engineer\'s terms', () => {
+    assert.equal(timingProblem({ window: 3600, stride: 600, horizon: 3600, timeStep: 60 }), null);
+    assert.equal(timingProblem({ window: 1200, stride: 1800, horizon: 3600, timeStep: 60 }), 'The twin moves at least once a window: with a 20 min window, move every 20 min or less (now every 30 min).');
+    assert.equal(timingProblem({ window: 3000, stride: 1200, horizon: 3600, timeStep: 60 }), 'The window must hold a whole number of moves: 50 min is not a multiple of 20 min (try 60 min).');
+    assert.equal(timingProblem({ window: 3600, stride: 600, horizon: 90, timeStep: 60 }), 'The forecast (90 s) must be a whole number of time steps (1 min each).');
+    assert.equal(timingProblem({ window: 5, stride: 0.5, horizon: 5, timeStep: 0.001 }), null, 'A motor\'s five seconds at a millisecond.');
+    assert.match(timingProblem({ window: 3600, stride: 600, horizon: 3600, timeStep: 0 }), /time step must be a positive/);
 });

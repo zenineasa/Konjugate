@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { readDataLog } from '../src/dataLog.mjs';
 import { DataLogWriter } from '../src/dataLogWriter.mjs';
-import { parseMqttPayload } from '../src/mqttSource.mjs';
+import { listenToBroker, parseMqttPayload, unreachableBroker } from '../src/mqttSource.mjs';
 
 const arrived = 1793955600; // 2026-11-06T09:00:00Z
 
@@ -47,4 +47,10 @@ test('what a source sent is written as a data log that reads back as it was sent
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+});
+
+test('a broker that cannot be reached is said in words, not as the client\'s AggregateError', async () => {
+    const refused = Object.assign(new AggregateError([Object.assign(new Error('connect ECONNREFUSED ::1:1883'), { code: 'ECONNREFUSED' }), Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1883'), { code: 'ECONNREFUSED' })]), { code: 'ECONNREFUSED' });
+    await assert.rejects(listenToBroker('mqtt://localhost:1883', { connect: async () => { throw refused; } }), { message: 'No MQTT broker is answering at mqtt://localhost:1883. Is the broker running, and is this its address and port?' });
+    assert.match(unreachableBroker('mqtt://nowhere.invalid:1883', Object.assign(new Error('getaddrinfo ENOTFOUND nowhere.invalid'), { code: 'ENOTFOUND' })), /no computer called nowhere\.invalid/);
 });

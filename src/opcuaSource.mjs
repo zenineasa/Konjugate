@@ -57,6 +57,16 @@ function makeClient({ security = 'none', pkiFolder = null, trustServer = false, 
 
 const untrusted = (error) => /BadCertificateUntrusted|untrusted|not trusted|BadSecurityChecksFailed/i.test(String(error?.message ?? error));
 
+// Why a server could not be reached, in words, where the client's own message ("The connection may have been rejected by server,
+// Err = ()") says little.
+export function unreachableServer(url, error) {
+    const message = String(error?.message ?? error);
+    if (/ECONNREFUSED|rejected by server|socket has been disconnected|ECONNRESET/i.test(message)) return `No OPC UA server is answering at ${url}. Is the server running, and is this its address and port (often 4840)?`;
+    if (/ENOTFOUND|EAI_AGAIN/i.test(message)) return `There is no computer at ${url} on this network. Check the server's address.`;
+    if (/timeout|timed out|ETIMEDOUT/i.test(message)) return `The server at ${url} did not answer in time. Is it reachable from this computer?`;
+    return `Could not connect to ${url}: ${message}`;
+}
+
 async function open(url, options) {
     const client = makeClient({ ...options, reconnect: false });
     try {
@@ -66,7 +76,7 @@ async function open(url, options) {
     } catch (error) {
         await client.disconnect().catch(() => {});
         if (options.security && options.security !== 'none' && !options.trustServer && untrusted(error)) throw new OpcUaUntrustedError(url);
-        throw error;
+        throw new Error(unreachableServer(url, error));
     }
 }
 

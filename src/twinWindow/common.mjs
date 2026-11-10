@@ -59,20 +59,29 @@ export function valueAt(series, time) {
     return series.at(-1).value;
 }
 
-// How a quantity has moved over the last `span` seconds of its history ([[time, value]], in time order): rising or falling when it
-// moved by more than half a percent of itself (or of its own range, for one near zero), else steady. The span is the twin's own time
-// scale, its window: an hour for a tank, five seconds for a motor (over an hour, a motor's three minutes are all one span, and its current
-// read "rising" from start to finish, settled or not). `change` is how far it moved, at its latest rate, over the span.
+// How a quantity has moved over the last `span` seconds of its history ([[time, value]], in time order): rising or falling, else
+// steady. The movement is the slope of a straight line fitted through the span's points (so an estimate that scatters from move to
+// move is read by where it goes, not by its last two points), and counts when it is larger than the scatter about that line, than a
+// tenth of how far the quantity moved over the whole history given (what its sparkline shows), and than a thousandth of its size (so a
+// level settled to the millimetre is steady). Nothing is judged against the value's size alone: a temperature in kelvin is large, so a
+// day's fall outdoors from 8 °C to below freezing would read as steady. The span is the caller's: a few of the twin's windows, its own
+// time scale (an hour for a tank, five seconds for a motor). `change` is how far it moved, at the fitted rate, over the span.
 export function trendOf(points, span = 3600) {
     if (points.length < 2) return { word: '—', kind: '' };
-    const [latestTime, latest] = points.at(-1);
-    const [earlierTime, earlier] = points.find(([time]) => time >= latestTime - span - 1e-9);
-    if (latestTime - earlierTime < 1e-9) return { word: '—', kind: '' };
-    const change = ((latest - earlier) / (latestTime - earlierTime)) * span;
-    const perHour = (change / span) * 3600;
+    const latestTime = points.at(-1)[0];
+    const recent = points.filter(([time]) => time >= latestTime - span - 1e-9);
+    if (recent.length < 2 || latestTime - recent[0][0] < 1e-9) return { word: '—', kind: '' };
+    const meanTime = recent.reduce((sum, [time]) => sum + time, 0) / recent.length;
+    const meanValue = recent.reduce((sum, [, value]) => sum + value, 0) / recent.length;
+    const spread = recent.reduce((sum, [time]) => sum + (time - meanTime) ** 2, 0);
+    const slope = spread > 0 ? recent.reduce((sum, [time, value]) => sum + (time - meanTime) * (value - meanValue), 0) / spread : 0;
+    const scatter = Math.sqrt(recent.reduce((sum, [time, value]) => sum + (value - meanValue - slope * (time - meanTime)) ** 2, 0) / recent.length);
+    const change = slope * span;
+    const perHour = slope * 3600;
     const values = points.map(([, value]) => value);
-    const scale = Math.abs(latest) > 1e-12 ? Math.abs(latest) : Math.max(...values) - Math.min(...values);
-    if (!(scale > 0) || Math.abs(change) <= 0.005 * scale) return { word: 'steady', kind: 'steady', perHour, change, span };
+    const range = Math.max(...values) - Math.min(...values);
+    const size = Math.max(Math.abs(points.at(-1)[1]), range);
+    if (!(size > 0) || Math.abs(change) <= Math.max(scatter, 0.1 * range, 0.001 * size)) return { word: 'steady', kind: 'steady', perHour, change, span };
     return { word: change > 0 ? 'rising' : 'falling', kind: change > 0 ? 'rising' : 'falling', perHour, change, span };
 }
 

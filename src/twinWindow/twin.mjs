@@ -12,10 +12,10 @@ import { suggestSymbol } from '../csvImport.mjs';
 import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
 import { readingNoise } from '../stateEstimator.mjs';
 import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMatching.mjs';
-import { normalizeTwinSetup, twinSessionMapping } from '../twinSetup.mjs';
+import { normalizeTwinSetup, timingProblem, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
 import { $, $$, cleanError, shown, sparkline } from './common.mjs';
-import { abandonRoom, closeRoom, currentTwin, handleEvent, initRoom, modelChanged, openRoom, openTileMenu } from './room.mjs';
+import { abandonRoom, addEvent, closeRoom, closeTileMenu, currentTwin, handleEvent, initRoom, modelChanged, openRoom, openTileMenu } from './room.mjs';
 import { initEngineer } from './engineer.mjs';
 
 const api = window.twin;
@@ -146,6 +146,8 @@ function continueDemo() {
     const variant = state.demoPending;
     if (!variant || !demoModelOpen(variant)) return;
     state.demoPending = null;
+    // Its model is open and the readings matched to it: the note that it was being opened goes, however the model came.
+    if (state.log) sourceStatus(`${state.log.header.signals.length} signals in ${state.log.fileName}, matched to ${state.context?.projectName || 'the model'}.`, 'good');
     if (variant !== 'plant' && state.rows.some((row) => row.target && row.role === 'output')) startTwin();
 }
 
@@ -163,6 +165,7 @@ $('#openDemos').addEventListener('click', () => $('#demosDialog').showModal());
 for (const button of $$('[data-demo]')) {
     button.addEventListener('click', async () => {
         if ($('#demosDialog').open) $('#demosDialog').close();
+        closeTileMenu();
         // Chosen from the room of a twin that has finished, the setup is shown again: the demonstration's progress, and its model being
         // opened (or the project asking about unsaved work), are said there.
         if (!$('#room').hidden) closeRoom();
@@ -215,7 +218,8 @@ $('#mqttListen').addEventListener('click', async () => {
         offerSignals(heard.filter((topic) => topic.numeric).map((topic) => ({ id: topic.topic, name: topic.topic, unit: '', values: [topic.value] })));
         sourceStatus(heard.length ? `Heard ${heard.length} topic${heard.length === 1 ? '' : 's'}${heard.some((topic) => !topic.numeric) ? `; those that are not numbers are left out` : ''}.` : 'Nothing was heard in 3 seconds. Is anything publishing to this broker?', heard.length ? 'good' : 'warning');
     } catch (error) {
-        sourceStatus(`Could not listen to ${url}: ${cleanError(error)}`, 'warning');
+        // Said in full by the source when it is about reaching the broker (it names the address); else what went wrong in listening.
+        sourceStatus(cleanError(error).includes(url) ? cleanError(error) : `Could not listen to ${url}: ${cleanError(error)}`, 'warning');
     }
 });
 
@@ -235,7 +239,7 @@ async function browseOpcUa(trustServer = false) {
         offerSignals(answer.tags.filter((tag) => tag.numeric).map((tag) => ({ id: tag.nodeId, name: tag.path, unit: tag.unit, range: tag.range, values: tag.value === null ? [] : [Number(tag.value)] })));
         sourceStatus(`Found ${answer.tags.length} tag${answer.tags.length === 1 ? '' : 's'}.`, 'good');
     } catch (error) {
-        sourceStatus(`Could not browse ${url}: ${cleanError(error)}`, 'warning');
+        sourceStatus(cleanError(error).includes(url) ? cleanError(error) : `Could not browse ${url}: ${cleanError(error)}`, 'warning');
     }
 }
 $('#opcuaBrowse').addEventListener('click', () => browseOpcUa(false));
@@ -487,11 +491,19 @@ function buildRun(setup) {
     }));
     const first = mapping.find((entry) => entry.role === 'output');
     const saved = { ...liveDefaults, ...setup.live };
-    const live = {
+    let live = {
         ...saved,
         timeStep: saved.timeStep ?? (state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations.map((observation) => ({ ...observation, signal: rows.find((row) => row.signal.id === observation.signal)?.name ?? observation.signal })), mapping) : 60),
         alert: saved.alert ?? 0.25 * tolerances[first.signal]
     };
+    // Timing kept with the setup that the twin cannot run with (from a file written elsewhere): the defaults instead, said, since
+    // timing is changed only in the room, which the twin would never reach.
+    const problem = timingProblem(live);
+    if (problem) {
+        const timeStep = timingProblem({ ...live, ...liveDefaults }) ? 60 : live.timeStep;
+        live = { ...live, window: liveDefaults.window, stride: liveDefaults.stride, horizon: liveDefaults.horizon, timeStep };
+        state.timingReset = `The timing kept with the setup could not run (${problem.replace(/\.$/, '')}), so the twin uses the default: an hour's window, moving every ten minutes.`;
+    } else state.timingReset = null;
     const estimating = Object.values(live.corrections).some((correction) => correction.estimate);
     const trackable = estimating ? tunableIds(state.context.document).filter((id) => !live.untracked.includes(id)) : [];
     let settings = {
@@ -530,6 +542,7 @@ async function startTwin(carried = null) {
     }
     await saveSetup(setup);
     openRoom(run);
+    if (state.timingReset) addEvent('lean', 'The twin uses the default timing', state.timingReset);
     try {
         await api.liveTwin.start(run.settings, run.source, state.context.projectPath ?? null);
     } catch (error) {
@@ -584,7 +597,7 @@ initEngineer({
         const estimated = Object.entries(corrections).filter(([, correction]) => correction.estimate).map(([name]) => name);
         await startTwin({
             events: twin?.events ?? [],
-            said: ['The twin was started again with the engineer\'s settings', `window ${window / 60} min, moving every ${stride / 60} min, forecast ${horizon / 60} min, time step ${timeStep} s${estimated.length ? `; estimating ${estimated.join(', ')}` : ''}`]
+            said: ['The twin was started again with the engineer\'s settings', `window ${window / 60} min, moving every ${stride / 60} min, forecast ${horizon / 60} min, time step ${timeStep} s${estimated.length ? `; estimating ${estimated.map((name) => state.rows.find((row) => row.name === name)?.target?.label ?? name).join(', ')}` : ''}`]
         });
     }
 });
@@ -595,12 +608,15 @@ api.onContext(async (context) => {
     // The setup kept with this project; one kept from before is kept only while it is the same project (a context sent again, before the
     // project has saved the setup). Another project, a demonstration's say, starts from its own or none: never from the one before, whose
     // timing (a motor's five-second window and millisecond step, given a house's day of data) can be far from what it needs.
-    const sameProject = state.context && context.projectPath === state.context.projectPath && context.projectName === state.context.projectName;
+    // A demonstration opened afresh is another take: it starts from its own setup, not from settings changed in the take before.
+    const sameProject = !context.fresh && state.context && context.projectPath === state.context.projectPath && context.projectName === state.context.projectName;
     state.context = context;
     state.saved = normalizeTwinSetup(context.setup) ?? (sameProject ? state.saved : null);
     state.memory = await api.memory.get().catch(() => ({}));
     renderModel();
-    if (currentTwin()) return;
+    // A twin in its room is left as it is; one that has stopped, its room left for the setup (a demonstration picked again), is not in
+    // the way of the readings being matched to the model that came.
+    if (currentTwin()?.running || !$('#room').hidden) return;
     // A log handed over by the tuning card's replay: chosen as the source.
     if (context.log?.content) {
         chooseSourceTile('file');

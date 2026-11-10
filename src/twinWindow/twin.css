@@ -77,7 +77,9 @@ input:focus, select:focus { border-color: var(--accent); }
 .mappingRow select { width: 100%; }
 .conversion { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .conversion .numbers { display: flex; gap: 4px; align-items: center; }
-.conversion input { width: 72px; min-width: 0; height: 26px; }
+.conversion input { width: 84px; min-width: 0; height: 26px; font-variant-numeric: tabular-nums; }
+/* No spinner: it took the room of a digit, and 273.15 showed as 273.1. */
+.conversion input::-webkit-inner-spin-button, .conversion input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .confidence { display: inline-block; min-width: 42px; margin-right: 6px; padding: 1px 6px; border-radius: 4px; text-align: center; font-weight: 650; font-size: 12px; }
 .confidence.high { color: var(--accentText); background: var(--good); }
 .confidence.medium { color: #241604; background: var(--lean); }
@@ -118,10 +120,14 @@ input:focus, select:focus { border-color: var(--accent); }
 .trendLegend i.tried { border-top-style: dotted; border-color: #9b8cf0; }
 .trendLegend i.input { border-color: #9b8cf0; }
 .trendScroll { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+/* More strips below than fit: a fade at the column's foot, with a chevron, until it is scrolled to its end. */
+.trendScroll::after { content: ''; position: sticky; bottom: 0; flex: none; height: 30px; margin-top: -30px; pointer-events: none; opacity: 0; transition: opacity .2s;
+    background: linear-gradient(transparent, var(--background) 80%); }
+.trendScroll.moreBelow::after { opacity: 1; content: '⌄'; display: grid; place-items: end center; color: var(--muted); font-size: 16px; line-height: 1; }
 .tiles { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0; }
 /* A strip: as tall as the column gives it, never under 140px (a column of many scrolls); a Taller one twice that. Whether the twin is in
    step with it is the bar down its left edge. */
-.tile { position: relative; flex: 1 0 140px; display: flex; flex-direction: column; min-height: 140px; padding: 4px 0 0 8px; border-left: 3px solid var(--faint); border-bottom: 1px solid var(--line); }
+.tile { position: relative; flex: 1 0 120px; display: flex; flex-direction: column; min-height: 120px; padding: 4px 0 0 8px; border-left: 3px solid var(--faint); border-bottom: 1px solid var(--line); }
 .tile.tall { flex: 2 0 280px; min-height: 280px; }
 .tile.good { border-left-color: var(--good); }
 .tile.lean { border-left-color: var(--lean); }
@@ -136,6 +142,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .tile .facts { flex: 1 1 auto; display: flex; flex-wrap: nowrap; gap: 14px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .tile .facts > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tile .facts > span.jumps, .tile .facts > span.state { flex: none; }
+.tile .facts > span.state.lean { color: var(--lean); }
 .tile .tileEnd { margin-left: auto; }
 
 /* The inputs, at the foot of the column: a short step strip each, in its own units, on the same time axis. */
@@ -228,7 +235,7 @@ button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400
 .tile.dragging { opacity: .4; }
 .tile.dropTarget { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .tile .jumps { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
-.tile .jumps svg { width: 120px; height: 18px; }
+.tile .jumps svg { width: 72px; height: 18px; }
 .tiles.past .tile { border-style: dashed; }
 
 .scenarioList { display: grid; gap: 4px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); max-height: 110px; overflow-y: auto; }

@@ -41,8 +41,25 @@ export function parseMqttPayload(payload, arrived) {
 }
 
 // Listens to every topic (or those under `filter`) for a few seconds and says what it heard.
+// Why a broker could not be reached, in words: nothing listening (refused on every address the name has, which Node reports as an
+// AggregateError of them), no such host, no answer in time; else the client's own message.
+export function unreachableBroker(url, error) {
+    const causes = [error, ...(error?.errors ?? [])];
+    const code = causes.map((cause) => cause?.code).find(Boolean) ?? '';
+    const message = causes.map((cause) => cause?.message).filter(Boolean).join('; ');
+    if (code === 'ECONNREFUSED' || error?.name === 'AggregateError') return `No MQTT broker is answering at ${url}. Is the broker running, and is this its address and port?`;
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `There is no computer called ${(() => { try { return new URL(url).hostname; } catch { return url; } })()} on this network. Check the broker's address.`;
+    if (code === 'ETIMEDOUT' || /timeout|timed out/i.test(message)) return `The broker at ${url} did not answer in time. Is it reachable from this computer?`;
+    return `Could not connect to ${url}: ${message || String(error)}`;
+}
+
 export async function listenToBroker(url, { seconds = 3, filter = '#', options = {}, connect = mqtt.connectAsync } = {}) {
-    const client = await connect(url, { connectTimeout: 5000, reconnectPeriod: 0, ...options });
+    let client;
+    try {
+        client = await connect(url, { connectTimeout: 5000, reconnectPeriod: 0, ...options });
+    } catch (error) {
+        throw new Error(unreachableBroker(url, error));
+    }
     const heard = new Map();
     client.on('message', (topic, payload) => {
         const reading = parseMqttPayload(payload, Date.now() / 1000);

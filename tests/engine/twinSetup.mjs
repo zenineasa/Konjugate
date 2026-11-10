@@ -68,8 +68,12 @@ for (const [index, cycle] of planted.entries()) {
     largest = Math.max(largest, ...cycle.restored.values.map((value, position) => Math.abs(value - other.restored.values[position])));
 }
 assert.ok(largest < 1e-9, `The twin's states agree with the rig's own recording's to ${largest}.`);
-// What the twin infers: every state no sensor measures, from its anchor to the horizon, in each move and in the event the room reads.
-const unmeasured = replayTargets(document).states.filter((state) => !mapping.some((entry) => entry.stateId === state.stateId));
+// What the twin infers: every state no sensor measures, from its anchor to the horizon, in each move and in the event the room reads;
+// all but the heater's heat flow, which the heater's power sets at every instant: that input again, shown with the inputs.
+const heatFlowStateId = 4;
+const unmeasured = replayTargets(document).states.filter((state) => !mapping.some((entry) => entry.stateId === state.stateId) && state.stateId !== heatFlowStateId);
+assert.ok(replayTargets(document).states.some((state) => state.stateId === heatFlowStateId), 'The rig has a heat flow its heater sets.');
+assert.equal(heatFlowStateId in planted.at(-1).inferred, false, 'The heat flow is not among what the twin infers.');
 assert.ok(unmeasured.length > 0, 'The rig has states no sensor measures.');
 const lastCycle = planted.at(-1);
 for (const state of unmeasured) {

@@ -57,7 +57,10 @@ export function initRoom(given) {
     });
     $('#trendColumn').addEventListener('pointermove', (event) => showCursor(event));
     $('#trendColumn').addEventListener('pointerleave', () => hideCursor());
-    $('#trendScroll').addEventListener('scroll', () => hideCursor());
+    $('#trendScroll').addEventListener('scroll', () => { hideCursor(); markMoreBelow(); });
+    // The column scrolls when its strips do not all fit: a fade at its foot says there is more below.
+    new ResizeObserver(() => markMoreBelow()).observe($('#trendScroll'));
+    new MutationObserver(() => markMoreBelow()).observe($('#trendScroll'), { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
     $('#engineerToggle').addEventListener('click', () => {
         const on = $('#engineerToggle').getAttribute('aria-pressed') !== 'true';
         $('#engineerToggle').setAttribute('aria-pressed', String(on));
@@ -290,7 +293,7 @@ const icon = (path) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${p
 // divider. One menu is open at a time; it closes on a choice, Escape, a click elsewhere, or the window changing size, and gives the focus
 // back to its button.
 let openMenu = null;
-function closeTileMenu({ refocus = false } = {}) {
+export function closeTileMenu({ refocus = false } = {}) {
     if (!openMenu) return;
     const { menu, button, cleanup } = openMenu;
     openMenu = null;
@@ -370,7 +373,12 @@ function visibleTime(cycle) {
     const length = span === 'all' ? Infinity : span === 'recent' ? 4 * (cycle.now - cycle.anchor) : span;
     const start = length > 0 && Number.isFinite(length) ? Math.max(first, cycle.now - length) : first;
     const shown = Math.max(end - start, 1);
-    const unit = shown < 180 ? { divisor: 1, title: 'seconds' } : shown < 3 * 3600 ? { divisor: 60, title: 'minutes' }
+    // In the unit the room's words give the latest time in ("Following now · 1.5 h", the events' times: src/twinWindow/common.mjs,
+    // dataClock), so the axis and the words agree; only a span that is a sliver of the data (a motor's last twenty seconds, five minutes
+    // in) is in the unit that reads at its own size.
+    const unit = shown >= end / 4
+        ? (end < 60 ? { divisor: 1, title: 'seconds' } : end < 3600 ? { divisor: 60, title: 'minutes' } : { divisor: 3600, title: 'hours' })
+        : shown < 180 ? { divisor: 1, title: 'seconds' } : shown < 3 * 3600 ? { divisor: 60, title: 'minutes' }
         : shown < 3 * 86400 ? { divisor: 3600, title: 'hours' } : { divisor: 86400, title: 'days' };
     return { start, end, ...unit };
 }
@@ -395,21 +403,20 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     facts.replaceChildren();
     const upTo = twin.cycles.filter((item) => item.index <= cycle.index);
     const jumps = upTo.map((item) => item.jumps?.[tile.signal]?.jump).filter(Number.isFinite).slice(-60);
-    facts.append(element('span', { className: 'jumps' }, `jumps`, sparkline(jumps, '#e0a14c'), `last ${Number.isFinite(jump) ? `${brief(shownAs.by(jump))}${unit}` : '—'}`));
-    // The drift's state first: on a narrow strip the facts after it shrink and end in an ellipsis, and this is the one to keep.
+    // The header is one line, so it says only what matters most, in order: the jumps against the most one may be, the drift's state,
+    // an estimate's band, and the warning while there is no state to say. Each says the rest in its tooltip; on a narrow strip what
+    // comes last shrinks and ends in an ellipsis.
+    const within = `${brief(shownAs.by(tile.tolerance))}${unit}`;
+    const warnsAt = Number.isFinite(twin.settings.alertAt) && twin.settings.alertAt > 0 ? `${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit}` : null;
+    facts.append(element('span', {
+        className: 'jumps',
+        title: `How far each move set the model right (the latest last). A jump larger than ±${within} leans the strip amber${warnsAt ? `; when the jumps keep to one side by more than ${warnsAt}, on average a move, the room warns of a drift` : ''}.`
+    }, `jumps`, sparkline(jumps, '#e0a14c'), `${Number.isFinite(jump) ? brief(shownAs.by(jump)) : '—'} of ±${within}`));
     if (alarm) facts.append(element('span', { className: 'state', textContent: 'drifting past the warning' }));
     else if (leaning) facts.append(element('span', { className: 'state', textContent: `leaning ${trend.direction} the readings` }));
-    facts.append(
-        // The two thresholds, named as the events name them: how far one move's jump may go before the strip leans, and how far the
-        // corrections may keep to one side, on average a move, before the room warns.
-        element('span', { textContent: `jumps within ±${brief(shownAs.by(tile.tolerance))}${unit}`, title: `A move whose jump is larger than ±${brief(shownAs.by(tile.tolerance))}${unit} leans the strip amber` }),
-        ...(Number.isFinite(twin.settings.alertAt) && twin.settings.alertAt > 0 ? [element('span', { textContent: `warns at ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit}`, title: `When the model's corrections keep to one side by more than ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit}, on average a move, the room warns of a drift` })] : []));
-    // An estimated signal: how many readings fell outside the band the twin expected, where about one in five is honest.
-    if (tile.estimated) {
-        const outside = upTo.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.outside ?? 0), 0);
-        const total = upTo.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.total ?? 0), 0);
-        if (total) facts.append(element('span', { textContent: `${Math.round((outside / total) * 100)}% of readings outside the band (about 20% is honest)`, title: `${outside} of ${total} readings fell outside the twin's 10th to 90th percentile` }));
-    }
+    const honesty = tile.estimated ? bandOf(tile, upTo) : null;
+    if (honesty) facts.append(element('span', { className: `state ${honesty.word === 'honest' ? '' : 'lean'}`, textContent: honesty.text, title: honesty.title }));
+    if (warnsAt && !alarm && !leaning) facts.append(element('span', { textContent: `warns at ${warnsAt}`, title: `When the jumps keep to one side by more than ${warnsAt}, on average a move, the room warns of a drift` }));
     if (!globalThis.Plotly) return;
     // Only what is in the span is drawn (a little before it too, so a line enters from the edge): the plot stays readable, and quick.
     const from = time.start - (time.end - time.start) * 0.02;
@@ -427,6 +434,10 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
         if (item.refit && Number.isFinite(previousNow) && item.index <= cycle.index && previousNow >= from) changes.push(previousNow);
         if (item.index >= cycle.index) break;
         const added = (item.window[tile.signal] ?? []).filter((row) => row.time >= previousNow - 1e-9 && row.time <= item.now + 1e-9 && row.time >= from);
+        // The first move with new values ran its window again with them, so where its stretch starts the model is where those values
+        // put it, not where the old ones had: a different run, not a jump in the temperature. The line breaks there, at the marker,
+        // rather than drawing a cliff no system could make.
+        if (item.refit && earlier.x.length) { earlier.x.push(null); earlier.y.push(null); }
         previousNow = item.now;
         for (const row of added) { earlier.x.push(row.time / time.divisor); earlier.y.push(shownAs.at(row.simulated)); }
     }
@@ -443,7 +454,7 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
             { type: 'scatter', mode: 'lines', name: 'Band (10–90%)', x: hours(band), y: band.map((point) => shownAs.at(point.low)), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
         ] : []),
         { type: 'scatter', mode: 'markers', name: 'Measured', x: shownMeasured.map(([at]) => at / time.divisor), y: shownMeasured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
-        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, line: { width: 1.5, color: 'rgba(75,143,226,.75)' }, legendgroup: 'model', showlegend: false }] : []),
+        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, connectgaps: false, line: { width: 1.5, color: 'rgba(75,143,226,.75)' }, legendgroup: 'model', showlegend: false }] : []),
         { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' }, legendgroup: 'model' },
         { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(forecast), y: forecast.map((point) => point.value), line: { width: 2, dash: 'dash', color: '#4b8fe2' } },
         ...(sandbox ? [{ type: 'scatter', mode: 'lines', name: 'Tried', x: hours(sandbox), y: sandbox.map((point) => point.value), line: { width: 2, dash: 'dot', color: '#9b8cf0' } }] : [])
@@ -461,6 +472,18 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
         annotations: changes.map((at) => ({ x: at / time.divisor, y: 1, xref: 'x', yref: 'paper', text: 'new values', showarrow: false, xanchor: 'left', yanchor: 'top', xshift: 3, font: { size: 10, color: '#42c9bc' } }))
     }), { displayModeBar: false, responsive: true });
     tile.changes = changes;
+}
+
+// An input as the room names it (its parameter's label, not the identifier the readings carry), and its unit.
+const inputName = (signal) => twin?.inputs.find((input) => input.signal === signal)?.target?.label?.replace(/^Shared · /, '') ?? signal;
+const inputUnit = (signal) => {
+    const unit = twin?.inputs.find((input) => input.signal === signal)?.target?.unit;
+    return unit ? ` ${unit}` : '';
+};
+
+function markMoreBelow() {
+    const scroll = $('#trendScroll');
+    scroll.classList.toggle('moreBelow', scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight > 2);
 }
 
 // Every plot in the column has the same margins, so their time axes line up to the pixel: a time is in the same place in every strip.
@@ -600,8 +623,12 @@ function collectInferred(cycle) {
         const entry = twin.inferred.get(stateId);
         entry.target = candidates.find((candidate) => candidate.kind === 'state' && candidate.id === stateId) ?? entry.target;
         entry.lastSeen = cycle.index;
-        for (const point of series) if (point.time <= cycle.now + 1e-9) entry.history.set(point.time, point.value);
+        // Each move's stretch after the one before ended, as the model line is drawn: a later move's run of its window, from its own
+        // start, written over the earlier ones' made a comb of the starts of every run.
+        const after = entry.until ?? -Infinity;
+        for (const point of series) if (point.time > after + 1e-9 && point.time <= cycle.now + 1e-9) entry.history.set(point.time, point.value);
         entry.history.set(cycle.now, valueAt(series, cycle.now));
+        entry.until = Math.max(after, cycle.now);
         const spread = cycle.estimate?.states?.find((candidate) => candidate.stateId === stateId)?.spread;
         if (Number.isFinite(spread)) entry.spreads.set(cycle.now, spread);
     }
@@ -613,6 +640,9 @@ function collectInferred(cycle) {
         entry.lastSeen = cycle.index;
     }
 }
+
+// At most `count` points, evenly through the series, its last kept.
+const everyFew = (points, count) => (points.length <= count ? points : Array.from({ length: count }, (_, index) => points[Math.round((index * (points.length - 1)) / (count - 1))]));
 
 function drawInferred(cycle) {
     const upTo = (map) => [...map].filter(([time]) => time <= cycle.now + 1e-9).sort((a, b) => a[0] - b[0]);
@@ -626,11 +656,14 @@ function drawInferred(cycle) {
         // Judged in the model's own units, since half a percent of a temperature in °C is not half a percent of it in kelvin.
         // Over the twin's own time scale, its window: an hour for a tank, five seconds for a motor.
         const span = Number(twin.settings.window) > 0 ? Number(twin.settings.window) : 3600;
+        // The sparkline shows the last dozen windows, and the word says where its right-hand end is going, over the last three: an
+        // hour's movement alone hides a day's fall outdoors.
+        const shownHistory = raw.filter(([time]) => time >= raw.at(-1)[0] - 12 * span - 1e-9);
         const step = stepOf(raw, span);
         const stepUnit = shownAs.unit ? ` ${shownAs.unit}` : '';
         const trend = step
             ? { word: `${step.change < 0 ? 'dropped' : 'rose'} ${ago(raw.at(-1)[0] - step.time, span)}`, kind: step.change < 0 ? 'falling' : 'rising', said: `from ${readable(shownAs.at(step.from))}${stepUnit} to ${readable(shownAs.at(step.to))}${stepUnit}` }
-            : trendOf(raw, span);
+            : trendOf(shownHistory, 3 * span);
         const units = shownAs.unit ? ` ${shownAs.unit}` : '';
         const number = element('div', { className: 'number', textContent: `${readable(latest)}${units}` });
         if (Number.isFinite(spread) && spread > 0) number.append(element('small', { textContent: ` ±${brief(spread)}` }));
@@ -638,7 +671,7 @@ function drawInferred(cycle) {
             element('div', {}, element('strong', { textContent: name }), element('small', { textContent: kind })),
             number,
             element('span', { className: `trend ${trend.kind}`, textContent: trend.word, title: trend.said ?? (Number.isFinite(trend.change) ? `${trend.change > 0 ? '+' : ''}${shown(shownAs.by(trend.change))}${units} over the last ${dataClock(trend.span)}` : '') }),
-            sparkline(points.slice(-120).map(([, value]) => value)));
+            sparkline(everyFew(shownHistory, 120).map(([, value]) => shownAs.at(value))));
         made.setAttribute('role', 'row');
         return made;
     };
@@ -674,6 +707,21 @@ function renderView() {
 // ---- Events ----------------------------------------------------------------------------------------------------------------------
 // One list, timed, newest first: warnings, the twin falling behind, the engine restarted, what the source says, changes made, the end.
 // actions: [{ label, run }] offered on the event, such as replaying a recording.
+// An estimated signal's band: how many of its readings fell outside the 10th to 90th percentile the twin expected, where about one in
+// five is honest; far more, the twin is surer than it should be (its band too narrow), far fewer, more cautious than it need be.
+function bandOf(tile, cycles) {
+    const outside = cycles.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.outside ?? 0), 0);
+    const total = cycles.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.total ?? 0), 0);
+    if (!total) return null;
+    const share = Math.round((outside / total) * 100);
+    const word = share > 35 ? 'too narrow' : share < 8 ? 'too wide' : 'honest';
+    return {
+        word, share,
+        text: `band ${word} · ${share}% outside`,
+        title: `${outside} of ${total} readings fell outside the twin's 10th to 90th percentile; about 20% is honest. ${word === 'too narrow' ? 'The twin is surer than it should be: give the readings more noise, or let the model drift more, in the engineer\'s view.' : word === 'too wide' ? 'The twin is more cautious than it need be: less noise, or less drift, would tighten it.' : ''}`.trim()
+    };
+}
+
 export function addEvent(kind, text, detail = '', time = null, actions = []) {
     if (!twin) return;
     const event = { at: new Date(), kind, text, detail: [detail, time === null ? '' : dataTime(time)].filter(Boolean).join(' · ') };
@@ -754,10 +802,16 @@ export function handleEvent(update) {
         $('#healthTwin').title = `The model runs ${Number.isFinite(stats.realTimeFactor) ? Math.round(stats.realTimeFactor).toLocaleString() : 'far more'} times faster than real time${Number.isFinite(arriving) ? `, and the data arrives at ${arriving}×` : ''}; a move takes ${(stats.cycleSeconds.median * 1000).toFixed(1)} ms.`;
         $('#healthTwin').className = `healthItem ${headroom >= 1.5 && !behind ? 'good' : 'lean'}`;
         const alarm = cycle.trend?.alarm;
-        $('#healthDrift').className = `healthItem ${alarm ? 'bad' : cycle.trend?.direction !== 'none' ? 'lean' : 'good'}`;
-        $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : cycle.trend?.direction !== 'none' ? 'Leaning' : 'In step';
+        // In step, but an estimated signal's band too narrow: said with it, so the chip does not say all is well beside a strip that
+        // says most readings fall outside what the twin expected.
+        const narrow = twin.tiles.filter((tile) => tile.estimated && bandOf(tile, twin.cycles)?.word === 'too narrow');
+        const leaningNow = cycle.trend?.direction !== 'none';
+        $('#healthDrift').className = `healthItem ${alarm ? 'bad' : leaningNow || narrow.length ? 'lean' : 'good'}`;
+        $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : leaningNow ? 'Leaning' : narrow.length ? 'In step · band too narrow' : 'In step';
         const worst = twin.tiles.find((tile) => tile.signal === cycle.trend?.signal);
-        $('#healthDrift').title = alarm || cycle.trend?.direction !== 'none' ? `${worst?.target?.label ?? cycle.trend?.signal}${twin.tiles.filter((tile) => driftOf(trendOfSignal(cycle, tile.signal)) !== 'good').length > 1 ? ', and others' : ''}` : 'Every measured signal is in step';
+        $('#healthDrift').title = alarm || leaningNow ? `${worst?.target?.label ?? cycle.trend?.signal}${twin.tiles.filter((tile) => driftOf(trendOfSignal(cycle, tile.signal)) !== 'good').length > 1 ? ', and others' : ''}`
+            : narrow.length ? `The model keeps to the readings, but more of ${narrow.map((tile) => tile.target?.label ?? tile.signal).join(', ')}'s readings fall outside the twin's band than an honest band lets through: it is surer than it should be`
+            : 'Every measured signal is in step';
         cycleEvents(cycle, stats);
         if (twin.view === null) renderView();
         else {
@@ -836,11 +890,11 @@ async function applyModelChange() {
     $('#modelApply').disabled = true;
     try {
         const outcome = await host.api.liveTwin.applyModel(model);
-        const at = twin.cycles.at(-1);
+        const takesEffect = Number.isFinite(outcome?.takesEffect) ? outcome.takesEffect : twin.cycles.at(-1).now;
         twin.baseline = model;
         twin.settings = { ...twin.settings, document: model };
         twin.pending = null;
-        addEvent('info', 'The model\'s change was applied to the twin', `${said}; it starts again from the move at ${dataClock(at.anchor)}${outcome.added.length ? `, ${plural(outcome.added.length, 'new state')} at ${outcome.added.length === 1 ? 'its' : 'their'} initial value${outcome.added.length === 1 ? '' : 's'}` : ''}`, at.now);
+        addEvent('info', 'The model\'s change was applied to the twin', `${said}; the twin runs on with it from ${dataClock(takesEffect)} of data, its latest window run again with it${outcome.added.length ? `, ${plural(outcome.added.length, 'new state')} at ${outcome.added.length === 1 ? 'its' : 'their'} initial value${outcome.added.length === 1 ? '' : 's'}` : ''}`, takesEffect);
         engineerOpened(twin);
     } catch (error) {
         addEvent('bad', 'The model\'s change was not applied', cleanError(error));
@@ -925,7 +979,7 @@ async function runSandbox() {
         const result = await host.api.liveTwin.sandboxRunFor(seconds);
         takeSandboxResult(sandbox, result);
         $('#sandboxStatus').className = 'status good';
-        $('#sandboxStatus').textContent = `Ran ahead to ${dataClock(result.time)}${result.tried.length ? ` with ${result.tried.map((step) => `${step.signal} ${step.value}`).join(', ')}` : ' with nothing changed'}.`;
+        $('#sandboxStatus').textContent = `Ran ahead to ${dataClock(result.time)}${result.tried.length ? ` with ${result.tried.map((step) => `${inputName(step.signal)} ${Number(Number(step.value).toPrecision(4))}${inputUnit(step.signal)}`).join(', ')}` : ' with nothing changed'}.`;
         renderView();
     } catch (error) {
         $('#sandboxStatus').className = 'status warning';

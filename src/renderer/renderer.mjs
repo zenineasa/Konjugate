@@ -9167,12 +9167,14 @@ function openParameterTuning() {
 
 // The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md). From
 // the tuning card's replay, the log it has open goes too, chosen as the twin's source.
-function openTwinWindow(log = null) {
+function openTwinWindow(log = null, { fresh = false } = {}) {
     if (activeResult) return;
     window.engine.liveTwin.openWindow({
         document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup,
         // A demonstration's model, opened as it ships and not saved as the person's own: picked again, it is opened afresh.
         demonstration: demonstrationProject,
+        // Opened afresh (a demonstration picked again): the twin starts from this setup, not from the one it had.
+        ...(fresh ? { fresh: true } : {}),
         ...(log ? { log } : {})
     });
 }
@@ -9252,11 +9254,14 @@ window.__debugTwin = { setup: () => structuredClone(projectTwinSetup) };
 // not counted as unsaved, so another demonstration can follow it without a prompt. Saved under a name, it is a project like any other.
 let demonstrationProject = false;
 window.engine.liveTwin?.onLoadDemoModel?.(async (variant) => {
-    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
+    // A demonstration's own model opened again is another take: what the take before changed in it (a refit kept, a parameter set)
+    // is the demonstration's, not the person's, and goes without asking. The person's own work is asked about first.
+    const unsaved = documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved;
+    if (unsaved && !demonstrationProject && !await window.projectFiles.confirmDiscard()) return;
     const demo = await window.engine.liveTwin.demo(variant);
     await loadProjectDocument(JSON.parse(demo.project.content), { fileName: demo.projectFileName, saved: true });
     demonstrationProject = true;
-    openTwinWindow();
+    openTwinWindow(null, { fresh: true });
 });
 
 $('#parameterTuningButton').addEventListener('click', openParameterTuning);

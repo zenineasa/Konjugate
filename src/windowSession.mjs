@@ -20,11 +20,31 @@
 // reaches neither the live session nor its record.
 
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
+import { timingProblem } from './twinSetup.mjs';
 import { interpolate, replayTargets, ReplayError } from './dataLogReplay.mjs';
 import { fitPlanFromLog } from './dataLogFit.mjs';
 import { analyse, ensembleStatistics, explainedShareTogether, initialEnsemble, perturb, quantile, readingNoise, seededNormal } from './stateEstimator.mjs';
 
-const isWholeMultiple = (value, of) => Math.abs(value / of - Math.round(value / of)) <= 1e-9 * Math.max(1, Math.abs(value / of));
+// The states a source term sets outright (`setsValue`) to an input's value, as it is (the outdoor air's temperature, the weather
+// station's reading; the heater's heat flow, its power): their ids. A term's bindings list every symbol it may use (its own state, the
+// time), so it is its expression that says what it reads: here, one symbol, bound to a parameter an input drives (the shared parameter,
+// or the term's own copy of it).
+function statesSetByInputs(document, inputParameterIds) {
+    const set = new Set();
+    for (const node of document.nodes ?? []) {
+        for (const term of node.sourceTerms ?? []) {
+            const stateId = term.expressionModel?.output?.stateId;
+            const symbol = term.expressionModel?.mathJson;
+            if (!term.setsValue || !Number.isSafeInteger(stateId) || typeof symbol !== 'string') continue;
+            const binding = (term.expressionModel?.bindings ?? []).find((candidate) => candidate.kind === 'parameter' && candidate.symbol === symbol);
+            if (!binding) continue;
+            const local = (term.parameters ?? []).find((parameter) => parameter.id === binding.parameterId);
+            if (inputParameterIds.has(binding.parameterId) || (local?.sharedParameterId !== undefined && inputParameterIds.has(local.sharedParameterId))) set.add(stateId);
+        }
+    }
+    return set;
+}
+
 const median = (values) => {
     if (!values.length) return 0;
     const sorted = [...values].sort((a, b) => a - b);
@@ -86,12 +106,8 @@ export class WindowSession {
     // grows, say] }. A parameter estimated is made live in this twin's copy of the model, within its tuning bounds, so each member can
     // run with its own value; its drift defaults to 20% of its value an hour, its spread at the first move to 10% of it.
     constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {} }) {
-        if (!(timeStep > 0)) throw new Error('The time step must be a positive number of seconds.');
-        for (const [name, value] of [['window', window], ['stride', stride], ['horizon', horizon]]) {
-            if (!(value > 0) || !isWholeMultiple(value, timeStep)) throw new Error(`The ${name} must be a whole number of time steps.`);
-        }
-        if (stride > window) throw new Error('The stride can be at most the window, so every anchor is in a stretch run on real inputs.');
-        if (!isWholeMultiple(window, stride)) throw new Error('The window must be a whole number of strides.');
+        const timing = timingProblem({ window, stride, horizon, timeStep });
+        if (timing) throw new Error(timing);
         this.document = document;
         this.header = header;
         this.mapping = mapping;
@@ -137,7 +153,10 @@ export class WindowSession {
         }
         this.document = prepared;
         this.estimatedParameters = estimatedParameters;
-        this.inferredStateIds = replayTargets(prepared).states.map((state) => state.stateId).filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId));
+        // What the twin infers: every state no sensor measures, except one an input sets outright (the outdoor air's temperature, set
+        // at every instant from the weather station's reading), which is that input again, shown with the inputs.
+        const givenByInputs = statesSetByInputs(prepared, new Set(this.inputs.map((entry) => entry.parameterId)));
+        this.inferredStateIds = replayTargets(prepared).states.map((state) => state.stateId).filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId) && !givenByInputs.has(stateId));
     }
 
     // The warning, changed while the twin runs: from the next move on (a multiple of the first measured signal's tolerance, or null).
@@ -781,6 +800,8 @@ export class WindowSession {
                 this.#restartFrom = from;
                 this.#ensemble = null;
                 outcome = { carried: newIds.filter((stateId) => oldIds.includes(stateId)), added: newIds.filter((stateId) => !oldIds.includes(stateId)), removed: oldIds.filter((stateId) => !newIds.includes(stateId)) };
+                // Where the twin's record starts with it, as for a refit.
+                outcome = { ...outcome, takesEffect: target.now };
                 this.#refit = { fromCycle: target.index, anchor: target.anchor, states: {}, model: outcome };
             } catch (error) {
                 // The twin goes on with the model it had.

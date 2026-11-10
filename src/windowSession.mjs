@@ -847,7 +847,7 @@ export class Sandbox {
         await sandbox.#engine.run([
             ...session.inputs.filter((entry) => cycle.inputs[entry.signal].length).map((entry) => ({ type: 'appendInputSamples', parameterId: entry.parameterId, samples: cycle.inputs[entry.signal] })),
             { type: 'restoreState', time: cycle.restored.time, values: cycle.restored.values, providerStates: cycle.restored.providerStates },
-            { type: 'advanceTo', time: cycle.now }
+            { type: 'advanceTo', time: cycle.now, discardSamples: true }
         ]);
         sandbox.time = cycle.now;
         sandbox.tried = [];
@@ -862,9 +862,13 @@ export class Sandbox {
         this.tried.push({ time: this.time, signal, value });
     }
 
-    // Runs ahead, and returns each measured signal's predicted series.
+    // Runs ahead, and returns each measured signal's predicted series: at most about two thousand points of it, however far and however
+    // fine the step (every step is computed; every n-th is kept, and the last). An hour of a motor at a millisecond is 3.6 million steps,
+    // and keeping them all, then drawing them, froze the app.
+    static drawnPoints = 2000;
     async runFor(seconds) {
-        const reply = await this.#engine.advanceTo(this.time + seconds);
+        const keepEvery = Math.max(1, Math.ceil(seconds / this.#session.timeStep / Sandbox.drawnPoints));
+        const reply = await this.#engine.advanceTo(this.time + seconds, { keepEvery });
         this.time = reply.time;
         return Object.fromEntries(this.#session.outputs.map((entry, position) => [entry.signal, reply.samples.map((sample) => ({ time: sample.time, value: sample.values[position] }))]));
     }

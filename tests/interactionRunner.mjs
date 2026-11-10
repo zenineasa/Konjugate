@@ -5851,6 +5851,17 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow strong')].map((name) => name.textContent)`), ['Voltage']);
         await evaluate(twin, `document.querySelector('#trySomething').click()`);
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && /Voltage/.test(document.querySelector('#sandboxInputs').textContent)`, 'The sandbox did not offer the voltage to steer.', 15000);
+        // Run ahead starts at the twin's own horizon (a minute, for a motor whose forecast is five seconds), and even an hour of it, 3.6
+        // million steps at a millisecond, comes back at once, drawn from about two thousand points: keeping and drawing every step froze
+        // the app.
+        assert.equal(await evaluate(twin, `document.querySelector('#sandboxMinutes').value`), '1');
+        await setField(twin, '#sandboxMinutes', '60', 'input');
+        const ranAt = Date.now();
+        await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
+        await waitFor(twin, `/^Ran ahead to /.test(document.querySelector('#sandboxStatus').textContent)`, 'An hour of the motor did not come back.', 60000);
+        const tried = await evaluate(twin, `(() => { const trace = document.querySelector('#tiles .tile .plot').data.find((item) => item.name === 'Tried'); return { points: trace.x.length, last: trace.x.at(-1) }; })()`);
+        assert.ok(tried.points <= 2100, `What was tried is drawn from ${tried.points} points, not millions.`);
+        assert.ok(Date.now() - ranAt < 30000, `An hour of the motor ran ahead in ${((Date.now() - ranAt) / 1000).toFixed(1)} s.`);
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         // A demonstration's project is not the person's work: what its twin keeps in it as it runs leaves it saved, so another
         // demonstration follows it from the room's More menu with no question asked, and goes into its room.

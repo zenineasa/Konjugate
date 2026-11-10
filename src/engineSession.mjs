@@ -9,7 +9,8 @@
 // What a command answers with:
 //   advanceTo(time, { takeCheckpoints })   { time, samples: [{ time, values }], checkpointsTaken } with `values` in the order of
 //                                          (an advanceTo command with `discardSamples: true` answers with none, and none is kept as it
-//                                          runs: a catch-up over hours at a fine step reports millions, which nothing reads)
+//                                          runs: a catch-up over hours at a fine step reports millions, which nothing reads; one with
+//                                          `keepEvery: n` keeps every n-th as they arrive and always the last, to be drawn)
 //                                     `reportedStateIds`; checkpoints are kept on the way only when asked for
 //   restoreCheckpoint(time, overrides) and restoreState(...)   { time, values, providerStates } with `values` in the order of `stateIds`
 //   appendInputs, retainFrom          { time }
@@ -88,7 +89,12 @@ export class EngineSession {
                         const running = [...this.#pending.values()].find((waiting) => waiting.wantsSamples);
                         if (running?.discardSamples) continue;
                         const { times, stateCount, values } = event.sampleBatch;
-                        times.forEach((time, index) => this.#samples.push({ time, values: values.slice(index * stateCount, (index + 1) * stateCount) }));
+                        const every = running?.keepEvery ?? 1;
+                        times.forEach((time, index) => {
+                            const sample = { time, values: values.slice(index * stateCount, (index + 1) * stateCount) };
+                            if (every <= 1 || running.seen++ % every === 0) this.#samples.push(sample);
+                            else running.lastSkipped = sample;
+                        });
                     } else if (event.sessionReply) {
                         this.#answer(event.sessionReply);
                     }
@@ -124,6 +130,8 @@ export class EngineSession {
         this.#pending.delete(reply.sequence);
         const samples = waiting.wantsSamples ? this.#samples : [];
         if (waiting.wantsSamples) this.#samples = [];
+        // Thinned, the advance still ends on its last sample.
+        if (waiting.lastSkipped && waiting.lastSkipped.time > (samples.at(-1)?.time ?? -Infinity)) samples.push(waiting.lastSkipped);
         waiting.resolve({ ...reply, samples });
     }
 
@@ -138,8 +146,11 @@ export class EngineSession {
         const batch = commands.length > 1 ? ++this.#batch : 0;
         const answers = commands.map((command) => {
             const sequence = ++this.#sequence;
-            const answered = new Promise((resolve, reject) => this.#pending.set(sequence, { resolve, reject, wantsSamples: command.type === 'advanceTo', discardSamples: command.discardSamples === true }));
-            const { discardSamples, ...sent } = command;
+            const answered = new Promise((resolve, reject) => this.#pending.set(sequence, {
+                resolve, reject, wantsSamples: command.type === 'advanceTo', discardSamples: command.discardSamples === true,
+                keepEvery: Number.isInteger(command.keepEvery) && command.keepEvery > 1 ? command.keepEvery : 1, seen: 0, lastSkipped: null
+            }));
+            const { discardSamples, keepEvery, ...sent } = command;
             this.#child.stdin.write(encodeEngineCommand(sequence, { ...sent, batch }));
             return answered;
         });
@@ -154,7 +165,7 @@ export class EngineSession {
         return replies;
     }
 
-    advanceTo(time, { takeCheckpoints = false } = {}) { return this.run([{ type: 'advanceTo', time, takeCheckpoints }]).then(([reply]) => reply); }
+    advanceTo(time, { takeCheckpoints = false, keepEvery = 1 } = {}) { return this.run([{ type: 'advanceTo', time, takeCheckpoints, keepEvery }]).then(([reply]) => reply); }
     restoreCheckpoint(time, overrides = []) { return this.run([{ type: 'restoreCheckpoint', time, overrides }]).then(([reply]) => reply); }
     restoreState(time, values, providerStates = []) { return this.run([{ type: 'restoreState', time, values, providerStates }]).then(([reply]) => reply); }
     appendInputs(parameterId, samples, replaceFrom) { return this.run([{ type: 'appendInputSamples', parameterId, samples, replaceFrom }]).then(([reply]) => reply); }

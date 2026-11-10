@@ -143,6 +143,9 @@ export function openRoom(run) {
     };
     buildTiles();
     refreshTemperatureButton();
+    // Run ahead starts at the twin's own forecast horizon, in whole minutes: an hour for the tank, a minute for the motor (an hour of a
+    // motor is millions of steps, and tells nothing its first minute does not).
+    $('#sandboxMinutes').value = String(Math.max(1, Math.round((settings.horizon ?? 3600) / 60)));
     // A span kept with the project that this menu does not offer (written by hand, say) is still used; the menu then shows Recent.
     $('#timeSpan').value = String(twin.layout.span ?? 'recent');
     if (!$('#timeSpan').value) $('#timeSpan').value = 'recent';
@@ -893,7 +896,16 @@ function takeSandboxResult(sandbox, result) {
     sandbox.tried = result.tried;
     sandbox.ranFor = result.time - sandbox.startedAt;
     const previous = sandbox.series ?? {};
-    sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, [...(previous[signal] ?? []), ...samples]]));
+    sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, thinned([...(previous[signal] ?? []), ...samples])]));
+}
+
+// What was tried, drawn from a few thousand points however long it is followed: past the limit, every other point is let go (and the
+// last kept). Following the controls adds a run ahead twenty times a second, and kept whole, a motor at a millisecond grows by tens of
+// thousands of points a second.
+const sandboxDrawnLimit = 4000;
+function thinned(samples) {
+    while (samples.length > sandboxDrawnLimit) samples = samples.filter((sample, index) => index % 2 === 0 || index === samples.length - 1);
+    return samples;
 }
 
 // Follow the controls is offered once a control drives one of the sandbox's inputs.

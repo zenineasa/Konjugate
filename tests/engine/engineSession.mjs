@@ -102,6 +102,14 @@ await cycleEqualsFreshRun({ name: 'The PI-controlled tank', document: controlled
         { type: 'advanceTo', time: 7200 }
     ]);
     assert.deepEqual(discarded.samples, [], 'A catch-up keeps no samples.');
+    // Thinned to every 7th as they arrive, an advance keeps those and its last, and nothing else: what a sandbox's run ahead draws.
+    const [, thinned] = await session.run([
+        { type: 'restoreCheckpoint', time: 1200, overrides: [{ stateId: 2, value: 301 }] },
+        { type: 'advanceTo', time: 7200, keepEvery: 7 }
+    ]);
+    const expected = first.filter((sample, index) => index % 7 === 0);
+    if (expected.at(-1).time !== first.at(-1).time) expected.push(first.at(-1));
+    assert.deepEqual(thinned.samples, expected, 'Every 7th sample, and the last.');
     assert.deepEqual(kept.samples, first.filter((sample) => sample.time > 3600), 'The advance after it has its own samples, as without the catch-up.');
     for (let index = 0; index < 100; index += 1) await once();
     const before = rss();

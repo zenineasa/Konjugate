@@ -71,7 +71,7 @@ export function motorProject() {
     const mechanical = '\\frac{\\mathrm{torqueConstant}\\cdot\\mathrm{current}-\\mathrm{friction}\\cdot\\mathrm{speed}}{\\mathrm{inertia}}';
     return {
         format: 'konjugate', version: 1, ownership: exampleOwnership('DC Motor'), metadata: { units: 'SI' },
-        sharedParameters: [{ id: ids.voltage, name: 'Voltage', symbol: 'voltage', value: 0, unit: 'V', mode: 'live', control: { minimum: 0, maximum: 24, step: 0.1 } }],
+        sharedParameters: [{ id: ids.voltage, name: 'Voltage', symbol: 'voltage', value: 0, unit: 'V', mode: 'live', control: { minimum: 0, maximum: 12, step: 0.1 } }],
         runConfigurations: [{ id: ids.run, name: 'Three minutes', globalTimeStep: motor.timeStep, outputInterval: motor.sampleEvery, targetTime: motor.duration }],
         activeRunConfigurationId: ids.run,
         nodes: [{

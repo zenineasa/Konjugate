@@ -599,25 +599,31 @@ export class WindowSession {
         if (recent.length < 3) return { signal, slopePerHour: 0, mean: 0, direction: 'none', alarm: false };
         const line = fitLine(recent.map((cycle) => [cycle.anchor / 3600, cycle.jumps[signal].jump]));
         const spread = Math.sqrt(recent.reduce((sum, cycle) => sum + (cycle.jumps[signal].jump - line.mean) ** 2, 0) / (recent.length - 1));
-        // A lean must be clear of the jumps' own scatter, and big enough to matter: at least a tenth of the tolerance. Without the
+        // A lean must be clear of the jumps' own scatter, and big enough to matter: at least a fifth of the tolerance. Without the
         // second, a model whose every jump is a steady few thousandths (its own step error, with noise-free data) would be called
         // drifting.
         const tolerance = this.tolerances[signal];
-        const floor = tolerance > 0 ? tolerance / 10 : 0;
+        const floor = tolerance > 0 ? tolerance / 5 : 0;
         // The jumps' scatter is measured about their trend line, not about their mean: when the jumps are growing, the growth is the
         // drift, and counting it as scatter would hide the very thing being looked for.
         const threshold = Math.max(2 * line.residual / Math.sqrt(recent.length), floor);
         // Once a lean is called it stays called until the jumps' mean falls below half of what called it, or changes side: one jump
         // that happens to land near zero (a thermostat that was off for that stride, say) must not make the call flicker.
+        // A new lean is called only when two moves in a row see it on the same side: the test is about two standard deviations, so on
+        // noisy readings one move in a few dozen passes it by chance, and the call came and went (a motor's tachometer, every second).
         const side = line.mean > 0 ? 'above' : 'below';
         const previous = cycles.at(-2)?.trends?.[signal];
         const holding = previous?.direction === side && previous.threshold > 0 && Math.abs(line.mean) > previous.threshold / 2;
-        const leaning = Math.abs(line.mean) > threshold || holding;
+        const clear = Math.abs(line.mean) > threshold;
+        const leaning = holding || (clear && previous?.seen === side);
         const direction = !leaning ? 'none' : side;
         // Past the warning means drifting past it: leaning to one side, not jumps that are large but scattered either side of nothing.
-        const alarm = leaning && this.alertAt !== null && tolerance > 0 && Math.abs(line.mean) > this.alertAt * tolerance;
+        // Once raised, the warning holds until the mean falls below half of it, as the lean does: a mean hovering at the warning must not
+        // raise it and drop it move after move.
+        const warnAt = this.alertAt !== null && tolerance > 0 ? this.alertAt * tolerance : Infinity;
+        const alarm = leaning && (Math.abs(line.mean) > warnAt || (previous?.alarm === true && previous.direction === side && Math.abs(line.mean) > warnAt / 2));
         // The threshold kept is the one that called the lean, so holding it is judged against what called it.
-        return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm, threshold: holding && !(Math.abs(line.mean) > threshold) ? previous.threshold : threshold };
+        return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm, seen: clear ? side : null, threshold: holding && !clear ? previous.threshold : threshold };
     }
 
     // After the engine died: a new one is given the state the last cycle restored, the inputs it ran on, and run up to the anchor

@@ -184,7 +184,16 @@ export function abandonRoom() {
 
 function reportStatus() {
     host.reportStatus({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad' });
+    // Trying something starts from the twin's latest move, while it runs: once the log has been played or the twin stopped, it is not
+    // offered, and says why.
+    $('#trySomething').disabled = !twin?.running || Boolean(twin.sandbox);
+    $('#trySomething').title = twin?.running ? trySomethingTitle : 'The twin has stopped: try something while it runs (Back to the setup, then Start).';
 }
+const trySomethingTitle = 'A copy of the twin from now, to try what an input would do; the twin itself is not changed';
+
+// The speed the data arrives at: a file played at its pace, a recording replayed as fast as it can go, a live source at one second a
+// second.
+const arrivingSpeed = () => (Number.isFinite(twin.run.source.speed) ? twin.run.source.speed : twin.run.source.kind === 'recording' ? Infinity : 1);
 
 // ---- How quantities are shown --------------------------------------------------------------------------------------------------
 // The model keeps temperatures in kelvin; a room is read in degrees Celsius unless it is set to kelvin (the °C / K button, kept with
@@ -709,7 +718,7 @@ export function handleEvent(update) {
         collectInferred(cycle);
         // How the twin keeps up with the data, in words: the engine's own speed beside the speed the data arrives at reads as a
         // contradiction, so the exact figure is kept for the tooltip.
-        const arriving = Number.isFinite(twin.run.source.speed) ? twin.run.source.speed : twin.run.source.kind === 'recording' ? Infinity : 1;
+        const arriving = arrivingSpeed();
         const headroom = Number.isFinite(stats.realTimeFactor) && Number.isFinite(arriving) ? stats.realTimeFactor / arriving : Infinity;
         const pace = headroom >= 10 ? 'keeping up easily' : headroom >= 1.5 ? 'keeping up' : 'only just keeping up';
         const behind = stats.lagSeconds > 2 * twin.settings.stride;
@@ -858,7 +867,11 @@ async function openSandbox() {
         for (const [slot, key] of slots) steering.decorate(slot, key);
         refreshFollowOffer();
         if (!twin.inputs.length) $('#sandboxInputs').replaceChildren(element('span', { className: 'hint', textContent: 'No input is mapped: run ahead to see the twin\'s own course.' }));
-        $('#sandboxStatus').textContent = `From ${dataTime(opened.time)}.`;
+        $('#sandboxStatus').textContent = `From ${dataClock(opened.time)} of data.`;
+        // Following the controls starts at the pace the data arrives at, the fastest offered at or below it: real time for a motor steered
+        // by hand, ten minutes a second for a log played at 600×.
+        const paces = [...$('#sandboxPace').options].map((option) => Number(option.value));
+        $('#sandboxPace').value = String(paces.filter((pace) => pace <= arrivingSpeed()).at(-1) ?? paces[0]);
         $('#sandboxBar').hidden = false;
         $('#trySomething').disabled = true;
     } catch (error) {
@@ -1000,7 +1013,7 @@ export async function closeSandbox() {
     twin.sandbox = null;
     $('#sandboxFollowControls').hidden = true;
     $('#sandboxBar').hidden = true;
-    $('#trySomething').disabled = false;
+    reportStatus();
     const closed = await host.api.liveTwin.sandboxClose().catch(() => null);
     const tried = closed?.tried ?? sandbox.tried;
     if (tried.length || sandbox.ranFor > 0) {

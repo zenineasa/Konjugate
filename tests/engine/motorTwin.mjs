@@ -57,6 +57,9 @@ const before = cycles.filter((cycle) => cycle.now < motor.warming.from && cycle.
 const worstJump = Math.max(...before.map((cycle) => Math.abs(cycle.jumps.motorSpeed.jump)));
 assert.ok(worstJump < tolerance, `In step before the bearing warms: the largest jump ${worstJump.toFixed(3)} rad/s, the tolerance ${tolerance}.`);
 assert.ok(before.every((cycle) => !cycle.trends.motorSpeed.alarm), 'No warning before the bearing warms.');
+// Nor a lean: the tachometer's noise once called one by chance, and the twin said "leaning below", then "back in step", over and over.
+const leaned = before.filter((cycle) => cycle.trends.motorSpeed.direction !== 'none').map((cycle) => cycle.now);
+assert.deepEqual(leaned, [], `No lean before the bearing warms: at ${leaned.join(', ')} s.`);
 
 // The bearing warming: the motor slower than the model says, move after move, and the twin warns.
 const alarmed = cycles.filter((cycle) => cycle.trends.motorSpeed.alarm).map((cycle) => cycle.now);

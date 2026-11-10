@@ -5381,6 +5381,9 @@ export async function runInteractionTests(driver) {
         assert.ok(modelSpan.earlier[0] < 0.2 && Math.abs(modelSpan.earlier[1] - modelSpan.latest) < 0.2, `The model's past runs from the start to the latest window (got ${JSON.stringify(modelSpan)}).`);
         await setField(twin, '#timeSpan', 'recent');
         assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^The whole log has been played: 31 moves/);
+        // Played to its end, the twin is not running: Try something is not offered, and says why.
+        assert.equal(await evaluate(twin, `document.querySelector('#trySomething').disabled`), true);
+        assert.match(await evaluate(twin, `document.querySelector('#trySomething').title`), /^The twin has stopped/);
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').textContent`), 'In step');
         assert.match(await evaluate(twin, `document.querySelector('#inferredRows').innerText`), /Ambient air · Temperature\s+carried by the model/, 'The room says what the readings do not reach.');
 
@@ -5855,6 +5858,9 @@ export async function runInteractionTests(driver) {
         // million steps at a millisecond, comes back at once, drawn from about two thousand points: keeping and drawing every step froze
         // the app.
         assert.equal(await evaluate(twin, `document.querySelector('#sandboxMinutes').value`), '1');
+        // Steered by hand, it follows the controls in real time, the pace its data arrives at.
+        assert.equal(await evaluate(twin, `document.querySelector('#sandboxPace').value`), '1');
+        assert.match(await evaluate(twin, `document.querySelector('#sandboxStatus').textContent`), /^From \d[^,]* of data\.$/);
         await setField(twin, '#sandboxMinutes', '60', 'input');
         const ranAt = Date.now();
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);

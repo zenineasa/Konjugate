@@ -690,6 +690,7 @@ export class WindowSession {
     // record as they were made.
     async applyRefit({ values: fitted, cycle }) {
         let refused = null;
+        let takesEffect = null;
         this.#queue = this.#queue.then(async () => {
             const target = this.cycles.find((candidate) => candidate.index === cycle);
             if (!target) throw new ReplayError('The move this refit was planned on is not one this twin made.');
@@ -732,9 +733,12 @@ export class WindowSession {
             }
             this.#restartFrom = from;
             this.#refit = { fromCycle: target.index, anchor: target.anchor, states };
+            // The next move is the first made with the new values; its stretch of the record starts where the latest move ended.
+            takesEffect = this.cycles.at(-1).now;
         }).catch((error) => { refused = error; });
         await this.idle();
         if (refused) throw refused;
+        return { takesEffect };
     }
 
     // A changed model (docs/proposals/controlRoom.md, "The engineer's view, and changing the model"), applied from the latest move:

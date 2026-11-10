@@ -218,8 +218,8 @@ export class LiveTwin {
     // What the fit found, for the twin to run on from the move the refit was planned on.
     async applyRefit(values, cycle) {
         if (!this.#session) throw new Error('The live twin has not started yet.');
-        await this.#session.applyRefit({ values, cycle });
-        return true;
+        // When the twin takes the new values: where its record starts with them.
+        return this.#session.applyRefit({ values, cycle });
     }
 
     // A changed model, applied from the latest move (src/windowSession.mjs, applyModel): what was carried across, added, removed.

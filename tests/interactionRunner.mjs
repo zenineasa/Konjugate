@@ -5435,7 +5435,7 @@ export async function runInteractionTests(driver) {
         assert.ok(room && Math.abs(Number(room[1]) - 293.15) < 0.5, `The room is fitted at the window's anchor, and found again near the truth: ${refitRow}`);
         assert.equal(await evaluate(twin, `document.querySelector('#refitKeep').hidden`), false, 'With the heat loss refitted, it can be kept in the model too.');
         await evaluate(twin, `document.querySelector('#refitApply').click()`);
-        await waitFor(twin, `/^Applied from the move at /.test(document.querySelector('#refitStatus').textContent)`, 'The refit was not applied.', 15000);
+        await waitFor(twin, `/^Applied: the twin runs with the new values from /.test(document.querySelector('#refitStatus').textContent)`, 'The refit was not applied.', 15000);
         await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.last?.refit)`, 'The next move did not say a refit was applied.', 30000);
         // Where the new values took effect is marked on the strip, so the drop that follows reads as the refit's doing.
         await waitFor(twin, `document.querySelector('#tiles .tile .plot').layout.annotations?.some((note) => note.text === 'new values')`, 'Where the refit took effect is not marked.', 15000);
@@ -5748,6 +5748,26 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `!document.querySelector('#liveTwinChip').hidden && document.querySelector('#liveTwinChipText').textContent === 'Live twin: drifting'`, 'The toolbar chip did not show the drift.');
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
         await waitFor(opened, `document.querySelector('#liveTwinChip').hidden`, 'The chip stayed after the twin stopped.');
+        // Another take: the demonstration's model changed since (its heat loss kept in it, as Keep in the model after a refit leaves it),
+        // and the demonstration picked again. It opens its model as it ships rather than going on with the changed one, so every take
+        // starts from the same model: here, with the change unsaved, the project window asks first (the test's dialogs are cancelled),
+        // and the setup offers to carry on with the model as it is.
+        const heatLossOf = () => evaluate(opened, `window.__debugProject.serialize().edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value`);
+        const shipped = await heatLossOf();
+        driver.takeNativeDialogs?.();
+        await evaluate(opened, `window.__debugParameterTuning.keepValues([{ parameterId: 10, value: ${shipped} * 1.2 }])`);
+        await waitFor(opened, `window.__debugProject.serialize().edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value !== ${shipped}`, 'The heat loss was not kept in the model.');
+        await evaluate(twin, `document.querySelector('#moreMenu').click()`);
+        await waitFor(twin, `Boolean(document.querySelector('.tileMenu'))`, 'The More menu did not open in the stopped room.');
+        await evaluate(twin, `[...document.querySelectorAll('.tileMenu button')].find((item) => item.textContent === 'Demonstrations…').click()`);
+        await setField(twin, '#demoPace', 'Infinity');
+        await evaluate(twin, `document.querySelector('[data-demo="drifting"]').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#sourceStatus button')].some((button) => button.textContent === 'Carry on with the model as it is')`, 'The setup did not offer to carry on with the changed model.', 15000);
+        if (driver.takeNativeDialogs) assert.equal(driver.takeNativeDialogs().length, 1, 'Opening the model as it ships asked about the unsaved change.');
+        assert.notEqual(await heatLossOf(), shipped, 'Declined, the changed model stays.');
+        await evaluate(twin, `[...document.querySelectorAll('#sourceStatus button')].find((button) => button.textContent === 'Carry on with the model as it is').click()`);
+        await waitFor(twin, `!document.querySelector('#room').hidden && (window.__debugTwinWindow.summary()?.moves ?? 0) >= 1`, 'Carried on, the demonstration did not go into the room.', 30000);
+        await waitFor(twin, `window.__debugTwinWindow.summary()?.running === false`, 'The second take did not play through.', 60000);
         await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);

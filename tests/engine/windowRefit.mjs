@@ -114,7 +114,9 @@ try {
     await session.idle();
     assert.equal(session.cycles.at(-1).index, plan.cycle + 3);
     const before = session.cycles.length;
-    await session.applyRefit({ values: report.finalParameters, cycle: plan.cycle });
+    const { takesEffect } = await session.applyRefit({ values: report.finalParameters, cycle: plan.cycle });
+    // Said at one time, the one the room marks: where the record starts with the new values, at the latest move's now.
+    assert.equal(takesEffect, session.cycles[before - 1].now, 'The new values take effect where the latest move ended.');
     assert.equal(session.document.sharedParameters.find((parameter) => parameter.id === 20).value, fitted[20], 'The twin runs on the fitted parameters.');
     session.push(rest);
     await session.end();

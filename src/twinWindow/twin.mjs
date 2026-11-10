@@ -176,17 +176,27 @@ for (const button of $$('[data-demo]')) {
             if ([...$('#fileSpeed').options].some((option) => option.value === speed)) $('#fileSpeed').value = speed;
             state.demoPending = variant;
             offerLog(demo.log.content, { fileName: demo.log.fileName, speed, demo: true });
-            if (demoModelOpen(variant)) {
+            // The person's own project with the demonstration's model (saved as theirs): the readings are matched to it, as it is.
+            if (demoModelOpen(variant) && !state.context?.demonstration) {
                 continueDemo();
                 return;
             }
-            // The demonstration's readings against another model match nothing: its model is opened in the project window, and the
-            // readings matched to it when it comes. Should the project decline (unsaved work kept), the button does it again.
+            // Otherwise its model is opened in the project window as it ships, and the readings matched to it when it comes: even when
+            // the demonstration's model is open already, since a take before may have changed it (a refit kept in the model), and the
+            // next take would start partly fixed. Should the project decline (unsaved work kept), the button does it again, or it
+            // carries on with the model as it is.
             const whose = { house: 'house', motor: 'motor' }[variant] ?? 'rig';
-            sourceStatus(`These are the simulated ${whose}'s readings: opening the ${whose}'s model in the project window to compare them with…`, 'warning');
             const open = Object.assign(document.createElement('button'), { type: 'button', textContent: `Open the ${whose}'s model` });
             open.addEventListener('click', () => api.openDemoModel(variant));
-            $('#sourceStatus').append(' ', open);
+            if (demoModelOpen(variant)) {
+                sourceStatus(`Opening the ${whose}'s model again as it ships, so the demonstration starts from its own values…`, 'warning');
+                const asItIs = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Carry on with the model as it is' });
+                asItIs.addEventListener('click', () => continueDemo());
+                $('#sourceStatus').append(' ', open, ' ', asItIs);
+            } else {
+                sourceStatus(`These are the simulated ${whose}'s readings: opening the ${whose}'s model in the project window to compare them with…`, 'warning');
+                $('#sourceStatus').append(' ', open);
+            }
             await api.openDemoModel(variant);
         } catch (error) {
             state.demoPending = null;

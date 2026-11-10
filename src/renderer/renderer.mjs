@@ -9171,6 +9171,8 @@ function openTwinWindow(log = null) {
     if (activeResult) return;
     window.engine.liveTwin.openWindow({
         document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup,
+        // A demonstration's model, opened as it ships and not saved as the person's own: picked again, it is opened afresh.
+        demonstration: demonstrationProject,
         ...(log ? { log } : {})
     });
 }
@@ -10134,7 +10136,9 @@ window.__debugParameterTuning = {
     report: () => structuredClone(parameterTuningState?.report ?? null),
     simulations: () => parameterTuningRun?.events.length ?? 0,
     setup: () => structuredClone(projectTuningSetup),
-    vocabulary: () => structuredClone(parameterTuningState?.vocabulary ?? null)
+    vocabulary: () => structuredClone(parameterTuningState?.vocabulary ?? null),
+    // Values kept in the model as the twin's Keep in the model keeps them (an undoable edit).
+    keepValues: (values) => applyFittedValues(values)
 };
 
 function renderParameterTuningReview() {

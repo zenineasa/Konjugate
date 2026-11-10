@@ -72,6 +72,9 @@ export function engineerCycle(twin, cycle) {
 
 function refreshButtons(twin) {
     $('#refitRun').disabled = !twin.running || !twin.cycles.length || Boolean(refit?.running);
+    $('#refitRun').title = !twin.running ? 'The twin has stopped: a refit is fitted on its latest window while it runs (Back to the setup, then Start)'
+        : !twin.cycles.length ? 'Wait for the twin\'s first move: a refit is fitted on its latest window'
+        : refit?.running ? 'A refit is running' : 'Fit the tunable values to the latest window';
     for (const field of $$('#tunableRows input')) field.disabled = !twin.running || !twin.cycles.length;
     $('#restartTwin').disabled = !dirty;
     // What a refit found: applied to the twin while it runs. Once it has stopped (a log played to its end while the fit ran) there is
@@ -140,15 +143,18 @@ async function setParameter(parameter, value, fields) {
     }
     const at = twin.cycles.at(-1);
     const from = parameter.value;
+    let applied;
     try {
-        await host.api.liveTwin.applyRefit([{ parameterId: parameter.parameterId, value }], at.index);
+        applied = await host.api.liveTwin.applyRefit([{ parameterId: parameter.parameterId, value }], at.index);
     } catch (error) {
         addEvent('bad', `${parameter.name} could not be set`, cleanError(error));
         return;
     }
     const kept = await keepInModel(twin, [{ parameterId: parameter.parameterId, value }]);
     parameter.value = value;
-    addEvent('info', `${parameter.name} set from ${shown(from)} to ${shown(value)}${parameter.unit ? ` ${parameter.unit}` : ''}`, `the twin runs on with it from the move at ${dataClock(at.anchor)}; ${kept}`, at.now);
+    // Said at the one time the strips mark it: where the twin's record starts with it.
+    const takesEffect = Number.isFinite(applied?.takesEffect) ? applied.takesEffect : at.now;
+    addEvent('info', `${parameter.name} set from ${shown(from)} to ${shown(value)}${parameter.unit ? ` ${parameter.unit}` : ''}`, `the twin runs on with it from ${dataClock(takesEffect)} of data; ${kept}`, takesEffect);
 }
 
 // Values kept in the model, in the project window (an undoable edit there); the twin's own copy follows, and the model's change that
@@ -232,8 +238,9 @@ async function applyRefit(keep) {
         addEvent('info', 'What a refit found is kept in the model', `${rows.join('; ')}; ${kept}`, plan.now);
         return;
     }
+    let applied;
     try {
-        await host.api.liveTwin.applyRefit(report.finalParameters, plan.cycle);
+        applied = await host.api.liveTwin.applyRefit(report.finalParameters, plan.cycle);
     } catch (error) {
         $('#refitStatus').className = 'status warning';
         $('#refitStatus').textContent = `The refit was not applied: ${cleanError(error)}`;
@@ -246,9 +253,12 @@ async function applyRefit(keep) {
         kept = `; ${await keepInModel(twin, report.finalParameters.filter((entry) => parameterIds.has(entry.parameterId)))}`;
         renderTunable(twin);
     }
+    // One time for it, the one the strips mark: where the twin's record starts with the new values. (The window it was fitted on is
+    // said as a span, so it is not read as a second time it took effect.)
+    const takesEffect = Number.isFinite(applied?.takesEffect) ? applied.takesEffect : plan.now;
     $('#refitStatus').className = 'status good';
-    $('#refitStatus').textContent = `Applied from the move at ${dataClock(plan.anchor)}.`;
-    addEvent('info', 'A refit was applied to the twin', `${rows.join('; ')}; it runs on from the move at ${dataClock(plan.anchor)}${kept}`, plan.now);
+    $('#refitStatus').textContent = `Applied: the twin runs with the new values from ${dataClock(takesEffect)} of data.`;
+    addEvent('info', 'A refit was applied to the twin', `${rows.join('; ')}, fitted on the window from ${dataClock(plan.anchor)} to ${dataClock(plan.now)}; the twin runs with them from ${dataClock(takesEffect)}${kept}`, takesEffect);
 }
 
 // ---- The warning --------------------------------------------------------------------------------------------------------------------

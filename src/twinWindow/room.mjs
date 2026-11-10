@@ -402,8 +402,8 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     facts.append(
         // The two thresholds, named as the events name them: how far one move's jump may go before the strip leans, and how far the
         // corrections may keep to one side, on average a move, before the room warns.
-        element('span', { textContent: `jump within ±${brief(shownAs.by(tile.tolerance))}${unit} a move`, title: 'A move whose jump is larger than this leans the strip amber' }),
-        ...(Number.isFinite(twin.settings.alertAt) && twin.settings.alertAt > 0 ? [element('span', { textContent: `warns at ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit} a move on average`, title: 'When the model\'s corrections keep to one side by more than this, on average a move, the room warns of a drift' })] : []));
+        element('span', { textContent: `jumps within ±${brief(shownAs.by(tile.tolerance))}${unit}`, title: `A move whose jump is larger than ±${brief(shownAs.by(tile.tolerance))}${unit} leans the strip amber` }),
+        ...(Number.isFinite(twin.settings.alertAt) && twin.settings.alertAt > 0 ? [element('span', { textContent: `warns at ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit}`, title: `When the model's corrections keep to one side by more than ${brief(shownAs.by(twin.settings.alertAt * tile.tolerance))}${unit}, on average a move, the room warns of a drift` })] : []));
     // An estimated signal: how many readings fell outside the band the twin expected, where about one in five is honest.
     if (tile.estimated) {
         const outside = upTo.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.outside ?? 0), 0);

@@ -74,6 +74,7 @@ export class WindowSession {
     #inputsSent = new Map(); // parameterId -> the time of the last reading sent to the engine
     #recoveries = 0;
     #skipped = 0;
+    #passedOver = 0; // moves passed over before the first, in data that was already there when the twin started
     #ended = false;
     #closed = false;
     #failure = null;
@@ -227,7 +228,9 @@ export class WindowSession {
                 let newest = Math.floor((this.#latest - this.window) / this.stride + 1e-9);
                 if (!this.#due(newest)) newest -= 1;
                 if (newest - this.#nextCycle >= this.maxBehind) {
-                    this.#skipped += newest - this.#nextCycle;
+                    // Before the first move the twin has not fallen behind: it starts at the latest of what was already there.
+                    if (this.cycles.length) this.#skipped += newest - this.#nextCycle;
+                    else this.#passedOver += newest - this.#nextCycle;
                     this.#nextCycle = newest;
                 }
             }
@@ -855,7 +858,8 @@ export class WindowSession {
             cycleSeconds: { median: median(this.cycles.map((cycle) => cycle.wallSeconds)), max: Math.max(0, ...this.cycles.map((cycle) => cycle.wallSeconds)) },
             lagSeconds: this.cycles.length ? Math.max(0, this.#latest - this.cycles.at(-1).now) : null,
             recoveries: this.#recoveries,
-            skipped: this.#skipped
+            skipped: this.#skipped,
+            passedOver: this.#passedOver
         };
     }
 

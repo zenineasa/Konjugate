@@ -5867,6 +5867,11 @@ export async function runInteractionTests(driver) {
         // The current, which nothing measures, inferred; the voltage the input to steer in a sandbox.
         await waitFor(twin, `/Motor · Current/.test(document.querySelector('#inferredRows').textContent)`, 'The motor\'s current was not inferred.');
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow strong')].map((name) => name.textContent)`), ['Voltage']);
+        // A refit on its latest window: the speed read every 50 ms against the model's millisecond step is filled between, not
+        // refused as a gap ("motorSpeed has no readings from 0 s to 0 s").
+        await evaluate(twin, `document.querySelector('#refitRun').click()`);
+        await waitFor(twin, `document.querySelector('#refitRows').children.length > 0 || /could not run/.test(document.querySelector('#refitStatus').textContent)`, 'The motor\'s refit did not finish.', 60000);
+        assert.match(await evaluate(twin, `document.querySelector('#refitRows').textContent`), /Bearing friction: [\d.e-]+ → [\d.e-]+/, await evaluate(twin, `document.querySelector('#refitStatus').textContent`));
         await evaluate(twin, `document.querySelector('#trySomething').click()`);
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && /Voltage/.test(document.querySelector('#sandboxInputs').textContent)`, 'The sandbox did not offer the voltage to steer.', 15000);
         // Run ahead starts at the twin's own horizon (a minute, for a motor whose forecast is five seconds), and even an hour of it, 3.6

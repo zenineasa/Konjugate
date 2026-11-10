@@ -7,12 +7,12 @@
 // are remembered across projects.
 
 import { readDataLog } from '../dataLog.mjs';
-import { defaultTolerance, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
+import { defaultTolerance, latestReadings, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import { suggestSymbol } from '../csvImport.mjs';
 import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
 import { readingNoise } from '../stateEstimator.mjs';
 import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMatching.mjs';
-import { normalizeTwinSetup, timingProblem, twinSessionMapping } from '../twinSetup.mjs';
+import { defaultTiming, normalizeTwinSetup, timingProblem, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
 import { $, $$, cleanError, shown, sparkline } from './common.mjs';
 import { abandonRoom, addEvent, closeRoom, closeTileMenu, currentTwin, handleEvent, initRoom, modelChanged, openRoom, openTileMenu } from './room.mjs';
@@ -439,7 +439,25 @@ $('#useAllSuggestions').addEventListener('click', () => {
 });
 
 // ---- Opening the control room --------------------------------------------------------------------------------------------------
-const liveDefaults = { window: 3600, stride: 600, horizon: 3600, corrections: {}, members: 32, untracked: [] };
+const liveDefaults = { corrections: {}, members: 32, untracked: [] };
+
+// How often a log's measured signals are read: the median gap between one signal's readings, the most often read of them (0 when the
+// source is not a log, or a signal has fewer than two).
+function logSpacing(rows) {
+    if (!state.log) return 0;
+    const spacings = rows.filter((row) => row.role === 'output').map((row) => {
+        const times = latestReadings(state.log.observations, row.signal.id).filter((reading) => reading.quality !== 'bad').map((reading) => reading.time);
+        const gaps = times.slice(1).map((time, index) => time - times[index]).filter((gap) => gap > 0).sort((a, b) => a - b);
+        return gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity;
+    });
+    const spacing = Math.min(...spacings);
+    return Number.isFinite(spacing) ? spacing : 0;
+}
+
+// A span as the timing message gives it: milliseconds under a second, then seconds, minutes, hours.
+const formatSpan = (seconds) => (seconds < 1 ? `${Number((seconds * 1000).toPrecision(3))} ms` : seconds < 60 ? `${Number(seconds.toPrecision(3))} s`
+    : seconds < 3600 ? `${Number((seconds / 60).toPrecision(3))} min` : `${Number((seconds / 3600).toPrecision(3))} h`);
+const timingText = ({ window, stride }) => `a ${formatSpan(window)} window, moving every ${formatSpan(stride)}`;
 
 function currentSetup() {
     return normalizeTwinSetup({
@@ -491,19 +509,21 @@ function buildRun(setup) {
     }));
     const first = mapping.find((entry) => entry.role === 'output');
     const saved = { ...liveDefaults, ...setup.live };
-    let live = {
-        ...saved,
-        timeStep: saved.timeStep ?? (state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations.map((observation) => ({ ...observation, signal: rows.find((row) => row.signal.id === observation.signal)?.name ?? observation.signal })), mapping) : 60),
-        alert: saved.alert ?? 0.25 * tolerances[first.signal]
-    };
+    const timeStep = saved.timeStep ?? (state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations.map((observation) => ({ ...observation, signal: rows.find((row) => row.signal.id === observation.signal)?.name ?? observation.signal })), mapping) : 60);
+    // Timing not kept with the setup follows how often the readings come (src/twinSetup.mjs, defaultTiming): a fast system read every
+    // 50 ms is not left with an hour's window.
+    const timing = defaultTiming({ spacing: logSpacing(rows), timeStep });
+    let live = { ...timing, ...saved, timeStep, alert: saved.alert ?? 0.25 * tolerances[first.signal] };
     // Timing kept with the setup that the twin cannot run with (from a file written elsewhere): the defaults instead, said, since
     // timing is changed only in the room, which the twin would never reach.
     const problem = timingProblem(live);
     if (problem) {
-        const timeStep = timingProblem({ ...live, ...liveDefaults }) ? 60 : live.timeStep;
-        live = { ...live, window: liveDefaults.window, stride: liveDefaults.stride, horizon: liveDefaults.horizon, timeStep };
-        state.timingReset = `The timing kept with the setup could not run (${problem.replace(/\.$/, '')}), so the twin uses the default: an hour's window, moving every ten minutes.`;
+        const fallback = timingProblem({ ...timing, timeStep }) ? { ...defaultTiming({ timeStep: 60 }), timeStep: 60 } : { ...timing, timeStep };
+        live = { ...live, ...fallback };
+        state.timingReset = `The timing kept with the setup could not run (${problem.replace(/\.$/, '')}), so the twin uses the default: ${timingText(fallback)}.`;
     } else state.timingReset = null;
+    // A default that is not the usual hour, said, so a person knows where it came from and where to change it.
+    state.timingChosen = !problem && !('window' in (setup.live ?? {})) && timing.stride !== 600 ? `The readings come every ${formatSpan(logSpacing(rows))}, so the twin uses ${timingText(timing)} and a ${formatSpan(timing.horizon)} forecast. Change it under Engineer, Timing.` : null;
     const estimating = Object.values(live.corrections).some((correction) => correction.estimate);
     const trackable = estimating ? tunableIds(state.context.document).filter((id) => !live.untracked.includes(id)) : [];
     let settings = {
@@ -543,6 +563,7 @@ async function startTwin(carried = null) {
     await saveSetup(setup);
     openRoom(run);
     if (state.timingReset) addEvent('lean', 'The twin uses the default timing', state.timingReset);
+    if (state.timingChosen) addEvent('info', 'The twin\'s timing follows the readings', state.timingChosen);
     try {
         await api.liveTwin.start(run.settings, run.source, state.context.projectPath ?? null);
     } catch (error) {

@@ -779,9 +779,10 @@ function cycleEvents(cycle, stats) {
         else addEvent('good', `${name} is back in step with the readings`, '', cycle.now);
     }
     twin.drift = driftOf(cycle.trend);
+    if (stats.passedOver && !twin.stats.passedOver) addEvent('info', `The twin started at the latest readings, passing over ${plural(stats.passedOver, 'move')} of what the source already held`, '', cycle.now);
     if (stats.skipped > twin.stats.skipped) addEvent('lean', `The twin fell behind the data, and skipped ${plural(stats.skipped - twin.stats.skipped, 'move')} to keep up`, 'a longer stride or a shorter window (Engineer, Timing) keeps up', cycle.now);
     if (stats.recoveries > twin.stats.recoveries) addEvent('lean', 'The engine stopped, and was started again from the last move', '', cycle.now);
-    twin.stats = { skipped: stats.skipped ?? 0, recoveries: stats.recoveries ?? 0 };
+    twin.stats = { skipped: stats.skipped ?? 0, recoveries: stats.recoveries ?? 0, passedOver: stats.passedOver ?? 0 };
 }
 
 export function handleEvent(update) {

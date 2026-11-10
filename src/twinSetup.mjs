@@ -116,3 +116,19 @@ export function timingProblem({ window, stride, horizon, timeStep }) {
     if (!whole(window, stride)) return `The window must hold a whole number of moves: ${span(window)} is not a multiple of ${span(stride)} (try ${span(Math.max(1, Math.round(window / stride)) * stride)}).`;
     return null;
 }
+
+// The twin's timing when none is kept with the setup, from how often the readings come (`spacing`, seconds; 0 when not known): a
+// move about every twenty readings, but at least once a second and at most every ten minutes, a whole number of time steps; a
+// window of six moves, and a forecast as long. Readings a minute apart give an hour's window moving every ten minutes; a motor read
+// every 50 ms a six-second window moving every second.
+export function defaultTiming({ spacing = 0, timeStep }) {
+    const longest = 600;
+    let stride = positive(spacing) ? Math.min(longest, Math.max(1, 20 * spacing)) : longest;
+    // A round number: 1, 2 or 5 times a power of ten, or whole minutes above one.
+    if (stride < longest) {
+        const power = 10 ** Math.floor(Math.log10(stride));
+        stride = (stride >= 60 ? [60, 120, 300, 600] : [1, 2, 5, 10].map((step) => step * power)).find((round) => round >= stride - 1e-9);
+    }
+    if (positive(timeStep)) stride = Math.max(1, Math.ceil(stride / timeStep - 1e-9)) * timeStep;
+    return { window: 6 * stride, stride, horizon: 6 * stride };
+}

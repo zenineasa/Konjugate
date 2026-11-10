@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normalizeTwinSetup, timingProblem, twinSessionMapping } from '../src/twinSetup.mjs';
+import { defaultTiming, normalizeTwinSetup, timingProblem, twinSessionMapping } from '../src/twinSetup.mjs';
 
 test('a setup keeps its source, its usable mapping entries and its settings, and drops the rest', () => {
     const setup = normalizeTwinSetup({
@@ -69,4 +69,17 @@ test('timing the twin cannot run with is said in the engineer\'s terms', () => {
     assert.equal(timingProblem({ window: 3600, stride: 600, horizon: 90, timeStep: 60 }), 'The forecast (90 s) must be a whole number of time steps (1 min each).');
     assert.equal(timingProblem({ window: 5, stride: 0.5, horizon: 5, timeStep: 0.001 }), null, 'A motor\'s five seconds at a millisecond.');
     assert.match(timingProblem({ window: 3600, stride: 600, horizon: 3600, timeStep: 0 }), /time step must be a positive/);
+});
+
+test('timing not kept with a setup follows how often the readings come, and can always run', () => {
+    // Readings a minute apart, or none known: the usual hour's window moving every ten minutes.
+    assert.deepEqual(defaultTiming({ spacing: 60, timeStep: 60 }), { window: 3600, stride: 600, horizon: 3600 });
+    assert.deepEqual(defaultTiming({ timeStep: 60 }), { window: 3600, stride: 600, horizon: 3600 });
+    // A motor read every 50 ms on a millisecond step: a move a second, six seconds of window and of forecast.
+    assert.deepEqual(defaultTiming({ spacing: 0.05, timeStep: 0.001 }), { window: 6, stride: 1, horizon: 6 });
+    // Readings every ten seconds: a round five minutes between moves.
+    assert.deepEqual(defaultTiming({ spacing: 10, timeStep: 1 }), { window: 1800, stride: 300, horizon: 1800 });
+    for (const [spacing, timeStep] of [[0.05, 0.001], [2, 0.01], [5, 0.5], [7, 3], [0.001, 0.001], [3600, 60]]) {
+        assert.equal(timingProblem({ ...defaultTiming({ spacing, timeStep }), timeStep }), null, `${spacing} s readings on a ${timeStep} s step`);
+    }
 });

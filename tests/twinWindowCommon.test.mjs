@@ -23,8 +23,20 @@ test('a gradual change, a small wobble, and a step more than an hour ago are not
     assert.equal(stepOf([[0, 1]]), null);
 });
 
+test('a trend is read at the twin\'s own time scale: a motor settled a minute ago is steady over its five seconds', () => {
+    // A current rising to 0.69 A over the first ten seconds, then flat: over an hour, everything since the start is one span.
+    const current = Array.from({ length: 181 }, (_, second) => [second, 0.69 * Math.min(1, second / 10)]);
+    assert.equal(trendOf(current).word, 'rising', 'Over an hour, the start is in the span.');
+    assert.equal(trendOf(current, 5).word, 'steady');
+    assert.equal(trendOf(current.slice(0, 8), 5).word, 'rising');
+    assert.equal(stepOf(current, 5), null);
+});
+
 test('how long ago, in words', () => {
     assert.equal(ago(20), 'just now');
+    // At a motor's scale (a five-second window), seconds.
+    assert.equal(ago(20, 5), '20 s ago');
+    assert.equal(ago(0.05, 5), 'just now');
     assert.equal(ago(12 * 60), '12 min ago');
     assert.equal(ago(40 * 60), '40 min ago');
     assert.equal(ago(3600), '1 h ago');

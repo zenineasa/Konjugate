@@ -59,28 +59,32 @@ export function valueAt(series, time) {
     return series.at(-1).value;
 }
 
-// How a quantity has moved over the last hour of its history ([[time, value]], in time order): rising or falling when it moved by
-// more than half a percent of itself (or of its own range, for one near zero), else steady.
-export function trendOf(points) {
+// How a quantity has moved over the last `span` seconds of its history ([[time, value]], in time order): rising or falling when it
+// moved by more than half a percent of itself (or of its own range, for one near zero), else steady. The span is the twin's own time
+// scale, its window: an hour for a tank, five seconds for a motor (over an hour, a motor's three minutes are all one span, and its current
+// read "rising" from start to finish, settled or not). `change` is how far it moved, at its latest rate, over the span.
+export function trendOf(points, span = 3600) {
     if (points.length < 2) return { word: '—', kind: '' };
     const [latestTime, latest] = points.at(-1);
-    const [earlierTime, earlier] = points.find(([time]) => time >= latestTime - 3600 - 1e-9);
+    const [earlierTime, earlier] = points.find(([time]) => time >= latestTime - span - 1e-9);
     if (latestTime - earlierTime < 1e-9) return { word: '—', kind: '' };
-    const perHour = (latest - earlier) / ((latestTime - earlierTime) / 3600);
+    const change = ((latest - earlier) / (latestTime - earlierTime)) * span;
+    const perHour = (change / span) * 3600;
     const values = points.map(([, value]) => value);
     const scale = Math.abs(latest) > 1e-12 ? Math.abs(latest) : Math.max(...values) - Math.min(...values);
-    if (!(scale > 0) || Math.abs(perHour) <= 0.005 * scale) return { word: 'steady', kind: 'steady', perHour };
-    return { word: perHour > 0 ? 'rising' : 'falling', kind: perHour > 0 ? 'rising' : 'falling', perHour };
+    if (!(scale > 0) || Math.abs(change) <= 0.005 * scale) return { word: 'steady', kind: 'steady', perHour, change, span };
+    return { word: change > 0 ? 'rising' : 'falling', kind: change > 0 ? 'rising' : 'falling', perHour, change, span };
 }
 
-// A change made at once within the last hour of data, as an input or a heater's heat flow makes one: { time, from, to, change }, or null.
+// A change made at once within the last `span` seconds of data (an hour by default; the twin's window), as an input or a heater's heat
+// flow makes one: { time, from, to, change }, or null.
 // A rate (rising, falling) is the wrong word for one: "steady" an hour after a heater went off, while the line shows it going off, reads
 // as a mistake. It counts when one step between two neighbouring points makes most of the movement over the hour, and is more than a
 // twentieth of the value's size. The point just before the hour is included, so a step at the hour's very edge is not missed.
-export function stepOf(points) {
+export function stepOf(points, span = 3600) {
     if (points.length < 2) return null;
     const latestTime = points.at(-1)[0];
-    const first = Math.max(0, points.findIndex(([time]) => time >= latestTime - 3600 - 1e-9) - 1);
+    const first = Math.max(0, points.findIndex(([time]) => time >= latestTime - span - 1e-9) - 1);
     const recent = points.slice(first);
     let largest = null;
     let movement = 0;
@@ -95,9 +99,11 @@ export function stepOf(points) {
     return largest;
 }
 
-// How long ago a time in the data was, in words: "just now", "12 min ago", "1 h ago", "1.5 h ago".
-export function ago(seconds) {
-    if (seconds < 60) return 'just now';
+// How long ago a time in the data was, in words: "just now", "20 s ago", "12 min ago", "1 h ago", "1.5 h ago". "Just now" is under a
+// sixtieth of the twin's time scale (`span`, its window): a minute for a tank's hour, a tenth of a second for a motor's five seconds.
+export function ago(seconds, span = 3600) {
+    if (seconds < span / 60) return 'just now';
+    if (seconds < 60) return `${Math.round(seconds)} s ago`;
     if (seconds < 3570) return `${Math.round(seconds / 60)} min ago`;
     return `${Number((seconds / 3600).toFixed(1))} h ago`;
 }

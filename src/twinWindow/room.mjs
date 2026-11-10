@@ -414,18 +414,19 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
     const from = time.start - (time.end - time.start) * 0.02;
     const inSpan = (points) => points.filter((point) => point.time >= from);
     const hours = (points) => points.map((point) => point.time / time.divisor);
-    const window = inSpan(rows.map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })));
     // The model before this move's window, as each earlier move ran it: the stretch each move added after the one before it, joined into
     // one line that jumps straight up or down where a move set it right (each move's stretch starts at the time the one before ended).
-    // Up to this window, which is drawn as now.
+    // Up to the move before this one; this move's stretch, from where that one ended to now, is drawn as now. (Drawn whole, this move's
+    // window hid the earlier moves' corrections within it, and read as an hour of the model running away to a step at now.)
     const earlier = { x: [], y: [] };
     let previousNow = -Infinity;
     for (const item of twin.cycles) {
         if (item.index >= cycle.index) break;
-        const added = (item.window[tile.signal] ?? []).filter((row) => row.time >= previousNow - 1e-9 && row.time <= Math.min(item.now, cycle.anchor) + 1e-9 && row.time >= from);
+        const added = (item.window[tile.signal] ?? []).filter((row) => row.time >= previousNow - 1e-9 && row.time <= item.now + 1e-9 && row.time >= from);
         previousNow = item.now;
         for (const row of added) { earlier.x.push(row.time / time.divisor); earlier.y.push(shownAs.at(row.simulated)); }
     }
+    const window = inSpan(rows.filter((row) => row.time >= previousNow - 1e-9).map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })));
     // The forecast from where the system is: the state set at now toward the latest reading (src/windowSession.mjs), its line starting there.
     const startsAt = cycle.forecastFrom?.[tile.signal]?.applied;
     const forecast = [...(Number.isFinite(startsAt) ? [{ time: cycle.now, value: shownAs.at(startsAt) }] : []), ...(cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }))];
@@ -598,18 +599,20 @@ function drawInferred(cycle) {
         const latest = points.at(-1)[1];
         const spread = upTo(spreads).at(-1)?.[1];
         // Judged in the model's own units, since half a percent of a temperature in °C is not half a percent of it in kelvin.
-        const step = stepOf(raw);
+        // Over the twin's own time scale, its window: an hour for a tank, five seconds for a motor.
+        const span = Number(twin.settings.window) > 0 ? Number(twin.settings.window) : 3600;
+        const step = stepOf(raw, span);
         const stepUnit = shownAs.unit ? ` ${shownAs.unit}` : '';
         const trend = step
-            ? { word: `${step.change < 0 ? 'dropped' : 'rose'} ${ago(raw.at(-1)[0] - step.time)}`, kind: step.change < 0 ? 'falling' : 'rising', said: `from ${readable(shownAs.at(step.from))}${stepUnit} to ${readable(shownAs.at(step.to))}${stepUnit}` }
-            : trendOf(raw);
+            ? { word: `${step.change < 0 ? 'dropped' : 'rose'} ${ago(raw.at(-1)[0] - step.time, span)}`, kind: step.change < 0 ? 'falling' : 'rising', said: `from ${readable(shownAs.at(step.from))}${stepUnit} to ${readable(shownAs.at(step.to))}${stepUnit}` }
+            : trendOf(raw, span);
         const units = shownAs.unit ? ` ${shownAs.unit}` : '';
         const number = element('div', { className: 'number', textContent: `${readable(latest)}${units}` });
         if (Number.isFinite(spread) && spread > 0) number.append(element('small', { textContent: ` ±${brief(spread)}` }));
         const made = element('div', { className: 'inferredRow' },
             element('div', {}, element('strong', { textContent: name }), element('small', { textContent: kind })),
             number,
-            element('span', { className: `trend ${trend.kind}`, textContent: trend.word, title: trend.said ?? (Number.isFinite(trend.perHour) ? `${trend.perHour > 0 ? '+' : ''}${shown(trend.perHour)}${units} an hour` : '') }),
+            element('span', { className: `trend ${trend.kind}`, textContent: trend.word, title: trend.said ?? (Number.isFinite(trend.change) ? `${trend.change > 0 ? '+' : ''}${shown(shownAs.by(trend.change))}${units} over the last ${dataClock(trend.span)}` : '') }),
             sparkline(points.slice(-120).map(([, value]) => value)));
         made.setAttribute('role', 'row');
         return made;
@@ -834,12 +837,14 @@ async function openSandbox() {
     try {
         const opened = await host.api.liveTwin.detach();
         const cycle = twin.cycles.at(-1);
-        twin.sandbox = { startedAt: opened.time, ranFor: 0, tried: [], series: null, cycle };
+        // Its inputs as the sandbox starts from them (the session's latest move, which may be newer than the one drawn here).
+        const startInputs = opened.startInputs ?? cycle.inputs ?? {};
+        twin.sandbox = { startedAt: opened.time, ranFor: 0, tried: [], series: null, cycle, startInputs };
         twin.view = null;
         const slots = [];
         sandboxTargets = [];
         $('#sandboxInputs').replaceChildren(...twin.inputs.map((input) => {
-            const field = element('input', { type: 'number', step: 'any', value: String(cycle.inputs?.[input.signal] ?? '') });
+            const field = element('input', { type: 'number', step: 'any', value: String(startInputs[input.signal] ?? '') });
             field.dataset.signal = input.signal;
             const name = input.target?.label.replace(/^Shared · /, '') ?? input.signal;
             field.setAttribute('aria-label', `${name} from now`);
@@ -886,7 +891,7 @@ async function runSandbox() {
     try {
         for (const field of $$('#sandboxInputs input')) {
             const value = Number(field.value);
-            const before = sandbox.tried.filter((step) => step.signal === field.dataset.signal).at(-1)?.value ?? sandbox.cycle.inputs?.[field.dataset.signal];
+            const before = sandbox.tried.filter((step) => step.signal === field.dataset.signal).at(-1)?.value ?? sandbox.startInputs?.[field.dataset.signal];
             if (field.value.trim() === '' || !Number.isFinite(value) || value === before) continue;
             await host.api.liveTwin.sandboxSetInput(field.dataset.signal, value);
         }
@@ -944,7 +949,7 @@ async function followControls() {
     // What the fields say as it starts goes first: a value typed or moved before.
     for (const field of $$('#sandboxInputs input')) {
         const value = Number(field.value);
-        const before = sandbox.tried.filter((step) => step.signal === field.dataset.signal).at(-1)?.value ?? sandbox.cycle.inputs?.[field.dataset.signal];
+        const before = sandbox.tried.filter((step) => step.signal === field.dataset.signal).at(-1)?.value ?? sandbox.startInputs?.[field.dataset.signal];
         if (field.value.trim() !== '' && Number.isFinite(value) && value !== before) following.queue.push({ signal: field.dataset.signal, value });
     }
     sandbox.following = following;

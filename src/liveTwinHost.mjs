@@ -240,7 +240,7 @@ export class LiveTwin {
         if (!this.#session) throw new Error('The live twin has not started yet.');
         await this.closeSandbox();
         this.#sandbox = await this.#session.detach();
-        return { time: this.#sandbox.time, inputs: this.#session.inputs.map((entry) => entry.signal) };
+        return { time: this.#sandbox.time, inputs: this.#session.inputs.map((entry) => entry.signal), startInputs: this.#sandbox.startInputs };
     }
 
     async sandboxSetInput(signal, value) {

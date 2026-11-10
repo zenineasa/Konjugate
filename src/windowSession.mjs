@@ -857,6 +857,8 @@ export class Sandbox {
         ]);
         sandbox.time = cycle.now;
         sandbox.tried = [];
+        // Each input's value at now, as the sandbox starts from it: what its fields show.
+        sandbox.startInputs = Object.fromEntries(session.inputs.map((entry) => [entry.signal, cycle.inputs[entry.signal].at(-1)?.value ?? null]));
         return sandbox;
     }
 
